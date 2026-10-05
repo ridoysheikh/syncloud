@@ -208,6 +208,10 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 			return ServiceView{}, false, err
 		}
 	}
+	m.routesDirty()
+	if m.OnChange != nil {
+		m.OnChange()
+	}
 	m.Enqueue(sv.ID)
 	v, err := m.ServiceView(ctx, sv.ID)
 	return v, created, err

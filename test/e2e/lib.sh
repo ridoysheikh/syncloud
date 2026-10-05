@@ -29,6 +29,10 @@ done
 docker build -q -t syncloud-e2e-node -f test/e2e/node.Dockerfile test/e2e >/dev/null
 docker image inspect busybox:1.37 >/dev/null 2>&1 || docker pull -q busybox:1.37 >/dev/null
 docker save busybox:1.37 -o "$BIN/busybox.tar"
+if [ "${WITH_TRAEFIK:-0}" = 1 ]; then
+  docker image inspect traefik:v3.7.13 >/dev/null 2>&1 || docker pull -q traefik:v3.7.13 >/dev/null
+  docker save traefik:v3.7.13 -o "$BIN/traefik.tar"
+fi
 
 echo "== nodes"
 docker network create "$NET" >/dev/null
@@ -76,4 +80,15 @@ wait_mesh() {
     sleep 2
   done
   [ $ok = 1 ] || { echo "$m"; fail "mesh did not converge (applied=$applied handshakes=$handshakes)"; }
+}
+
+# start_traefik runs Traefik on the controller node like the system task does,
+# polling the controller's dynamic config (§5.7).
+start_traefik() {
+  x sc-e2e-ctl docker load -q -i /opt/sc/traefik.tar >/dev/null
+  local tok; tok=$(x sc-e2e-ctl cat /data/traefik.token)
+  x sc-e2e-ctl docker run -d --name traefik --network host traefik:v3.7.13 \
+    --entrypoints.web.address=:8080 --entrypoints.websecure.address=:8443 \
+    --providers.http.endpoint=http://127.0.0.1:7070/internal/traefik/config --providers.http.pollInterval=2s \
+    "--providers.http.headers.X-Syncloud-Token=$tok" >/dev/null
 }

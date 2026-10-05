@@ -1237,6 +1237,11 @@ Because there is only one controller:
   - Nodes get a `schedulable` flag (cordon/uncordon). `ctl-0` is off by default (D3) and on with `--controller-schedulable` (default in dev).
   - API under `/projects/{p}/environments/{e}/services/{s}` (PUT = create or update, kubectl-apply style), scale, rollback, tasks and revisions; `/services`, `/tasks`. synctl `projects`, `envs`, `services list|run|apply -f|scale|tasks|revisions|rollback|delete`, `tasks list|restart`, `nodes cordon|uncordon`. Pages: Compute → Services (list and a new-service dialog), the service page (scale, tasks, revisions with rollback, JSON spec editor) and Tasks.
   - Verified with `test/e2e/services.sh` on three Docker-in-Docker nodes: spread placement, every task reachable on its mesh IP from another node, scale-down, a rolling update, crash replacement, rollback as a new revision, and deletion with no containers left.
+- ✅ Slice 2b (2026-10-06), routing:
+  - Every `http` port gets a default hostname `<service>-<env>-<project>.<base-domain>`, or `<service>-<port>-<env>-<project>…` for further ports. Before a base domain exists it is `….localhost` on the dev HTTP port, which browsers resolve locally.
+  - The Traefik config adds one router and load balancer per route. Servers are the running tasks' mesh IPs. A retry middleware (2 attempts) is on, and with a base domain routes are HTTPS with an HTTP→HTTPS redirect. Route hosts are added to the certificate manager, so each gets its own ACME certificate.
+  - Routes are cached and invalidated by task and service changes. Stopping a task removes it from routing before the container stops.
+  - Services report `endpoints`. Verified in e2e with a real Traefik on the controller node: 30 requests to the default hostname reached all three tasks on three nodes over the mesh.
 - TaskDefinition, Service, Task model; reconciler; scheduler (spread/binpack, constraints).
 - Start, stop and restart; exec terminal.
 - **Centralized logging** (§9.2): agent log shipper with disk buffer, log ingest, VictoriaLogs, logs explorer with the per-service merged view and live tail.

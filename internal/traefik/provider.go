@@ -48,6 +48,19 @@ type Server struct {
 type Middleware struct {
 	RedirectScheme *RedirectScheme `json:"redirectScheme,omitempty"`
 	RedirectRegex  *RedirectRegex  `json:"redirectRegex,omitempty"`
+	Retry          *Retry          `json:"retry,omitempty"`
+}
+
+type Retry struct {
+	Attempts        int    `json:"attempts"`
+	InitialInterval string `json:"initialInterval,omitempty"`
+}
+
+// ServiceRoute is one public route to a service's tasks (§5.7).
+type ServiceRoute struct {
+	Name    string
+	Host    string
+	Servers []string
 }
 
 type RedirectScheme struct {
@@ -87,6 +100,8 @@ type Provider struct {
 	HTTPSPort string
 	// Certificates returns the TLS certificates to serve.
 	Certificates func() []Certificate
+	// ServiceRoutes returns the routes of user services.
+	ServiceRoutes func() []ServiceRoute
 }
 
 const (
@@ -106,6 +121,28 @@ func (p *Provider) Config() Dynamic {
 	web, websecure := []string{"web"}, []string{"websecure"}
 
 	base := p.BaseDomain()
+	var routes []ServiceRoute
+	if p.ServiceRoutes != nil {
+		routes = p.ServiceRoutes()
+	}
+	if len(routes) > 0 {
+		// Retry on another task when one fails mid-request (idempotent requests only, §5.7).
+		d.HTTP.Middlewares["syncloud-retry"] = Middleware{Retry: &Retry{Attempts: 2, InitialInterval: "100ms"}}
+	}
+	for _, r := range routes {
+		servers := make([]Server, 0, len(r.Servers))
+		for _, u := range r.Servers {
+			servers = append(servers, Server{URL: u})
+		}
+		d.HTTP.Services[r.Name] = Service{LoadBalancer: LoadBalancer{Servers: servers, PassHostHeader: true}}
+		if base == "" {
+			d.HTTP.Routers[r.Name] = Router{Rule: host(r.Host), EntryPoints: web, Middlewares: []string{"syncloud-retry"}, Service: r.Name}
+			continue
+		}
+		d.HTTP.Routers[r.Name] = Router{Rule: host(r.Host), EntryPoints: websecure, Middlewares: []string{"syncloud-retry"}, Service: r.Name, TLS: &RouterTLS{}}
+		d.HTTP.Routers[r.Name+"-http"] = Router{Rule: host(r.Host), EntryPoints: web, Middlewares: []string{"syncloud-https"}, Service: r.Name}
+	}
+
 	if base == "" {
 		// No base domain yet: plain HTTP, the dashboard answers on any host.
 		d.HTTP.Routers["syncloud-dashboard"] = Router{Rule: "PathPrefix(`/`)", Priority: 1, EntryPoints: web, Service: svcController}

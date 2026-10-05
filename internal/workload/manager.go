@@ -56,6 +56,7 @@ type Manager struct {
 	queued   map[string]bool
 	specs    map[string]Spec        // "<service>:<revision>" -> spec (immutable)
 	failures map[string][]time.Time // service -> recent task failures
+	routes   routeCache
 }
 
 func NewManager(st *store.Store, gw *agentgw.Gateway, reg *nodes.Registry, netReady NetworkReady, bus *events.Bus, log *slog.Logger) *Manager {
@@ -315,6 +316,7 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 				return
 			}
 			m.log.Info("service deleted", "service", sv.Project+"/"+sv.Environment+"/"+sv.Name)
+			m.routesDirty()
 			m.bus.Publish(TopicService, map[string]any{"id": sv.ID, "deleted": true})
 			if m.OnChange != nil {
 				m.OnChange()
@@ -328,6 +330,7 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 	}
 	if changed {
 		_ = m.st.PruneTasks(ctx, sv.ID, keepStopped)
+		m.routesDirty()
 		if m.OnChange != nil {
 			m.OnChange()
 		}
@@ -440,6 +443,7 @@ func (m *Manager) setDesired(ctx context.Context, t store.Task, state string, no
 	if err := m.st.SetTaskDesired(ctx, t.ID, "stopped", state, now); err != nil {
 		m.log.Error("update task", "task", t.ID, "err", err)
 	}
+	m.routesDirty() // stop sending traffic before the container stops
 	if state != "" {
 		t.State = state
 	}
@@ -574,6 +578,7 @@ func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
 		m.log.Error("update task", "task", t.ID, "err", err)
 		return
 	}
+	m.routesDirty()
 	m.publishTask(ctx, t)
 	m.Enqueue(t.ServiceID)
 }

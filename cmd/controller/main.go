@@ -192,16 +192,30 @@ func serve(args []string) error {
 	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts})
 	gw.AddHooks(meshMgr.Hooks())
 	go meshMgr.Run(ctx)
-	workloads := workload.NewManager(st, gw, registry, meshMgr.NetworkReady, bus, log)
-	gw.AddHooks(workloads.Hooks())
-	go workloads.Run(ctx)
+	var workloads *workload.Manager // set below; routes need certificates too
 	certHosts := func(ep domain.Endpoints) []string {
 		if ep.BaseDomain == "" {
 			return nil
 		}
-		return []string{ep.BaseDomain, domain.RegistryHost(ep.BaseDomain)}
+		hosts := []string{ep.BaseDomain, domain.RegistryHost(ep.BaseDomain)}
+		if workloads != nil {
+			for _, r := range workloads.Routes(context.Background(), ep.BaseDomain) {
+				hosts = append(hosts, r.Host)
+			}
+		}
+		return hosts
 	}
+	workloads = workload.NewManager(st, gw, registry, meshMgr.NetworkReady, bus, log)
+	workloads.OnChange = func() { certMgr.SetHosts(certHosts(domains.Endpoints())) }
 	certMgr.SetHosts(certHosts(domains.Endpoints()))
+	gw.AddHooks(workloads.Hooks())
+	go workloads.Run(ctx)
+	workload.Endpoints = func(sv store.Service, spec workload.Spec) []string {
+		if base := domains.Base(); base != "" {
+			return workload.ServiceEndpoints(sv, spec, base, "https", httpsPort)
+		}
+		return workload.ServiceEndpoints(sv, spec, "", "http", devPort(httpPort))
+	}
 	domains.OnChange(func(ep domain.Endpoints) {
 		log.Info("base domain changed", "domain", ep.BaseDomain, "dashboard", ep.DashboardURL)
 		sysMgr.SetConfig(sysCfg(ep)) // the registry's token realm follows the domain
@@ -216,6 +230,13 @@ func serve(args []string) error {
 	traefikProvider := &traefik.Provider{
 		Token: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: controllerURL,
 		RegistryURL: "http://" + system.RegistryAddr, BaseDomain: domains.Base, HTTPSPort: httpsPort,
+		ServiceRoutes: func() []traefik.ServiceRoute {
+			var out []traefik.ServiceRoute
+			for _, r := range workloads.Routes(context.Background(), domains.Base()) {
+				out = append(out, traefik.ServiceRoute{Name: r.Name, Host: r.Host, Servers: r.Servers})
+			}
+			return out
+		},
 		Certificates: func() []traefik.Certificate {
 			var out []traefik.Certificate
 			for _, p := range certMgr.Pairs() {
@@ -482,4 +503,12 @@ func portOf(addr string) string {
 func isLoopback(host string) bool {
 	ip := net.ParseIP(host)
 	return host == "localhost" || (ip != nil && ip.IsLoopback())
+}
+
+// devPort is the port to put in development URLs ("" for 80).
+func devPort(p string) string {
+	if p == "80" {
+		return ""
+	}
+	return p
 }

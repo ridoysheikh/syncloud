@@ -4,9 +4,11 @@
 #
 #   test/e2e/services.sh          # run and clean up
 #   KEEP=1 test/e2e/services.sh   # leave the nodes running for inspection
+WITH_TRAEFIK=1
 . "$(dirname "$0")/lib.sh"
 trap cleanup EXIT
 setup_cluster
+start_traefik
 wait_mesh
 
 SVC=localhost:7070/api/v1/projects/shop/environments/production/services/web
@@ -36,6 +38,17 @@ for ip in $(tasks | grep -o '"ip":"10\.91\.[0-9.]*"' | cut -d'"' -f4); do
   x sc-e2e-w1 wget -q -T 5 -O /dev/null "http://$ip:8080/hostname" || fail "task $ip not reachable from w1"
 done
 echo "  ✓ every task answers on its mesh IP"
+
+# Traefik on the controller balances the default hostname over all tasks.
+seen=""
+for _ in $(seq 1 30); do
+  h=$(x sc-e2e-ctl curl -fs -H 'Host: web-production-shop.localhost' http://127.0.0.1:8080/hostname || true)
+  [ -n "$h" ] && seen="$seen $h"
+done
+distinct=$(echo $seen | tr ' ' '\n' | sort -u | grep -c . || true)
+[ "$distinct" -eq 3 ] || fail "Traefik reached $distinct distinct tasks, want 3 (responses: $seen)"
+api "$SVC" | grep -q '"endpoints":\["http://web-production-shop.localhost:8080"\]' || fail "service endpoint missing"
+echo "  ✓ Traefik routes web-production-shop.localhost to all 3 tasks across nodes"
 
 echo "== scale"
 api "$SVC/scale" -d '{"desiredCount":1}' >/dev/null

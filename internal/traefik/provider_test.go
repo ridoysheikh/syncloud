@@ -57,6 +57,19 @@ func TestProviderRequiresTokenAndRoutesDashboard(t *testing.T) {
 	if d.TLS == nil || len(d.TLS.Certificates) != 1 || d.TLS.Certificates[0].KeyFile != "KEY" {
 		t.Fatalf("tls: %+v", d.TLS)
 	}
+	p.ServiceRoutes = func() []ServiceRoute {
+		return []ServiceRoute{{Name: "svc-1-http", Host: "web-production-shop.203-0-113-10.sslip.io", Servers: []string{"http://10.91.1.2:8080", "http://10.91.2.2:8080"}}}
+	}
+	d = get()
+	if r := d.HTTP.Routers["svc-1-http"]; r.Rule != "Host(`web-production-shop.203-0-113-10.sslip.io`)" || r.TLS == nil || r.Middlewares[0] != "syncloud-retry" {
+		t.Fatalf("service router: %+v", r)
+	}
+	if r := d.HTTP.Routers["svc-1-http-http"]; r.Middlewares[0] != "syncloud-https" {
+		t.Fatalf("service redirect: %+v", r)
+	}
+	if s := d.HTTP.Services["svc-1-http"].LoadBalancer.Servers; len(s) != 2 {
+		t.Fatalf("service servers: %+v", s)
+	}
 	if host("evil`) || Host(`x") != "Host(`invalid.invalid`)" {
 		t.Fatal("rule injection")
 	}
