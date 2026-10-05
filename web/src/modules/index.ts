@@ -21,6 +21,7 @@ import { PlatformPage } from "./settings/PlatformPage";
 import { DomainsPage } from "./settings/DomainsPage";
 import { BackupsPage } from "./settings/BackupsPage";
 import { TopologyPage } from "./network/TopologyPage";
+import { FirewallPage } from "./network/FirewallPage";
 
 /** The module registry. The side nav and routes are built from this list. */
 export const modules: DashboardModule[] = [
@@ -54,7 +55,7 @@ export const modules: DashboardModule[] = [
       { path: "/network/traffic", label: "Traffic", component: planned(["Network"], "Traffic", "Phase 2/5", "§5.7", "Domains, routes, middlewares, certificates and the live traffic map.") },
       { path: "/network/edge", label: "Edge Nodes", component: planned(["Network"], "Edge Nodes", "Phase 8", "§8.5", "Traefik replicas that keep public traffic flowing.") },
       { path: "/network/topology", label: "Topology", component: TopologyPage },
-      { path: "/network/firewall", label: "Firewall", component: planned(["Network"], "Firewall", "Phase 1/6", "§8.3", "Host policies, security groups, hit counters and reachability.") },
+      { path: "/network/firewall", label: "Firewall", component: FirewallPage },
       { path: "/network/ipam", label: "IPAM & DNS", component: planned(["Network"], "IPAM & DNS", "Phase 1", "§8.1–8.2, §8.6", "Subnets, service VIPs, task IPs and internal DNS.") },
     ],
   },

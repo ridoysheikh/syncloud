@@ -23,16 +23,18 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
+	"syncloud/internal/firewall"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 )
 
 // platform holds the userspace WireGuard device (when the kernel module is
 // missing) and the RTT probe listener.
 type platform struct {
-	dev       *device.Device
-	uapi      net.Listener
-	probe     net.Listener
-	probeAddr string
+	lastRuleset string
+	dev         *device.Device
+	uapi        net.Listener
+	probe       net.Listener
+	probeAddr   string
 }
 
 func (p *platform) close() {
@@ -93,9 +95,15 @@ func (m *Manager) apply(ctx context.Context, cfg *agentv1.NetworkConfig) (string
 	if err != nil {
 		return mode, fmt.Errorf("docker network %s: %w", Network, err)
 	}
-	if err := applyNft(rules(cfg, subnet)); err != nil {
+	ruleset, err := firewall.Render(cfg, m.firewallFor(cfg))
+	if err != nil {
 		return mode, err
 	}
+	m.checkDrift()
+	if err := applyNft(ruleset); err != nil {
+		return mode, err
+	}
+	m.rememberRuleset()
 	m.ensureProbe(addr.Addr())
 	return mode, nil
 }
@@ -239,28 +247,6 @@ func (m *Manager) ensureProbe(ip netip.Addr) {
 	}()
 }
 
-// rules is the agent's nftables table. It only touches its own table, so it
-// coexists with Docker's iptables rules. Phase 1 adds the host firewall and
-// service VIPs here (§8.3, §8.6).
-func rules(cfg *agentv1.NetworkConfig, subnet netip.Prefix) string {
-	internal := strings.Join([]string{cfg.GetMeshCidr(), cfg.GetContainerCidr(), cfg.GetServiceCidr()}, ", ")
-	return fmt.Sprintf(`table ip syncloud
-delete table ip syncloud
-table ip syncloud {
-	chain forward {
-		type filter hook forward priority filter - 10; policy accept;
-		# Container IPs are only reachable from the mesh and the local bridge.
-		ip daddr %[1]s iifname != { "%[2]s", "%[3]s" } ct state new drop
-	}
-	chain postrouting {
-		type nat hook postrouting priority srcnat + 10; policy accept;
-		# No NAT inside the private network; masquerade to the internet.
-		ip saddr %[4]s ip daddr != { %[5]s } oifname != "%[3]s" masquerade
-	}
-}
-`, cfg.GetContainerCidr(), Interface, Bridge, subnet, internal)
-}
-
 func applyNft(ruleset string) error {
 	cmd := exec.Command("nft", "-f", "-")
 	cmd.Stdin = strings.NewReader(ruleset)
@@ -278,3 +264,27 @@ func applyNft(ruleset string) error {
 func ipnet(p netip.Prefix) *net.IPNet {
 	return &net.IPNet{IP: p.Addr().AsSlice(), Mask: net.CIDRMask(p.Bits(), p.Addr().BitLen())}
 }
+
+// listTable returns the live table without counters, for drift detection.
+func listTable() string {
+	out, err := exec.Command("nft", "-s", "list", "table", "inet", "syncloud").Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
+// checkDrift compares the live table with what was applied last time.
+func (m *Manager) checkDrift() {
+	if m.sys.lastRuleset == "" {
+		return
+	}
+	if live := listTable(); live != m.sys.lastRuleset {
+		m.mu.Lock()
+		m.drift++
+		m.mu.Unlock()
+		m.log.Warn("managed nftables rules were changed outside SynCloud; restoring them")
+	}
+}
+
+func (m *Manager) rememberRuleset() { m.sys.lastRuleset = listTable() }

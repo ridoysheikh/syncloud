@@ -318,3 +318,40 @@ func TestJoinScriptAndDownloads(t *testing.T) {
 		}
 	}
 }
+
+func TestFirewallPolicies(t *testing.T) {
+	e := newEnv(t)
+	signIn(t, e)
+	_, body := e.do(t, "GET", "/api/v1/firewall/policies", nil, nil)
+	if items := body["items"].([]any); len(items) != 1 || items[0].(map[string]any)["name"] != "default" {
+		t.Fatalf("default policy: %v", body)
+	}
+	bad := []map[string]any{
+		{"name": "Bad Name"},
+		{"name": "x", "rules": []map[string]any{{"protocol": "tcp", "ports": "22; flush ruleset"}}},
+		{"name": "x", "rules": []map[string]any{{"protocol": "tcp", "ports": "22", "sources": []string{"not-an-ip"}}}},
+		{"name": "x", "targets": []string{"node_missing"}},
+	}
+	for _, b := range bad {
+		if resp, body := e.do(t, "POST", "/api/v1/firewall/policies", b, nil); resp.StatusCode != 400 {
+			t.Fatalf("%v accepted: %d %v", b, resp.StatusCode, body)
+		}
+	}
+	resp, body := e.do(t, "POST", "/api/v1/firewall/policies", map[string]any{
+		"name": "web", "rules": []map[string]any{{"protocol": "TCP", "ports": "8000-8100", "sources": []string{"203.0.113.0/24", "cluster"}}},
+	}, nil)
+	if resp.StatusCode != 201 || body["targets"].([]any)[0] != "*" {
+		t.Fatalf("create: %d %v", resp.StatusCode, body)
+	}
+	id := body["id"].(string)
+	if resp, _ := e.do(t, "POST", "/api/v1/firewall/policies", map[string]any{"name": "web"}, nil); resp.StatusCode != 409 {
+		t.Fatalf("duplicate name: %d", resp.StatusCode)
+	}
+	resp, body = e.do(t, "PUT", "/api/v1/firewall/policies/"+id, map[string]any{"name": "web", "rules": []map[string]any{}}, nil)
+	if resp.StatusCode != 200 || len(body["rules"].([]any)) != 0 {
+		t.Fatalf("update: %d %v", resp.StatusCode, body)
+	}
+	if resp, _ := e.do(t, "DELETE", "/api/v1/firewall/policies/"+id, nil, nil); resp.StatusCode != 204 {
+		t.Fatalf("delete: %d", resp.StatusCode)
+	}
+}

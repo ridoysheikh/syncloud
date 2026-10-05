@@ -894,6 +894,171 @@
           }
         }
       }
+    },
+    "/api/v1/firewall/policies": {
+      "get": {
+        "operationId": "listFirewallPolicies",
+        "tags": [
+          "firewall"
+        ],
+        "summary": "Host firewall policies",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FirewallPolicyList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createFirewallPolicy",
+        "tags": [
+          "firewall"
+        ],
+        "summary": "Create a host firewall policy. Nodes apply it with commit-confirm.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FirewallPolicyInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FirewallPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/firewall/policies/{id}": {
+      "put": {
+        "operationId": "updateFirewallPolicy",
+        "tags": [
+          "firewall"
+        ],
+        "summary": "Replace a host firewall policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FirewallPolicyInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FirewallPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteFirewallPolicy",
+        "tags": [
+          "firewall"
+        ],
+        "summary": "Delete a host firewall policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/firewall/nodes/{id}/effective": {
+      "get": {
+        "operationId": "getEffectiveFirewall",
+        "tags": [
+          "firewall"
+        ],
+        "summary": "The rules a node enforces, including built-in rules, and the rendered nftables table",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveFirewall"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1776,6 +1941,12 @@
             "items": {
               "$ref": "#/components/schemas/MeshPeer"
             }
+          },
+          "firewallPending": {
+            "type": "boolean"
+          },
+          "driftCorrections": {
+            "type": "integer"
           }
         }
       },
@@ -1796,6 +1967,133 @@
             "items": {
               "$ref": "#/components/schemas/MeshNode"
             }
+          }
+        }
+      },
+      "FirewallRule": {
+        "type": "object",
+        "required": [
+          "protocol"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "tcp",
+              "udp",
+              "icmp",
+              "any"
+            ]
+          },
+          "ports": {
+            "type": "string",
+            "example": "22 or 8000-8100"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IPs, CIDRs or \"cluster\"; empty = anywhere"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "FirewallPolicyInput": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "node IDs, or [\"*\"] for all nodes (default)"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FirewallRule"
+            }
+          }
+        }
+      },
+      "FirewallPolicy": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/FirewallPolicyInput"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "FirewallPolicyList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FirewallPolicy"
+            }
+          }
+        }
+      },
+      "EffectiveFirewall": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/FirewallRule"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "clusterSources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ruleset": {
+            "type": "string"
           }
         }
       }

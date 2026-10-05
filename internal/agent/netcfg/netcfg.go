@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+	"google.golang.org/protobuf/proto"
 
 	"syncloud/internal/agent/docker"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
@@ -49,6 +50,15 @@ type Manager struct {
 	mode    string
 	rtt     map[string]float64 // peer public key -> ms
 	kick    chan struct{}
+	drift   uint64
+
+	// Commit-confirm (§8.3): a firewall change must be confirmed by the
+	// controller, or it is rolled back to the last confirmed firewall.
+	confirmedFW *agentv1.Firewall
+	pendingFW   *agentv1.Firewall
+	pendingGen  uint64
+	deadline    time.Time
+	rejectedGen uint64
 
 	sys platform // OS-specific state (userspace WireGuard device, probe listener)
 }
@@ -114,6 +124,8 @@ func (m *Manager) Run(ctx context.Context) {
 	defer t.Stop()
 	probe := time.NewTicker(10 * time.Second)
 	defer probe.Stop()
+	confirm := time.NewTicker(2 * time.Second)
+	defer confirm.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -124,6 +136,10 @@ func (m *Manager) Run(ctx context.Context) {
 			m.applyLatest(ctx)
 		case <-probe.C:
 			m.probePeers(ctx)
+		case <-confirm.C:
+			if m.confirmExpired() {
+				m.applyLatest(ctx)
+			}
 		}
 	}
 }
@@ -150,10 +166,19 @@ func (m *Manager) applyLatest(ctx context.Context) {
 		m.lastErr = err.Error()
 		return
 	}
-	if m.applied != cfg.GetGeneration() || m.lastErr != "" {
+	if fw := m.firewallForLocked(cfg); !proto.Equal(fw, m.confirmedFW) && cfg.GetFirewall().GetConfirmTimeoutSeconds() > 0 && cfg.GetGeneration() != m.rejectedGen {
+		if m.pendingGen != cfg.GetGeneration() {
+			m.pendingFW, m.pendingGen = fw, cfg.GetGeneration()
+			m.deadline = time.Now().Add(time.Duration(cfg.GetFirewall().GetConfirmTimeoutSeconds()) * time.Second)
+		}
+	}
+	if m.applied != cfg.GetGeneration() {
 		m.log.Info("mesh config applied", "generation", cfg.GetGeneration(), "address", cfg.GetNodeAddress(), "peers", len(cfg.GetPeers()), "mode", m.mode)
 	}
-	m.applied, m.lastErr = cfg.GetGeneration(), ""
+	m.applied = cfg.GetGeneration()
+	if cfg.GetGeneration() != m.rejectedGen {
+		m.lastErr = ""
+	}
 }
 
 func (m *Manager) probePeers(ctx context.Context) {
@@ -183,13 +208,51 @@ func (m *Manager) probePeers(ctx context.Context) {
 	m.mu.Unlock()
 }
 
+// firewallFor picks the firewall to render: the latest one, unless that
+// generation was rolled back.
+func (m *Manager) firewallFor(cfg *agentv1.NetworkConfig) *agentv1.Firewall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.firewallForLocked(cfg)
+}
+
+func (m *Manager) firewallForLocked(cfg *agentv1.NetworkConfig) *agentv1.Firewall {
+	if m.rejectedGen != 0 && cfg.GetGeneration() == m.rejectedGen {
+		return m.confirmedFW
+	}
+	return cfg.GetFirewall()
+}
+
+// Confirm marks the pending firewall as good (the controller still hears us).
+func (m *Manager) Confirm(gen uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.pendingFW != nil && gen >= m.pendingGen {
+		m.confirmedFW, m.pendingFW, m.pendingGen = m.pendingFW, nil, 0
+	}
+}
+
+// confirmExpired rolls back an unconfirmed firewall change.
+func (m *Manager) confirmExpired() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.pendingFW == nil || time.Now().Before(m.deadline) {
+		return false
+	}
+	m.log.Error("firewall change not confirmed by the controller; rolling back", "generation", m.pendingGen)
+	m.rejectedGen = m.pendingGen
+	m.pendingFW, m.pendingGen = nil, 0
+	m.lastErr = "firewall change rolled back: the controller did not confirm it in time"
+	return true
+}
+
 // Status is reported in every heartbeat (nil when disabled).
 func (m *Manager) Status() *agentv1.NetworkStatus {
 	if !m.enabled {
 		return nil
 	}
 	m.mu.Lock()
-	st := &agentv1.NetworkStatus{Generation: m.applied, Error: m.lastErr, Mode: m.mode}
+	st := &agentv1.NetworkStatus{Generation: m.applied, Error: m.lastErr, Mode: m.mode, FirewallPending: m.pendingFW != nil, DriftCorrections: m.drift}
 	rtt := m.rtt
 	m.mu.Unlock()
 	for _, p := range m.peerStatus() {

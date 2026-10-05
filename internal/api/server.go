@@ -164,6 +164,11 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/backups", h: s.handleRunBackup},
 		{Method: "GET", Path: "/api/v1/backups/download", h: s.handleDownloadBackup},
 		{Method: "GET", Path: "/api/v1/network/mesh", h: s.handleMesh},
+		{Method: "GET", Path: "/api/v1/firewall/policies", h: s.handleListFirewallPolicies},
+		{Method: "POST", Path: "/api/v1/firewall/policies", h: s.handleCreateFirewallPolicy},
+		{Method: "PUT", Path: "/api/v1/firewall/policies/{id}", h: s.handleUpdateFirewallPolicy},
+		{Method: "DELETE", Path: "/api/v1/firewall/policies/{id}", h: s.handleDeleteFirewallPolicy},
+		{Method: "GET", Path: "/api/v1/firewall/nodes/{id}/effective", h: s.handleEffectiveFirewall},
 	}
 }
 

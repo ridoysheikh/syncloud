@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -79,10 +80,14 @@ func NewRoot(in io.Reader, out, errOut io.Writer) *cobra.Command {
 		a.certsCmd(),
 		a.backupsCmd(),
 		a.networkCmd(),
+		a.firewallCmd(),
 	)
 	return root
 }
 
-func op(id string) map[string]string { return map[string]string{opAnnotation: id} }
+// op annotates a command with the operation(s) it wraps (comma-separated).
+func op(ids ...string) map[string]string {
+	return map[string]string{opAnnotation: strings.Join(ids, ",")}
+}
 
 func ctx(cmd *cobra.Command) context.Context { return cmd.Context() }

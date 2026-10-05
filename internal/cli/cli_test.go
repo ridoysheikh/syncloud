@@ -47,7 +47,10 @@ func TestEveryOperationHasACommand(t *testing.T) {
 	covered := map[string]string{}
 	var walk func(c *cobra.Command)
 	walk = func(c *cobra.Command) {
-		if id := c.Annotations[opAnnotation]; id != "" {
+		for _, id := range strings.Split(c.Annotations[opAnnotation], ",") {
+			if id == "" {
+				continue
+			}
 			covered[id] = c.CommandPath()
 		}
 		for _, sub := range c.Commands() {

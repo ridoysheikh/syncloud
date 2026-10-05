@@ -97,6 +97,32 @@ if x sc-e2e-w2 wget -q -T 3 -O /dev/null "http://$W1_IP:8080/cgi-bin/ip" 2>/dev/
   echo "  ✓ worker host -> remote container (mesh)"
 fi
 
+echo "== host firewall"
+W1_PUB=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" sc-e2e-w1)
+W2_PUB=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" sc-e2e-w2)
+x -d sc-e2e-w1 sh -c 'while true; do echo hello | nc -l -p 2222; done'
+sleep 1
+probe() { x sc-e2e-w2 sh -c "echo | timeout 3 nc $W1_PUB 2222 2>/dev/null" | grep -q hello; }
+if probe; then fail "port 2222 on w1 is reachable without a rule"; fi
+echo "  ✓ default deny: w2 cannot reach w1:2222 on its public address"
+api() { x sc-e2e-ctl curl -fs -b /tmp/jar -H 'content-type: application/json' -H 'Origin: http://localhost:7070' "$@"; }
+api localhost:7070/api/v1/firewall/policies -d "{\"name\":\"e2e\",\"rules\":[{\"protocol\":\"tcp\",\"ports\":\"2222\",\"sources\":[\"$W2_PUB\"]}]}" >/dev/null
+for _ in $(seq 1 15); do probe && break; sleep 1; done
+probe || fail "allow rule not applied"
+echo "  ✓ policy allows w2 -> w1:2222"
+x sc-e2e-w1 docker run --rm --network syncloud busybox:1.37 true
+x sc-e2e-w2 docker exec client wget -q -T 5 -O /dev/null "http://$W1_IP:8080/cgi-bin/ip" || fail "mesh traffic blocked by the firewall"
+echo "  ✓ mesh traffic still flows with the firewall on"
+for _ in $(seq 1 15); do mesh | grep -q '"firewallPending":true' || break; sleep 1; done
+mesh | grep -q '"firewallPending":true' && fail "firewall changes not confirmed"
+echo "  ✓ firewall changes confirmed by the controller (commit-confirm)"
+x sc-e2e-w1 nft flush chain inet syncloud input
+probe || fail "flushing the chain should have opened the port"
+for _ in $(seq 1 40); do mesh | grep -o '"name":"w1"[^}]*"driftCorrections":[1-9]' >/dev/null && break; sleep 1; done
+probe && ! x sc-e2e-w1 nft list chain inet syncloud input | grep -q "default deny" && fail "drift not corrected"
+x sc-e2e-w1 nft list chain inet syncloud input | grep -q "default deny" || fail "drift not corrected"
+echo "  ✓ a hand-flushed ruleset is detected and restored"
+
 echo "== node removal"
 W2_ID=$(x sc-e2e-ctl curl -fs -b /tmp/jar localhost:7070/api/v1/nodes | grep -o '"id":"node_[a-z0-9]*","name":"w2"' | cut -d'"' -f4)
 x sc-e2e-ctl curl -fs -b /tmp/jar -X DELETE "localhost:7070/api/v1/nodes/$W2_ID" -H 'Origin: http://localhost:7070' >/dev/null

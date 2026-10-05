@@ -37,6 +37,8 @@ type Controller struct {
 	ACMEEmail     string
 	// ACMECAFile is an extra CA bundle trusted for the ACME server (e.g. Pebble in tests).
 	ACMECAFile string
+	// Firewall manages each node's host firewall (§8.3).
+	Firewall bool
 	// DownloadsDir holds agent and CLI binaries served to joining nodes.
 	DownloadsDir string
 	// Dev enables development behavior (verbose logs, relaxed origin checks for the Vite dev server).
@@ -65,6 +67,7 @@ func LoadController(args []string) (Controller, error) {
 	fs.StringVar(&c.ACMEDirectory, "acme-directory", env("SYNCLOUD_ACME_DIRECTORY", "https://acme-v02.api.letsencrypt.org/directory"), "ACME directory URL")
 	fs.StringVar(&c.ACMEEmail, "acme-email", env("SYNCLOUD_ACME_EMAIL", ""), "ACME account contact email (optional)")
 	fs.StringVar(&c.ACMECAFile, "acme-ca-file", env("SYNCLOUD_ACME_CA_FILE", ""), "extra CA bundle to trust for the ACME server")
+	fs.BoolVar(&c.Firewall, "firewall", env("SYNCLOUD_FIREWALL", "1") == "1", "manage the host firewall on every node (default on)")
 	fs.StringVar(&c.DownloadsDir, "downloads-dir", env("SYNCLOUD_DOWNLOADS_DIR", "/usr/local/lib/syncloud/downloads"), "agent/CLI binaries served at /downloads/")
 	if err := fs.Parse(args); err != nil {
 		return c, err

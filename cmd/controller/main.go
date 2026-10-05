@@ -184,7 +184,11 @@ func serve(args []string) error {
 		gw.AddHooks(sysMgr.Hooks())
 		go sysMgr.Run(ctx)
 	}
-	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP)
+	ctlPorts := []string{portOf(cfg.PublicHTTP), portOf(cfg.PublicHTTPS), portOf(cfg.AgentListen)}
+	if host, _, _ := net.SplitHostPort(cfg.Listen); !isLoopback(host) {
+		ctlPorts = append(ctlPorts, portOf(cfg.Listen)) // the API was exposed on purpose
+	}
+	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts})
 	gw.AddHooks(meshMgr.Hooks())
 	go meshMgr.Run(ctx)
 	certHosts := func(ep domain.Endpoints) []string {
@@ -464,4 +468,14 @@ func acmeHTTPClient(caFile string) (*http.Client, error) {
 	t.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 	c.Transport = t
 	return c, nil
+}
+
+func portOf(addr string) string {
+	_, p, _ := net.SplitHostPort(addr)
+	return p
+}
+
+func isLoopback(host string) bool {
+	ip := net.ParseIP(host)
+	return host == "localhost" || (ip != nil && ip.IsLoopback())
 }

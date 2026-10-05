@@ -327,3 +327,51 @@ func (c *Client) GetMesh(ctx context.Context) (Mesh, error) {
 	var out Mesh
 	return out, c.Do(ctx, "GET", "/api/v1/network/mesh", nil, &out)
 }
+
+type FirewallRule struct {
+	ID          string   `json:"id,omitempty"`
+	Protocol    string   `json:"protocol"`
+	Ports       string   `json:"ports"`
+	Sources     []string `json:"sources"`
+	Description string   `json:"description"`
+}
+
+type FirewallPolicy struct {
+	ID          string         `json:"id,omitempty"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Targets     []string       `json:"targets"`
+	Rules       []FirewallRule `json:"rules"`
+	UpdatedAt   time.Time      `json:"updatedAt,omitzero"`
+}
+
+type EffectiveFirewall struct {
+	Enabled        bool           `json:"enabled"`
+	Rules          []FirewallRule `json:"rules"`
+	ClusterSources []string       `json:"clusterSources"`
+	Ruleset        string         `json:"ruleset"`
+}
+
+func (c *Client) ListFirewallPolicies(ctx context.Context) ([]FirewallPolicy, error) {
+	var out list[FirewallPolicy]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/firewall/policies", nil, &out)
+}
+
+func (c *Client) CreateFirewallPolicy(ctx context.Context, p FirewallPolicy) (FirewallPolicy, error) {
+	var out FirewallPolicy
+	return out, c.Do(ctx, "POST", "/api/v1/firewall/policies", p, &out)
+}
+
+func (c *Client) UpdateFirewallPolicy(ctx context.Context, id string, p FirewallPolicy) (FirewallPolicy, error) {
+	var out FirewallPolicy
+	return out, c.Do(ctx, "PUT", "/api/v1/firewall/policies/"+url.PathEscape(id), p, &out)
+}
+
+func (c *Client) DeleteFirewallPolicy(ctx context.Context, id string) error {
+	return c.Do(ctx, "DELETE", "/api/v1/firewall/policies/"+url.PathEscape(id), nil, nil)
+}
+
+func (c *Client) EffectiveFirewall(ctx context.Context, nodeID string) (EffectiveFirewall, error) {
+	var out EffectiveFirewall
+	return out, c.Do(ctx, "GET", "/api/v1/firewall/nodes/"+url.PathEscape(nodeID)+"/effective", nil, &out)
+}

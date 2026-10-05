@@ -85,6 +85,8 @@ type NodeView struct {
 	Generation      uint64     `json:"generation"`
 	AppliedGen      uint64     `json:"appliedGeneration"`
 	Error           string     `json:"error"`
+	FirewallPending bool       `json:"firewallPending"`
+	Drift           uint64     `json:"driftCorrections"`
 	Peers           []PeerView `json:"peers"`
 	StatusUpdatedAt *time.Time `json:"statusUpdatedAt"`
 }
@@ -92,12 +94,25 @@ type NodeView struct {
 // PublicIP returns the controller's public address (for ctl-0's endpoint).
 type PublicIP func(ctx context.Context) (string, error)
 
+// ConfirmTimeout is how long an agent waits for the controller to confirm a
+// firewall change before rolling it back (§8.3).
+const ConfirmTimeout = 60
+
+// Options configure the firewall rules the controller adds by itself.
+type Options struct {
+	// ControllerPorts are opened to everyone on ctl-0 (HTTP, HTTPS, agent gateway).
+	ControllerPorts []string
+	// Firewall turns the host firewall on.
+	Firewall bool
+}
+
 type Manager struct {
 	st       *store.Store
 	gw       *agentgw.Gateway
 	bus      *events.Bus
 	log      *slog.Logger
 	publicIP PublicIP
+	opts     Options
 	gen      atomic.Uint64
 
 	mu     sync.Mutex
@@ -105,8 +120,8 @@ type Manager struct {
 	seen   map[string]time.Time
 }
 
-func NewManager(st *store.Store, gw *agentgw.Gateway, bus *events.Bus, log *slog.Logger, publicIP PublicIP) *Manager {
-	m := &Manager{st: st, gw: gw, bus: bus, log: log, publicIP: publicIP, status: map[string]*agentv1.NetworkStatus{}, seen: map[string]time.Time{}}
+func NewManager(st *store.Store, gw *agentgw.Gateway, bus *events.Bus, log *slog.Logger, publicIP PublicIP, opts Options) *Manager {
+	m := &Manager{st: st, gw: gw, bus: bus, log: log, publicIP: publicIP, opts: opts, status: map[string]*agentv1.NetworkStatus{}, seen: map[string]time.Time{}}
 	m.gen.Store(uint64(time.Now().UnixNano())) // increases across restarts
 	return m
 }
@@ -173,11 +188,20 @@ func (m *Manager) onConnect(c agentgw.Conn) {
 	}
 }
 
+// Changed re-sends every node its configuration (e.g. after a firewall
+// policy change).
+func (m *Manager) Changed(ctx context.Context) { m.broadcast(ctx, "") }
+
 // broadcast sends every connected node (or only onlyID) its mesh view.
 func (m *Manager) broadcast(ctx context.Context, onlyID string) {
 	all, err := m.st.ListNodeNetworks(ctx)
 	if err != nil {
 		m.log.Error("list mesh members", "err", err)
+		return
+	}
+	policies, err := m.st.ListFirewallPolicies(ctx)
+	if err != nil {
+		m.log.Error("list firewall policies", "err", err)
 		return
 	}
 	gen := m.gen.Add(1)
@@ -186,6 +210,9 @@ func (m *Manager) broadcast(ctx context.Context, onlyID string) {
 			continue
 		}
 		cfg := ConfigFor(self, all, gen)
+		if m.opts.Firewall {
+			cfg.Firewall = FirewallFor(self, all, policies, m.opts)
+		}
 		err := m.gw.Send(self.NodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_Network{Network: cfg}})
 		if err != nil && !errors.Is(err, agentgw.ErrNotConnected) {
 			m.log.Warn("send mesh config", "node", self.NodeName, "err", err)
@@ -216,10 +243,67 @@ func ConfigFor(self store.NodeNetwork, all []store.NodeNetwork, gen uint64) *age
 	return cfg
 }
 
+// FirewallFor builds a node's host firewall: built-in rules plus every
+// policy that targets it.
+func FirewallFor(self store.NodeNetwork, all []store.NodeNetwork, policies []store.FirewallPolicy, opts Options) *agentv1.Firewall {
+	fw := &agentv1.Firewall{ConfirmTimeoutSeconds: ConfirmTimeout}
+	for _, n := range all {
+		if n.NodeID == self.NodeID || n.Endpoint == "" {
+			continue
+		}
+		if host, _, err := net.SplitHostPort(n.Endpoint); err == nil {
+			fw.ClusterSources = append(fw.ClusterSources, host)
+		}
+	}
+	if self.NodeName == ControllerNode {
+		for _, p := range opts.ControllerPorts {
+			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:controller-" + p, Protocol: "tcp", Ports: p, Description: "controller (built-in)"})
+		}
+	}
+	for _, p := range policies {
+		if !p.AppliesTo(self.NodeID) {
+			continue
+		}
+		for i, r := range p.Rules {
+			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{
+				Id: fmt.Sprintf("%s:%d", p.ID, i), Protocol: r.Protocol, Ports: r.Ports, Sources: r.Sources, Description: r.Description,
+			})
+		}
+	}
+	return fw
+}
+
+// NodeConfig returns the configuration a node would get now (for the
+// effective-rules view).
+func (m *Manager) NodeConfig(ctx context.Context, nodeID string) (*agentv1.NetworkConfig, error) {
+	all, err := m.st.ListNodeNetworks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	policies, err := m.st.ListFirewallPolicies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, self := range all {
+		if self.NodeID == nodeID {
+			cfg := ConfigFor(self, all, m.gen.Load())
+			if m.opts.Firewall {
+				cfg.Firewall = FirewallFor(self, all, policies, m.opts)
+			}
+			return cfg, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
 func (m *Manager) onHeartbeat(node store.Node, hb *agentv1.Heartbeat) {
 	ns := hb.GetNetwork()
 	if ns == nil {
 		return
+	}
+	if ns.GetFirewallPending() {
+		// The heartbeat itself proves the controller still hears the node.
+		_ = m.gw.Send(node.ID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_ConfirmNetwork{ConfirmNetwork: &agentv1.ConfirmNetwork{Generation: ns.GetGeneration()}}})
 	}
 	m.mu.Lock()
 	m.status[node.ID] = ns
@@ -248,6 +332,7 @@ func (m *Manager) List(ctx context.Context) ([]NodeView, error) {
 		if st := m.status[n.NodeID]; st != nil {
 			seen := m.seen[n.NodeID]
 			v.Mode, v.AppliedGen, v.Error, v.StatusUpdatedAt = st.GetMode(), st.GetGeneration(), st.GetError(), &seen
+			v.FirewallPending, v.Drift = st.GetFirewallPending(), st.GetDriftCorrections()
 			for _, p := range st.GetPeers() {
 				pv := PeerView{Endpoint: p.GetEndpoint(), RxBytes: p.GetRxBytes(), TxBytes: p.GetTxBytes(), RTTMillis: p.GetRttMs()}
 				if peer, ok := byKey[p.GetPublicKey()]; ok {

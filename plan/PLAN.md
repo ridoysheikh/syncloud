@@ -1197,7 +1197,7 @@ Because there is only one controller:
 - Controller **installation** (§5.0): preflight checks, signed binaries, systemd units, `init` / `doctor`, the local agent, and **system tasks** (Traefik with the UI as the first route, private registry, BuildKit, VictoriaMetrics, VictoriaLogs).
 - **sslip.io base domain**, controller-managed certificates (ACME) with the fallback (§5.0.2), served to Traefik; recovery key; Litestream backup wiring.
 
-### Phase 1: Nodes, Networking and Host Firewall (3–4 wks)
+### Phase 1: Nodes, Networking and Host Firewall (3–4 wks) — ✅ done 2026-10-06 (DNS and VIPs moved to Phase 2)
 **Progress**
 - ✅ Slice 1a (2026-10-06), WireGuard mesh and IPAM:
   - The controller allocates a mesh index (`10.90.x.y`, `ctl-0` is always `10.90.0.1`) and a container `/24` per node, with a 1-hour cool-down before released addresses are reused. Every agent gets its full-mesh view (`NetworkConfig`) over the stream, and again whenever membership changes.
@@ -1210,6 +1210,14 @@ Because there is only one controller:
 - ✅ Slice 1b (2026-10-06), worker join and certificate renewal:
   - The controller serves `/join.sh`, filled in with the URL it was fetched from, and `/downloads/{agent,synctl}-linux-{amd64,arm64}` plus `SHA256SUMS` from `/usr/local/lib/syncloud/downloads` (populated by install.sh). join.sh installs Docker and nftables, verifies the agent checksum, joins and starts the systemd unit. The Nodes page shows the one-line command.
   - **Node certificate renewal**: with under 30 days left, the agent sends a CSR for a new key over the stream. The controller keeps the previous serial valid until the agent reconnects with the new certificate, and file writes recover from a crash mid-rename.
+- ✅ Slice 1c (2026-10-06), host firewall:
+  - Each node's `inet syncloud` table (IPv4 and IPv6, replacing the IPv4-only table) holds an input chain. Built-in rules that cannot be removed allow established traffic, loopback, the mesh and Docker bridges, essential ICMP/ICMPv6, and WireGuard from cluster nodes (an nftables set). The controller also keeps HTTP, HTTPS, the agent gateway and an intentionally exposed API port open. Everything else ends in a counted default deny.
+  - **Policies** (`firewall_policies`) target all nodes or chosen nodes. A `default` policy is seeded with SSH open. Rules (tcp, udp, icmp or any, with ports and sources: IP, CIDR or `cluster`) are strictly validated, because they are rendered into nftables syntax. One renderer (`internal/firewall`) is shared by the agent and the controller, so the API shows each node's exact **effective rules** and nftables text.
+  - **Commit-confirm**: a node that applies a changed firewall waits for the controller's confirmation (sent when its next heartbeat arrives) and rolls back to the last confirmed firewall after 60s without it.
+  - **Drift**: before each 30s re-apply the agent compares the live table with what it applied. It counts and logs changes and restores the managed rules.
+  - API `/firewall/policies`, `/firewall/nodes/{id}/effective`, `synctl firewall list|get|apply -f|delete|effective`, the Network → Firewall page (policy editor and effective rules), and `--firewall` (default on).
+  - Verified in `make e2e`: default deny on public addresses, an allow-policy taking effect, mesh traffic unaffected, commit-confirm completing, and a hand-flushed chain being restored.
+  - Phase 6 adds rule hit counters in the UI, the drop log, security groups and the reachability check.
 - **Reordered**: internal DNS and service VIPs move into Phase 2 with services, which are their first users. The VIP data path uses **nftables DNAT load balancing** (as in kube-proxy's nftables mode) instead of IPVS: no extra kernel modules, and one atomic ruleset shared with the firewall. The trade-off is random or round-robin balancing, with no least-connections.
 - Agent binary, `join.sh`, join flow, mTLS CA.
 - WireGuard mesh with IPAM, per-node container subnets, and cross-node container connectivity tests.
