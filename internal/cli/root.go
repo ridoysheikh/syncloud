@@ -73,6 +73,7 @@ func NewRoot(in io.Reader, out, errOut io.Writer) *cobra.Command {
 		a.whoamiCmd(),
 		a.apiCmd(),
 		a.iamCmd(),
+		a.nodesCmd(),
 	)
 	return root
 }

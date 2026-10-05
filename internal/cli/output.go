@@ -44,8 +44,10 @@ func ago(t *time.Time) string {
 func age(t time.Time) string {
 	d := time.Since(t)
 	switch {
-	case d < time.Minute:
+	case d < 10*time.Second:
 		return "just now"
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
 	case d < time.Hour:
 		return fmt.Sprintf("%dm ago", int(d.Minutes()))
 	case d < 48*time.Hour:

@@ -16,6 +16,7 @@ import type { DashboardModule } from "./types";
 import { OverviewPage } from "./overview/OverviewPage";
 import { planned } from "./planned";
 import { CredentialsPage } from "./iam/CredentialsPage";
+import { NodesPage } from "./compute/NodesPage";
 
 /** The module registry. The side nav and routes are built from this list. */
 export const modules: DashboardModule[] = [
@@ -36,7 +37,7 @@ export const modules: DashboardModule[] = [
       { path: "/compute/tasks", label: "Tasks", component: planned(["Compute"], "Tasks", "Phase 2", "§5.2–5.3", "Every running container across all nodes.") },
       { path: "/compute/jobs", label: "Jobs", component: planned(["Compute"], "Jobs", "Phase 3", "§5.11", "One-off tasks, cron jobs and deploy hooks.") },
       { path: "/compute/deployments", label: "Deployments", component: planned(["Compute"], "Deployments", "Phase 3", "§5.4", "Rollout history, circuit breaker and rollback.") },
-      { path: "/compute/nodes", label: "Nodes", component: planned(["Compute"], "Nodes", "Phase 1", "§6", "Worker nodes: join, metrics, cordon and drain.") },
+      { path: "/compute/nodes", label: "Nodes", component: NodesPage },
       { path: "/compute/node-pools", label: "Node Pools", component: planned(["Compute"], "Node Pools", "Phase 8", "§6.5", "Provider-backed pools and cluster autoscaling.") },
     ],
   },

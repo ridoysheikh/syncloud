@@ -1,4 +1,4 @@
-.PHONY: all build controller synctl web test vet fmt dev dev-controller dev-web clean
+.PHONY: all build controller agent synctl web proto test vet fmt dev dev-controller dev-agent dev-web clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 LDFLAGS := -s -w -X syncloud/internal/version.Version=$(VERSION)
@@ -7,10 +7,13 @@ DEV_DATA := $(CURDIR)/.data
 all: build
 
 ## build: dashboard + controller binary (dashboard embedded)
-build: web controller synctl
+build: web controller agent synctl
 
 controller:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/syncloud-controller ./cmd/controller
+
+agent:
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/syncloud-agent ./cmd/agent
 
 synctl:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/synctl ./cmd/synctl
@@ -23,6 +26,18 @@ web/node_modules: web/package.json web/pnpm-lock.yaml
 	cd web && pnpm install --frozen-lockfile
 	@touch $@
 
+## proto: regenerate gRPC code (tools are installed into .tools/ on first use)
+proto: .tools/buf .tools/protoc-gen-go .tools/protoc-gen-go-grpc
+	PATH=$(CURDIR)/.tools:$$PATH .tools/buf lint
+	PATH=$(CURDIR)/.tools:$$PATH .tools/buf generate
+
+.tools/buf:
+	GOBIN=$(CURDIR)/.tools go install github.com/bufbuild/buf/cmd/buf@latest
+.tools/protoc-gen-go:
+	GOBIN=$(CURDIR)/.tools go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+.tools/protoc-gen-go-grpc:
+	GOBIN=$(CURDIR)/.tools go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
 test:
 	go test ./...
 
@@ -33,12 +48,19 @@ vet:
 fmt:
 	gofmt -w cmd internal
 
-## dev: controller on :7070 + Vite dev server on :5173 (open http://localhost:5173)
+## dev: controller on :7070, its local agent (ctl-0), and Vite on :5173 (open http://localhost:5173)
 dev: web/node_modules
-	@$(MAKE) -j2 dev-controller dev-web
+	@$(MAKE) -j3 dev-controller dev-agent dev-web
 
 dev-controller:
 	go run ./cmd/controller --dev --data-dir $(DEV_DATA)
+
+# The local agent joins as ctl-0 with the token the controller writes on first start (§6.4).
+dev-agent:
+	@until [ -f $(DEV_DATA)/agent/agent.json ] || [ -f $(DEV_DATA)/local-join.token ]; do sleep 0.5; done
+	@[ -f $(DEV_DATA)/agent/agent.json ] || go run ./cmd/agent join --data-dir $(DEV_DATA)/agent \
+		--controller http://127.0.0.1:7070 --token-file $(DEV_DATA)/local-join.token --name ctl-0
+	go run ./cmd/agent run --data-dir $(DEV_DATA)/agent
 
 dev-web:
 	cd web && pnpm run dev

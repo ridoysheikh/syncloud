@@ -5,135 +5,305 @@
     "version": "v1",
     "description": "The public SynCloud controller API. The dashboard, synctl and CI all use these endpoints (plan §5.1). Authenticate with the dashboard session cookie, a personal access token (Bearer), or a signed access-key request (SYN1-HMAC-SHA256, plan §7.1)."
   },
-  "servers": [{ "url": "/" }],
-  "security": [{ "session": [] }, { "bearerToken": [] }, { "accessKey": [] }],
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "session": []
+    },
+    {
+      "bearerToken": []
+    },
+    {
+      "accessKey": []
+    }
+  ],
   "paths": {
     "/api/v1/system/status": {
       "get": {
         "operationId": "getSystemStatus",
-        "tags": ["system"],
+        "tags": [
+          "system"
+        ],
         "summary": "Controller version and setup state",
         "security": [],
         "responses": {
-          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SystemStatus" } } } }
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatus"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/api/v1/openapi.json": {
       "get": {
         "operationId": "getOpenAPI",
-        "tags": ["system"],
+        "tags": [
+          "system"
+        ],
         "summary": "This API description",
         "security": [],
-        "responses": { "200": { "description": "OpenAPI document" } }
+        "responses": {
+          "200": {
+            "description": "OpenAPI document"
+          }
+        }
       }
     },
     "/api/v1/setup": {
       "post": {
         "operationId": "completeSetup",
-        "tags": ["auth"],
+        "tags": [
+          "auth"
+        ],
         "summary": "Exchange the one-time setup token for the root account and sign in",
         "security": [],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SetupRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupRequest"
+              }
+            }
+          }
         },
         "responses": {
-          "201": { "description": "Root account created; session cookie set", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } } },
-          "400": { "$ref": "#/components/responses/Error" },
-          "401": { "$ref": "#/components/responses/Error" },
-          "409": { "$ref": "#/components/responses/Error" },
-          "429": { "$ref": "#/components/responses/Error" }
+          "201": {
+            "description": "Root account created; session cookie set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "login",
-        "tags": ["auth"],
+        "tags": [
+          "auth"
+        ],
         "summary": "Sign in to the dashboard (sets the session cookie)",
         "security": [],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "Signed in", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } } },
-          "401": { "$ref": "#/components/responses/Error" },
-          "429": { "$ref": "#/components/responses/Error" }
+          "200": {
+            "description": "Signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
     "/api/v1/auth/logout": {
       "post": {
         "operationId": "logout",
-        "tags": ["auth"],
+        "tags": [
+          "auth"
+        ],
         "summary": "End the current session",
-        "responses": { "204": { "description": "Signed out" }, "401": { "$ref": "#/components/responses/Error" } }
+        "responses": {
+          "204": {
+            "description": "Signed out"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/auth/me": {
       "get": {
         "operationId": "whoami",
-        "tags": ["auth"],
+        "tags": [
+          "auth"
+        ],
         "summary": "The authenticated user",
         "responses": {
-          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } } },
-          "401": { "$ref": "#/components/responses/Error" }
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
     "/api/v1/stream": {
       "get": {
         "operationId": "stream",
-        "tags": ["system"],
+        "tags": [
+          "system"
+        ],
         "summary": "Live event stream (WebSocket upgrade). Each message is a JSON Event.",
-        "responses": { "101": { "description": "Switching to WebSocket" }, "401": { "$ref": "#/components/responses/Error" } }
+        "responses": {
+          "101": {
+            "description": "Switching to WebSocket"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/iam/access-keys": {
       "get": {
         "operationId": "listAccessKeys",
-        "tags": ["iam"],
+        "tags": [
+          "iam"
+        ],
         "summary": "Your access keys",
         "responses": {
-          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccessKeyList" } } } }
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessKeyList"
+                }
+              }
+            }
+          }
         }
       },
       "post": {
         "operationId": "createAccessKey",
-        "tags": ["iam"],
+        "tags": [
+          "iam"
+        ],
         "summary": "Create an access key (max 2 per user). The secret is returned only once.",
         "requestBody": {
-          "content": { "application/json": { "schema": { "type": "object", "properties": { "description": { "type": "string", "maxLength": 200 } } } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "description": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
         },
         "responses": {
-          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccessKey" } } } },
-          "409": { "$ref": "#/components/responses/Error" }
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessKey"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
     "/api/v1/iam/access-keys/{id}": {
       "delete": {
         "operationId": "deleteAccessKey",
-        "tags": ["iam"],
+        "tags": [
+          "iam"
+        ],
         "summary": "Delete one of your access keys",
-        "parameters": [{ "$ref": "#/components/parameters/Id" }],
-        "responses": { "204": { "description": "Deleted" }, "404": { "$ref": "#/components/responses/Error" } }
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/iam/tokens": {
       "get": {
         "operationId": "listTokens",
-        "tags": ["iam"],
+        "tags": [
+          "iam"
+        ],
         "summary": "Your personal access tokens",
         "responses": {
-          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TokenList" } } } }
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenList"
+                }
+              }
+            }
+          }
         }
       },
       "post": {
         "operationId": "createToken",
-        "tags": ["iam"],
+        "tags": [
+          "iam"
+        ],
         "summary": "Create a personal access token. The token is returned only once.",
         "requestBody": {
           "required": true,
@@ -141,35 +311,253 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["name"],
+                "required": [
+                  "name"
+                ],
                 "properties": {
-                  "name": { "type": "string", "maxLength": 100 },
-                  "expiresInDays": { "type": "integer", "minimum": 0, "maximum": 365, "description": "0 means no expiry" }
+                  "name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "expiresInDays": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 365,
+                    "description": "0 means no expiry"
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Token" } } } },
-          "400": { "$ref": "#/components/responses/Error" }
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Token"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
     "/api/v1/iam/tokens/{id}": {
       "delete": {
         "operationId": "deleteToken",
-        "tags": ["iam"],
+        "tags": [
+          "iam"
+        ],
         "summary": "Delete one of your personal access tokens",
-        "parameters": [{ "$ref": "#/components/parameters/Id" }],
-        "responses": { "204": { "description": "Deleted" }, "404": { "$ref": "#/components/responses/Error" } }
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/join": {
+      "post": {
+        "operationId": "joinNode",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Register a node with a join token (used by syncloud-agent join). Returns the node's client certificate signed from its CSR.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JoinRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/nodes": {
+      "get": {
+        "operationId": "listNodes",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "All nodes with live status and latest metrics",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}": {
+      "delete": {
+        "operationId": "deleteNode",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Remove a node. Its certificate stops working immediately.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/join-tokens": {
+      "get": {
+        "operationId": "listJoinTokens",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Active (unexpired, unused) join tokens",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinTokenList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createJoinToken",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Create a join token. The token is returned only once.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "ttlMinutes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10080,
+                    "description": "default 60"
+                  },
+                  "singleUse": {
+                    "type": "boolean",
+                    "description": "default true"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/join-tokens/{id}": {
+      "delete": {
+        "operationId": "deleteJoinToken",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Revoke a join token",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     }
   },
   "components": {
     "securitySchemes": {
-      "session": { "type": "apiKey", "in": "cookie", "name": "syncloud_session" },
-      "bearerToken": { "type": "http", "scheme": "bearer", "description": "Personal access token (syn_pat_…)" },
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "syncloud_session"
+      },
+      "bearerToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Personal access token (syn_pat_…)"
+      },
       "accessKey": {
         "type": "apiKey",
         "in": "header",
@@ -178,95 +566,492 @@
       }
     },
     "parameters": {
-      "Id": { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      "Id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
     },
     "responses": {
       "Error": {
         "description": "Error",
-        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     },
     "schemas": {
       "Error": {
         "type": "object",
-        "required": ["error"],
+        "required": [
+          "error"
+        ],
         "properties": {
           "error": {
             "type": "object",
-            "required": ["code", "message"],
-            "properties": { "code": { "type": "string" }, "message": { "type": "string" } }
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
           }
         }
       },
       "SystemStatus": {
         "type": "object",
-        "required": ["version", "setupRequired", "baseDomain"],
+        "required": [
+          "version",
+          "setupRequired",
+          "baseDomain"
+        ],
         "properties": {
-          "version": { "type": "string" },
-          "setupRequired": { "type": "boolean" },
-          "baseDomain": { "type": "string" }
+          "version": {
+            "type": "string"
+          },
+          "setupRequired": {
+            "type": "boolean"
+          },
+          "baseDomain": {
+            "type": "string"
+          }
         }
       },
       "SetupRequest": {
         "type": "object",
-        "required": ["setupToken", "email", "name", "password"],
+        "required": [
+          "setupToken",
+          "email",
+          "name",
+          "password"
+        ],
         "properties": {
-          "setupToken": { "type": "string" },
-          "email": { "type": "string", "format": "email" },
-          "name": { "type": "string", "maxLength": 100 },
-          "password": { "type": "string", "minLength": 12 }
+          "setupToken": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12
+          }
         }
       },
       "LoginRequest": {
         "type": "object",
-        "required": ["email", "password"],
-        "properties": { "email": { "type": "string" }, "password": { "type": "string" } }
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
       },
       "User": {
         "type": "object",
-        "required": ["id", "email", "name", "isRoot", "createdAt"],
+        "required": [
+          "id",
+          "email",
+          "name",
+          "isRoot",
+          "createdAt"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "email": { "type": "string" },
-          "name": { "type": "string" },
-          "isRoot": { "type": "boolean" },
-          "createdAt": { "type": "string", "format": "date-time" }
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "isRoot": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "AccessKey": {
         "type": "object",
-        "required": ["id", "description", "createdAt", "lastUsedAt", "lastUsedIp"],
+        "required": [
+          "id",
+          "description",
+          "createdAt",
+          "lastUsedAt",
+          "lastUsedIp"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "description": { "type": "string" },
-          "createdAt": { "type": "string", "format": "date-time" },
-          "lastUsedAt": { "type": ["string", "null"], "format": "date-time" },
-          "lastUsedIp": { "type": "string" },
-          "secretAccessKey": { "type": "string", "description": "Only present in the create response" }
+          "id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastUsedIp": {
+            "type": "string"
+          },
+          "secretAccessKey": {
+            "type": "string",
+            "description": "Only present in the create response"
+          }
         }
       },
       "AccessKeyList": {
         "type": "object",
-        "required": ["items"],
-        "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/AccessKey" } } }
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccessKey"
+            }
+          }
+        }
       },
       "Token": {
         "type": "object",
-        "required": ["id", "name", "createdAt", "expiresAt", "lastUsedAt", "lastUsedIp"],
+        "required": [
+          "id",
+          "name",
+          "createdAt",
+          "expiresAt",
+          "lastUsedAt",
+          "lastUsedIp"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "name": { "type": "string" },
-          "createdAt": { "type": "string", "format": "date-time" },
-          "expiresAt": { "type": ["string", "null"], "format": "date-time" },
-          "lastUsedAt": { "type": ["string", "null"], "format": "date-time" },
-          "lastUsedIp": { "type": "string" },
-          "token": { "type": "string", "description": "Only present in the create response" }
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastUsedIp": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string",
+            "description": "Only present in the create response"
+          }
         }
       },
       "TokenList": {
         "type": "object",
-        "required": ["items"],
-        "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Token" } } }
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Token"
+            }
+          }
+        }
+      },
+      "JoinRequest": {
+        "type": "object",
+        "required": [
+          "token",
+          "name",
+          "csr"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+          },
+          "csr": {
+            "type": "string",
+            "description": "PEM certificate signing request for the node's own key"
+          }
+        }
+      },
+      "JoinResponse": {
+        "type": "object",
+        "required": [
+          "nodeId",
+          "name",
+          "certificate",
+          "caCertificate",
+          "gatewayAddress"
+        ],
+        "properties": {
+          "nodeId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "certificate": {
+            "type": "string"
+          },
+          "caCertificate": {
+            "type": "string"
+          },
+          "gatewayAddress": {
+            "type": "string",
+            "description": "host:port of the agent gateway (gRPC, mTLS)"
+          }
+        }
+      },
+      "NodeInfo": {
+        "type": "object",
+        "properties": {
+          "hostname": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string"
+          },
+          "kernel": {
+            "type": "string"
+          },
+          "arch": {
+            "type": "string"
+          },
+          "cpuCores": {
+            "type": "integer"
+          },
+          "memoryBytes": {
+            "type": "integer"
+          },
+          "diskBytes": {
+            "type": "integer"
+          },
+          "dockerVersion": {
+            "type": "string"
+          },
+          "agentVersion": {
+            "type": "string"
+          }
+        }
+      },
+      "NodeMetrics": {
+        "type": "object",
+        "properties": {
+          "cpuPercent": {
+            "type": "number"
+          },
+          "memoryUsedBytes": {
+            "type": "integer"
+          },
+          "memoryTotalBytes": {
+            "type": "integer"
+          },
+          "diskUsedBytes": {
+            "type": "integer"
+          },
+          "diskTotalBytes": {
+            "type": "integer"
+          },
+          "load1": {
+            "type": "number"
+          },
+          "load5": {
+            "type": "number"
+          },
+          "load15": {
+            "type": "number"
+          },
+          "netRxBytes": {
+            "type": "integer"
+          },
+          "netTxBytes": {
+            "type": "integer"
+          },
+          "uptimeSeconds": {
+            "type": "integer"
+          }
+        }
+      },
+      "Node": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "statusAt",
+          "connected",
+          "lastSeenAt",
+          "createdAt",
+          "info",
+          "metrics"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ready",
+              "suspect",
+              "not_ready"
+            ]
+          },
+          "statusAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "lastSeenAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "info": {
+            "$ref": "#/components/schemas/NodeInfo"
+          },
+          "metrics": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NodeMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "NodeList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Node"
+            }
+          }
+        }
+      },
+      "JoinToken": {
+        "type": "object",
+        "required": [
+          "id",
+          "description",
+          "createdAt",
+          "expiresAt",
+          "singleUse",
+          "uses"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "singleUse": {
+            "type": "boolean"
+          },
+          "uses": {
+            "type": "integer"
+          },
+          "token": {
+            "type": "string",
+            "description": "Only present in the create response"
+          }
+        }
+      },
+      "JoinTokenList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JoinToken"
+            }
+          }
+        }
       }
     }
   }

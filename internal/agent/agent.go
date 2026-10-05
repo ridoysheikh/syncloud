@@ -1,0 +1,240 @@
+// Package agent is syncloud-agent: it joins a node to the controller and keeps
+// one outbound mTLS gRPC stream open for heartbeats and (later) commands (§6).
+package agent
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"math/rand/v2"
+	"net"
+	"os"
+	"path/filepath"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
+
+	"syncloud/internal/agent/sysinfo"
+	"syncloud/internal/client"
+	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	"syncloud/internal/nodes"
+	"syncloud/internal/pki"
+	"syncloud/internal/version"
+)
+
+// State files under the agent's data directory.
+const (
+	keyFile   = "node.key"
+	certFile  = "node.crt"
+	caFile    = "ca.crt"
+	stateFile = "agent.json"
+)
+
+type State struct {
+	NodeID     string `json:"nodeId"`
+	Name       string `json:"name"`
+	Controller string `json:"controller"`
+	Gateway    string `json:"gateway"`
+}
+
+// Join registers this machine with the controller using a join token. The
+// node key is generated here and never leaves the machine.
+func Join(ctx context.Context, dataDir, controllerURL, token, name string) (State, error) {
+	if _, err := os.Stat(filepath.Join(dataDir, stateFile)); err == nil {
+		return State{}, fmt.Errorf("this machine has already joined (state in %s); remove it to join again", dataDir)
+	}
+	keyPEM, csrPEM, err := pki.NewNodeKey(name)
+	if err != nil {
+		return State{}, err
+	}
+	c, err := client.New(controllerURL, client.Credentials{})
+	if err != nil {
+		return State{}, err
+	}
+	resp, err := c.JoinNode(ctx, client.JoinRequest{Token: token, Name: name, CSR: string(csrPEM)})
+	if err != nil {
+		return State{}, fmt.Errorf("join: %w", err)
+	}
+	st := State{NodeID: resp.NodeID, Name: resp.Name, Controller: controllerURL, Gateway: resp.GatewayAddress}
+	stateJSON, _ := json.MarshalIndent(st, "", "  ")
+
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return st, err
+	}
+	for _, f := range []struct {
+		name string
+		data []byte
+		mode os.FileMode
+	}{
+		{keyFile, keyPEM, 0o600},
+		{certFile, []byte(resp.Certificate), 0o644},
+		{caFile, []byte(resp.CACertificate), 0o644},
+		{stateFile, append(stateJSON, '\n'), 0o644}, // last: its presence means "joined"
+	} {
+		if err := os.WriteFile(filepath.Join(dataDir, f.name), f.data, f.mode); err != nil {
+			return st, err
+		}
+	}
+	return st, nil
+}
+
+func loadState(dataDir string) (State, *tls.Config, error) {
+	var st State
+	b, err := os.ReadFile(filepath.Join(dataDir, stateFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return st, nil, fmt.Errorf("not joined yet: run `syncloud-agent join` first")
+	} else if err != nil {
+		return st, nil, err
+	}
+	if err := json.Unmarshal(b, &st); err != nil {
+		return st, nil, err
+	}
+	cert, err := tls.LoadX509KeyPair(filepath.Join(dataDir, certFile), filepath.Join(dataDir, keyFile))
+	if err != nil {
+		return st, nil, err
+	}
+	caPEM, err := os.ReadFile(filepath.Join(dataDir, caFile))
+	if err != nil {
+		return st, nil, err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return st, nil, errors.New("invalid CA certificate")
+	}
+	host, _, err := net.SplitHostPort(st.Gateway)
+	if err != nil {
+		return st, nil, fmt.Errorf("gateway address %q: %w", st.Gateway, err)
+	}
+	return st, &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      pool, // only the cluster CA is trusted for the gateway
+		ServerName:   host,
+		MinVersion:   tls.VersionTLS13,
+	}, nil
+}
+
+// Run keeps the agent connected until ctx ends, reconnecting with backoff.
+func Run(ctx context.Context, dataDir string, log *slog.Logger) error {
+	st, tlsCfg, err := loadState(dataDir)
+	if err != nil {
+		return err
+	}
+	conn, err := grpc.NewClient(st.Gateway,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 30 * time.Second, Timeout: 10 * time.Second, PermitWithoutStream: true}),
+	)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	gw := agentv1.NewAgentGatewayServiceClient(conn)
+	info := sysinfo.StaticInfo(ctx, "/")
+
+	log.Info("agent starting", "node", st.Name, "gateway", st.Gateway, "version", version.Version)
+	for attempt := 0; ; attempt++ {
+		connected, err := session(ctx, gw, info, log)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if status.Code(err) == codes.PermissionDenied {
+			// The node was removed or its certificate replaced: retrying cannot help.
+			return fmt.Errorf("controller rejected this node: %w", err)
+		}
+		if connected {
+			attempt = 0
+		}
+		delay := backoff(attempt)
+		log.Warn("disconnected from controller", "err", err, "retry_in", delay.Round(100*time.Millisecond))
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(delay):
+		}
+	}
+}
+
+// session runs one stream. connected reports whether the controller accepted it.
+func session(ctx context.Context, gw agentv1.AgentGatewayServiceClient, info nodes.Info, log *slog.Logger) (connected bool, err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := gw.Connect(ctx)
+	if err != nil {
+		return false, err
+	}
+	err = stream.Send(&agentv1.ConnectRequest{Msg: &agentv1.ConnectRequest_Hello{Hello: &agentv1.Hello{
+		AgentVersion: version.Version,
+		Info: &agentv1.NodeInfo{
+			Hostname: info.Hostname, Os: info.OS, Kernel: info.Kernel, Arch: info.Arch,
+			CpuCores: int32(info.CPUCores), MemoryBytes: info.MemoryBytes, DiskBytes: info.DiskBytes,
+			DockerVersion: info.DockerVersion,
+		},
+	}}})
+	if err != nil {
+		return false, err
+	}
+	first, err := stream.Recv()
+	if err != nil {
+		return false, err
+	}
+	welcome := first.GetWelcome()
+	if welcome == nil {
+		return false, errors.New("expected Welcome from controller")
+	}
+	log.Info("connected to controller", "node_id", welcome.GetNodeId())
+
+	interval := time.Duration(welcome.GetHeartbeatIntervalSeconds()) * time.Second
+	if interval <= 0 {
+		interval = nodes.HeartbeatInterval
+	}
+	errc := make(chan error, 2)
+	go func() { errc <- heartbeats(ctx, stream, interval) }()
+	go func() {
+		for {
+			if _, err := stream.Recv(); err != nil { // commands arrive with the Docker runner
+				errc <- err
+				return
+			}
+		}
+	}()
+	return true, <-errc
+}
+
+func heartbeats(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.ConnectRequest, agentv1.ConnectResponse], every time.Duration) error {
+	sampler := sysinfo.NewSampler("/")
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+			m := sampler.Sample()
+			err := stream.Send(&agentv1.ConnectRequest{Msg: &agentv1.ConnectRequest_Heartbeat{Heartbeat: &agentv1.Heartbeat{
+				Metrics: &agentv1.NodeMetrics{
+					CpuPercent: m.CPUPercent, MemoryUsedBytes: m.MemoryUsedBytes, MemoryTotalBytes: m.MemoryTotalBytes,
+					DiskUsedBytes: m.DiskUsedBytes, DiskTotalBytes: m.DiskTotalBytes,
+					Load1: m.Load1, Load5: m.Load5, Load15: m.Load15,
+					NetRxBytes: m.NetRxBytes, NetTxBytes: m.NetTxBytes, UptimeSeconds: m.UptimeSeconds,
+				},
+			}}})
+			if err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// backoff: 1s, 2s, 4s … capped at 30s, with ±25% jitter so nodes don't reconnect in lockstep.
+func backoff(attempt int) time.Duration {
+	d := time.Second << min(attempt, 5)
+	d = min(d, 30*time.Second)
+	return time.Duration(float64(d) * (0.75 + rand.Float64()*0.5))
+}

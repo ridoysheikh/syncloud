@@ -10,14 +10,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
 
+	"syncloud/internal/agentgw"
 	"syncloud/internal/api"
 	"syncloud/internal/auth"
 	"syncloud/internal/config"
 	"syncloud/internal/events"
+	"syncloud/internal/nodes"
+	"syncloud/internal/pki"
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 	"syncloud/internal/version"
@@ -61,8 +65,37 @@ func run(args []string) error {
 		return fmt.Errorf("setup token: %w", err)
 	}
 
+	ca, err := pki.LoadOrCreateCA(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("certificate authority: %w", err)
+	}
+
 	bus := events.NewBus()
-	srv := api.New(api.Options{Store: st, Secrets: box, Bus: bus, Log: log, Web: web.FS()})
+	registry := nodes.NewRegistry(st, bus, log)
+	if err := registry.Load(ctx); err != nil {
+		return fmt.Errorf("load nodes: %w", err)
+	}
+	if err := ensureLocalJoinToken(ctx, st, cfg.DataDir); err != nil {
+		return fmt.Errorf("local join token: %w", err)
+	}
+
+	srv := api.New(api.Options{
+		Store: st, Secrets: box, CA: ca, Nodes: registry, GatewayAddr: cfg.AgentAdvertise,
+		Bus: bus, Log: log, Web: web.FS(),
+	})
+
+	gwHost, _, err := net.SplitHostPort(cfg.AgentAdvertise)
+	if err != nil {
+		return fmt.Errorf("--agent-advertise: %w", err)
+	}
+	gw := agentgw.New(st, registry, log)
+	go func() {
+		if err := gw.Serve(ctx, ca, cfg.AgentListen, []string{gwHost, "localhost", "127.0.0.1"}); err != nil {
+			log.Error("agent gateway stopped", "err", err)
+			stop()
+		}
+	}()
+	go registry.Run(ctx)
 
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
@@ -152,6 +185,9 @@ func cleanupSessions(ctx context.Context, st *store.Store, log *slog.Logger) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if err := st.DeleteExpiredJoinTokens(ctx, time.Now()); err != nil {
+				log.Warn("cleanup join tokens", "err", err)
+			}
 			if n, err := st.DeleteExpiredSessions(ctx, time.Now()); err != nil {
 				log.Warn("cleanup sessions", "err", err)
 			} else if n > 0 {
@@ -159,4 +195,30 @@ func cleanupSessions(ctx context.Context, st *store.Store, log *slog.Logger) {
 			}
 		}
 	}
+}
+
+// LocalNodeName is the controller's own node (§6.4).
+const LocalNodeName = "ctl-0"
+
+// ensureLocalJoinToken writes a single-use join token for the controller's own
+// agent to <data>/local-join.token (0600) until node ctl-0 exists. The agent on
+// this host joins with: syncloud-agent join --token-file <data>/local-join.token --name ctl-0
+func ensureLocalJoinToken(ctx context.Context, st *store.Store, dataDir string) error {
+	path := filepath.Join(dataDir, "local-join.token")
+	if _, err := st.NodeByName(ctx, LocalNodeName); err == nil {
+		_ = os.Remove(path)
+		return nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	tok := auth.NewToken("SYN-JOIN-")
+	now := time.Now()
+	err := st.CreateJoinToken(ctx, store.JoinToken{
+		ID: auth.NewID("jt_"), TokenHash: auth.HashToken(tok), Description: "local agent (ctl-0)",
+		CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour), SingleUse: true,
+	})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(tok+"\n"), 0o600)
 }

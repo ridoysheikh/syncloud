@@ -1,0 +1,74 @@
+// Agent <-> controller protocol (plan §12). The agent dials out once and keeps
+// a single bidirectional stream; commands and telemetry share it.
+syntax = "proto3";
+
+package syncloud.agent.v1;
+
+option go_package = "syncloud/internal/gen/syncloud/agent/v1;agentv1";
+
+service AgentGatewayService {
+  // Connect is the long-lived agent stream. The first message must be Hello.
+  // The node identity comes from the mTLS client certificate, not the messages.
+  rpc Connect(stream ConnectRequest) returns (stream ConnectResponse);
+}
+
+message ConnectRequest {
+  oneof msg {
+    Hello hello = 1;
+    Heartbeat heartbeat = 2;
+    CommandResult result = 3;
+  }
+}
+
+message ConnectResponse {
+  oneof msg {
+    Welcome welcome = 1;
+    // Commands (StartTask, StopTask, PullImage, …) are added with the Docker runner.
+  }
+}
+
+message Hello {
+  string agent_version = 1;
+  NodeInfo info = 2;
+}
+
+message NodeInfo {
+  string hostname = 1;
+  string os = 2;              // e.g. "Ubuntu 24.04.1 LTS"
+  string kernel = 3;
+  string arch = 4;            // amd64, arm64
+  int32 cpu_cores = 5;
+  uint64 memory_bytes = 6;
+  uint64 disk_bytes = 7;      // root filesystem size
+  string docker_version = 8;  // empty when Docker is unavailable
+}
+
+message Welcome {
+  string node_id = 1;
+  // How often the agent should send heartbeats.
+  int32 heartbeat_interval_seconds = 2;
+}
+
+message Heartbeat {
+  NodeMetrics metrics = 1;
+}
+
+message NodeMetrics {
+  double cpu_percent = 1;
+  uint64 memory_used_bytes = 2;
+  uint64 memory_total_bytes = 3;
+  uint64 disk_used_bytes = 4;
+  uint64 disk_total_bytes = 5;
+  double load1 = 6;
+  double load5 = 7;
+  double load15 = 8;
+  uint64 net_rx_bytes = 9;    // cumulative, all non-loopback interfaces
+  uint64 net_tx_bytes = 10;
+  int64 uptime_seconds = 11;
+}
+
+message CommandResult {
+  string command_id = 1;
+  bool ok = 2;
+  string error = 3;
+}

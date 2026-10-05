@@ -1164,6 +1164,13 @@ Because there is only one controller:
 
 ### Phase 0b: Install and system tasks (2 wks)
 *Depends on a minimal agent (Docker runner + gRPC link), which is pulled forward from Phases 1–2.*
+
+**Progress**
+- ✅ Slice 1 (2026-10-06), agent link: internal CA, join tokens, `syncloud-agent join` (the node key is generated on the node; the controller signs its CSR), an mTLS gRPC stream (`proto/syncloud/agent/v1`), heartbeats with node metrics, Ready/Suspect/NotReady tracking (only transitions written to SQLite), revocation on node delete, a local `ctl-0` join token, `synctl nodes …`, and the dashboard Nodes page and overview.
+  - Follow-up: node certificates are valid for 90 days; automatic renewal over the stream is still to do (before Phase 1 ends).
+- ⏳ Slice 2: Docker runner and system tasks.
+- ⏳ Slice 3: sslip.io base domain and certificates.
+- ⏳ Slice 4: install script, recovery key, Litestream.
 - Minimal agent: gRPC stream to the controller, Docker runner for system tasks.
 - Controller **installation** (§5.0): preflight checks, signed binaries, systemd units, `init` / `doctor`, the local agent, and **system tasks** (Traefik with the UI as the first route, private registry, BuildKit, VictoriaMetrics, VictoriaLogs).
 - **sslip.io base domain**, controller-managed certificates (lego) with the fallback chain (§5.0.2), served to Traefik; recovery key; Litestream backup wiring.

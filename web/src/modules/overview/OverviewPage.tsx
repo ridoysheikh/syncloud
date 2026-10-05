@@ -1,15 +1,19 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Server } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { statusQuery } from "@/lib/auth";
 import { useStreamTopic, type StreamEvent } from "@/lib/stream";
+import { bytes, pct, useNodes, type Node } from "@/lib/nodes";
 import { TimeSeriesChart, type TimeSeriesHandle } from "@/charts/TimeSeriesChart";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { StatTile } from "@/ui/StatTile";
-import { EmptyState } from "@/ui/EmptyState";
 import { StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { NodesTable } from "../compute/NodesTable";
+
+// Module routes are registered at runtime, so links to them use plain strings.
+const nodesPath: string = "/compute/nodes";
 
 interface ControllerStats {
   goroutines: number;
@@ -26,55 +30,108 @@ function formatUptime(sec: number) {
   return `${m}m ${sec % 60}s`;
 }
 
+/** Cluster totals over nodes that are reporting metrics. */
+function totals(nodes: Node[]) {
+  let cores = 0,
+    cpuWeighted = 0,
+    memUsed = 0,
+    memTotal = 0,
+    diskUsed = 0,
+    diskTotal = 0;
+  for (const n of nodes) {
+    const m = n.metrics;
+    if (!m || n.status !== "ready") continue;
+    cores += n.info.cpuCores;
+    cpuWeighted += m.cpuPercent * n.info.cpuCores;
+    memUsed += m.memoryUsedBytes;
+    memTotal += m.memoryTotalBytes;
+    diskUsed += m.diskUsedBytes;
+    diskTotal += m.diskTotalBytes;
+  }
+  return { cores, cpu: cores ? cpuWeighted / cores : 0, memUsed, memTotal, diskUsed, diskTotal };
+}
+
 export function OverviewPage() {
   const { data: status } = useQuery(statusQuery);
+  const { data: nodes = [], isLoading } = useNodes();
   const [stats, setStats] = useState<ControllerStats | null>(null);
-  const heap = useRef<TimeSeriesHandle>(null);
-  const goroutines = useRef<TimeSeriesHandle>(null);
+  const cpuChart = useRef<TimeSeriesHandle>(null);
+  const memChart = useRef<TimeSeriesHandle>(null);
+  const heapChart = useRef<TimeSeriesHandle>(null);
 
   const onStats = useCallback((e: StreamEvent<ControllerStats>) => {
-    const t = Date.parse(e.at);
-    heap.current?.append(t, [e.data.heapMB]);
-    goroutines.current?.append(t, [e.data.goroutines]);
+    heapChart.current?.append(Date.parse(e.at), [e.data.heapMB, e.data.goroutines]);
     setStats(e.data);
   }, []);
   useStreamTopic("controller.stats", onStats);
+
+  // Sample cluster totals on a fixed cadence so the charts have evenly spaced points.
+  const latest = useRef(nodes);
+  latest.current = nodes;
+  useEffect(() => {
+    const id = setInterval(() => {
+      const t = totals(latest.current);
+      if (!t.cores) return;
+      const now = Date.now();
+      cpuChart.current?.append(now, [t.cpu]);
+      memChart.current?.append(now, [pct(t.memUsed, t.memTotal)]);
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  const t = totals(nodes);
+  const ready = nodes.filter((n) => n.status === "ready").length;
+  const unhealthy = nodes.filter((n) => n.status === "suspect" || n.status === "not_ready").length;
 
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader
         crumbs={["Cluster"]}
         title="Overview"
-        status={<StatusBadge tone={stats ? "ok" : "neutral"}>{stats ? "Controller healthy" : "Waiting for data"}</StatusBadge>}
+        status={
+          <StatusBadge tone={unhealthy ? "warn" : stats ? "ok" : "neutral"}>
+            {unhealthy ? `${unhealthy} node${unhealthy > 1 ? "s" : ""} unhealthy` : stats ? "Healthy" : "Waiting for data"}
+          </StatusBadge>
+        }
       />
 
-      <div className={cn("grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6", gap)}>
-        <StatTile label="Controller" value={status?.version ?? "—"} hint="version" />
-        <StatTile label="Uptime" value={stats ? formatUptime(stats.uptimeSec) : "—"} />
-        <StatTile label="Heap" value={stats ? stats.heapMB.toFixed(1) : "—"} unit="MB" />
-        <StatTile label="Goroutines" value={stats?.goroutines ?? "—"} />
-        <StatTile label="Nodes" value={0} hint="join workers in Phase 1" />
+      <div className={cn("grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6", gap)}>
+        <StatTile label="Nodes ready" value={`${ready}/${nodes.length}`} tone={unhealthy ? "warn" : ready ? "ok" : undefined} />
+        <StatTile label="CPU" value={t.cores ? t.cpu.toFixed(0) : "—"} unit={t.cores ? "%" : undefined} hint={t.cores ? `${t.cores} cores` : "no node metrics yet"} />
+        <StatTile label="Memory" value={t.memTotal ? pct(t.memUsed, t.memTotal).toFixed(0) : "—"} unit={t.memTotal ? "%" : undefined} hint={t.memTotal ? `${bytes(t.memUsed)} of ${bytes(t.memTotal)}` : undefined} />
+        <StatTile label="Disk" value={t.diskTotal ? pct(t.diskUsed, t.diskTotal).toFixed(0) : "—"} unit={t.diskTotal ? "%" : undefined} hint={t.diskTotal ? `${bytes(t.diskUsed)} of ${bytes(t.diskTotal)}` : undefined} />
         <StatTile label="Services" value={0} hint="deploy in Phase 2" />
+        <StatTile label="Controller" value={status?.version ?? "—"} hint={stats ? `up ${formatUptime(stats.uptimeSec)}` : undefined} />
       </div>
 
-      <div className={cn("grid grid-cols-1 lg:grid-cols-2", gap)}>
-        <Panel title="Controller heap" flush>
+      <div className={cn("grid grid-cols-1 lg:grid-cols-3", gap)}>
+        <Panel title="Cluster CPU" flush>
           <div className="p-1">
-            <TimeSeriesChart ref={heap} series={[{ name: "Heap", area: true }]} unit="MB" />
+            <TimeSeriesChart ref={cpuChart} series={[{ name: "CPU", area: true }]} unit="%" />
           </div>
         </Panel>
-        <Panel title="Controller goroutines" flush>
+        <Panel title="Cluster memory" flush>
           <div className="p-1">
-            <TimeSeriesChart ref={goroutines} series={[{ name: "Goroutines", area: true }]} />
+            <TimeSeriesChart ref={memChart} series={[{ name: "Memory", area: true }]} unit="%" />
+          </div>
+        </Panel>
+        <Panel title="Controller process" flush>
+          <div className="p-1">
+            <TimeSeriesChart ref={heapChart} series={[{ name: "Heap MB" }, { name: "Goroutines" }]} />
           </div>
         </Panel>
       </div>
 
-      <Panel title="Nodes">
-        <EmptyState icon={Server} title="No worker nodes yet">
-          Workers join with a one-line command once the agent ships (Phase 1). Node CPU, memory, disk and network
-          charts will appear here.
-        </EmptyState>
+      <Panel
+        title="Nodes"
+        flush
+        actions={
+          <Link to={nodesPath} className="text-accent text-xs hover:underline">
+            Manage
+          </Link>
+        }
+      >
+        <NodesTable nodes={nodes} loading={isLoading} compact />
       </Panel>
     </div>
   );

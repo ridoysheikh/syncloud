@@ -13,6 +13,11 @@ type Controller struct {
 	DataDir string
 	// Listen is the address the API and dashboard listen on.
 	Listen string
+	// AgentListen is where the agent gateway (gRPC, mTLS) listens.
+	AgentListen string
+	// AgentAdvertise is the gateway address given to joining nodes. In production
+	// this is the controller's WireGuard IP (10.90.0.1:7443, §8).
+	AgentAdvertise string
 	// Dev enables development behavior (verbose logs, relaxed origin checks for the Vite dev server).
 	Dev bool
 }
@@ -26,9 +31,14 @@ func LoadController(args []string) (Controller, error) {
 	c := Controller{}
 	fs.StringVar(&c.DataDir, "data-dir", env("SYNCLOUD_DATA_DIR", "/var/lib/syncloud"), "directory for controller state")
 	fs.StringVar(&c.Listen, "listen", env("SYNCLOUD_LISTEN", "127.0.0.1:7070"), "API and dashboard listen address")
+	fs.StringVar(&c.AgentListen, "agent-listen", env("SYNCLOUD_AGENT_LISTEN", "127.0.0.1:7443"), "agent gateway listen address")
+	fs.StringVar(&c.AgentAdvertise, "agent-advertise", env("SYNCLOUD_AGENT_ADVERTISE", ""), "agent gateway address for nodes (default: --agent-listen)")
 	fs.BoolVar(&c.Dev, "dev", env("SYNCLOUD_DEV", "") == "1", "development mode")
 	if err := fs.Parse(args); err != nil {
 		return c, err
+	}
+	if c.AgentAdvertise == "" {
+		c.AgentAdvertise = c.AgentListen
 	}
 	if c.DataDir == "" {
 		return c, fmt.Errorf("data-dir must not be empty")

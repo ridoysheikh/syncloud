@@ -81,3 +81,95 @@ func (c *Client) CreateToken(ctx context.Context, name string, expiresInDays int
 func (c *Client) DeleteToken(ctx context.Context, id string) error {
 	return c.Do(ctx, "DELETE", "/api/v1/iam/tokens/"+id, nil, nil)
 }
+
+type NodeInfo struct {
+	Hostname      string `json:"hostname"`
+	OS            string `json:"os"`
+	Kernel        string `json:"kernel"`
+	Arch          string `json:"arch"`
+	CPUCores      int    `json:"cpuCores"`
+	MemoryBytes   uint64 `json:"memoryBytes"`
+	DiskBytes     uint64 `json:"diskBytes"`
+	DockerVersion string `json:"dockerVersion"`
+	AgentVersion  string `json:"agentVersion"`
+}
+
+type NodeMetrics struct {
+	CPUPercent       float64 `json:"cpuPercent"`
+	MemoryUsedBytes  uint64  `json:"memoryUsedBytes"`
+	MemoryTotalBytes uint64  `json:"memoryTotalBytes"`
+	DiskUsedBytes    uint64  `json:"diskUsedBytes"`
+	DiskTotalBytes   uint64  `json:"diskTotalBytes"`
+	Load1            float64 `json:"load1"`
+	Load5            float64 `json:"load5"`
+	Load15           float64 `json:"load15"`
+	NetRxBytes       uint64  `json:"netRxBytes"`
+	NetTxBytes       uint64  `json:"netTxBytes"`
+	UptimeSeconds    int64   `json:"uptimeSeconds"`
+}
+
+type Node struct {
+	ID         string       `json:"id"`
+	Name       string       `json:"name"`
+	Status     string       `json:"status"`
+	StatusAt   time.Time    `json:"statusAt"`
+	Connected  bool         `json:"connected"`
+	LastSeenAt *time.Time   `json:"lastSeenAt"`
+	CreatedAt  time.Time    `json:"createdAt"`
+	Info       NodeInfo     `json:"info"`
+	Metrics    *NodeMetrics `json:"metrics"`
+}
+
+type JoinToken struct {
+	ID          string    `json:"id"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"createdAt"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+	SingleUse   bool      `json:"singleUse"`
+	Uses        int       `json:"uses"`
+	Token       string    `json:"token,omitempty"`
+}
+
+type JoinRequest struct {
+	Token string `json:"token"`
+	Name  string `json:"name"`
+	CSR   string `json:"csr"`
+}
+
+type JoinResponse struct {
+	NodeID         string `json:"nodeId"`
+	Name           string `json:"name"`
+	Certificate    string `json:"certificate"`
+	CACertificate  string `json:"caCertificate"`
+	GatewayAddress string `json:"gatewayAddress"`
+}
+
+// JoinNode needs no credentials: the join token authorizes it.
+func (c *Client) JoinNode(ctx context.Context, req JoinRequest) (JoinResponse, error) {
+	var out JoinResponse
+	return out, c.Do(ctx, "POST", "/api/v1/nodes/join", req, &out)
+}
+
+func (c *Client) ListNodes(ctx context.Context) ([]Node, error) {
+	var out list[Node]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/nodes", nil, &out)
+}
+
+func (c *Client) DeleteNode(ctx context.Context, id string) error {
+	return c.Do(ctx, "DELETE", "/api/v1/nodes/"+id, nil, nil)
+}
+
+func (c *Client) ListJoinTokens(ctx context.Context) ([]JoinToken, error) {
+	var out list[JoinToken]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/nodes/join-tokens", nil, &out)
+}
+
+func (c *Client) CreateJoinToken(ctx context.Context, description string, ttlMinutes int, singleUse bool) (JoinToken, error) {
+	var out JoinToken
+	return out, c.Do(ctx, "POST", "/api/v1/nodes/join-tokens",
+		map[string]any{"description": description, "ttlMinutes": ttlMinutes, "singleUse": singleUse}, &out)
+}
+
+func (c *Client) DeleteJoinToken(ctx context.Context, id string) error {
+	return c.Do(ctx, "DELETE", "/api/v1/nodes/join-tokens/"+id, nil, nil)
+}

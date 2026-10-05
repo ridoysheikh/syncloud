@@ -30,6 +30,7 @@ var noCommand = map[string]string{
 	"logout":        "browser-only: dashboard sessions",
 	"stream":        "WebSocket for the dashboard; CLI watch commands arrive with resources",
 	"getOpenAPI":    "reachable with `synctl api GET /api/v1/openapi.json`",
+	"joinNode":      "agent-only: `syncloud-agent join` (it generates the node key)",
 }
 
 // Every API operation has a synctl command (§5.1 parity check).
