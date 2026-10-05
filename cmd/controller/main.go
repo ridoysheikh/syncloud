@@ -231,7 +231,8 @@ func serve(args []string) error {
 			"GET " + certs.ChallengePrefix: certMgr,
 		},
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
-		ACME: api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
+		DownloadsDir: cfg.DownloadsDir,
+		ACME:         api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {
 			_ = os.Remove(filepath.Join(cfg.DataDir, setupTokenFile))
 			_ = os.Remove(filepath.Join(cfg.DataDir, recoveryKeyFile))

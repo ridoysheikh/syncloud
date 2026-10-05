@@ -10,6 +10,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -290,5 +291,30 @@ func TestSetupRequiresRecoveryKeySuffix(t *testing.T) {
 	req["recoveryKeySuffix"] = "abc234"
 	if resp, body := e.do(t, "POST", "/api/v1/setup", req, nil); resp.StatusCode != 201 {
 		t.Fatalf("setup: %d %v", resp.StatusCode, body)
+	}
+}
+
+func TestJoinScriptAndDownloads(t *testing.T) {
+	e := newEnv(t)
+	resp, err := e.c.Get(e.srv.URL + "/join.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(b), `CONTROLLER="`+e.srv.URL+`"`) {
+		t.Fatalf("join.sh: %d\n%s", resp.StatusCode, b[:min(len(b), 300)])
+	}
+	// No downloads directory configured: binaries are not served, and names
+	// outside the allow-list are never looked up.
+	for _, p := range []string{"/downloads/syncloud-agent-linux-amd64", "/downloads/..%2fmaster.key", "/downloads/master.key"} {
+		resp, err := e.c.Get(e.srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 404 {
+			t.Fatalf("%s: %d", p, resp.StatusCode)
+		}
 	}
 }

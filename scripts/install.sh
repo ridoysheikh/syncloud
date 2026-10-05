@@ -21,6 +21,7 @@ RELEASE_URL="${SYNCLOUD_RELEASE_URL:-https://get.syncloud.dev/releases}"
 MINISIGN_PUBKEY="${SYNCLOUD_MINISIGN_PUBKEY:-}"
 BIN_DIR=/usr/local/bin
 DATA_DIR=/var/lib/syncloud
+DL_DIR=/usr/local/lib/syncloud/downloads   # served to joining workers at /downloads/
 AGENT_DIR=/var/lib/syncloud-agent
 ENV_FILE=/etc/syncloud/controller.env
 API=http://127.0.0.1:7070
@@ -62,6 +63,7 @@ uninstall() {
   rm -f /etc/systemd/system/syncloud-controller.service /etc/systemd/system/syncloud-agent.service
   systemctl daemon-reload
   rm -f "$BIN_DIR/syncloud-controller" "$BIN_DIR/syncloud-agent"
+  rm -rf /usr/local/lib/syncloud
   if [ "$PURGE" -eq 1 ]; then
     rm -rf "$DATA_DIR" "$AGENT_DIR" /etc/syncloud
     docker volume rm syncloud-registry syncloud-victoriametrics syncloud-victorialogs >/dev/null 2>&1 || true
@@ -159,6 +161,25 @@ fi
 install -m 0755 "$tmp/syncloud-controller" "$BIN_DIR/syncloud-controller"
 install -m 0755 "$tmp/syncloud-agent" "$BIN_DIR/syncloud-agent"
 ok "installed $("$BIN_DIR/syncloud-controller" version) to $BIN_DIR"
+
+# Binaries for workers (join.sh) and synctl, served by the controller.
+mkdir -p "$DL_DIR"
+if [ -n "$FROM_DIR" ]; then
+  install -m 0644 "$tmp/syncloud-agent" "$DL_DIR/syncloud-agent-linux-$ARCH"
+  [ -x "$FROM_DIR/synctl" ] && install -m 0644 "$FROM_DIR/synctl" "$DL_DIR/synctl-linux-$ARCH"
+  for f in "$FROM_DIR"/syncloud-agent-linux-* "$FROM_DIR"/synctl-linux-*; do
+    [ -f "$f" ] && install -m 0644 "$f" "$DL_DIR/"
+  done
+else
+  for a in amd64 arm64; do
+    for b in syncloud-agent synctl; do
+      curl -fsSL -o "$DL_DIR/$b-linux-$a" "$RELEASE_URL/$VERSION/$b-linux-$a" || warn "could not download $b-linux-$a"
+    done
+  done
+  (cd "$DL_DIR" && grep -E " (syncloud-agent|synctl)-linux-(amd64|arm64)\$" "$tmp/SHA256SUMS" | sha256sum -c --quiet --ignore-missing) || die "checksum mismatch in $DL_DIR"
+fi
+(cd "$DL_DIR" && sha256sum syncloud-agent-linux-* synctl-linux-* 2>/dev/null > SHA256SUMS)
+ok "worker downloads in $DL_DIR"
 
 # ── 3. Configuration and services ───────────────────────────────────────────
 bold "Services"
@@ -265,3 +286,6 @@ fi
 echo
 echo "  Certificates are being requested; the first visit may show a"
 echo "  self-signed certificate for a minute. Check: syncloud-controller doctor"
+echo
+echo "  Add workers from the dashboard (Compute → Nodes → Add node), which"
+echo "  prints a one-line command using https://${domain:-$PUBLIC_IP}/join.sh"

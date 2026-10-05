@@ -188,3 +188,31 @@ func scanNode(r scanner) (Node, error) {
 	n.CreatedAt, n.StatusAt, n.LastSeenAt = time.Unix(created, 0), time.Unix(statusAt, 0), nullTime(seen)
 	return n, err
 }
+
+// RotateNodeCert records a renewed certificate; the current serial becomes
+// the previous one and stays valid until the node connects with the new one.
+func (s *Store) RotateNodeCert(ctx context.Context, id, newSerial string) error {
+	res, err := s.W.ExecContext(ctx, `UPDATE nodes SET prev_cert_serial = cert_serial, cert_serial = ? WHERE id = ?`, newSerial, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// NodeCertSerials returns the accepted serials (current, previous).
+func (s *Store) NodeCertSerials(ctx context.Context, id string) (cur, prev string, err error) {
+	err = s.R.QueryRowContext(ctx, `SELECT cert_serial, prev_cert_serial FROM nodes WHERE id = ?`, id).Scan(&cur, &prev)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = ErrNotFound
+	}
+	return
+}
+
+// ConfirmNodeCert drops the previous serial once the node uses the current one.
+func (s *Store) ConfirmNodeCert(ctx context.Context, id string) error {
+	_, err := s.W.ExecContext(ctx, `UPDATE nodes SET prev_cert_serial = '' WHERE id = ? AND prev_cert_serial != ''`, id)
+	return err
+}

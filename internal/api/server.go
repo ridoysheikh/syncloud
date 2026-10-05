@@ -29,25 +29,26 @@ import (
 var OpenAPISpec []byte
 
 type Server struct {
-	store       *store.Store
-	secrets     *secrets.Box
-	ca          *pki.CA
-	nodes       *nodes.Registry
-	gatewayAddr string
-	system      *system.Manager
-	registry    *registry.Issuer
-	internal    map[string]http.Handler
-	domains     *domain.Service
-	detector    *domain.Detector
-	certs       *certs.Manager
-	acme        ACMEInfo
-	onSetup     func()
-	backups     *backup.Manager
-	mesh        *mesh.Manager
-	bus         *events.Bus
-	log         *slog.Logger
-	web         fs.FS // built dashboard (may be empty in development)
-	now         func() time.Time
+	store        *store.Store
+	secrets      *secrets.Box
+	ca           *pki.CA
+	nodes        *nodes.Registry
+	gatewayAddr  string
+	system       *system.Manager
+	registry     *registry.Issuer
+	internal     map[string]http.Handler
+	domains      *domain.Service
+	detector     *domain.Detector
+	certs        *certs.Manager
+	acme         ACMEInfo
+	onSetup      func()
+	backups      *backup.Manager
+	mesh         *mesh.Manager
+	downloadsDir string
+	bus          *events.Bus
+	log          *slog.Logger
+	web          fs.FS // built dashboard (may be empty in development)
+	now          func() time.Time
 
 	loginLimiter *attemptLimiter
 	setupLimiter *attemptLimiter
@@ -79,9 +80,11 @@ type Options struct {
 	Backups *backup.Manager
 	// Mesh reports the private network (§8); may be nil.
 	Mesh *mesh.Manager
-	Bus  *events.Bus
-	Log  *slog.Logger
-	Web  fs.FS
+	// DownloadsDir holds agent/CLI binaries served at /downloads/ ("" disables).
+	DownloadsDir string
+	Bus          *events.Bus
+	Log          *slog.Logger
+	Web          fs.FS
 	// Now is overridable for tests.
 	Now func() time.Time
 }
@@ -106,6 +109,7 @@ func New(o Options) *Server {
 		onSetup:      o.OnSetup,
 		backups:      o.Backups,
 		mesh:         o.Mesh,
+		downloadsDir: o.DownloadsDir,
 		bus:          o.Bus,
 		log:          o.Log,
 		web:          o.Web,
@@ -172,6 +176,8 @@ func (s *Server) Handler() http.Handler {
 		}
 		mux.HandleFunc(rt.Method+" "+rt.Path, h)
 	}
+	mux.HandleFunc("GET /join.sh", s.handleJoinScript)
+	mux.HandleFunc("GET /downloads/{file}", s.handleDownload)
 	for pattern, h := range s.internal {
 		mux.Handle(pattern, h)
 	}

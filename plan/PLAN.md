@@ -1207,6 +1207,10 @@ Because there is only one controller:
   - Verified with `make e2e` (three Docker-in-Docker nodes, one on userspace WireGuard): cross-node container traffic keeps the source IP, the controller host reaches remote containers (Traefik's path), egress is masqueraded, and node removal updates the mesh.
   - **Deviation**: the agent ↔ controller gRPC stream stays on the controller's advertised address (mTLS) instead of moving into the mesh. Keeping the control plane independent of the data plane means a broken mesh can still be repaired from the controller.
   - The agent joins the mesh when it runs as root (`--network auto`); the non-root dev agent stays out.
+- ✅ Slice 1b (2026-10-06), worker join and certificate renewal:
+  - The controller serves `/join.sh`, filled in with the URL it was fetched from, and `/downloads/{agent,synctl}-linux-{amd64,arm64}` plus `SHA256SUMS` from `/usr/local/lib/syncloud/downloads` (populated by install.sh). join.sh installs Docker and nftables, verifies the agent checksum, joins and starts the systemd unit. The Nodes page shows the one-line command.
+  - **Node certificate renewal**: with under 30 days left, the agent sends a CSR for a new key over the stream. The controller keeps the previous serial valid until the agent reconnects with the new certificate, and file writes recover from a crash mid-rename.
+- **Reordered**: internal DNS and service VIPs move into Phase 2 with services, which are their first users. The VIP data path uses **nftables DNAT load balancing** (as in kube-proxy's nftables mode) instead of IPVS: no extra kernel modules, and one atomic ruleset shared with the firewall. The trade-off is random or round-robin balancing, with no least-connections.
 - Agent binary, `join.sh`, join flow, mTLS CA.
 - WireGuard mesh with IPAM, per-node container subnets, and cross-node container connectivity tests.
 - Internal DNS with the agent-side forwarder (§8.1).

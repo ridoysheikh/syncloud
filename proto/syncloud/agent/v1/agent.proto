@@ -18,6 +18,7 @@ message ConnectRequest {
     Heartbeat heartbeat = 2;
     CommandResult result = 3;
     TaskStatus task_status = 4;
+    RenewCertificate renew_certificate = 5;
   }
 }
 
@@ -27,6 +28,7 @@ message ConnectResponse {
     RunTask run_task = 2;
     StopTask stop_task = 3;
     NetworkConfig network = 4;
+    CertificateIssued certificate = 5;
   }
 }
 
@@ -201,4 +203,14 @@ message PeerStatus {
   uint64 tx_bytes = 4;
   string endpoint = 5;          // as seen by WireGuard (may differ behind NAT)
   double rtt_ms = 6;            // TCP probe to the peer's node address; 0 = unknown
+}
+
+// RenewCertificate asks for a new node certificate for a freshly generated
+// key, before the current one expires (certificates last 90 days).
+message RenewCertificate {
+  string csr = 1;               // PEM CERTIFICATE REQUEST
+}
+
+message CertificateIssued {
+  string certificate = 1;       // PEM; the previous certificate stays valid until the agent reconnects with this one
 }

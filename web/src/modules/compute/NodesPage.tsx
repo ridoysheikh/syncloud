@@ -116,13 +116,20 @@ function AddNodeDialog({ open, onClose }: { open: boolean; onClose: () => void }
         </div>
       ) : (
         <div className="flex flex-col gap-2.5">
-          <Field label="Run on the new server (as root)">
-            <CommandBox value={`syncloud-agent join --controller ${origin} --token ${token.token} && syncloud-agent run`} />
+          <Field label="Run on the new server">
+            <CommandBox value={`curl -fsSL ${origin}/join.sh | sudo bash -s -- --token ${token.token}`} />
           </Field>
           <p className="text-faint text-xs">
-            The one-line <code className="font-mono">curl … | sudo bash</code> installer that also installs Docker and WireGuard arrives with
-            the installer (plan §6.1). Expires {new Date(token.expiresAt).toLocaleTimeString()}.
+            Installs Docker and nftables if missing, downloads the agent from this controller (checksum-verified), joins and starts it as a
+            systemd service. Add <code className="font-mono">--advertise-address IP</code> if other nodes must reach this one on a different
+            address. Expires {new Date(token.expiresAt).toLocaleTimeString()}.
           </p>
+          <details className="text-xs">
+            <summary className="text-muted cursor-pointer">Agent already installed?</summary>
+            <div className="mt-1.5">
+              <CommandBox value={`syncloud-agent join --controller ${origin} --token ${token.token} && syncloud-agent run`} />
+            </div>
+          </details>
         </div>
       )}
     </Dialog>

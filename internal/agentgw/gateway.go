@@ -47,6 +47,7 @@ type Gateway struct {
 	registry *nodes.Registry
 	log      *slog.Logger
 	hooks    []Hooks
+	ca       *pki.CA
 
 	mu       sync.Mutex
 	sessions map[string]*session // by node ID
@@ -100,6 +101,7 @@ func (g *Gateway) Serve(ctx context.Context, ca *pki.CA, addr string, hosts []st
 
 // ServeListener is Serve on an existing listener.
 func (g *Gateway) ServeListener(ctx context.Context, ca *pki.CA, ln net.Listener, hosts []string) error {
+	g.ca = ca
 	cert, err := ca.ServerCert(hosts, 365*24*time.Hour)
 	if err != nil {
 		return fmt.Errorf("gateway certificate: %w", err)
@@ -236,6 +238,8 @@ func (g *Gateway) Connect(stream grpc.BidiStreamingServer[agentv1.ConnectRequest
 						h.OnTaskStatus(node, m.TaskStatus)
 					}
 				}
+			case *agentv1.ConnectRequest_RenewCertificate:
+				g.renew(ctx, node, sess, m.RenewCertificate.GetCsr())
 			case *agentv1.ConnectRequest_Result:
 			case *agentv1.ConnectRequest_Hello:
 				return status.Error(codes.InvalidArgument, "Hello sent twice")
@@ -261,7 +265,20 @@ func (g *Gateway) authenticate(ctx context.Context) (store.Node, error) {
 	} else if err != nil {
 		return n, status.Error(codes.Internal, "lookup node")
 	}
-	if n.CertSerial != leaf.SerialNumber.Text(16) {
+	cur, prev, err := g.st.NodeCertSerials(ctx, n.ID)
+	if err != nil {
+		return n, status.Error(codes.Internal, "lookup node certificate")
+	}
+	switch serial := leaf.SerialNumber.Text(16); {
+	case serial == cur:
+		if prev != "" { // renewal completed: the old certificate is no longer accepted
+			if err := g.st.ConfirmNodeCert(ctx, n.ID); err != nil {
+				g.log.Warn("confirm node certificate", "node", n.Name, "err", err)
+			}
+		}
+	case prev != "" && serial == prev:
+		// Renewed, but the agent has not switched to the new certificate yet.
+	default:
 		return n, status.Error(codes.PermissionDenied, "certificate has been replaced")
 	}
 	return n, nil
@@ -282,5 +299,23 @@ func metricsFrom(m *agentv1.NodeMetrics) nodes.Metrics {
 		DiskUsedBytes: m.GetDiskUsedBytes(), DiskTotalBytes: m.GetDiskTotalBytes(),
 		Load1: m.GetLoad1(), Load5: m.GetLoad5(), Load15: m.GetLoad15(),
 		NetRxBytes: m.GetNetRxBytes(), NetTxBytes: m.GetNetTxBytes(), UptimeSeconds: m.GetUptimeSeconds(),
+	}
+}
+
+// renew signs a new node certificate (§6.1, 90-day validity).
+func (g *Gateway) renew(ctx context.Context, node store.Node, sess *session, csr string) {
+	certPEM, serial, err := g.ca.SignNodeCSR([]byte(csr), node.ID)
+	if err != nil {
+		g.log.Warn("certificate renewal rejected", "node", node.Name, "err", err)
+		return
+	}
+	if err := g.st.RotateNodeCert(ctx, node.ID, serial); err != nil {
+		g.log.Error("store renewed certificate", "node", node.Name, "err", err)
+		return
+	}
+	g.log.Info("node certificate renewed", "node", node.Name, "serial", serial)
+	select {
+	case sess.send <- &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_Certificate{Certificate: &agentv1.CertificateIssued{Certificate: string(certPEM)}}}:
+	case <-ctx.Done():
 	}
 }

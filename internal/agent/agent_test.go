@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"log/slog"
 	"net"
@@ -181,7 +182,7 @@ func TestUntrustedClientRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	keyPEM, csrPEM, _ := pki.NewNodeKey("evil")
-	st, _, _ := loadState(dataDir)
+	st, _, _, _ := loadState(dataDir)
 	certPEM, _, err := other.SignNodeCSR(csrPEM, st.NodeID) // same node ID, wrong CA
 	if err != nil {
 		t.Fatal(err)
@@ -204,5 +205,65 @@ func writeFile(t *testing.T, path string, data []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCertificateRenewal(t *testing.T) {
+	c := startCluster(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dataDir := t.TempDir()
+	st, err := Join(ctx, dataDir, c.apiURL, c.joinToken(t, true), "w-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(filepath.Join(dataDir, certFile))
+	oldSerial, _, _ := c.st.NodeCertSerials(ctx, st.NodeID)
+
+	// RenewBefore longer than the validity: renew on the first connection.
+	runCtx, stop := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(runCtx, dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{RenewBefore: 365 * 24 * time.Hour})
+	}()
+	waitFor(t, "renewed certificate saved", func() bool {
+		after, _ := os.ReadFile(filepath.Join(dataDir, certFile))
+		return len(after) > 0 && string(after) != string(before)
+	})
+	cur, prev, _ := c.st.NodeCertSerials(ctx, st.NodeID)
+	if cur == oldSerial || prev != oldSerial {
+		t.Fatalf("serials: cur=%s prev=%s old=%s", cur, prev, oldSerial)
+	}
+	stop()
+	<-done
+
+	// Reconnecting with the new certificate retires the old serial.
+	go Run(ctx, dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{})
+	waitFor(t, "previous serial dropped", func() bool {
+		_, prev, _ := c.st.NodeCertSerials(ctx, st.NodeID)
+		return prev == ""
+	})
+	if _, err := tls.LoadX509KeyPair(filepath.Join(dataDir, certFile), filepath.Join(dataDir, keyFile)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInterruptedRenewalRecovers(t *testing.T) {
+	dir := t.TempDir()
+	key1, csr1, _ := pki.NewNodeKey("a")
+	key2, csr2, _ := pki.NewNodeKey("a")
+	ca, _ := pki.LoadOrCreateCA(t.TempDir())
+	crt1, _, _ := ca.SignNodeCSR(csr1, "node_x")
+	crt2, _, _ := ca.SignNodeCSR(csr2, "node_x")
+	_ = key1
+	// Crash after the key rename, before the certificate rename.
+	writeFile(t, filepath.Join(dir, keyFile), key2)
+	writeFile(t, filepath.Join(dir, certFile), crt1)
+	writeFile(t, filepath.Join(dir, certFile+".tmp"), crt2)
+	if _, err := loadNodeCert(dir); err != nil {
+		t.Fatalf("recovery failed: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, certFile)); string(b) != string(crt2) {
+		t.Fatal("new certificate not moved into place")
 	}
 }

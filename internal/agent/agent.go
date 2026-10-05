@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -89,39 +90,42 @@ func Join(ctx context.Context, dataDir, controllerURL, token, name string) (Stat
 	return st, nil
 }
 
-func loadState(dataDir string) (State, *tls.Config, error) {
+func loadState(dataDir string) (State, *tls.Config, *certHolder, error) {
 	var st State
 	b, err := os.ReadFile(filepath.Join(dataDir, stateFile))
 	if errors.Is(err, os.ErrNotExist) {
-		return st, nil, fmt.Errorf("not joined yet: run `syncloud-agent join` first")
+		return st, nil, nil, fmt.Errorf("not joined yet: run `syncloud-agent join` first")
 	} else if err != nil {
-		return st, nil, err
+		return st, nil, nil, err
 	}
 	if err := json.Unmarshal(b, &st); err != nil {
-		return st, nil, err
+		return st, nil, nil, err
 	}
-	cert, err := tls.LoadX509KeyPair(filepath.Join(dataDir, certFile), filepath.Join(dataDir, keyFile))
+	cert, err := loadNodeCert(dataDir)
 	if err != nil {
-		return st, nil, err
+		return st, nil, nil, err
 	}
+	holder := &certHolder{}
+	holder.set(cert)
 	caPEM, err := os.ReadFile(filepath.Join(dataDir, caFile))
 	if err != nil {
-		return st, nil, err
+		return st, nil, nil, err
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caPEM) {
-		return st, nil, errors.New("invalid CA certificate")
+		return st, nil, nil, errors.New("invalid CA certificate")
 	}
 	host, _, err := net.SplitHostPort(st.Gateway)
 	if err != nil {
-		return st, nil, fmt.Errorf("gateway address %q: %w", st.Gateway, err)
+		return st, nil, nil, fmt.Errorf("gateway address %q: %w", st.Gateway, err)
 	}
 	return st, &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      pool, // only the cluster CA is trusted for the gateway
-		ServerName:   host,
-		MinVersion:   tls.VersionTLS13,
-	}, nil
+		// Read on every handshake, so a renewed certificate is used on the next reconnect.
+		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return holder.get(), nil },
+		RootCAs:              pool, // only the cluster CA is trusted for the gateway
+		ServerName:           host,
+		MinVersion:           tls.VersionTLS13,
+	}, holder, nil
 }
 
 // Options tune the agent.
@@ -131,6 +135,9 @@ type Options struct {
 	// AdvertiseAddress is the address peers dial for WireGuard ("" = the
 	// address the controller sees).
 	AdvertiseAddress string
+	// RenewBefore renews the node certificate when less than this is left
+	// (default 30 days of the 90-day validity).
+	RenewBefore time.Duration
 }
 
 // Run keeps the agent connected until ctx ends, reconnecting with backoff.
@@ -140,7 +147,7 @@ func Run(ctx context.Context, dataDir string, log *slog.Logger, opts Options) er
 
 // RunWith is Run with an explicit Docker client (tests).
 func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Logger, opts Options) error {
-	st, tlsCfg, err := loadState(dataDir)
+	st, tlsCfg, certs, err := loadState(dataDir)
 	if err != nil {
 		return err
 	}
@@ -162,7 +169,12 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 		return fmt.Errorf("network: %w", err)
 	}
 	go net.Run(ctx)
-	a := &agentLink{info: info, runner: runner, net: net, advertise: opts.AdvertiseAddress, log: log}
+	renewBefore := opts.RenewBefore
+	if renewBefore == 0 {
+		renewBefore = 30 * 24 * time.Hour
+	}
+	a := &agentLink{info: info, runner: runner, net: net, advertise: opts.AdvertiseAddress, log: log,
+		dataDir: dataDir, certs: certs, renewBefore: renewBefore}
 
 	log.Info("agent starting", "node", st.Name, "gateway", st.Gateway, "version", version.Version)
 	for attempt := 0; ; attempt++ {
@@ -189,11 +201,17 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 
 // agentLink holds what every stream session needs.
 type agentLink struct {
-	info      nodes.Info
-	runner    *Runner
-	net       *netcfg.Manager
-	advertise string
-	log       *slog.Logger
+	info        nodes.Info
+	runner      *Runner
+	net         *netcfg.Manager
+	advertise   string
+	log         *slog.Logger
+	dataDir     string
+	certs       *certHolder
+	renewBefore time.Duration
+
+	mu         sync.Mutex
+	pendingKey []byte // key for an in-flight renewal
 }
 
 // session runs one stream. connected reports whether the controller accepted it.
@@ -237,7 +255,11 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 		interval = nodes.HeartbeatInterval
 	}
 	errc := make(chan error, 2)
-	go func() { errc <- writer(ctx, stream, interval, runner, a.net) }()
+	renew := make(chan *agentv1.ConnectRequest, 1)
+	if req := a.renewalRequest(); req != nil {
+		renew <- req
+	}
+	go func() { errc <- writer(ctx, stream, interval, runner, a.net, renew) }()
 	go func() {
 		for {
 			msg, err := stream.Recv()
@@ -253,6 +275,8 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 				go runner.Stop(ctx, st.GetTaskId(), time.Duration(st.GetTimeoutSeconds())*time.Second, st.GetRemove())
 			case *agentv1.ConnectResponse_Network:
 				a.net.Submit(m.Network)
+			case *agentv1.ConnectResponse_Certificate:
+				a.installCertificate(m.Certificate.GetCertificate())
 			}
 		}
 	}()
@@ -261,7 +285,7 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 
 // writer is the only goroutine that sends on the stream (gRPC streams are not
 // safe for concurrent sends): heartbeats on a ticker, task statuses as they come.
-func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.ConnectRequest, agentv1.ConnectResponse], every time.Duration, runner *Runner, net *netcfg.Manager) error {
+func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.ConnectRequest, agentv1.ConnectResponse], every time.Duration, runner *Runner, net *netcfg.Manager, extra <-chan *agentv1.ConnectRequest) error {
 	sampler := sysinfo.NewSampler("/")
 	t := time.NewTicker(every)
 	defer t.Stop()
@@ -272,6 +296,7 @@ func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.Connect
 			return ctx.Err()
 		case s := <-runner.out:
 			msg = &agentv1.ConnectRequest{Msg: &agentv1.ConnectRequest_TaskStatus{TaskStatus: s}}
+		case msg = <-extra:
 		case <-t.C:
 			m := sampler.Sample()
 			msg = &agentv1.ConnectRequest{Msg: &agentv1.ConnectRequest_Heartbeat{Heartbeat: &agentv1.Heartbeat{
