@@ -1227,6 +1227,16 @@ Because there is only one controller:
 - Heartbeats, node list/detail UI, node metrics, mesh link stats, first charts.
 
 ### Phase 2: Running Containers and Logs (3–4 wks)
+**Progress**
+- ✅ Slice 2a (2026-10-06), services, scheduler and reconciler:
+  - Model: projects (each created with a first environment, default `production`), environments, services, **immutable task-definition revisions** (a spec change creates one, scaling does not), and tasks with history (the last 20 stopped tasks per service).
+  - Spec v1: one container per task with image, command, env, ports (`http` ports get public routes in 2b), reservations and limits (default 0.1 CPU and 128 MiB, limit 2× memory), and placement `spread|binpack`.
+  - **Scheduler** (§5.3): nodes must be Ready, connected, schedulable, have Docker and a ready private network, and have enough *reserved* CPU and memory free (90% of RAM and cores−0.1 allocatable). Then spread by the service's task count, or binpack by free memory, and by total tasks as the tie-breaker. Unplaceable tasks set a service status message that names the reasons.
+  - **Reconciler** (§5.2): a per-service work queue triggered by API changes, task reports and node changes, with a 30s resync. It replaces exited or failed tasks (exponential backoff once 3 fail within 5 minutes), replaces tasks on NotReady or removed nodes, re-sends tasks that never reported, and does a basic rolling update capped at 200% (old revisions retire as new tasks run; health gating and the circuit breaker come in Phase 3). Deletion stops tasks, then removes the service. On agent reconnect it compares the container snapshot: missing tasks are re-sent or marked exited, and unknown containers are removed.
+  - Tasks run with restart policy `no` (the reconciler owns restarts), on the `syncloud` network, with `SYNCLOUD_*` environment variables and labels. Agents report each task's IP and refuse tasks until the mesh network is applied.
+  - Nodes get a `schedulable` flag (cordon/uncordon). `ctl-0` is off by default (D3) and on with `--controller-schedulable` (default in dev).
+  - API under `/projects/{p}/environments/{e}/services/{s}` (PUT = create or update, kubectl-apply style), scale, rollback, tasks and revisions; `/services`, `/tasks`. synctl `projects`, `envs`, `services list|run|apply -f|scale|tasks|revisions|rollback|delete`, `tasks list|restart`, `nodes cordon|uncordon`. Pages: Compute → Services (list and a new-service dialog), the service page (scale, tasks, revisions with rollback, JSON spec editor) and Tasks.
+  - Verified with `test/e2e/services.sh` on three Docker-in-Docker nodes: spread placement, every task reachable on its mesh IP from another node, scale-down, a rolling update, crash replacement, rollback as a new revision, and deletion with no containers left.
 - TaskDefinition, Service, Task model; reconciler; scheduler (spread/binpack, constraints).
 - Start, stop and restart; exec terminal.
 - **Centralized logging** (§9.2): agent log shipper with disk buffer, log ingest, VictoriaLogs, logs explorer with the per-service merged view and live tail.

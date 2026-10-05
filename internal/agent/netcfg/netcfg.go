@@ -246,6 +246,23 @@ func (m *Manager) confirmExpired() bool {
 	return true
 }
 
+// Ready reports whether the "syncloud" Docker network exists with this
+// node's subnet, so tasks can be started. Always nil when disabled.
+func (m *Manager) Ready() error {
+	if !m.enabled {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.applied == 0 {
+		if m.lastErr != "" {
+			return errors.New("private network not ready: " + m.lastErr)
+		}
+		return errors.New("private network not ready yet")
+	}
+	return nil
+}
+
 // Status is reported in every heartbeat (nil when disabled).
 func (m *Manager) Status() *agentv1.NetworkStatus {
 	if !m.enabled {

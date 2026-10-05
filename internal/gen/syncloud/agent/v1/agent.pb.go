@@ -1353,6 +1353,7 @@ type TaskStatus struct {
 	Error         string                 `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`
 	StartedAtUnix int64                  `protobuf:"varint,8,opt,name=started_at_unix,json=startedAtUnix,proto3" json:"started_at_unix,omitempty"`
 	SpecHash      string                 `protobuf:"bytes,9,opt,name=spec_hash,json=specHash,proto3" json:"spec_hash,omitempty"`
+	Ip            string                 `protobuf:"bytes,10,opt,name=ip,proto3" json:"ip,omitempty"` // address on the task's network (the "syncloud" network for services)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1446,6 +1447,13 @@ func (x *TaskStatus) GetStartedAtUnix() int64 {
 func (x *TaskStatus) GetSpecHash() string {
 	if x != nil {
 		return x.SpecHash
+	}
+	return ""
+}
+
+func (x *TaskStatus) GetIp() string {
+	if x != nil {
+		return x.Ip
 	}
 	return ""
 }
@@ -2193,7 +2201,7 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12'\n" +
 	"\x0ftimeout_seconds\x18\x03 \x01(\x05R\x0etimeoutSeconds\x12\x16\n" +
-	"\x06remove\x18\x04 \x01(\bR\x06remove\"\xa2\x02\n" +
+	"\x06remove\x18\x04 \x01(\bR\x06remove\"\xb2\x02\n" +
 	"\n" +
 	"TaskStatus\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x122\n" +
@@ -2204,7 +2212,9 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\texit_code\x18\x06 \x01(\x05R\bexitCode\x12\x14\n" +
 	"\x05error\x18\a \x01(\tR\x05error\x12&\n" +
 	"\x0fstarted_at_unix\x18\b \x01(\x03R\rstartedAtUnix\x12\x1b\n" +
-	"\tspec_hash\x18\t \x01(\tR\bspecHash\"\xed\x02\n" +
+	"\tspec_hash\x18\t \x01(\tR\bspecHash\x12\x0e\n" +
+	"\x02ip\x18\n" +
+	" \x01(\tR\x02ip\"\xed\x02\n" +
 	"\rNetworkConfig\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x04R\n" +

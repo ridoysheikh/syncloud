@@ -115,13 +115,14 @@ type Manager struct {
 	opts     Options
 	gen      atomic.Uint64
 
-	mu     sync.Mutex
-	status map[string]*agentv1.NetworkStatus // by node ID
-	seen   map[string]time.Time
+	mu      sync.Mutex
+	status  map[string]*agentv1.NetworkStatus // by node ID
+	seen    map[string]time.Time
+	members map[string]bool // nodes whose agent runs mesh networking
 }
 
 func NewManager(st *store.Store, gw *agentgw.Gateway, bus *events.Bus, log *slog.Logger, publicIP PublicIP, opts Options) *Manager {
-	m := &Manager{st: st, gw: gw, bus: bus, log: log, publicIP: publicIP, opts: opts, status: map[string]*agentv1.NetworkStatus{}, seen: map[string]time.Time{}}
+	m := &Manager{st: st, gw: gw, bus: bus, log: log, publicIP: publicIP, opts: opts, status: map[string]*agentv1.NetworkStatus{}, seen: map[string]time.Time{}, members: map[string]bool{}}
 	m.gen.Store(uint64(time.Now().UnixNano())) // increases across restarts
 	return m
 }
@@ -157,6 +158,12 @@ func (m *Manager) onConnect(c agentgw.Conn) {
 	}
 	info := c.Hello.GetInfo()
 	key := info.GetWireguardPublicKey()
+	m.mu.Lock()
+	m.members[c.Node.ID] = key != ""
+	if key == "" {
+		delete(m.status, c.Node.ID)
+	}
+	m.mu.Unlock()
 	if key == "" {
 		m.log.Warn("agent has no WireGuard key; it is not part of the mesh", "node", c.Node.Name)
 		return
@@ -309,6 +316,18 @@ func (m *Manager) onHeartbeat(node store.Node, hb *agentv1.Heartbeat) {
 	m.status[node.ID] = ns
 	m.seen[node.ID] = time.Now().UTC()
 	m.mu.Unlock()
+}
+
+// NetworkReady reports whether tasks can be placed on the node: either it is
+// not a mesh member (single-node development), or its network is applied.
+func (m *Manager) NetworkReady(nodeID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.members[nodeID] {
+		return true
+	}
+	st := m.status[nodeID]
+	return st != nil && st.GetGeneration() > 0
 }
 
 // List returns every member's mesh state.

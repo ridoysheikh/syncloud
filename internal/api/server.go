@@ -20,6 +20,7 @@ import (
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 	"syncloud/internal/system"
+	"syncloud/internal/workload"
 )
 
 // OpenAPISpec is the API contract, served at /api/v1/openapi.json.
@@ -29,26 +30,28 @@ import (
 var OpenAPISpec []byte
 
 type Server struct {
-	store        *store.Store
-	secrets      *secrets.Box
-	ca           *pki.CA
-	nodes        *nodes.Registry
-	gatewayAddr  string
-	system       *system.Manager
-	registry     *registry.Issuer
-	internal     map[string]http.Handler
-	domains      *domain.Service
-	detector     *domain.Detector
-	certs        *certs.Manager
-	acme         ACMEInfo
-	onSetup      func()
-	backups      *backup.Manager
-	mesh         *mesh.Manager
-	downloadsDir string
-	bus          *events.Bus
-	log          *slog.Logger
-	web          fs.FS // built dashboard (may be empty in development)
-	now          func() time.Time
+	store                 *store.Store
+	secrets               *secrets.Box
+	ca                    *pki.CA
+	nodes                 *nodes.Registry
+	gatewayAddr           string
+	system                *system.Manager
+	registry              *registry.Issuer
+	internal              map[string]http.Handler
+	domains               *domain.Service
+	detector              *domain.Detector
+	certs                 *certs.Manager
+	acme                  ACMEInfo
+	onSetup               func()
+	backups               *backup.Manager
+	mesh                  *mesh.Manager
+	downloadsDir          string
+	workloads             *workload.Manager
+	controllerSchedulable bool
+	bus                   *events.Bus
+	log                   *slog.Logger
+	web                   fs.FS // built dashboard (may be empty in development)
+	now                   func() time.Time
 
 	loginLimiter *attemptLimiter
 	setupLimiter *attemptLimiter
@@ -82,9 +85,13 @@ type Options struct {
 	Mesh *mesh.Manager
 	// DownloadsDir holds agent/CLI binaries served at /downloads/ ("" disables).
 	DownloadsDir string
-	Bus          *events.Bus
-	Log          *slog.Logger
-	Web          fs.FS
+	// Workloads runs services (§5.2); may be nil.
+	Workloads *workload.Manager
+	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
+	ControllerSchedulable bool
+	Bus                   *events.Bus
+	Log                   *slog.Logger
+	Web                   fs.FS
 	// Now is overridable for tests.
 	Now func() time.Time
 }
@@ -94,29 +101,31 @@ func New(o Options) *Server {
 		o.Now = time.Now
 	}
 	return &Server{
-		store:        o.Store,
-		secrets:      o.Secrets,
-		ca:           o.CA,
-		nodes:        o.Nodes,
-		gatewayAddr:  o.GatewayAddr,
-		system:       o.System,
-		registry:     o.Registry,
-		internal:     o.Internal,
-		domains:      o.Domains,
-		detector:     o.Detector,
-		certs:        o.Certs,
-		acme:         o.ACME,
-		onSetup:      o.OnSetup,
-		backups:      o.Backups,
-		mesh:         o.Mesh,
-		downloadsDir: o.DownloadsDir,
-		bus:          o.Bus,
-		log:          o.Log,
-		web:          o.Web,
-		now:          o.Now,
-		loginLimiter: newAttemptLimiter(10, 5*time.Minute),
-		setupLimiter: newAttemptLimiter(10, 5*time.Minute),
-		joinLimiter:  newAttemptLimiter(20, 5*time.Minute),
+		store:                 o.Store,
+		secrets:               o.Secrets,
+		ca:                    o.CA,
+		nodes:                 o.Nodes,
+		gatewayAddr:           o.GatewayAddr,
+		system:                o.System,
+		registry:              o.Registry,
+		internal:              o.Internal,
+		domains:               o.Domains,
+		detector:              o.Detector,
+		certs:                 o.Certs,
+		acme:                  o.ACME,
+		onSetup:               o.OnSetup,
+		backups:               o.Backups,
+		mesh:                  o.Mesh,
+		downloadsDir:          o.DownloadsDir,
+		workloads:             o.Workloads,
+		controllerSchedulable: o.ControllerSchedulable,
+		bus:                   o.Bus,
+		log:                   o.Log,
+		web:                   o.Web,
+		now:                   o.Now,
+		loginLimiter:          newAttemptLimiter(10, 5*time.Minute),
+		setupLimiter:          newAttemptLimiter(10, 5*time.Minute),
+		joinLimiter:           newAttemptLimiter(20, 5*time.Minute),
 	}
 }
 
@@ -164,6 +173,24 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/backups", h: s.handleRunBackup},
 		{Method: "GET", Path: "/api/v1/backups/download", h: s.handleDownloadBackup},
 		{Method: "GET", Path: "/api/v1/network/mesh", h: s.handleMesh},
+		{Method: "PUT", Path: "/api/v1/nodes/{id}/schedulable", h: s.handleSetSchedulable},
+		{Method: "GET", Path: "/api/v1/projects", h: s.handleListProjects},
+		{Method: "POST", Path: "/api/v1/projects", h: s.handleCreateProject},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}", h: s.handleDeleteProject},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments", h: s.handleListEnvironments},
+		{Method: "POST", Path: "/api/v1/projects/{project}/environments", h: s.handleCreateEnvironment},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}", h: s.handleDeleteEnvironment},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services", h: s.handleListServices},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}", h: s.handleGetService},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}", h: s.handleApplyService},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}", h: s.handleDeleteService},
+		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/scale", h: s.handleScaleService},
+		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/rollback", h: s.handleRollbackService},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/tasks", h: s.handleServiceTasks},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/revisions", h: s.handleServiceRevisions},
+		{Method: "GET", Path: "/api/v1/services", h: s.handleListAllServices},
+		{Method: "GET", Path: "/api/v1/tasks", h: s.handleListTasks},
+		{Method: "POST", Path: "/api/v1/tasks/{id}/restart", h: s.handleRestartTask},
 		{Method: "GET", Path: "/api/v1/firewall/policies", h: s.handleListFirewallPolicies},
 		{Method: "POST", Path: "/api/v1/firewall/policies", h: s.handleCreateFirewallPolicy},
 		{Method: "PUT", Path: "/api/v1/firewall/policies/{id}", h: s.handleUpdateFirewallPolicy},

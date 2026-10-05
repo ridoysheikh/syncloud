@@ -24,6 +24,8 @@ type Node struct {
 	CreatedAt  time.Time
 	StatusAt   time.Time
 	LastSeenAt *time.Time
+	// Schedulable allows new tasks on the node.
+	Schedulable bool
 }
 
 type JoinToken struct {
@@ -114,8 +116,8 @@ func (s *Store) JoinNode(ctx context.Context, tokenHash string, n Node, now time
 		return ErrNameTaken
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO nodes (id, name, status, info, cert_serial, created_at, status_at) VALUES (?, ?, ?, '{}', ?, ?, ?)`,
-		n.ID, n.Name, NodePending, n.CertSerial, n.CreatedAt.Unix(), n.CreatedAt.Unix()); err != nil {
+		`INSERT INTO nodes (id, name, status, info, cert_serial, created_at, status_at, schedulable) VALUES (?, ?, ?, '{}', ?, ?, ?, ?)`,
+		n.ID, n.Name, NodePending, n.CertSerial, n.CreatedAt.Unix(), n.CreatedAt.Unix(), n.Schedulable); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -178,13 +180,13 @@ func (s *Store) DeleteNode(ctx context.Context, id string) error {
 	return nil
 }
 
-const nodeCols = `SELECT id, name, status, info, cert_serial, created_at, status_at, last_seen_at FROM nodes`
+const nodeCols = `SELECT id, name, status, info, cert_serial, created_at, status_at, last_seen_at, schedulable FROM nodes`
 
 func scanNode(r scanner) (Node, error) {
 	var n Node
 	var created, statusAt int64
 	var seen sql.NullInt64
-	err := r.Scan(&n.ID, &n.Name, &n.Status, &n.Info, &n.CertSerial, &created, &statusAt, &seen)
+	err := r.Scan(&n.ID, &n.Name, &n.Status, &n.Info, &n.CertSerial, &created, &statusAt, &seen, &n.Schedulable)
 	n.CreatedAt, n.StatusAt, n.LastSeenAt = time.Unix(created, 0), time.Unix(statusAt, 0), nullTime(seen)
 	return n, err
 }

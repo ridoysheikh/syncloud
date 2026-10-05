@@ -17,6 +17,9 @@ import { OverviewPage } from "./overview/OverviewPage";
 import { planned } from "./planned";
 import { CredentialsPage } from "./iam/CredentialsPage";
 import { NodesPage } from "./compute/NodesPage";
+import { ServicesPage } from "./compute/ServicesPage";
+import { ServicePage } from "./compute/ServicePage";
+import { TasksPage } from "./compute/TasksPage";
 import { PlatformPage } from "./settings/PlatformPage";
 import { DomainsPage } from "./settings/DomainsPage";
 import { BackupsPage } from "./settings/BackupsPage";
@@ -38,8 +41,9 @@ export const modules: DashboardModule[] = [
     icon: Cpu,
     order: 10,
     pages: [
-      { path: "/compute/services", label: "Services", component: planned(["Compute"], "Services", "Phase 2", "§4, §5.2", "Long-running services with desired count, rolling deploys and autoscaling.") },
-      { path: "/compute/tasks", label: "Tasks", component: planned(["Compute"], "Tasks", "Phase 2", "§5.2–5.3", "Every running container across all nodes.") },
+      { path: "/compute/services", label: "Services", component: ServicesPage },
+      { path: "/compute/services/$project/$env/$name", label: "Service", component: ServicePage, hidden: true },
+      { path: "/compute/tasks", label: "Tasks", component: TasksPage },
       { path: "/compute/jobs", label: "Jobs", component: planned(["Compute"], "Jobs", "Phase 3", "§5.11", "One-off tasks, cron jobs and deploy hooks.") },
       { path: "/compute/deployments", label: "Deployments", component: planned(["Compute"], "Deployments", "Phase 3", "§5.4", "Rollout history, circuit breaker and rollback.") },
       { path: "/compute/nodes", label: "Nodes", component: NodesPage },

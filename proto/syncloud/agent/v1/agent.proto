@@ -167,6 +167,7 @@ message TaskStatus {
   string error = 7;
   int64 started_at_unix = 8;
   string spec_hash = 9;
+  string ip = 10;               // address on the task's network (the "syncloud" network for services)
 }
 
 // NetworkConfig is this node's view of the WireGuard mesh (§8). It is sent

@@ -36,6 +36,7 @@ import (
 	"syncloud/internal/traefik"
 	"syncloud/internal/version"
 	"syncloud/internal/web"
+	"syncloud/internal/workload"
 )
 
 func main() {
@@ -191,6 +192,9 @@ func serve(args []string) error {
 	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts})
 	gw.AddHooks(meshMgr.Hooks())
 	go meshMgr.Run(ctx)
+	workloads := workload.NewManager(st, gw, registry, meshMgr.NetworkReady, bus, log)
+	gw.AddHooks(workloads.Hooks())
+	go workloads.Run(ctx)
 	certHosts := func(ep domain.Endpoints) []string {
 		if ep.BaseDomain == "" {
 			return nil
@@ -235,8 +239,8 @@ func serve(args []string) error {
 			"GET " + certs.ChallengePrefix: certMgr,
 		},
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
-		DownloadsDir: cfg.DownloadsDir,
-		ACME:         api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
+		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, ControllerSchedulable: cfg.ControllerSchedulable,
+		ACME: api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {
 			_ = os.Remove(filepath.Join(cfg.DataDir, setupTokenFile))
 			_ = os.Remove(filepath.Join(cfg.DataDir, recoveryKeyFile))

@@ -37,6 +37,8 @@ type Controller struct {
 	ACMEEmail     string
 	// ACMECAFile is an extra CA bundle trusted for the ACME server (e.g. Pebble in tests).
 	ACMECAFile string
+	// ControllerSchedulable lets the controller node run services (D3).
+	ControllerSchedulable bool
 	// Firewall manages each node's host firewall (§8.3).
 	Firewall bool
 	// DownloadsDir holds agent and CLI binaries served to joining nodes.
@@ -67,6 +69,7 @@ func LoadController(args []string) (Controller, error) {
 	fs.StringVar(&c.ACMEDirectory, "acme-directory", env("SYNCLOUD_ACME_DIRECTORY", "https://acme-v02.api.letsencrypt.org/directory"), "ACME directory URL")
 	fs.StringVar(&c.ACMEEmail, "acme-email", env("SYNCLOUD_ACME_EMAIL", ""), "ACME account contact email (optional)")
 	fs.StringVar(&c.ACMECAFile, "acme-ca-file", env("SYNCLOUD_ACME_CA_FILE", ""), "extra CA bundle to trust for the ACME server")
+	ctlSched := fs.String("controller-schedulable", env("SYNCLOUD_CONTROLLER_SCHEDULABLE", ""), "run services on the controller node: 1 or 0 (default 0, dev 1)")
 	fs.BoolVar(&c.Firewall, "firewall", env("SYNCLOUD_FIREWALL", "1") == "1", "manage the host firewall on every node (default on)")
 	fs.StringVar(&c.DownloadsDir, "downloads-dir", env("SYNCLOUD_DOWNLOADS_DIR", "/usr/local/lib/syncloud/downloads"), "agent/CLI binaries served at /downloads/")
 	if err := fs.Parse(args); err != nil {
@@ -78,6 +81,7 @@ func LoadController(args []string) (Controller, error) {
 	if c.PublicHTTPS == "" {
 		c.PublicHTTPS = map[bool]string{true: "127.0.0.1:8443", false: ":443"}[c.Dev]
 	}
+	c.ControllerSchedulable = *ctlSched == "1" || (*ctlSched == "" && c.Dev)
 	switch *acme {
 	case "":
 		c.ACME = !c.Dev

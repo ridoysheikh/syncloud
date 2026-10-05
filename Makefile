@@ -41,6 +41,7 @@ release: web
 ## e2e: multi-node tests in Docker-in-Docker containers (needs Docker, privileged containers)
 e2e:
 	test/e2e/mesh.sh
+	test/e2e/services.sh
 
 ## proto: regenerate gRPC code (tools are installed into .tools/ on first use)
 proto: .tools/buf .tools/protoc-gen-go .tools/protoc-gen-go-grpc

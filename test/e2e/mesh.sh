@@ -1,78 +1,14 @@
 #!/usr/bin/env bash
-# End-to-end test of the private network (§8): a controller node and two
-# workers in Docker-in-Docker containers form a WireGuard mesh; containers on
-# different nodes reach each other by IP without NAT, and reach the internet.
+# End-to-end test of the private network (§8): WireGuard mesh, cross-node
+# container traffic without NAT, egress, host firewall and node removal.
 #
 #   test/e2e/mesh.sh          # run and clean up
 #   KEEP=1 test/e2e/mesh.sh   # leave the nodes running for inspection
-set -euo pipefail
-cd "$(dirname "$0")/../.."
-NET=sc-e2e
-NODES=(sc-e2e-ctl sc-e2e-w1 sc-e2e-w2)
-BIN=$(mktemp -d)
-
-cleanup() {
-  [ "${KEEP:-0}" = 1 ] && { echo "nodes kept: ${NODES[*]}"; return; }
-  docker rm -f "${NODES[@]}" >/dev/null 2>&1 || true
-  docker network rm "$NET" >/dev/null 2>&1 || true
-}
+. "$(dirname "$0")/lib.sh"
 trap cleanup EXIT
-fail() { echo "FAIL: $*" >&2; exit 1; }
-x() { docker exec "$@"; }
-
-echo "== build"
-for c in controller agent synctl; do
-  name=syncloud-$c; [ $c = synctl ] && name=synctl
-  CGO_ENABLED=0 GOOS=linux go build -o "$BIN/$name" ./cmd/$c
-done
-docker build -q -t syncloud-e2e-node -f test/e2e/node.Dockerfile test/e2e >/dev/null
-docker image inspect busybox:1.37 >/dev/null 2>&1 || docker pull -q busybox:1.37 >/dev/null
-docker save busybox:1.37 -o "$BIN/busybox.tar"
-
-echo "== nodes"
-cleanup; trap cleanup EXIT
-docker network create "$NET" >/dev/null
-for n in "${NODES[@]}"; do
-  docker run -d --privileged --name "$n" --hostname "${n#sc-e2e-}" --network "$NET" -v "$BIN:/opt/sc:ro" \
-    syncloud-e2e-node dockerd -H unix:///var/run/docker.sock >/dev/null
-done
-for n in "${NODES[@]}"; do
-  for _ in $(seq 1 60); do x "$n" docker info >/dev/null 2>&1 && break; sleep 1; done
-  x "$n" docker load -q -i /opt/sc/busybox.tar >/dev/null
-done
-CTL_IP=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" sc-e2e-ctl)
-
-echo "== controller on $CTL_IP"
-x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false > /var/log/controller.log 2>&1"
-for _ in $(seq 1 30); do x sc-e2e-ctl curl -fs localhost:7070/api/v1/system/status >/dev/null 2>&1 && break; sleep 1; done
-x sc-e2e-ctl /opt/sc/syncloud-agent join --controller http://127.0.0.1:7070 --token-file /data/local-join.token --name ctl-0 --data-dir /agent >/dev/null
-x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-agent run --data-dir /agent --network on > /var/log/agent.log 2>&1"
-
-# Root account and a join token for the workers.
-TOK=$(x sc-e2e-ctl cat /data/setup-token)
-SUF=$(x sc-e2e-ctl cat /data/recovery-key | tr -d '-' | tail -c 7 | tr -d '\n')
-x sc-e2e-ctl curl -fs -c /tmp/jar -H 'content-type: application/json' localhost:7070/api/v1/setup \
-  -d "{\"setupToken\":\"$TOK\",\"email\":\"e2e@example.com\",\"name\":\"E2E\",\"password\":\"e2e-password-123\",\"recoveryKeySuffix\":\"$SUF\"}" >/dev/null
-JOIN=$(x sc-e2e-ctl curl -fs -b /tmp/jar -H 'content-type: application/json' localhost:7070/api/v1/nodes/join-tokens -d '{"singleUse":false,"ttlMinutes":30}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-[ -n "$JOIN" ] || fail "no join token"
-for w in w1 w2; do
-  x sc-e2e-$w /opt/sc/syncloud-agent join --controller "http://$CTL_IP:7070" --token "$JOIN" --name "$w" --data-dir /agent >/dev/null
-  # w2 uses userspace WireGuard, so both implementations are tested together.
-  mode=kernel; [ $w = w2 ] && mode=userspace
-  x -d -e SYNCLOUD_WIREGUARD_MODE=$mode sc-e2e-$w sh -c "/opt/sc/syncloud-agent run --data-dir /agent --network on > /var/log/agent.log 2>&1"
-done
-
-echo "== waiting for the mesh"
-mesh() { x sc-e2e-ctl curl -fs -b /tmp/jar localhost:7070/api/v1/network/mesh; }
-ok=0
-for _ in $(seq 1 60); do
-  m=$(mesh || true)
-  applied=$(echo "$m" | grep -o '"appliedGeneration":[1-9]' | wc -l || true)
-  handshakes=$(echo "$m" | grep -o '"lastHandshake":"' | wc -l || true)
-  if [ "$applied" -eq 3 ] && [ "$handshakes" -ge 6 ]; then ok=1; break; fi
-  sleep 2
-done
-[ $ok = 1 ] || { echo "$m"; x sc-e2e-w1 tail -20 /var/log/agent.log; fail "mesh did not converge (applied=$applied handshakes=$handshakes)"; }
+setup_cluster
+wait_mesh
+m=$(mesh)
 echo "$m" | grep -o '"name":"[a-z0-9-]*","address":"[0-9.]*","subnet":"[0-9./]*"' | sed 's/"//g'
 echo "$m" | grep -o '"mode":"[a-z]*"' | sort | uniq -c
 
@@ -105,7 +41,6 @@ sleep 1
 probe() { x sc-e2e-w2 sh -c "echo | timeout 3 nc $W1_PUB 2222 2>/dev/null" | grep -q hello; }
 if probe; then fail "port 2222 on w1 is reachable without a rule"; fi
 echo "  ✓ default deny: w2 cannot reach w1:2222 on its public address"
-api() { x sc-e2e-ctl curl -fs -b /tmp/jar -H 'content-type: application/json' -H 'Origin: http://localhost:7070' "$@"; }
 api localhost:7070/api/v1/firewall/policies -d "{\"name\":\"e2e\",\"rules\":[{\"protocol\":\"tcp\",\"ports\":\"2222\",\"sources\":[\"$W2_PUB\"]}]}" >/dev/null
 for _ in $(seq 1 15); do probe && break; sleep 1; done
 probe || fail "allow rule not applied"

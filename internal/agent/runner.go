@@ -32,10 +32,15 @@ type Runner struct {
 	log    *slog.Logger
 	// Status updates for the controller; dropped when no session is listening.
 	out chan *agentv1.TaskStatus
+	// NetworkReady reports whether tasks may join TaskNetwork yet (nil: always).
+	NetworkReady func() error
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 }
+
+// TaskNetwork is the Docker network service tasks join (§8).
+const TaskNetwork = "syncloud"
 
 func NewRunner(d *docker.Client, log *slog.Logger) *Runner {
 	return &Runner{docker: d, log: log, out: make(chan *agentv1.TaskStatus, 256), locks: map[string]*sync.Mutex{}}
@@ -127,6 +132,13 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 	}
 
 	mode := spec.NetworkMode
+	if mode == TaskNetwork && r.NetworkReady != nil {
+		// On mesh nodes the agent creates this network with the node's subnet.
+		if err := r.NetworkReady(); err != nil {
+			fail(err)
+			return
+		}
+	}
 	if mode != "" && mode != "host" && mode != "bridge" && mode != "none" {
 		if err := r.docker.EnsureNetwork(ctx, mode, map[string]string{LabelManaged: "true"}); err != nil {
 			fail(err)
@@ -201,6 +213,13 @@ func (r *Runner) inspect(ctx context.Context, containerID, taskID string) *agent
 	}
 	s.Image = c.Config.Image
 	s.SpecHash = c.Config.Labels[LabelSpecHash]
+	if n, ok := c.NetworkSettings.Networks[TaskNetwork]; ok {
+		s.Ip = n.IPAddress
+	} else {
+		for _, n := range c.NetworkSettings.Networks {
+			s.Ip = n.IPAddress
+		}
+	}
 	s.ExitCode = int32(c.State.ExitCode)
 	s.Error = c.State.Error
 	if c.State.Health != nil {

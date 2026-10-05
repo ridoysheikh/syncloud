@@ -51,6 +51,8 @@ func (a *app) nodesCmd() *cobra.Command {
 				return nil
 			},
 		},
+		a.schedulableCmd("cordon", "Stop placing new tasks on a node", false),
+		a.schedulableCmd("uncordon", "Allow new tasks on a node again", true),
 		a.joinTokensCmd(),
 	)
 	return nodes
@@ -145,4 +147,23 @@ func pct(used, total uint64) float64 {
 		return 0
 	}
 	return float64(used) / float64(total) * 100
+}
+
+func (a *app) schedulableCmd(use, short string, on bool) *cobra.Command {
+	return &cobra.Command{
+		Use: use + " ID", Short: short, Args: cobra.ExactArgs(1),
+		Annotations: op("setNodeSchedulable"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			n, err := c.SetNodeSchedulable(ctx(cmd), args[0], on)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "Node %s schedulable: %v\n", n.Name, n.Schedulable)
+			return nil
+		},
+	}
 }

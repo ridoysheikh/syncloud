@@ -169,6 +169,7 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 		return fmt.Errorf("network: %w", err)
 	}
 	go net.Run(ctx)
+	runner.NetworkReady = net.Ready
 	renewBefore := opts.RenewBefore
 	if renewBefore == 0 {
 		renewBefore = 30 * 24 * time.Hour

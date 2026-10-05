@@ -119,6 +119,8 @@ type Node struct {
 	CreatedAt  time.Time    `json:"createdAt"`
 	Info       NodeInfo     `json:"info"`
 	Metrics    *NodeMetrics `json:"metrics"`
+	// Schedulable allows new tasks on the node.
+	Schedulable bool `json:"schedulable"`
 }
 
 type JoinToken struct {
@@ -374,4 +376,175 @@ func (c *Client) DeleteFirewallPolicy(ctx context.Context, id string) error {
 func (c *Client) EffectiveFirewall(ctx context.Context, nodeID string) (EffectiveFirewall, error) {
 	var out EffectiveFirewall
 	return out, c.Do(ctx, "GET", "/api/v1/firewall/nodes/"+url.PathEscape(nodeID)+"/effective", nil, &out)
+}
+
+type Project struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	Environments []string  `json:"environments"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type Environment struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type ServicePort struct {
+	Name      string `json:"name,omitempty"`
+	Container int    `json:"container"`
+	Protocol  string `json:"protocol,omitempty"`
+}
+
+type ServiceSpec struct {
+	Image     string            `json:"image"`
+	Command   []string          `json:"command,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Ports     []ServicePort     `json:"ports,omitempty"`
+	Resources struct {
+		CPU         float64 `json:"cpu,omitempty"`
+		Memory      int     `json:"memory,omitempty"`
+		CPULimit    float64 `json:"cpuLimit,omitempty"`
+		MemoryLimit int     `json:"memoryLimit,omitempty"`
+	} `json:"resources"`
+	Placement struct {
+		Strategy string `json:"strategy,omitempty"`
+	} `json:"placement"`
+	DesiredCount *int `json:"desiredCount,omitempty"`
+}
+
+type Service struct {
+	ID           string      `json:"id"`
+	Project      string      `json:"project"`
+	Environment  string      `json:"environment"`
+	Name         string      `json:"name"`
+	Revision     int         `json:"revision"`
+	DesiredCount int         `json:"desiredCount"`
+	Running      int         `json:"running"`
+	Pending      int         `json:"pending"`
+	Status       string      `json:"status"`
+	Deleting     bool        `json:"deleting"`
+	Spec         ServiceSpec `json:"spec"`
+	Endpoints    []string    `json:"endpoints"`
+	CreatedAt    time.Time   `json:"createdAt"`
+	UpdatedAt    time.Time   `json:"updatedAt"`
+}
+
+type Task struct {
+	ID          string     `json:"id"`
+	ServiceID   string     `json:"serviceId"`
+	Project     string     `json:"project"`
+	Environment string     `json:"environment"`
+	Service     string     `json:"service"`
+	Revision    int        `json:"revision"`
+	NodeID      string     `json:"nodeId"`
+	Node        string     `json:"node"`
+	Desired     string     `json:"desired"`
+	State       string     `json:"state"`
+	IP          string     `json:"ip"`
+	ContainerID string     `json:"containerId"`
+	Health      string     `json:"health"`
+	ExitCode    int        `json:"exitCode"`
+	Error       string     `json:"error"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	StartedAt   *time.Time `json:"startedAt"`
+	FinishedAt  *time.Time `json:"finishedAt"`
+}
+
+type Revision struct {
+	Revision  int         `json:"revision"`
+	Current   bool        `json:"current"`
+	Spec      ServiceSpec `json:"spec"`
+	CreatedAt time.Time   `json:"createdAt"`
+	CreatedBy string      `json:"createdBy"`
+}
+
+func svcPath(project, env, name string) string {
+	return "/api/v1/projects/" + url.PathEscape(project) + "/environments/" + url.PathEscape(env) + "/services/" + url.PathEscape(name)
+}
+
+func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
+	var out list[Project]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/projects", nil, &out)
+}
+
+func (c *Client) CreateProject(ctx context.Context, name, description, environment string) (Project, error) {
+	var out Project
+	return out, c.Do(ctx, "POST", "/api/v1/projects", map[string]string{"name": name, "description": description, "environment": environment}, &out)
+}
+
+func (c *Client) DeleteProject(ctx context.Context, name string) error {
+	return c.Do(ctx, "DELETE", "/api/v1/projects/"+url.PathEscape(name), nil, nil)
+}
+
+func (c *Client) ListEnvironments(ctx context.Context, project string) ([]Environment, error) {
+	var out list[Environment]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/projects/"+url.PathEscape(project)+"/environments", nil, &out)
+}
+
+func (c *Client) CreateEnvironment(ctx context.Context, project, name string) (Environment, error) {
+	var out Environment
+	return out, c.Do(ctx, "POST", "/api/v1/projects/"+url.PathEscape(project)+"/environments", map[string]string{"name": name}, &out)
+}
+
+func (c *Client) DeleteEnvironment(ctx context.Context, project, name string) error {
+	return c.Do(ctx, "DELETE", "/api/v1/projects/"+url.PathEscape(project)+"/environments/"+url.PathEscape(name), nil, nil)
+}
+
+func (c *Client) ListServices(ctx context.Context, project, env string) ([]Service, error) {
+	var out list[Service]
+	if project == "" {
+		return out.Items, c.Do(ctx, "GET", "/api/v1/services", nil, &out)
+	}
+	return out.Items, c.Do(ctx, "GET", "/api/v1/projects/"+url.PathEscape(project)+"/environments/"+url.PathEscape(env)+"/services", nil, &out)
+}
+
+func (c *Client) GetService(ctx context.Context, project, env, name string) (Service, error) {
+	var out Service
+	return out, c.Do(ctx, "GET", svcPath(project, env, name), nil, &out)
+}
+
+func (c *Client) ApplyService(ctx context.Context, project, env, name string, spec ServiceSpec) (Service, error) {
+	var out Service
+	return out, c.Do(ctx, "PUT", svcPath(project, env, name), spec, &out)
+}
+
+func (c *Client) DeleteService(ctx context.Context, project, env, name string) error {
+	return c.Do(ctx, "DELETE", svcPath(project, env, name), nil, nil)
+}
+
+func (c *Client) ScaleService(ctx context.Context, project, env, name string, desired int) (Service, error) {
+	var out Service
+	return out, c.Do(ctx, "POST", svcPath(project, env, name)+"/scale", map[string]int{"desiredCount": desired}, &out)
+}
+
+func (c *Client) RollbackService(ctx context.Context, project, env, name string, revision int) (Service, error) {
+	var out Service
+	return out, c.Do(ctx, "POST", svcPath(project, env, name)+"/rollback", map[string]int{"revision": revision}, &out)
+}
+
+func (c *Client) ServiceTasks(ctx context.Context, project, env, name string) ([]Task, error) {
+	var out list[Task]
+	return out.Items, c.Do(ctx, "GET", svcPath(project, env, name)+"/tasks", nil, &out)
+}
+
+func (c *Client) ServiceRevisions(ctx context.Context, project, env, name string) ([]Revision, error) {
+	var out list[Revision]
+	return out.Items, c.Do(ctx, "GET", svcPath(project, env, name)+"/revisions", nil, &out)
+}
+
+func (c *Client) ListTasks(ctx context.Context) ([]Task, error) {
+	var out list[Task]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/tasks", nil, &out)
+}
+
+func (c *Client) RestartTask(ctx context.Context, id string) error {
+	return c.Do(ctx, "POST", "/api/v1/tasks/"+url.PathEscape(id)+"/restart", nil, nil)
+}
+
+func (c *Client) SetNodeSchedulable(ctx context.Context, id string, on bool) (Node, error) {
+	var out Node
+	return out, c.Do(ctx, "PUT", "/api/v1/nodes/"+url.PathEscape(id)+"/schedulable", map[string]bool{"schedulable": on}, &out)
 }

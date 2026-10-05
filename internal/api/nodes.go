@@ -51,7 +51,8 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
 		return
 	}
-	n := store.Node{ID: nodeID, Name: req.Name, Status: store.NodePending, CertSerial: serial, CreatedAt: now.Truncate(time.Second)}
+	n := store.Node{ID: nodeID, Name: req.Name, Status: store.NodePending, CertSerial: serial, CreatedAt: now.Truncate(time.Second),
+		Schedulable: req.Name != controllerNode || s.controllerSchedulable}
 	n.StatusAt = n.CreatedAt
 	switch err := s.store.JoinNode(r.Context(), auth.HashToken(strings.TrimSpace(req.Token)), n, now); {
 	case errors.Is(err, store.ErrNotFound):
@@ -172,4 +173,33 @@ func (s *Server) handleDeleteJoinToken(w http.ResponseWriter, r *http.Request) {
 	u, _ := currentUser(r.Context())
 	s.audit(r, u.ID, "node:DeleteJoinToken", "srn:syncloud:join-token/"+id, nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// controllerNode is the controller's own node (§6.4).
+const controllerNode = "ctl-0"
+
+// handleSetSchedulable is cordon/uncordon (§6.4, Phase 3 adds draining).
+func (s *Server) handleSetSchedulable(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Schedulable bool `json:"schedulable"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.store.SetNodeSchedulable(r.Context(), id, req.Schedulable); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, CodeNotFound, "no such node")
+		return
+	} else if err != nil {
+		s.internalError(w, "set schedulable", err)
+		return
+	}
+	s.nodes.SetSchedulable(r.Context(), id, req.Schedulable)
+	u, _ := currentUser(r.Context())
+	s.audit(r, u.ID, "node:SetSchedulable", "srn:syncloud:node/"+id, map[string]any{"schedulable": req.Schedulable})
+	if s.workloads != nil {
+		s.workloads.EnqueueAll()
+	}
+	v, _ := s.nodes.Get(id)
+	writeJSON(w, http.StatusOK, v)
 }
