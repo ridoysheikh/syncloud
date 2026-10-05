@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"syncloud/internal/auth"
+	"syncloud/internal/certs"
+	"syncloud/internal/domain"
 	"syncloud/internal/events"
 	"syncloud/internal/registry"
 	"syncloud/internal/secrets"
@@ -52,7 +54,15 @@ func newEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(Options{Store: st, Secrets: box, Registry: reg, Bus: events.NewBus(), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Web: web})
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	bus := events.NewBus()
+	domains := domain.NewService(st, "443", "http://localhost", "registry.localhost")
+	cm := certs.New(st, box, bus, log, certs.Config{})
+	domains.OnChange(func(ep domain.Endpoints) { cm.SetHosts([]string{ep.BaseDomain, domain.RegistryHost(ep.BaseDomain)}) })
+	s := New(Options{
+		Store: st, Secrets: box, Registry: reg, Bus: bus, Log: log, Web: web,
+		Domains: domains, Detector: domain.NewDetector("203.0.113.10"), Certs: cm,
+	})
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
@@ -227,5 +237,39 @@ func TestClientIPTrustsOnlyLocalProxy(t *testing.T) {
 	}
 	if isHTTPS(r) {
 		t.Fatal("spoofed X-Forwarded-Proto trusted")
+	}
+}
+
+func TestDomainSettings(t *testing.T) {
+	e := newEnv(t)
+	signIn(t, e)
+	resp, body := e.do(t, "GET", "/api/v1/settings/domain", nil, nil)
+	if resp.StatusCode != 200 || body["baseDomain"] != "" || body["publicIp"] != "203.0.113.10" {
+		t.Fatalf("get: %d %v", resp.StatusCode, body)
+	}
+	if sg := body["suggestions"].([]any); len(sg) != 2 || sg[0] != "203-0-113-10.sslip.io" {
+		t.Fatalf("suggestions: %v", sg)
+	}
+	resp, body = e.do(t, "PUT", "/api/v1/settings/domain", map[string]string{"baseDomain": "not a domain"}, nil)
+	if resp.StatusCode != 400 {
+		t.Fatalf("invalid domain: %d", resp.StatusCode)
+	}
+	resp, body = e.do(t, "PUT", "/api/v1/settings/domain", map[string]string{"baseDomain": "203-0-113-10.SSLIP.io"}, nil)
+	if resp.StatusCode != 200 || body["dashboardUrl"] != "https://203-0-113-10.sslip.io" || body["registryHost"] != "registry.203-0-113-10.sslip.io" {
+		t.Fatalf("set: %d %v", resp.StatusCode, body)
+	}
+	_, body = e.do(t, "GET", "/api/v1/system/status", nil, nil)
+	if body["baseDomain"] != "203-0-113-10.sslip.io" {
+		t.Fatalf("status: %v", body)
+	}
+	_, body = e.do(t, "GET", "/api/v1/certificates", nil, nil)
+	if items := body["items"].([]any); len(items) != 2 {
+		t.Fatalf("certificates: %v", body)
+	}
+	if resp, _ := e.do(t, "POST", "/api/v1/certificates/registry.203-0-113-10.sslip.io/renew", nil, nil); resp.StatusCode != 202 {
+		t.Fatalf("renew: %d", resp.StatusCode)
+	}
+	if resp, _ := e.do(t, "POST", "/api/v1/certificates/other.example.com/renew", nil, nil); resp.StatusCode != 404 {
+		t.Fatalf("renew unknown: %d", resp.StatusCode)
 	}
 }

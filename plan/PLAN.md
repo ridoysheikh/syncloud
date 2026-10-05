@@ -124,7 +124,7 @@ Logs are stored in VictoriaLogs (§9.2). Optional **edge nodes** run extra Traef
 | Metrics | VictoriaMetrics | PromQL-compatible; Traefik and cAdvisor-style metrics fit directly |
 | Logs | **VictoriaLogs** (single-node, on the controller), with LogsQL queries proxied through the controller API | Low resource use, fast full-text search, label-based streams that map directly to project/service/task (D12) |
 | Firewall | **nftables**, managed by the agent in its own table | Atomic rule updates, sets for fast IP membership, per-rule counters (D13) |
-| TLS | **lego** (ACME library) inside the controller | Certificates are issued centrally and work across multiple Traefik replicas (D17) |
+| TLS | **golang.org/x/crypto/acme** inside the controller (no lego: small dependency tree) | Certificates are issued centrally and work across multiple Traefik replicas (D17) |
 | Networking | WireGuard (kernel module) | Fast, simple, built into modern kernels |
 | Builds | BuildKit + Dockerfile, with **Nixpacks** as a fallback (as in Coolify and Dokploy) | Proven approach |
 | CLI / shell | `synctl` (Go, shares the generated API client), plus the in-dashboard Cloud Shell | kubectl-like UX, 100% API coverage, IAM access keys and tokens (§7.1) |
@@ -164,7 +164,7 @@ Cluster-wide:
  ├── NodePool         a group of nodes by label (e.g. "gpu", "eu-fra"); manual or provider-backed with autoscaling (§6.5)
  ├── CloudProvider    credentials and settings for Hetzner / DigitalOcean / Vultr / AWS EC2 … (§6.5)
  ├── HostFirewallPolicy  public-interface rules applied to node pools or single nodes (§8.3)
- ├── Certificate      issued and renewed by the controller (lego), served to all Traefik replicas (§8.5)
+ ├── Certificate      issued and renewed by the controller (ACME), served to all Traefik replicas (§8.5)
  ├── GitSource        (GitHub App / GitLab / Gitea / generic + deploy key)
  ├── Registry         (built-in plus external credentials)
  │    ├── Repository   (project-scoped; immutability, scan-on-push, lifecycle and permission policies)
@@ -322,12 +322,11 @@ curl -fsSL https://get.syncloud.dev/install.sh | sudo bash
 **Certificates**
 - Wildcard certificates are not possible on sslip.io (they need DNS-01, and nobody can create DNS records there). So the controller requests **one certificate per hostname** with HTTP-01, when a route is first created.
 - **Rate limits (verified 2026-10-06)**: sslip.io is **not** on the Public Suffix List. Instead, Let's Encrypt gives sslip.io/nip.io (run by the same operators) a raised **shared** limit of 250,000 certificates per week across all users, so rate limiting is possible at busy times. The operators recommend falling back to the other domain or to an IP-address certificate.
-- **Certificate fallback chain** (automatic, per hostname):
-  1. Let's Encrypt HTTP-01 for the `sslip.io` name.
-  2. If rate-limited: the same name on **nip.io** (`api-production-shop.203-0-113-10.nip.io`), which resolves the same way. The route serves both names.
-  3. If still failing: a second ACME CA (ZeroSSL) for the sslip.io name.
-  4. For the dashboard only: a Let's Encrypt **IP-address certificate** for `https://203.0.113.10`.
-  5. Last resort: self-signed, with a dashboard banner and automatic retries with backoff.
+- **Certificate fallback** (revised 2026-10-06 while building; a per-hostname nip.io certificate does not help users who browse the sslip.io name):
+  1. A **self-signed placeholder** is created at once, so HTTPS works from the first second.
+  2. Let's Encrypt HTTP-01 for the name. Failures retry with backoff (1m, 5m, 15m, 1h, 3h, 6h, then every 12h); "Request now" skips the wait.
+  3. If **rate-limited**, the dashboard offers a one-click switch of the whole base domain to **nip.io**, which has its own limit.
+  4. Phase 9: a second ACME CA (ZeroSSL, with external account binding) and an IP-address certificate for the dashboard.
 - Certificates are reused and renewed early, and issued only when a route is created, to keep requests low.
 
 **Things to know (shown in the dashboard Settings → Domains)**
@@ -806,7 +805,7 @@ The **Network** section of the dashboard shows:
 **v1 default**: public traffic enters through Traefik on the controller.
 
 **Edge-ready by design**
-- **Certificates are issued by the controller** (lego/ACME), stored encrypted in SQLite and backed up, and delivered to Traefik through the HTTP provider's TLS section. Traefik never runs its own ACME. This is what makes multiple replicas possible.
+- **Certificates are issued by the controller** (ACME), stored encrypted in SQLite and backed up, and delivered to Traefik through the HTTP provider's TLS section. Traefik never runs its own ACME. This is what makes multiple replicas possible.
 - HTTP-01 challenges: every Traefik replica forwards `/.well-known/acme-challenge/*` to the controller. DNS-01 is done directly by the controller with provider credentials.
 
 **Edge nodes**
@@ -1057,7 +1056,7 @@ SynCloud/
 │   ├── quota/                # quotas, admission checks, usage metering
 │   ├── nodepool/             # node pools, cluster autoscaler
 │   │   └── providers/        # hetzner, digitalocean, vultr, aws, …
-│   ├── certs/                # ACME (lego), certificate store, renewal
+│   ├── certs/                # ACME (x/crypto/acme), certificate store, renewal
 │   ├── agentgw/              # gRPC server for agents
 │   ├── storage/              # S3 endpoints, bindings, credential vending
 │   └── agent/                # agent-side: docker, collector, prober, wg, nftables, log shipper, dns forwarder
@@ -1180,11 +1179,16 @@ Because there is only one controller:
   - Verified with a real `docker login` / `push` / `pull`.
   - Until IAM (Phase 7), the root account gets all registry actions and other accounts get none.
   - **BuildKit moved to Phase 4**: it needs a privileged container and has no consumer before Git builds.
-- ⏳ Slice 3: sslip.io base domain and certificates.
+- ✅ Slice 3 (2026-10-06), base domain and certificates:
+  - On first start the controller sets `<public-ip>.sslip.io` (or `--base-domain`); the IP comes from an interface or an echo service (`--public-ip` overrides).
+  - The controller is the ACME client (HTTP-01). Traefik routes `/.well-known/acme-challenge/` to it, ahead of the HTTP→HTTPS redirect. Certificates and keys are sealed in SQLite and handed to Traefik inline through the HTTP provider's `tls` section.
+  - Changing the base domain (Settings → Domains, `synctl domain set`) moves the routes, re-requests certificates, and re-renders the registry's token realm (the registry container is recreated).
+  - Verified end to end against Pebble with a real Traefik: issuance, TLS chain, redirects, and a live domain change.
+  - Dev mode: no base domain and ACME off by default.
 - ⏳ Slice 4: install script, recovery key, Litestream.
 - Minimal agent: gRPC stream to the controller, Docker runner for system tasks.
 - Controller **installation** (§5.0): preflight checks, signed binaries, systemd units, `init` / `doctor`, the local agent, and **system tasks** (Traefik with the UI as the first route, private registry, BuildKit, VictoriaMetrics, VictoriaLogs).
-- **sslip.io base domain**, controller-managed certificates (lego) with the fallback chain (§5.0.2), served to Traefik; recovery key; Litestream backup wiring.
+- **sslip.io base domain**, controller-managed certificates (ACME) with the fallback (§5.0.2), served to Traefik; recovery key; Litestream backup wiring.
 
 ### Phase 1: Nodes, Networking and Host Firewall (3–4 wks)
 - Agent binary, `join.sh`, join flow, mTLS CA.

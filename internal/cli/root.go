@@ -75,6 +75,8 @@ func NewRoot(in io.Reader, out, errOut io.Writer) *cobra.Command {
 		a.iamCmd(),
 		a.nodesCmd(),
 		a.systemCmd(),
+		a.domainCmd(),
+		a.certsCmd(),
 	)
 	return root
 }

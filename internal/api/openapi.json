@@ -3,7 +3,7 @@
   "info": {
     "title": "SynCloud API",
     "version": "v1",
-    "description": "The public SynCloud controller API. The dashboard, synctl and CI all use these endpoints (plan §5.1). Authenticate with the dashboard session cookie, a personal access token (Bearer), or a signed access-key request (SYN1-HMAC-SHA256, plan §7.1)."
+    "description": "The public SynCloud controller API. The dashboard, synctl and CI all use these endpoints (plan \u00a75.1). Authenticate with the dashboard session cookie, a personal access token (Bearer), or a signed access-key request (SYN1-HMAC-SHA256, plan \u00a77.1)."
   },
   "servers": [
     {
@@ -551,7 +551,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Platform components (system tasks) running on the controller node: Traefik, VictoriaMetrics, VictoriaLogs, …",
+        "summary": "Platform components (system tasks) running on the controller node: Traefik, VictoriaMetrics, VictoriaLogs, \u2026",
         "responses": {
           "200": {
             "description": "OK",
@@ -627,6 +627,116 @@
           }
         }
       }
+    },
+    "/api/v1/settings/domain": {
+      "get": {
+        "operationId": "getDomainSettings",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Base domain, public IP, suggested sslip.io/nip.io domains and ACME settings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainSettings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setBaseDomain",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Change the base domain. The dashboard moves to https://<domain> and the registry to registry.<domain>; certificates are requested automatically.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "baseDomain"
+                ],
+                "properties": {
+                  "baseDomain": {
+                    "type": "string",
+                    "example": "203-0-113-10.sslip.io"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificates": {
+      "get": {
+        "operationId": "listCertificates",
+        "tags": [
+          "settings"
+        ],
+        "summary": "TLS certificates for the platform hostnames",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/certificates/{host}/renew": {
+      "post": {
+        "operationId": "renewCertificate",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Clear the retry backoff and request a certificate now",
+        "parameters": [
+          {
+            "name": "host",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -639,7 +749,7 @@
       "bearerToken": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Personal access token (syn_pat_…)"
+        "description": "Personal access token (syn_pat_\u2026)"
       },
       "accessKey": {
         "type": "apiKey",
@@ -1211,6 +1321,108 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SystemTask"
+            }
+          }
+        }
+      },
+      "DomainSettings": {
+        "type": "object",
+        "properties": {
+          "baseDomain": {
+            "type": "string",
+            "description": "empty until set"
+          },
+          "dashboardUrl": {
+            "type": "string"
+          },
+          "registryHost": {
+            "type": "string"
+          },
+          "publicIp": {
+            "type": "string"
+          },
+          "publicIpError": {
+            "type": "string"
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "acme": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "directoryUrl": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Certificate": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "issuer": {
+            "type": "string",
+            "enum": [
+              "acme",
+              "self-signed"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "valid",
+              "pending",
+              "failed",
+              "rate_limited",
+              "self_signed"
+            ]
+          },
+          "notAfter": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "failures": {
+            "type": "integer"
+          },
+          "nextAttemptAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CertificateList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Certificate"
             }
           }
         }

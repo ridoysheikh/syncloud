@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,7 +21,9 @@ import (
 	"syncloud/internal/agentgw"
 	"syncloud/internal/api"
 	"syncloud/internal/auth"
+	"syncloud/internal/certs"
 	"syncloud/internal/config"
+	"syncloud/internal/domain"
 	"syncloud/internal/events"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
@@ -97,36 +101,85 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("registry token issuer: %w", err)
 	}
-	baseDomain, _, err := st.GetSetting(ctx, store.SettingBaseDomain)
+	_, httpsPort, _ := net.SplitHostPort(cfg.PublicHTTPS)
+	_, httpPort, _ := net.SplitHostPort(cfg.PublicHTTP)
+	devURL := "http://localhost"
+	if httpPort != "" && httpPort != "80" {
+		devURL += ":" + httpPort
+	}
+	domains := domain.NewService(st, httpsPort, devURL, traefik.DevRegistryHost)
+	if err := domains.Load(ctx); err != nil {
+		return err
+	}
+	detector := domain.NewDetector(cfg.PublicIP)
+	if err := initBaseDomain(ctx, cfg, domains, detector, log); err != nil {
+		return err
+	}
+
+	acmeHTTP, err := acmeHTTPClient(cfg.ACMECAFile)
 	if err != nil {
 		return err
 	}
-	pub := publicEndpoints(cfg, baseDomain)
+	certMgr := certs.New(st, box, bus, log, certs.Config{
+		ACME: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail, HTTPClient: acmeHTTP,
+	})
+	if err := certMgr.Load(ctx); err != nil {
+		return fmt.Errorf("load certificates: %w", err)
+	}
 
 	controllerURL := "http://" + loopbackURLHost(cfg.Listen)
-	sysMgr := system.NewManager(gw, bus, log, system.Config{
-		ControllerURL: controllerURL, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS,
-		AdminAddr: cfg.TraefikAdmin, TraefikToken: traefikToken,
-		RegistryRealm: pub.url + "/api/v1/registry/token", RegistryTokenCert: regIssuer.CertPath,
-	})
+	sysCfg := func(ep domain.Endpoints) system.Config {
+		return system.Config{
+			ControllerURL: controllerURL, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS,
+			AdminAddr: cfg.TraefikAdmin, TraefikToken: traefikToken,
+			RegistryRealm: ep.DashboardURL + "/api/v1/registry/token", RegistryTokenCert: regIssuer.CertPath,
+		}
+	}
+	sysMgr := system.NewManager(gw, bus, log, sysCfg(domains.Endpoints()))
 	if cfg.SystemTasks {
 		gw.SetHooks(sysMgr.Hooks())
 		go sysMgr.Run(ctx)
 	}
+	certHosts := func(ep domain.Endpoints) []string {
+		if ep.BaseDomain == "" {
+			return nil
+		}
+		return []string{ep.BaseDomain, domain.RegistryHost(ep.BaseDomain)}
+	}
+	certMgr.SetHosts(certHosts(domains.Endpoints()))
+	domains.OnChange(func(ep domain.Endpoints) {
+		log.Info("base domain changed", "domain", ep.BaseDomain, "dashboard", ep.DashboardURL)
+		sysMgr.SetConfig(sysCfg(ep)) // the registry's token realm follows the domain
+		certMgr.SetHosts(certHosts(ep))
+		bus.Publish("domain.updated", ep)
+	})
+	go certMgr.Run(ctx)
+
+	if httpsPort == "443" {
+		httpsPort = ""
+	}
 	traefikProvider := &traefik.Provider{
 		Token: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: controllerURL,
-		BaseDomain: func() string {
-			d, _, _ := st.GetSetting(context.Background(), store.SettingBaseDomain)
-			return d
+		RegistryURL: "http://" + system.RegistryAddr, BaseDomain: domains.Base, HTTPSPort: httpsPort,
+		Certificates: func() []traefik.Certificate {
+			var out []traefik.Certificate
+			for _, p := range certMgr.Pairs() {
+				out = append(out, traefik.Certificate{CertFile: p.CertPEM, KeyFile: p.KeyPEM})
+			}
+			return out
 		},
-		RegistryHost: func() string { return pub.registryHost },
-		RegistryURL:  "http://" + system.RegistryAddr,
 	}
 
 	srv := api.New(api.Options{
 		Store: st, Secrets: box, CA: ca, Nodes: registry, GatewayAddr: cfg.AgentAdvertise,
-		System: sysMgr, Registry: regIssuer, Internal: map[string]http.Handler{"GET /internal/traefik/config": traefikProvider},
-		Bus: bus, Log: log, Web: web.FS(),
+		System: sysMgr, Registry: regIssuer,
+		Internal: map[string]http.Handler{
+			"GET /internal/traefik/config": traefikProvider,
+			"GET " + certs.ChallengePrefix: certMgr,
+		},
+		Domains: domains, Detector: detector, Certs: certMgr,
+		ACME: api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
+		Bus:  bus, Log: log, Web: web.FS(),
 	})
 	go func() {
 		if err := gw.Serve(ctx, ca, cfg.AgentListen, []string{gwHost, "localhost", "127.0.0.1"}); err != nil {
@@ -286,21 +339,52 @@ func loopbackURLHost(listen string) string {
 	return net.JoinHostPort(host, port)
 }
 
-type endpoints struct {
-	url          string // public dashboard/API URL, e.g. https://203-0-113-10.sslip.io
-	registryHost string // registry hostname without port
+// initBaseDomain stores the first base domain: --base-domain, or outside dev
+// mode <public-ip>.sslip.io (§5.0.2). An existing setting is never replaced.
+func initBaseDomain(ctx context.Context, cfg config.Controller, domains *domain.Service, det *domain.Detector, log *slog.Logger) error {
+	if domains.Base() != "" {
+		return nil
+	}
+	base := cfg.BaseDomain
+	if base == "" {
+		if cfg.Dev {
+			return nil
+		}
+		dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		ip, err := det.PublicIP(dctx)
+		cancel()
+		if err != nil {
+			log.Warn("no base domain: public IP detection failed; set one with --base-domain or in Settings → Domains", "err", err)
+			return nil
+		}
+		base = domain.Wildcard(ip, "sslip.io")
+	}
+	if _, err := domains.Set(ctx, base); err != nil {
+		return fmt.Errorf("--base-domain: %w", err)
+	}
+	log.Info("base domain set", "domain", base)
+	return nil
 }
 
-// publicEndpoints derives public addresses. Without a base domain (set in the
-// first-run flow, §5.0.2), dev mode uses localhost names on the dev ports.
-func publicEndpoints(cfg config.Controller, baseDomain string) endpoints {
-	if baseDomain != "" {
-		return endpoints{url: "https://" + baseDomain, registryHost: "registry." + baseDomain}
+// acmeHTTPClient trusts the system roots plus caFile, if given.
+func acmeHTTPClient(caFile string) (*http.Client, error) {
+	c := &http.Client{Timeout: 30 * time.Second}
+	if caFile == "" {
+		return c, nil
 	}
-	_, port, _ := net.SplitHostPort(cfg.PublicHTTP)
-	host := "localhost"
-	if port != "" && port != "80" {
-		host += ":" + port
+	pemData, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("--acme-ca-file: %w", err)
 	}
-	return endpoints{url: "http://" + host, registryHost: "registry.localhost"}
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM(pemData) {
+		return nil, fmt.Errorf("--acme-ca-file: no certificates in %s", caFile)
+	}
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	c.Transport = t
+	return c, nil
 }

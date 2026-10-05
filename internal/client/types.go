@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"net/url"
 	"time"
 )
 
@@ -191,4 +192,49 @@ type SystemTask struct {
 func (c *Client) ListSystemTasks(ctx context.Context) ([]SystemTask, error) {
 	var out list[SystemTask]
 	return out.Items, c.Do(ctx, "GET", "/api/v1/system/tasks", nil, &out)
+}
+
+type DomainSettings struct {
+	BaseDomain    string   `json:"baseDomain"`
+	DashboardURL  string   `json:"dashboardUrl"`
+	RegistryHost  string   `json:"registryHost"`
+	PublicIP      string   `json:"publicIp"`
+	PublicIPError string   `json:"publicIpError"`
+	Suggestions   []string `json:"suggestions"`
+	ACME          struct {
+		Enabled      bool   `json:"enabled"`
+		DirectoryURL string `json:"directoryUrl"`
+		Email        string `json:"email"`
+	} `json:"acme"`
+	Warnings []string `json:"warnings"`
+}
+
+func (c *Client) GetDomainSettings(ctx context.Context) (DomainSettings, error) {
+	var out DomainSettings
+	return out, c.Do(ctx, "GET", "/api/v1/settings/domain", nil, &out)
+}
+
+func (c *Client) SetBaseDomain(ctx context.Context, baseDomain string) (DomainSettings, error) {
+	var out DomainSettings
+	return out, c.Do(ctx, "PUT", "/api/v1/settings/domain", map[string]string{"baseDomain": baseDomain}, &out)
+}
+
+type Certificate struct {
+	Host          string     `json:"host"`
+	Issuer        string     `json:"issuer"`
+	Status        string     `json:"status"`
+	NotAfter      time.Time  `json:"notAfter"`
+	LastError     string     `json:"lastError"`
+	Failures      int        `json:"failures"`
+	NextAttemptAt *time.Time `json:"nextAttemptAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+}
+
+func (c *Client) ListCertificates(ctx context.Context) ([]Certificate, error) {
+	var out list[Certificate]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/certificates", nil, &out)
+}
+
+func (c *Client) RenewCertificate(ctx context.Context, host string) error {
+	return c.Do(ctx, "POST", "/api/v1/certificates/"+url.PathEscape(host)+"/renew", nil, nil)
 }

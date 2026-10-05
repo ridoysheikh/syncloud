@@ -26,6 +26,17 @@ type Controller struct {
 	TraefikAdmin string
 	// SystemTasks runs the platform components on ctl-0 (D20). Off in tests.
 	SystemTasks bool
+	// BaseDomain is set on first start when no base domain is stored (§5.0.2).
+	// Without it, a non-dev controller uses <public-ip>.sslip.io.
+	BaseDomain string
+	// PublicIP overrides public IP detection.
+	PublicIP string
+	// ACME issues real certificates (default on outside dev mode).
+	ACME          bool
+	ACMEDirectory string
+	ACMEEmail     string
+	// ACMECAFile is an extra CA bundle trusted for the ACME server (e.g. Pebble in tests).
+	ACMECAFile string
 	// Dev enables development behavior (verbose logs, relaxed origin checks for the Vite dev server).
 	Dev bool
 }
@@ -46,6 +57,12 @@ func LoadController(args []string) (Controller, error) {
 	fs.StringVar(&c.PublicHTTPS, "public-https", env("SYNCLOUD_PUBLIC_HTTPS", ""), "Traefik HTTPS entrypoint (default :443, dev 127.0.0.1:8443)")
 	fs.StringVar(&c.TraefikAdmin, "traefik-admin", env("SYNCLOUD_TRAEFIK_ADMIN", "127.0.0.1:8082"), "Traefik ping/metrics address (loopback)")
 	fs.BoolVar(&c.SystemTasks, "system-tasks", env("SYNCLOUD_SYSTEM_TASKS", "1") == "1", "run platform components (Traefik, metrics, logs) on the local node")
+	fs.StringVar(&c.BaseDomain, "base-domain", env("SYNCLOUD_BASE_DOMAIN", ""), "initial base domain (default <public-ip>.sslip.io outside dev mode)")
+	fs.StringVar(&c.PublicIP, "public-ip", env("SYNCLOUD_PUBLIC_IP", ""), "public IPv4 address (default: detect)")
+	acme := fs.String("acme", env("SYNCLOUD_ACME", ""), "issue certificates with ACME: 1 or 0 (default 1, dev 0)")
+	fs.StringVar(&c.ACMEDirectory, "acme-directory", env("SYNCLOUD_ACME_DIRECTORY", "https://acme-v02.api.letsencrypt.org/directory"), "ACME directory URL")
+	fs.StringVar(&c.ACMEEmail, "acme-email", env("SYNCLOUD_ACME_EMAIL", ""), "ACME account contact email (optional)")
+	fs.StringVar(&c.ACMECAFile, "acme-ca-file", env("SYNCLOUD_ACME_CA_FILE", ""), "extra CA bundle to trust for the ACME server")
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
@@ -54,6 +71,15 @@ func LoadController(args []string) (Controller, error) {
 	}
 	if c.PublicHTTPS == "" {
 		c.PublicHTTPS = map[bool]string{true: "127.0.0.1:8443", false: ":443"}[c.Dev]
+	}
+	switch *acme {
+	case "":
+		c.ACME = !c.Dev
+	case "1", "true":
+		c.ACME = true
+	case "0", "false":
+	default:
+		return c, fmt.Errorf("--acme must be 1 or 0")
 	}
 	if c.AgentAdvertise == "" {
 		c.AgentAdvertise = c.AgentListen

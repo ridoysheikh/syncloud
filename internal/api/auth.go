@@ -25,12 +25,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "count users", err)
 		return
 	}
-	domain, _, err := s.store.GetSetting(r.Context(), store.SettingBaseDomain)
+	baseDomain, _, err := s.store.GetSetting(r.Context(), store.SettingBaseDomain)
 	if err != nil {
 		s.internalError(w, "get base domain", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, statusResponse{Version: version.Version, SetupRequired: n == 0, BaseDomain: domain})
+	writeJSON(w, http.StatusOK, statusResponse{Version: version.Version, SetupRequired: n == 0, BaseDomain: baseDomain})
 }
 
 type userResponse struct {

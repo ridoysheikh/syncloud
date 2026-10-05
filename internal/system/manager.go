@@ -73,7 +73,7 @@ func (m *Manager) onConnect(node store.Node, snapshot []*agentv1.TaskStatus) {
 	m.mu.Unlock()
 
 	wanted := map[string]bool{}
-	for _, s := range m.specs {
+	for _, s := range m.currentSpecs() {
 		wanted[s.TaskId] = true
 	}
 	for _, s := range snapshot {
@@ -118,8 +118,27 @@ func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
 	m.bus.Publish(TopicTask, v)
 }
 
+// SetConfig re-renders the specs (e.g. after a base domain change) and applies
+// them; agents recreate only the containers whose spec changed.
+func (m *Manager) SetConfig(cfg Config) {
+	specs := Specs(cfg)
+	m.mu.Lock()
+	m.specs = specs
+	id := m.nodeID
+	m.mu.Unlock()
+	if id != "" {
+		m.applyAll(id)
+	}
+}
+
+func (m *Manager) currentSpecs() []*agentv1.TaskSpec {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.specs
+}
+
 func (m *Manager) applyAll(nodeID string) {
-	for _, s := range m.specs {
+	for _, s := range m.currentSpecs() {
 		m.send(nodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_RunTask{RunTask: &agentv1.RunTask{Spec: s}}})
 	}
 }

@@ -39,7 +39,25 @@ func TestProviderRequiresTokenAndRoutesDashboard(t *testing.T) {
 	}
 
 	domain = "203-0-113-10.sslip.io"
-	if r := get().HTTP.Routers["syncloud-dashboard"]; r.Rule != "Host(`203-0-113-10.sslip.io`)" {
+	p.RegistryURL = "http://127.0.0.1:5000"
+	p.Certificates = func() []Certificate { return []Certificate{{CertFile: "CERT", KeyFile: "KEY"}} }
+	d = get()
+	if r := d.HTTP.Routers["syncloud-dashboard"]; r.Rule != "Host(`203-0-113-10.sslip.io`)" || r.TLS == nil || r.EntryPoints[0] != "websecure" {
 		t.Fatalf("dashboard router with domain: %+v", r)
+	}
+	if r := d.HTTP.Routers["syncloud-registry"]; r.Rule != "Host(`registry.203-0-113-10.sslip.io`)" || r.TLS == nil {
+		t.Fatalf("registry router: %+v", r)
+	}
+	if r := d.HTTP.Routers["syncloud-acme"]; r.EntryPoints[0] != "web" || r.Priority < 1000 {
+		t.Fatalf("acme router: %+v", r)
+	}
+	if m := d.HTTP.Middlewares["syncloud-https"]; m.RedirectScheme == nil || m.RedirectScheme.Scheme != "https" {
+		t.Fatalf("redirect: %+v", m)
+	}
+	if d.TLS == nil || len(d.TLS.Certificates) != 1 || d.TLS.Certificates[0].KeyFile != "KEY" {
+		t.Fatalf("tls: %+v", d.TLS)
+	}
+	if host("evil`) || Host(`x") != "Host(`invalid.invalid`)" {
+		t.Fatal("rule injection")
 	}
 }

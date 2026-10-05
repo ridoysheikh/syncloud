@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"syncloud/internal/certs"
+	"syncloud/internal/domain"
 	"syncloud/internal/events"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
@@ -33,6 +35,10 @@ type Server struct {
 	system      *system.Manager
 	registry    *registry.Issuer
 	internal    map[string]http.Handler
+	domains     *domain.Service
+	detector    *domain.Detector
+	certs       *certs.Manager
+	acme        ACMEInfo
 	bus         *events.Bus
 	log         *slog.Logger
 	web         fs.FS // built dashboard (may be empty in development)
@@ -57,6 +63,11 @@ type Options struct {
 	// Internal handlers are mounted as-is outside the public API (e.g. the
 	// Traefik config endpoint) and carry their own authentication.
 	Internal map[string]http.Handler
+	// Domains, Detector and Certs back the domain settings (§5.0.2); may be nil.
+	Domains  *domain.Service
+	Detector *domain.Detector
+	Certs    *certs.Manager
+	ACME     ACMEInfo
 	Bus      *events.Bus
 	Log      *slog.Logger
 	Web      fs.FS
@@ -77,6 +88,10 @@ func New(o Options) *Server {
 		system:       o.System,
 		registry:     o.Registry,
 		internal:     o.Internal,
+		domains:      o.Domains,
+		detector:     o.Detector,
+		certs:        o.Certs,
+		acme:         o.ACME,
 		bus:          o.Bus,
 		log:          o.Log,
 		web:          o.Web,
@@ -120,6 +135,10 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/nodes/join-tokens", h: s.handleListJoinTokens},
 		{Method: "POST", Path: "/api/v1/nodes/join-tokens", h: s.handleCreateJoinToken},
 		{Method: "DELETE", Path: "/api/v1/nodes/join-tokens/{id}", h: s.handleDeleteJoinToken},
+		{Method: "GET", Path: "/api/v1/settings/domain", h: s.handleGetDomain},
+		{Method: "PUT", Path: "/api/v1/settings/domain", h: s.handleSetDomain},
+		{Method: "GET", Path: "/api/v1/certificates", h: s.handleListCertificates},
+		{Method: "POST", Path: "/api/v1/certificates/{host}/renew", h: s.handleRenewCertificate},
 	}
 }
 
