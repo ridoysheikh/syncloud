@@ -26,6 +26,7 @@ message ConnectResponse {
     Welcome welcome = 1;
     RunTask run_task = 2;
     StopTask stop_task = 3;
+    NetworkConfig network = 4;
   }
 }
 
@@ -46,6 +47,12 @@ message NodeInfo {
   uint64 memory_bytes = 6;
   uint64 disk_bytes = 7;      // root filesystem size
   string docker_version = 8;  // empty when Docker is unavailable
+  // Private networking (§8). The key is generated on the node.
+  string wireguard_public_key = 9;
+  // advertise_address is the address peers use to reach this node's
+  // WireGuard port (--advertise-address). Empty: the controller uses the
+  // address the node connects from.
+  string advertise_address = 10;
 }
 
 message Welcome {
@@ -56,6 +63,7 @@ message Welcome {
 
 message Heartbeat {
   NodeMetrics metrics = 1;
+  NetworkStatus network = 2;
 }
 
 message NodeMetrics {
@@ -156,4 +164,41 @@ message TaskStatus {
   string error = 7;
   int64 started_at_unix = 8;
   string spec_hash = 9;
+}
+
+// NetworkConfig is this node's view of the WireGuard mesh (§8). It is sent
+// after Welcome and again whenever a node joins, leaves or changes address.
+message NetworkConfig {
+  uint64 generation = 1;
+  string node_address = 2;      // e.g. "10.90.0.5/16" for the WireGuard interface
+  string container_subnet = 3;  // e.g. "10.91.5.0/24" for the Docker network "syncloud"
+  uint32 listen_port = 4;       // WireGuard UDP port
+  repeated Peer peers = 5;
+  string mesh_cidr = 6;         // 10.90.0.0/16
+  string container_cidr = 7;    // 10.91.0.0/16
+  string service_cidr = 8;      // 10.92.0.0/16 (VIPs, §8.6)
+}
+
+message Peer {
+  string node_id = 1;
+  string name = 2;
+  string public_key = 3;
+  string endpoint = 4;          // host:port
+  repeated string allowed_ips = 5;
+}
+
+message NetworkStatus {
+  uint64 generation = 1;        // last NetworkConfig applied
+  string error = 2;             // why the last apply failed
+  string mode = 3;              // "kernel" or "userspace" WireGuard
+  repeated PeerStatus peers = 4;
+}
+
+message PeerStatus {
+  string public_key = 1;
+  int64 last_handshake_unix = 2;
+  uint64 rx_bytes = 3;
+  uint64 tx_bytes = 4;
+  string endpoint = 5;          // as seen by WireGuard (may differ behind NAT)
+  double rtt_ms = 6;            // TCP probe to the peer's node address; 0 = unknown
 }

@@ -13,6 +13,7 @@ import (
 	"syncloud/internal/certs"
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
+	"syncloud/internal/mesh"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
 	"syncloud/internal/registry"
@@ -42,6 +43,7 @@ type Server struct {
 	acme        ACMEInfo
 	onSetup     func()
 	backups     *backup.Manager
+	mesh        *mesh.Manager
 	bus         *events.Bus
 	log         *slog.Logger
 	web         fs.FS // built dashboard (may be empty in development)
@@ -75,9 +77,11 @@ type Options struct {
 	OnSetup func()
 	// Backups manages S3 backups (§13); may be nil.
 	Backups *backup.Manager
-	Bus     *events.Bus
-	Log     *slog.Logger
-	Web     fs.FS
+	// Mesh reports the private network (§8); may be nil.
+	Mesh *mesh.Manager
+	Bus  *events.Bus
+	Log  *slog.Logger
+	Web  fs.FS
 	// Now is overridable for tests.
 	Now func() time.Time
 }
@@ -101,6 +105,7 @@ func New(o Options) *Server {
 		acme:         o.ACME,
 		onSetup:      o.OnSetup,
 		backups:      o.Backups,
+		mesh:         o.Mesh,
 		bus:          o.Bus,
 		log:          o.Log,
 		web:          o.Web,
@@ -154,6 +159,7 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/backups", h: s.handleListBackups},
 		{Method: "POST", Path: "/api/v1/backups", h: s.handleRunBackup},
 		{Method: "GET", Path: "/api/v1/backups/download", h: s.handleDownloadBackup},
+		{Method: "GET", Path: "/api/v1/network/mesh", h: s.handleMesh},
 	}
 }
 
@@ -198,4 +204,19 @@ func (s *Server) handleSystemTasks(w http.ResponseWriter, _ *http.Request) {
 		items = s.system.List()
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) handleMesh(w http.ResponseWriter, r *http.Request) {
+	items := []mesh.NodeView{}
+	if s.mesh != nil {
+		var err error
+		if items, err = s.mesh.List(r.Context()); err != nil {
+			s.internalError(w, "list mesh", err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"meshCidr": mesh.MeshCIDR.String(), "containerCidr": mesh.ContainerCIDR.String(), "serviceCidr": mesh.ServiceCIDR.String(),
+		"items": items,
+	})
 }

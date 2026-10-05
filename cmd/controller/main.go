@@ -26,6 +26,7 @@ import (
 	"syncloud/internal/config"
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
+	"syncloud/internal/mesh"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
 	dockerregistry "syncloud/internal/registry"
@@ -180,9 +181,12 @@ func serve(args []string) error {
 	}
 	sysMgr := system.NewManager(gw, bus, log, sysCfg(domains.Endpoints()))
 	if cfg.SystemTasks {
-		gw.SetHooks(sysMgr.Hooks())
+		gw.AddHooks(sysMgr.Hooks())
 		go sysMgr.Run(ctx)
 	}
+	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP)
+	gw.AddHooks(meshMgr.Hooks())
+	go meshMgr.Run(ctx)
 	certHosts := func(ep domain.Endpoints) []string {
 		if ep.BaseDomain == "" {
 			return nil
@@ -226,7 +230,7 @@ func serve(args []string) error {
 			"GET /internal/traefik/config": traefikProvider,
 			"GET " + certs.ChallengePrefix: certMgr,
 		},
-		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups,
+		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
 		ACME: api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {
 			_ = os.Remove(filepath.Join(cfg.DataDir, setupTokenFile))

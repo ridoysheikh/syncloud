@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"syncloud/internal/agent/docker"
+	"syncloud/internal/agent/netcfg"
 	"syncloud/internal/agent/sysinfo"
 	"syncloud/internal/client"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
@@ -123,13 +124,22 @@ func loadState(dataDir string) (State, *tls.Config, error) {
 	}, nil
 }
 
+// Options tune the agent.
+type Options struct {
+	// Network joins the WireGuard mesh (§8). It needs root.
+	Network bool
+	// AdvertiseAddress is the address peers dial for WireGuard ("" = the
+	// address the controller sees).
+	AdvertiseAddress string
+}
+
 // Run keeps the agent connected until ctx ends, reconnecting with backoff.
-func Run(ctx context.Context, dataDir string, log *slog.Logger) error {
-	return RunWith(ctx, dataDir, docker.New(docker.DefaultSocket), log)
+func Run(ctx context.Context, dataDir string, log *slog.Logger, opts Options) error {
+	return RunWith(ctx, dataDir, docker.New(docker.DefaultSocket), log, opts)
 }
 
 // RunWith is Run with an explicit Docker client (tests).
-func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Logger) error {
+func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Logger, opts Options) error {
 	st, tlsCfg, err := loadState(dataDir)
 	if err != nil {
 		return err
@@ -147,10 +157,16 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 
 	runner := NewRunner(d, log)
 	go runner.Watch(ctx)
+	net, err := netcfg.New(dataDir, d, log, opts.Network)
+	if err != nil {
+		return fmt.Errorf("network: %w", err)
+	}
+	go net.Run(ctx)
+	a := &agentLink{info: info, runner: runner, net: net, advertise: opts.AdvertiseAddress, log: log}
 
 	log.Info("agent starting", "node", st.Name, "gateway", st.Gateway, "version", version.Version)
 	for attempt := 0; ; attempt++ {
-		connected, err := session(ctx, gw, info, runner, log)
+		connected, err := a.session(ctx, gw)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -171,8 +187,18 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 	}
 }
 
+// agentLink holds what every stream session needs.
+type agentLink struct {
+	info      nodes.Info
+	runner    *Runner
+	net       *netcfg.Manager
+	advertise string
+	log       *slog.Logger
+}
+
 // session runs one stream. connected reports whether the controller accepted it.
-func session(ctx context.Context, gw agentv1.AgentGatewayServiceClient, info nodes.Info, runner *Runner, log *slog.Logger) (connected bool, err error) {
+func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceClient) (connected bool, err error) {
+	info, runner, log := a.info, a.runner, a.log
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := gw.Connect(ctx)
@@ -184,7 +210,8 @@ func session(ctx context.Context, gw agentv1.AgentGatewayServiceClient, info nod
 		Info: &agentv1.NodeInfo{
 			Hostname: info.Hostname, Os: info.OS, Kernel: info.Kernel, Arch: info.Arch,
 			CpuCores: int32(info.CPUCores), MemoryBytes: info.MemoryBytes, DiskBytes: info.DiskBytes,
-			DockerVersion: info.DockerVersion,
+			DockerVersion:      info.DockerVersion,
+			WireguardPublicKey: a.net.PublicKey(), AdvertiseAddress: a.advertise,
 		},
 		Tasks: runner.Snapshot(ctx),
 	}}})
@@ -210,7 +237,7 @@ func session(ctx context.Context, gw agentv1.AgentGatewayServiceClient, info nod
 		interval = nodes.HeartbeatInterval
 	}
 	errc := make(chan error, 2)
-	go func() { errc <- writer(ctx, stream, interval, runner) }()
+	go func() { errc <- writer(ctx, stream, interval, runner, a.net) }()
 	go func() {
 		for {
 			msg, err := stream.Recv()
@@ -224,6 +251,8 @@ func session(ctx context.Context, gw agentv1.AgentGatewayServiceClient, info nod
 			case *agentv1.ConnectResponse_StopTask:
 				st := m.StopTask
 				go runner.Stop(ctx, st.GetTaskId(), time.Duration(st.GetTimeoutSeconds())*time.Second, st.GetRemove())
+			case *agentv1.ConnectResponse_Network:
+				a.net.Submit(m.Network)
 			}
 		}
 	}()
@@ -232,7 +261,7 @@ func session(ctx context.Context, gw agentv1.AgentGatewayServiceClient, info nod
 
 // writer is the only goroutine that sends on the stream (gRPC streams are not
 // safe for concurrent sends): heartbeats on a ticker, task statuses as they come.
-func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.ConnectRequest, agentv1.ConnectResponse], every time.Duration, runner *Runner) error {
+func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.ConnectRequest, agentv1.ConnectResponse], every time.Duration, runner *Runner, net *netcfg.Manager) error {
 	sampler := sysinfo.NewSampler("/")
 	t := time.NewTicker(every)
 	defer t.Stop()
@@ -252,6 +281,7 @@ func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.Connect
 					Load1: m.Load1, Load5: m.Load5, Load15: m.Load15,
 					NetRxBytes: m.NetRxBytes, NetTxBytes: m.NetTxBytes, UptimeSeconds: m.UptimeSeconds,
 				},
+				Network: net.Status(),
 			}}}
 		}
 		if err := stream.Send(msg); err != nil {

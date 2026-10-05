@@ -123,6 +123,11 @@ fi
 systemctl enable --now docker >/dev/null 2>&1 || true
 ok "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null || echo '?')"
 command -v curl >/dev/null || die "curl is required"
+if ! command -v nft >/dev/null; then
+  echo "  installing nftables…"
+  (apt-get -qq update && apt-get -qq install -y nftables) >/dev/null 2>&1 || die "install the nftables package"
+fi
+ok "nftables $(nft --version 2>/dev/null | awk '{print $2}')"
 
 # ── 2. Binaries ─────────────────────────────────────────────────────────────
 bold "Binaries"

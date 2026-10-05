@@ -115,7 +115,7 @@ func TestJoinConnectAndRevoke(t *testing.T) {
 
 	runCtx, stop := context.WithCancel(ctx)
 	done := make(chan error, 1)
-	go func() { done <- Run(runCtx, dataDir, slog.New(slog.NewTextHandler(io.Discard, nil))) }()
+	go func() { done <- Run(runCtx, dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{}) }()
 
 	node := func() nodes.View {
 		for _, n := range c.registry.List() {
@@ -139,7 +139,7 @@ func TestJoinConnectAndRevoke(t *testing.T) {
 	}
 	stop() // drop the current stream; Run returns nil on cancel
 	<-done
-	err = Run(ctx, dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	err = Run(ctx, dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{})
 	if err == nil || !strings.Contains(err.Error(), "removed") {
 		t.Fatalf("removed node: want rejection, got %v", err)
 	}
@@ -157,7 +157,7 @@ func TestHeartbeatsCarryMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go Run(ctx, dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	go Run(ctx, dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{})
 	waitFor(t, "first heartbeat", func() bool {
 		for _, n := range c.registry.List() {
 			if n.ID == st.NodeID && n.Metrics != nil {
@@ -191,7 +191,7 @@ func TestUntrustedClientRejected(t *testing.T) {
 
 	rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	go Run(rctx, dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	go Run(rctx, dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{})
 	time.Sleep(1500 * time.Millisecond)
 	for _, n := range c.registry.List() {
 		if n.Connected {

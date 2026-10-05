@@ -1198,6 +1198,15 @@ Because there is only one controller:
 - **sslip.io base domain**, controller-managed certificates (ACME) with the fallback (§5.0.2), served to Traefik; recovery key; Litestream backup wiring.
 
 ### Phase 1: Nodes, Networking and Host Firewall (3–4 wks)
+**Progress**
+- ✅ Slice 1a (2026-10-06), WireGuard mesh and IPAM:
+  - The controller allocates a mesh index (`10.90.x.y`, `ctl-0` is always `10.90.0.1`) and a container `/24` per node, with a 1-hour cool-down before released addresses are reused. Every agent gets its full-mesh view (`NetworkConfig`) over the stream, and again whenever membership changes.
+  - The agent creates the WireGuard interface `wg-syncloud` (not `wg0`, which users often have). It uses kernel WireGuard, or falls back to embedded **userspace WireGuard** when the module is missing (or with `SYNCLOUD_WIREGUARD_MODE=userspace`).
+  - The Docker network `syncloud` (bridge `syncloud0`) uses `gateway_mode_ipv4=nat-unprotected` with Docker's masquerade turned off. The agent's own nftables table `ip syncloud` masquerades only traffic leaving the private ranges, and drops new connections to container IPs that do not arrive from the mesh or the local bridge.
+  - Each agent measures RTT to its peers (a TCP probe on `<mesh-ip>:7444`) and reports handshakes and traffic. API `GET /network/mesh`, `synctl network mesh`, and the Network → Topology page (graph and members table).
+  - Verified with `make e2e` (three Docker-in-Docker nodes, one on userspace WireGuard): cross-node container traffic keeps the source IP, the controller host reaches remote containers (Traefik's path), egress is masqueraded, and node removal updates the mesh.
+  - **Deviation**: the agent ↔ controller gRPC stream stays on the controller's advertised address (mTLS) instead of moving into the mesh. Keeping the control plane independent of the data plane means a broken mesh can still be repaired from the controller.
+  - The agent joins the mesh when it runs as root (`--network auto`); the non-root dev agent stays out.
 - Agent binary, `join.sh`, join flow, mTLS CA.
 - WireGuard mesh with IPAM, per-node container subnets, and cross-node container connectivity tests.
 - Internal DNS with the agent-side forwarder (§8.1).

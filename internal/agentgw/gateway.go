@@ -30,10 +30,15 @@ import (
 // Hooks let other controller components react to agents. Hooks run on the
 // stream's goroutine and must not block.
 type Hooks struct {
-	// OnConnect runs after the Welcome, with the node's container snapshot.
-	OnConnect func(node store.Node, tasks []*agentv1.TaskStatus)
+	// OnConnect runs after the Welcome, with the node's Hello (including its
+	// container snapshot) and the IP address it connected from.
+	OnConnect func(c Conn)
 	// OnTaskStatus runs for every task status the agent reports.
 	OnTaskStatus func(node store.Node, s *agentv1.TaskStatus)
+	// OnHeartbeat runs for every heartbeat.
+	OnHeartbeat func(node store.Node, hb *agentv1.Heartbeat)
+	// OnDisconnect runs when the stream ends.
+	OnDisconnect func(node store.Node)
 }
 
 type Gateway struct {
@@ -41,7 +46,7 @@ type Gateway struct {
 	st       *store.Store
 	registry *nodes.Registry
 	log      *slog.Logger
-	hooks    Hooks
+	hooks    []Hooks
 
 	mu       sync.Mutex
 	sessions map[string]*session // by node ID
@@ -57,8 +62,15 @@ func New(st *store.Store, registry *nodes.Registry, log *slog.Logger) *Gateway {
 	return &Gateway{st: st, registry: registry, log: log, sessions: map[string]*session{}}
 }
 
-// SetHooks must be called before Serve.
-func (g *Gateway) SetHooks(h Hooks) { g.hooks = h }
+// Conn describes a newly connected agent.
+type Conn struct {
+	Node   store.Node
+	Hello  *agentv1.Hello
+	Remote string // IP address the agent connected from
+}
+
+// AddHooks registers h. It must be called before Serve.
+func (g *Gateway) AddHooks(h Hooks) { g.hooks = append(g.hooks, h) }
 
 // Send queues a command for a connected node.
 func (g *Gateway) Send(nodeID string, msg *agentv1.ConnectResponse) error {
@@ -164,9 +176,24 @@ func (g *Gateway) Connect(stream grpc.BidiStreamingServer[agentv1.ConnectRequest
 		}
 	}()
 
-	if g.hooks.OnConnect != nil {
-		g.hooks.OnConnect(node, hello.GetTasks())
+	remote := ""
+	if p, ok := peer.FromContext(ctx); ok {
+		if host, _, err := net.SplitHostPort(p.Addr.String()); err == nil {
+			remote = host
+		}
 	}
+	for _, h := range g.hooks {
+		if h.OnConnect != nil {
+			h.OnConnect(Conn{Node: node, Hello: hello, Remote: remote})
+		}
+	}
+	defer func() {
+		for _, h := range g.hooks {
+			if h.OnDisconnect != nil {
+				h.OnDisconnect(node)
+			}
+		}
+	}()
 
 	recv := make(chan *agentv1.ConnectRequest)
 	recvErr := make(chan error, 1)
@@ -198,9 +225,16 @@ func (g *Gateway) Connect(stream grpc.BidiStreamingServer[agentv1.ConnectRequest
 			switch m := msg.Msg.(type) {
 			case *agentv1.ConnectRequest_Heartbeat:
 				g.registry.Heartbeat(ctx, node.ID, metricsFrom(m.Heartbeat.GetMetrics()))
+				for _, h := range g.hooks {
+					if h.OnHeartbeat != nil {
+						h.OnHeartbeat(node, m.Heartbeat)
+					}
+				}
 			case *agentv1.ConnectRequest_TaskStatus:
-				if g.hooks.OnTaskStatus != nil {
-					g.hooks.OnTaskStatus(node, m.TaskStatus)
+				for _, h := range g.hooks {
+					if h.OnTaskStatus != nil {
+						h.OnTaskStatus(node, m.TaskStatus)
+					}
 				}
 			case *agentv1.ConnectRequest_Result:
 			case *agentv1.ConnectRequest_Hello:

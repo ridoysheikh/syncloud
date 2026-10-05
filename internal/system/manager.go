@@ -64,7 +64,8 @@ func (m *Manager) Hooks() agentgw.Hooks {
 	return agentgw.Hooks{OnConnect: m.onConnect, OnTaskStatus: m.onTaskStatus}
 }
 
-func (m *Manager) onConnect(node store.Node, snapshot []*agentv1.TaskStatus) {
+func (m *Manager) onConnect(c agentgw.Conn) {
+	node, snapshot := c.Node, c.Hello.GetTasks()
 	if node.Name != LocalNode {
 		return
 	}

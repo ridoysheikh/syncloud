@@ -1,4 +1,4 @@
-.PHONY: all build controller agent synctl web proto test vet fmt dev dev-controller dev-agent dev-web clean release
+.PHONY: all build controller agent synctl web proto test vet fmt dev dev-controller dev-agent dev-web clean release e2e
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 LDFLAGS := -s -w -X syncloud/internal/version.Version=$(VERSION)
@@ -37,6 +37,10 @@ release: web
 	done
 	cp scripts/install.sh dist/
 	cd dist && sha256sum syncloud-* synctl-* > SHA256SUMS
+
+## e2e: multi-node tests in Docker-in-Docker containers (needs Docker, privileged containers)
+e2e:
+	test/e2e/mesh.sh
 
 ## proto: regenerate gRPC code (tools are installed into .tools/ on first use)
 proto: .tools/buf .tools/protoc-gen-go .tools/protoc-gen-go-grpc

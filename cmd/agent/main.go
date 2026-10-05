@@ -74,11 +74,23 @@ func run(args []string) error {
 		return nil
 
 	case "run":
+		network := fs.String("network", envOr("SYNCLOUD_AGENT_NETWORK", "auto"), "join the private network: on, off, or auto (on when running as root)")
+		advertise := fs.String("advertise-address", os.Getenv("SYNCLOUD_ADVERTISE_ADDRESS"), "address other nodes use to reach this node's WireGuard port (default: as seen by the controller)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
+		opts := agent.Options{AdvertiseAddress: *advertise}
+		switch *network {
+		case "on":
+			opts.Network = true
+		case "off":
+		case "auto":
+			opts.Network = os.Geteuid() == 0
+		default:
+			return errors.New("--network must be on, off or auto")
+		}
 		log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-		return agent.Run(ctx, *dataDir, log)
+		return agent.Run(ctx, *dataDir, log, opts)
 
 	case "version":
 		fmt.Printf("syncloud-agent %s (%s)\n", version.Version, version.Commit)

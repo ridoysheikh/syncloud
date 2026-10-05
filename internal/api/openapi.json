@@ -873,6 +873,27 @@
           }
         }
       }
+    },
+    "/api/v1/network/mesh": {
+      "get": {
+        "operationId": "getMesh",
+        "tags": [
+          "network"
+        ],
+        "summary": "WireGuard mesh: each node's address, container subnet, endpoint and live peer links",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Mesh"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1675,6 +1696,105 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BackupObject"
+            }
+          }
+        }
+      },
+      "MeshPeer": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "lastHandshake": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "rxBytes": {
+            "type": "integer"
+          },
+          "txBytes": {
+            "type": "integer"
+          },
+          "rttMs": {
+            "type": "number"
+          }
+        }
+      },
+      "MeshNode": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "subnet": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "publicKey": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "",
+              "kernel",
+              "userspace"
+            ]
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "appliedGeneration": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "statusUpdatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "peers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MeshPeer"
+            }
+          }
+        }
+      },
+      "Mesh": {
+        "type": "object",
+        "properties": {
+          "meshCidr": {
+            "type": "string"
+          },
+          "containerCidr": {
+            "type": "string"
+          },
+          "serviceCidr": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MeshNode"
             }
           }
         }

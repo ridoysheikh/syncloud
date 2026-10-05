@@ -291,3 +291,39 @@ func (c *Client) RunBackup(ctx context.Context) (BackupObject, error) {
 	var out BackupObject
 	return out, c.Do(ctx, "POST", "/api/v1/backups", nil, &out)
 }
+
+type MeshPeer struct {
+	NodeID        string     `json:"nodeId"`
+	Name          string     `json:"name"`
+	Endpoint      string     `json:"endpoint"`
+	LastHandshake *time.Time `json:"lastHandshake"`
+	RxBytes       uint64     `json:"rxBytes"`
+	TxBytes       uint64     `json:"txBytes"`
+	RTTMillis     float64    `json:"rttMs"`
+}
+
+type MeshNode struct {
+	NodeID     string     `json:"nodeId"`
+	Name       string     `json:"name"`
+	Address    string     `json:"address"`
+	Subnet     string     `json:"subnet"`
+	Endpoint   string     `json:"endpoint"`
+	PublicKey  string     `json:"publicKey"`
+	Mode       string     `json:"mode"`
+	Generation uint64     `json:"generation"`
+	AppliedGen uint64     `json:"appliedGeneration"`
+	Error      string     `json:"error"`
+	Peers      []MeshPeer `json:"peers"`
+}
+
+type Mesh struct {
+	MeshCIDR      string     `json:"meshCidr"`
+	ContainerCIDR string     `json:"containerCidr"`
+	ServiceCIDR   string     `json:"serviceCidr"`
+	Items         []MeshNode `json:"items"`
+}
+
+func (c *Client) GetMesh(ctx context.Context) (Mesh, error) {
+	var out Mesh
+	return out, c.Do(ctx, "GET", "/api/v1/network/mesh", nil, &out)
+}

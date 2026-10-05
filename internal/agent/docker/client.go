@@ -315,3 +315,40 @@ func (c *Client) Events(ctx context.Context, label string) (<-chan Event, <-chan
 	}()
 	return evc, errc
 }
+
+// EnsureBridge makes sure a bridge network exists with exactly this subnet.
+// A network with a different subnet is recreated if no containers use it.
+func (c *Client) EnsureBridge(ctx context.Context, name, subnet, gateway string, options, labels map[string]string) error {
+	var cur struct {
+		IPAM struct {
+			Config []struct {
+				Subnet string `json:"Subnet"`
+			} `json:"Config"`
+		} `json:"IPAM"`
+		Options    map[string]string `json:"Options"`
+		Containers map[string]any    `json:"Containers"`
+	}
+	err := c.json(ctx, "GET", "/networks/"+name, nil, nil, &cur)
+	switch {
+	case err == nil:
+		same := len(cur.IPAM.Config) == 1 && cur.IPAM.Config[0].Subnet == subnet
+		for k, v := range options {
+			same = same && cur.Options[k] == v
+		}
+		if same {
+			return nil
+		}
+		if len(cur.Containers) > 0 {
+			return fmt.Errorf("network %s has different settings and %d containers attached; stop them to let it be recreated", name, len(cur.Containers))
+		}
+		if err := c.json(ctx, "DELETE", "/networks/"+name, nil, nil, nil); err != nil && !IsNotFound(err) {
+			return err
+		}
+	case !IsNotFound(err):
+		return err
+	}
+	return c.json(ctx, "POST", "/networks/create", nil, map[string]any{
+		"Name": name, "Driver": "bridge", "Labels": labels, "Options": options, "CheckDuplicate": true,
+		"IPAM": map[string]any{"Driver": "default", "Config": []map[string]string{{"Subnet": subnet, "Gateway": gateway}}},
+	}, nil)
+}
