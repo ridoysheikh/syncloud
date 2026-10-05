@@ -23,6 +23,7 @@ import (
 	"syncloud/internal/events"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
+	dockerregistry "syncloud/internal/registry"
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 	"syncloud/internal/system"
@@ -92,10 +93,21 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	regIssuer, err := dockerregistry.LoadOrCreateIssuer(filepath.Join(cfg.DataDir, "registry"))
+	if err != nil {
+		return fmt.Errorf("registry token issuer: %w", err)
+	}
+	baseDomain, _, err := st.GetSetting(ctx, store.SettingBaseDomain)
+	if err != nil {
+		return err
+	}
+	pub := publicEndpoints(cfg, baseDomain)
+
 	controllerURL := "http://" + loopbackURLHost(cfg.Listen)
 	sysMgr := system.NewManager(gw, bus, log, system.Config{
 		ControllerURL: controllerURL, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS,
 		AdminAddr: cfg.TraefikAdmin, TraefikToken: traefikToken,
+		RegistryRealm: pub.url + "/api/v1/registry/token", RegistryTokenCert: regIssuer.CertPath,
 	})
 	if cfg.SystemTasks {
 		gw.SetHooks(sysMgr.Hooks())
@@ -107,11 +119,13 @@ func run(args []string) error {
 			d, _, _ := st.GetSetting(context.Background(), store.SettingBaseDomain)
 			return d
 		},
+		RegistryHost: func() string { return pub.registryHost },
+		RegistryURL:  "http://" + system.RegistryAddr,
 	}
 
 	srv := api.New(api.Options{
 		Store: st, Secrets: box, CA: ca, Nodes: registry, GatewayAddr: cfg.AgentAdvertise,
-		System: sysMgr, Internal: map[string]http.Handler{"GET /internal/traefik/config": traefikProvider},
+		System: sysMgr, Registry: regIssuer, Internal: map[string]http.Handler{"GET /internal/traefik/config": traefikProvider},
 		Bus: bus, Log: log, Web: web.FS(),
 	})
 	go func() {
@@ -270,4 +284,23 @@ func loopbackURLHost(listen string) string {
 		host = "127.0.0.1"
 	}
 	return net.JoinHostPort(host, port)
+}
+
+type endpoints struct {
+	url          string // public dashboard/API URL, e.g. https://203-0-113-10.sslip.io
+	registryHost string // registry hostname without port
+}
+
+// publicEndpoints derives public addresses. Without a base domain (set in the
+// first-run flow, §5.0.2), dev mode uses localhost names on the dev ports.
+func publicEndpoints(cfg config.Controller, baseDomain string) endpoints {
+	if baseDomain != "" {
+		return endpoints{url: "https://" + baseDomain, registryHost: "registry." + baseDomain}
+	}
+	_, port, _ := net.SplitHostPort(cfg.PublicHTTP)
+	host := "localhost"
+	if port != "" && port != "80" {
+		host += ":" + port
+	}
+	return endpoints{url: "http://" + host, registryHost: "registry.localhost"}
 }

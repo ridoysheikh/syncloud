@@ -25,12 +25,13 @@ import (
 
 // Operations deliberately without a dedicated command, and why.
 var noCommand = map[string]string{
-	"completeSetup": "browser-only: first-run wizard",
-	"login":         "browser-only: dashboard sessions; the CLI uses access keys",
-	"logout":        "browser-only: dashboard sessions",
-	"stream":        "WebSocket for the dashboard; CLI watch commands arrive with resources",
-	"getOpenAPI":    "reachable with `synctl api GET /api/v1/openapi.json`",
-	"joinNode":      "agent-only: `syncloud-agent join` (it generates the node key)",
+	"completeSetup":    "browser-only: first-run wizard",
+	"login":            "browser-only: dashboard sessions; the CLI uses access keys",
+	"logout":           "browser-only: dashboard sessions",
+	"stream":           "WebSocket for the dashboard; CLI watch commands arrive with resources",
+	"getOpenAPI":       "reachable with `synctl api GET /api/v1/openapi.json`",
+	"joinNode":         "agent-only: `syncloud-agent join` (it generates the node key)",
+	"getRegistryToken": "used by `docker login` / the Docker registry token protocol",
 }
 
 // Every API operation has a synctl command (§5.1 parity check).

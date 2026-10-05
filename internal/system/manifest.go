@@ -14,7 +14,11 @@ const (
 	ImageTraefik         = "traefik:v3.7.13"
 	ImageVictoriaMetrics = "victoriametrics/victoria-metrics:v1.153.0"
 	ImageVictoriaLogs    = "victoriametrics/victoria-logs:v1.53.0"
+	ImageRegistry        = "registry:3.1.2"
 )
+
+// RegistryAddr is where Traefik (host network) reaches the registry.
+const RegistryAddr = "127.0.0.1:5000"
 
 // Network is the Docker bridge network system components share.
 const Network = "syncloud-system"
@@ -32,6 +36,10 @@ type Config struct {
 	AdminAddr string
 	// TraefikToken authenticates Traefik to the controller's config endpoint.
 	TraefikToken string
+	// RegistryRealm is the token endpoint URL Docker clients are sent to.
+	RegistryRealm string
+	// RegistryTokenCert is the absolute path of the token issuer certificate.
+	RegistryTokenCert string
 }
 
 // Component describes one system task for the dashboard.
@@ -46,6 +54,10 @@ var Components = []Component{
 	{
 		TaskID: "sys-traefik", Name: "Traefik", Description: "Edge proxy: routes and TLS from the controller (§5.7)",
 		spec: traefikSpec,
+	},
+	{
+		TaskID: "sys-registry", Name: "Registry", Description: "Private Docker registry with token auth (§5.9)",
+		spec: registrySpec,
 	},
 	{
 		TaskID: "sys-victoriametrics", Name: "VictoriaMetrics", Description: "Metrics store (§9.1)",
@@ -100,6 +112,28 @@ func traefikSpec(c Config) *agentv1.TaskSpec {
 		},
 		NetworkMode: "host",
 		System:      true,
+	}
+}
+
+func registrySpec(c Config) *agentv1.TaskSpec {
+	return &agentv1.TaskSpec{
+		TaskId: "sys-registry", Name: "syncloud-registry", Image: ImageRegistry,
+		Env: map[string]string{
+			"REGISTRY_HTTP_ADDR":                 ":5000",
+			"REGISTRY_STORAGE_DELETE_ENABLED":    "true",
+			"REGISTRY_AUTH_TOKEN_REALM":          c.RegistryRealm,
+			"REGISTRY_AUTH_TOKEN_SERVICE":        "syncloud-registry",
+			"REGISTRY_AUTH_TOKEN_ISSUER":         "syncloud",
+			"REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE": "/etc/syncloud/registry-token.crt",
+			"REGISTRY_LOG_LEVEL":                 "info",
+			"OTEL_TRACES_EXPORTER":               "none",
+		},
+		Ports: []*agentv1.PortBinding{{HostIp: "127.0.0.1", HostPort: 5000, ContainerPort: 5000}},
+		Mounts: []*agentv1.Mount{
+			{Type: agentv1.Mount_TYPE_VOLUME, Source: "syncloud-registry", Target: "/var/lib/registry"},
+			{Type: agentv1.Mount_TYPE_BIND, Source: c.RegistryTokenCert, Target: "/etc/syncloud/registry-token.crt", ReadOnly: true},
+		},
+		NetworkMode: Network, System: true,
 	}
 }
 

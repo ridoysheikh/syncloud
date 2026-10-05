@@ -565,6 +565,68 @@
           }
         }
       }
+    },
+    "/api/v1/registry/token": {
+      "get": {
+        "operationId": "getRegistryToken",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Docker registry token endpoint (used by docker login/push/pull). Basic auth: access key ID + secret, or any username + personal access token.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "const": "syncloud-registry"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "explode": true,
+            "description": "e.g. repository:shop/api:pull,push"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "access_token": {
+                      "type": "string"
+                    },
+                    "expires_in": {
+                      "type": "integer"
+                    },
+                    "issued_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {

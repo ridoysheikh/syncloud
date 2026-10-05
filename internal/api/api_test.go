@@ -16,6 +16,7 @@ import (
 
 	"syncloud/internal/auth"
 	"syncloud/internal/events"
+	"syncloud/internal/registry"
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 )
@@ -47,7 +48,11 @@ func newEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(Options{Store: st, Secrets: box, Bus: events.NewBus(), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Web: web})
+	reg, err := registry.LoadOrCreateIssuer(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{Store: st, Secrets: box, Registry: reg, Bus: events.NewBus(), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Web: web})
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)

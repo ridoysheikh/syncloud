@@ -1173,7 +1173,13 @@ Because there is only one controller:
   - The controller pushes RunTask/StopTask over the stream. System tasks (Traefik v3.7.13, VictoriaMetrics v1.153.0, VictoriaLogs v1.53.0) run on `ctl-0` and are re-applied every minute.
   - The Traefik HTTP provider endpoint (token-protected) routes the dashboard. X-Forwarded-* is trusted from loopback only.
   - Dev mode uses 127.0.0.1:8080/8443. Settings → Platform page; `synctl system tasks`.
-- ⏳ Slice 2b: private registry with token auth (registry 3.1.2), BuildKit.
+- ✅ Slice 2b (2026-10-06), private registry: `registry:3.1.2` runs as a system task with Docker token auth.
+  - The controller issues ES256 JWTs (x5c and libtrust-style kid) at `/api/v1/registry/token`.
+  - `docker login` accepts an access key (key ID as username, secret as password) or any username with a personal access token.
+  - Traefik routes `registry.<base-domain>` (`registry.localhost` in dev).
+  - Verified with a real `docker login` / `push` / `pull`.
+  - Until IAM (Phase 7), the root account gets all registry actions and other accounts get none.
+  - **BuildKit moved to Phase 4**: it needs a privileged container and has no consumer before Git builds.
 - ⏳ Slice 3: sslip.io base domain and certificates.
 - ⏳ Slice 4: install script, recovery key, Litestream.
 - Minimal agent: gRPC stream to the controller, Docker runner for system tasks.
@@ -1206,7 +1212,7 @@ Because there is only one controller:
 - ECR-style registry UI (§5.10): dashboard, repositories, images, push commands, lifecycle policies with preview, permissions, upstream credentials, registry tokens; registry event tracking; pre-pull before deploys.
 - (v1.1) Trivy scanning and the deploy gate.
 - GitHub App, GitLab, Gitea and generic Git; webhooks plus the polling scheduler (watch rules, path filters, SHA dedup, backoff) (§5.8).
-- BuildKit/Nixpacks builds, build logs, auto-deploy.
+- BuildKit system task (privileged; moved from Phase 0b), BuildKit/Nixpacks builds, build logs, auto-deploy.
 
 ### Phase 5: Autoscaling and Traffic Insights (2–3 wks)
 - Traefik metrics and access-log ingestion; dynamic traffic dashboard: live traffic map, RPS, latency and errors per service and in total, request tail (§5.7).

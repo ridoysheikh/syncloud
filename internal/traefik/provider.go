@@ -50,6 +50,10 @@ type Provider struct {
 	ControllerURL string
 	// BaseDomain returns the current base domain ("" until one is set, §5.0.2).
 	BaseDomain func() string
+	// RegistryHost is the registry's hostname (no port), e.g. "registry.<base-domain>".
+	RegistryHost func() string
+	// RegistryURL is where Traefik reaches the registry.
+	RegistryURL string
 }
 
 // Config builds the current dynamic configuration.
@@ -64,6 +68,16 @@ func (p *Provider) Config() Dynamic {
 	}
 	d.HTTP.Routers["syncloud-dashboard"] = Router{
 		Rule: rule, Priority: 1, EntryPoints: []string{"web"}, Service: "syncloud-controller",
+	}
+	if p.RegistryHost != nil && p.RegistryURL != "" {
+		if host := p.RegistryHost(); host != "" {
+			d.HTTP.Services["syncloud-registry"] = Service{LoadBalancer: LoadBalancer{
+				Servers: []Server{{URL: p.RegistryURL}}, PassHostHeader: true,
+			}}
+			d.HTTP.Routers["syncloud-registry"] = Router{
+				Rule: "Host(`" + host + "`)", EntryPoints: []string{"web"}, Service: "syncloud-registry",
+			}
+		}
 	}
 	return d
 }

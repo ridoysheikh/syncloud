@@ -61,6 +61,12 @@ func LoadController(args []string) (Controller, error) {
 	if c.DataDir == "" {
 		return c, fmt.Errorf("data-dir must not be empty")
 	}
+	// Absolute, because files under it are bind-mounted into system containers.
+	abs, err := filepath.Abs(c.DataDir)
+	if err != nil {
+		return c, err
+	}
+	c.DataDir = abs
 	return c, nil
 }
 

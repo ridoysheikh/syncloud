@@ -12,6 +12,7 @@ import (
 	"syncloud/internal/events"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
+	"syncloud/internal/registry"
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 	"syncloud/internal/system"
@@ -30,6 +31,7 @@ type Server struct {
 	nodes       *nodes.Registry
 	gatewayAddr string
 	system      *system.Manager
+	registry    *registry.Issuer
 	internal    map[string]http.Handler
 	bus         *events.Bus
 	log         *slog.Logger
@@ -50,6 +52,8 @@ type Options struct {
 	GatewayAddr string
 	// System reports platform components (system tasks); may be nil in tests.
 	System *system.Manager
+	// Registry issues Docker registry tokens; nil disables the token endpoint.
+	Registry *registry.Issuer
 	// Internal handlers are mounted as-is outside the public API (e.g. the
 	// Traefik config endpoint) and carry their own authentication.
 	Internal map[string]http.Handler
@@ -71,6 +75,7 @@ func New(o Options) *Server {
 		nodes:        o.Nodes,
 		gatewayAddr:  o.GatewayAddr,
 		system:       o.System,
+		registry:     o.Registry,
 		internal:     o.Internal,
 		bus:          o.Bus,
 		log:          o.Log,
@@ -97,6 +102,7 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/system/status", Public: true, h: s.handleStatus},
 		{Method: "GET", Path: "/api/v1/openapi.json", Public: true, h: handleOpenAPI},
 		{Method: "GET", Path: "/api/v1/system/tasks", h: s.handleSystemTasks},
+		{Method: "GET", Path: "/api/v1/registry/token", Public: true, h: s.handleRegistryToken},
 		{Method: "POST", Path: "/api/v1/setup", Public: true, h: s.handleSetup},
 		{Method: "POST", Path: "/api/v1/auth/login", Public: true, h: s.handleLogin},
 		{Method: "POST", Path: "/api/v1/auth/logout", h: s.handleLogout},
