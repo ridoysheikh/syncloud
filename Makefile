@@ -1,4 +1,4 @@
-.PHONY: all build controller web test vet fmt dev dev-controller dev-web clean
+.PHONY: all build controller synctl web test vet fmt dev dev-controller dev-web clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 LDFLAGS := -s -w -X syncloud/internal/version.Version=$(VERSION)
@@ -7,10 +7,13 @@ DEV_DATA := $(CURDIR)/.data
 all: build
 
 ## build: dashboard + controller binary (dashboard embedded)
-build: web controller
+build: web controller synctl
 
 controller:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/syncloud-controller ./cmd/controller
+
+synctl:
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/synctl ./cmd/synctl
 
 web: web/node_modules
 	cd web && pnpm run build

@@ -1,32 +1,14 @@
 package api
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"net/url"
 	"runtime/debug"
 	"time"
 
-	"syncloud/internal/auth"
 	"syncloud/internal/store"
 )
-
-type ctxKey int
-
-const userKey ctxKey = iota
-
-const (
-	sessionCookie = "syncloud_session"
-	sessionTTL    = 12 * time.Hour
-	// Sessions are extended at most this often, to avoid a write per request.
-	sessionTouchEvery = time.Minute
-)
-
-func currentUser(ctx context.Context) (store.User, bool) {
-	u, ok := ctx.Value(userKey).(store.User)
-	return u, ok
-}
 
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,35 +67,6 @@ func checkOrigin(next http.Handler) http.Handler {
 	})
 }
 
-// requireSession authenticates the request from the session cookie.
-func (s *Server) requireSession(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie(sessionCookie)
-		if err != nil || c.Value == "" {
-			writeError(w, http.StatusUnauthorized, CodeUnauthorized, "not signed in")
-			return
-		}
-		now := s.now()
-		hash := auth.HashToken(c.Value)
-		sess, err := s.store.SessionByHash(r.Context(), hash, now)
-		if err != nil {
-			writeError(w, http.StatusUnauthorized, CodeUnauthorized, "session expired")
-			return
-		}
-		u, err := s.store.UserByID(r.Context(), sess.UserID)
-		if err != nil {
-			writeError(w, http.StatusUnauthorized, CodeUnauthorized, "session expired")
-			return
-		}
-		if now.Sub(sess.LastSeenAt) >= sessionTouchEvery {
-			if err := s.store.TouchSession(r.Context(), hash, now, now.Add(sessionTTL)); err != nil {
-				s.log.Warn("touch session", "err", err)
-			}
-		}
-		next(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
-	}
-}
-
 // clientIP returns the direct peer address. Once Traefik fronts the controller
 // (Phase 0b) this must honor X-Forwarded-For from trusted proxies only.
 func clientIP(r *http.Request) string {
@@ -128,7 +81,18 @@ func isHTTPS(r *http.Request) bool {
 	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 }
 
+// audit records an action. The credential used (session, token or access key)
+// is added automatically for authenticated requests (§7.1).
 func (s *Server) audit(r *http.Request, actorID, action, resource string, detail map[string]any) {
+	if p, ok := principal(r.Context()); ok {
+		if detail == nil {
+			detail = map[string]any{}
+		}
+		detail["credType"] = p.CredType
+		if p.CredID != "" {
+			detail["credId"] = p.CredID
+		}
+	}
 	err := s.store.WriteAudit(r.Context(), store.AuditEvent{
 		At: s.now(), ActorID: actorID, Action: action, Resource: resource,
 		IP: clientIP(r), UserAgent: r.UserAgent(), Detail: detail,

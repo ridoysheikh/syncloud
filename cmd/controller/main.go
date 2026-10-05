@@ -18,6 +18,7 @@ import (
 	"syncloud/internal/auth"
 	"syncloud/internal/config"
 	"syncloud/internal/events"
+	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 	"syncloud/internal/version"
 	"syncloud/internal/web"
@@ -50,13 +51,18 @@ func run(args []string) error {
 	}
 	defer st.Close()
 
+	box, err := secrets.LoadOrCreate(cfg.DataDir)
+	if err != nil {
+		return err
+	}
+
 	token, err := auth.EnsureSetupToken(ctx, st, time.Now())
 	if err != nil {
 		return fmt.Errorf("setup token: %w", err)
 	}
 
 	bus := events.NewBus()
-	srv := api.New(api.Options{Store: st, Bus: bus, Log: log, Web: web.FS()})
+	srv := api.New(api.Options{Store: st, Secrets: box, Bus: bus, Log: log, Web: web.FS()})
 
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {

@@ -15,6 +15,7 @@ import {
 import type { DashboardModule } from "./types";
 import { OverviewPage } from "./overview/OverviewPage";
 import { planned } from "./planned";
+import { CredentialsPage } from "./iam/CredentialsPage";
 
 /** The module registry. The side nav and routes are built from this list. */
 export const modules: DashboardModule[] = [
@@ -123,7 +124,7 @@ export const modules: DashboardModule[] = [
     pages: [
       { path: "/iam/users", label: "Users", component: planned(["IAM"], "Users", "Phase 7", "§7", "Users, groups, roles and service accounts.") },
       { path: "/iam/policies", label: "Policies", component: planned(["IAM"], "Policies", "Phase 7", "§7", "JSON policies and the policy simulator.") },
-      { path: "/iam/keys", label: "Access keys", component: planned(["IAM"], "Access keys", "Phase 7", "§7.1", "Access keys, personal tokens and role sessions.") },
+      { path: "/iam/keys", label: "Access keys", component: CredentialsPage },
       { path: "/iam/audit", label: "Audit log", component: planned(["IAM"], "Audit log", "Phase 7", "§7", "Every action with who, what, where and when.") },
     ],
   },

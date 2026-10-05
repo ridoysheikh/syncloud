@@ -3,31 +3,41 @@
 package api
 
 import (
+	_ "embed"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"syncloud/internal/events"
+	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 )
 
+// OpenAPISpec is the API contract, served at /api/v1/openapi.json.
+// A test keeps it in sync with Routes.
+//
+//go:embed openapi.json
+var OpenAPISpec []byte
+
 type Server struct {
-	store *store.Store
-	bus   *events.Bus
-	log   *slog.Logger
-	web   fs.FS // built dashboard (may be empty in development)
-	now   func() time.Time
+	store   *store.Store
+	secrets *secrets.Box
+	bus     *events.Bus
+	log     *slog.Logger
+	web     fs.FS // built dashboard (may be empty in development)
+	now     func() time.Time
 
 	loginLimiter *attemptLimiter
 	setupLimiter *attemptLimiter
 }
 
 type Options struct {
-	Store *store.Store
-	Bus   *events.Bus
-	Log   *slog.Logger
-	Web   fs.FS
+	Store   *store.Store
+	Secrets *secrets.Box
+	Bus     *events.Bus
+	Log     *slog.Logger
+	Web     fs.FS
 	// Now is overridable for tests.
 	Now func() time.Time
 }
@@ -38,6 +48,7 @@ func New(o Options) *Server {
 	}
 	return &Server{
 		store:        o.Store,
+		secrets:      o.Secrets,
 		bus:          o.Bus,
 		log:          o.Log,
 		web:          o.Web,
@@ -47,22 +58,54 @@ func New(o Options) *Server {
 	}
 }
 
+// Route is one API endpoint. Path uses OpenAPI-style {param} placeholders,
+// which net/http's ServeMux also understands.
+type Route struct {
+	Method string
+	Path   string
+	Public bool // no authentication required
+	h      http.HandlerFunc
+}
+
+// Routes returns every API endpoint.
+func (s *Server) Routes() []Route {
+	return []Route{
+		{Method: "GET", Path: "/api/v1/system/status", Public: true, h: s.handleStatus},
+		{Method: "GET", Path: "/api/v1/openapi.json", Public: true, h: handleOpenAPI},
+		{Method: "POST", Path: "/api/v1/setup", Public: true, h: s.handleSetup},
+		{Method: "POST", Path: "/api/v1/auth/login", Public: true, h: s.handleLogin},
+		{Method: "POST", Path: "/api/v1/auth/logout", h: s.handleLogout},
+		{Method: "GET", Path: "/api/v1/auth/me", h: s.handleMe},
+		{Method: "GET", Path: "/api/v1/stream", h: s.handleStream},
+		{Method: "GET", Path: "/api/v1/iam/access-keys", h: s.handleListAccessKeys},
+		{Method: "POST", Path: "/api/v1/iam/access-keys", h: s.handleCreateAccessKey},
+		{Method: "DELETE", Path: "/api/v1/iam/access-keys/{id}", h: s.handleDeleteAccessKey},
+		{Method: "GET", Path: "/api/v1/iam/tokens", h: s.handleListTokens},
+		{Method: "POST", Path: "/api/v1/iam/tokens", h: s.handleCreateToken},
+		{Method: "DELETE", Path: "/api/v1/iam/tokens/{id}", h: s.handleDeleteToken},
+	}
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET /api/v1/system/status", s.handleStatus)
-	mux.HandleFunc("POST /api/v1/setup", s.handleSetup)
-	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
-	mux.HandleFunc("POST /api/v1/auth/logout", s.requireSession(s.handleLogout))
-	mux.HandleFunc("GET /api/v1/auth/me", s.requireSession(s.handleMe))
-	mux.HandleFunc("GET /api/v1/stream", s.requireSession(s.handleStream))
-
+	for _, rt := range s.Routes() {
+		h := rt.h
+		if !rt.Public {
+			h = s.requireAuth(h)
+		}
+		mux.HandleFunc(rt.Method+" "+rt.Path, h)
+	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such endpoint")
 	})
 	mux.Handle("/", spaHandler(s.web))
 
 	return s.recoverPanics(s.logRequests(checkOrigin(securityHeaders(mux))))
+}
+
+func handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(OpenAPISpec)
 }
 
 func securityHeaders(next http.Handler) http.Handler {

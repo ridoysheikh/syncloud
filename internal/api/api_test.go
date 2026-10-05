@@ -16,6 +16,7 @@ import (
 
 	"syncloud/internal/auth"
 	"syncloud/internal/events"
+	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 )
 
@@ -42,7 +43,11 @@ func newEnv(t *testing.T) *testEnv {
 		"index.html":      {Data: []byte("<html>dashboard</html>")},
 		"assets/app-1.js": {Data: []byte("console.log(1)")},
 	}
-	s := New(Options{Store: st, Bus: events.NewBus(), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Web: web})
+	box, err := secrets.New(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{Store: st, Secrets: box, Bus: events.NewBus(), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Web: web})
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)

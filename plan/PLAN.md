@@ -1154,7 +1154,8 @@ Because there is only one controller:
 
 ## 15. Roadmap / Milestones
 
-### Phase 0a: Controller core (2 wks)
+### Phase 0a: Controller core (2 wks) — ✅ done 2026-10-06
+*Notes: the OpenAPI spec is hand-written (`internal/api/openapi.json`) and tests enforce route and synctl parity; the Go and TS clients are hand-written against it for now (code generation can replace them later). CI is in `.github/workflows/ci.yml`.*
 - Monorepo scaffold, Go module, Vite UI shell, Makefile, CI.
 - Controller server: config, SQLite (WAL, single writer) with goose migrations, the in-process event bus, structured logging.
 - **API-first skeleton**: OpenAPI spec, setup-token bootstrap, root account with sessions, then access-key signing and bearer tokens; a `synctl` skeleton with `configure` and `api`. `synctl` then grows **alongside every phase** (parity check in CI).

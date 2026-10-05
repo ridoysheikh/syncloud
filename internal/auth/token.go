@@ -40,3 +40,16 @@ func HashToken(token string) string {
 func TokenMatches(token, storedHash string) bool {
 	return subtle.ConstantTimeCompare([]byte(HashToken(token)), []byte(storedHash)) == 1
 }
+
+// NewAccessKey returns a new access key ID ("SYNAK" + 16 chars) and secret (40 chars).
+func NewAccessKey() (id, secret string) {
+	idb := make([]byte, 10)
+	sb := make([]byte, 25)
+	if _, err := rand.Read(idb); err != nil {
+		panic(err)
+	}
+	if _, err := rand.Read(sb); err != nil {
+		panic(err)
+	}
+	return "SYNAK" + b32.EncodeToString(idb), b32.EncodeToString(sb)
+}
