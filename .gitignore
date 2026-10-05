@@ -1,0 +1,16 @@
+# build output
+/bin/
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep
+
+# local dev data
+/.data/
+
+# frontend
+/web/node_modules/
+/web/.vite/
+
+# editor / OS
+.DS_Store
+.idea/
+*.swp

@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/*
+ * SynCloud design tokens (plan §10.1, D11).
+ * Dark theme only: there is no light palette and no `dark:` variants.
+ */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Surfaces */
+  --color-bg: #0b0d10;
+  --color-surface: #111418;
+  --color-raised: #171b21;
+  --color-hover: #1d222a;
+  --color-line: #232831;
+  --color-line-strong: #2f3540;
+
+  /* Text */
+  --color-fg: #e4e7eb;
+  --color-muted: #8a929d;
+  --color-faint: #5c646f;
+
+  /* Accent and status */
+  --color-accent: #4c8dff;
+  --color-accent-fg: #ffffff;
+  --color-ok: #3fb950;
+  --color-warn: #d29922;
+  --color-bad: #f85149;
+  --color-info: #4c8dff;
+  --color-neutral: #6e7681;
+
+  /* Minor radii: rounded-sm (2px) for controls, rounded-md (4px) max for panels. */
+  --radius-sm: 0.125rem;
+  --radius-md: 0.25rem;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg text-fg font-sans text-sm antialiased;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+  :focus-visible {
+    outline: 1px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+}
