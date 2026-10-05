@@ -523,3 +523,57 @@ func (s *Store) EnsureServiceVIP(ctx context.Context, serviceID string, pool Ind
 	}
 	return 0, ErrPoolExhausted
 }
+
+// ── custom domains ──────────────────────────────────────────────────────────
+
+type Domain struct {
+	ID        string    `json:"id"`
+	ServiceID string    `json:"serviceId"`
+	Host      string    `json:"host"`
+	PortName  string    `json:"port"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+func (s *Store) AddDomain(ctx context.Context, d Domain) error {
+	_, err := s.W.ExecContext(ctx, `INSERT INTO domains (id, service_id, host, port_name, created_at) VALUES (?, ?, ?, ?, ?)`,
+		d.ID, d.ServiceID, d.Host, d.PortName, d.CreatedAt.Unix())
+	if isUnique(err) {
+		return ErrNameTaken
+	}
+	return err
+}
+
+func (s *Store) DeleteDomain(ctx context.Context, serviceID, host string) error {
+	res, err := s.W.ExecContext(ctx, `DELETE FROM domains WHERE service_id = ? AND host = ?`, serviceID, host)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListDomains returns custom domains of one service ("" = all).
+func (s *Store) ListDomains(ctx context.Context, serviceID string) ([]Domain, error) {
+	q, args := `SELECT id, service_id, host, port_name, created_at FROM domains ORDER BY host`, []any{}
+	if serviceID != "" {
+		q, args = `SELECT id, service_id, host, port_name, created_at FROM domains WHERE service_id = ? ORDER BY host`, []any{serviceID}
+	}
+	rows, err := s.R.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Domain
+	for rows.Next() {
+		var d Domain
+		var at int64
+		if err := rows.Scan(&d.ID, &d.ServiceID, &d.Host, &d.PortName, &at); err != nil {
+			return nil, err
+		}
+		d.CreatedAt = time.Unix(at, 0).UTC()
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}

@@ -618,3 +618,40 @@ func (c *Client) TailLogs(ctx context.Context, q LogQuery, fn func(LogLine)) err
 	}
 	return sc.Err()
 }
+
+type DomainCheck struct {
+	Host      string   `json:"host"`
+	Expected  string   `json:"expected"`
+	Addresses []string `json:"addresses"`
+	Ready     bool     `json:"ready"`
+	Record    string   `json:"record"`
+}
+
+type ServiceDomain struct {
+	ID        string      `json:"id"`
+	Host      string      `json:"host"`
+	Port      string      `json:"port"`
+	CreatedAt time.Time   `json:"createdAt"`
+	DNS       DomainCheck `json:"dns"`
+}
+
+func (c *Client) ListServiceDomains(ctx context.Context, project, env, name string) ([]ServiceDomain, error) {
+	var out list[ServiceDomain]
+	return out.Items, c.Do(ctx, "GET", svcPath(project, env, name)+"/domains", nil, &out)
+}
+
+func (c *Client) AddServiceDomain(ctx context.Context, project, env, name, host, port string) (DomainCheck, error) {
+	var out struct {
+		DNS DomainCheck `json:"dns"`
+	}
+	return out.DNS, c.Do(ctx, "POST", svcPath(project, env, name)+"/domains", map[string]string{"host": host, "port": port}, &out)
+}
+
+func (c *Client) RemoveServiceDomain(ctx context.Context, project, env, name, host string) error {
+	return c.Do(ctx, "DELETE", svcPath(project, env, name)+"/domains/"+url.PathEscape(host), nil, nil)
+}
+
+func (c *Client) CheckDomain(ctx context.Context, host string) (DomainCheck, error) {
+	var out DomainCheck
+	return out, c.Do(ctx, "GET", "/api/v1/domains/check?host="+url.QueryEscape(host), nil, &out)
+}

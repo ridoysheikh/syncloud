@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/coder/websocket"
 	"io"
 	"net/http"
 	"net/url"
@@ -146,4 +147,42 @@ func (c *Client) Stream(ctx context.Context, path string) (io.ReadCloser, error)
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 	return resp.Body, nil
+}
+
+// ExecDial opens an interactive command in a task (see the execTask
+// operation). The caller owns the connection.
+func (c *Client) ExecDial(ctx context.Context, taskID string, command []string, tty bool, cols, rows int) (*websocket.Conn, error) {
+	q := url.Values{"command": command, "cols": {fmt.Sprint(cols)}, "rows": {fmt.Sprint(rows)}}
+	if tty {
+		q.Set("tty", "1")
+	} else {
+		q.Set("tty", "0")
+	}
+	ref, err := url.Parse("/api/v1/tasks/" + url.PathEscape(taskID) + "/exec?" + q.Encode())
+	if err != nil {
+		return nil, err
+	}
+	u := c.endpoint.ResolveReference(ref)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case c.creds.AccessKeyID != "":
+		sigv.Sign(req, c.creds.AccessKeyID, c.creds.SecretAccessKey, nil, c.now())
+	case c.creds.Token != "":
+		req.Header.Set("Authorization", "Bearer "+c.creds.Token)
+	}
+	ws := *u
+	ws.Scheme = strings.Replace(u.Scheme, "http", "ws", 1)
+	conn, resp, err := websocket.Dial(ctx, ws.String(), &websocket.DialOptions{HTTPHeader: req.Header, HTTPClient: c.http})
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			return nil, fmt.Errorf("exec: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		}
+		return nil, err
+	}
+	conn.SetReadLimit(4 << 20)
+	return conn, nil
 }

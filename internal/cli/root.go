@@ -86,6 +86,7 @@ func NewRoot(in io.Reader, out, errOut io.Writer) *cobra.Command {
 		a.servicesCmd(),
 		a.tasksCmd(),
 		a.logsCmd(),
+		a.execCmd(),
 	)
 	return root
 }

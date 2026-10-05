@@ -321,7 +321,71 @@ func (a *app) servicesCmd() *cobra.Command {
 	apply.Flags().StringVarP(&file, "file", "f", "", "service JSON file, or - for stdin")
 	_ = apply.MarkFlagRequired("file")
 
-	svc.AddCommand(list, run, apply,
+	domains := &cobra.Command{Use: "domains", Short: "Custom domains of a service"}
+	var port string
+	add := &cobra.Command{
+		Use: "add SERVICE HOST", Short: "Route a custom domain to a service", Args: cobra.ExactArgs(2),
+		Annotations: op("addServiceDomain"),
+		RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+			chk, err := c.AddServiceDomain(ctx(cmd), s.project, s.env, args[0], args[1], port)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "Routing %s to %s.\n", args[1], args[0])
+			printCheck(a, chk)
+			return nil
+		}),
+	}
+	add.Flags().StringVar(&port, "port", "", "http port name (default: the first)")
+	domains.AddCommand(add,
+		&cobra.Command{
+			Use: "list SERVICE", Aliases: []string{"ls"}, Short: "List a service's custom domains", Args: cobra.ExactArgs(1),
+			Annotations: op("listServiceDomains"),
+			RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+				ds, err := c.ListServiceDomains(ctx(cmd), s.project, s.env, args[0])
+				if err != nil {
+					return err
+				}
+				rows := make([][]string, 0, len(ds))
+				for _, d := range ds {
+					dns := "ok"
+					if !d.DNS.Ready {
+						dns = "waiting for " + orDash(d.DNS.Record)
+					}
+					rows = append(rows, []string{d.Host, d.Port, dns})
+				}
+				return a.printer().table(ds, []string{"HOST", "PORT", "DNS"}, rows)
+			}),
+		},
+		&cobra.Command{
+			Use: "remove SERVICE HOST", Aliases: []string{"rm"}, Short: "Stop routing a custom domain", Args: cobra.ExactArgs(2),
+			Annotations: op("removeServiceDomain"),
+			RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+				if err := c.RemoveServiceDomain(ctx(cmd), s.project, s.env, args[0], args[1]); err != nil {
+					return err
+				}
+				fmt.Fprintf(a.out, "Removed %s from %s\n", args[1], args[0])
+				return nil
+			}),
+		},
+		&cobra.Command{
+			Use: "check HOST", Short: "Check that a hostname points at this platform", Args: cobra.ExactArgs(1),
+			Annotations: op("checkDomain"),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				c, err := a.client()
+				if err != nil {
+					return err
+				}
+				chk, err := c.CheckDomain(ctx(cmd), args[0])
+				if err != nil {
+					return err
+				}
+				printCheck(a, chk)
+				return nil
+			},
+		},
+	)
+	svc.AddCommand(list, run, apply, domains,
 		&cobra.Command{
 			Use: "scale NAME=COUNT", Short: "Set the desired task count", Args: cobra.ExactArgs(1),
 			Annotations: op("scaleService"),
@@ -449,4 +513,20 @@ func (a *app) tasksCmd() *cobra.Command {
 		},
 	)
 	return t
+}
+
+func printCheck(a *app, chk client.DomainCheck) {
+	if a.output == "json" {
+		_ = a.printer().json(chk)
+		return
+	}
+	if chk.Ready {
+		fmt.Fprintf(a.out, "DNS ok: %s resolves to %s. The certificate is requested automatically.\n", chk.Host, chk.Expected)
+		return
+	}
+	now := "nothing"
+	if len(chk.Addresses) > 0 {
+		now = strings.Join(chk.Addresses, ", ")
+	}
+	fmt.Fprintf(a.out, "Create this DNS record: %s\n(%s resolves to %s now)\n", orDash(chk.Record), chk.Host, now)
 }

@@ -207,6 +207,7 @@ function PolicyDialog({ policy, nodes, onClose }: { policy: Policy | null; nodes
       open
       onClose={onClose}
       title={policy ? `Edit ${policy.name}` : "New firewall policy"}
+      wide
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>

@@ -13,6 +13,7 @@ import (
 	"syncloud/internal/certs"
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
+	"syncloud/internal/execrelay"
 	"syncloud/internal/logs"
 	"syncloud/internal/mesh"
 	"syncloud/internal/nodes"
@@ -49,6 +50,7 @@ type Server struct {
 	downloadsDir          string
 	workloads             *workload.Manager
 	logs                  *logs.Store
+	exec                  *execrelay.Relay
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -91,6 +93,8 @@ type Options struct {
 	Workloads *workload.Manager
 	// Logs serves container logs (§9.2); may be nil.
 	Logs *logs.Store
+	// Exec relays interactive commands to tasks; may be nil.
+	Exec *execrelay.Relay
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -123,6 +127,7 @@ func New(o Options) *Server {
 		downloadsDir:          o.DownloadsDir,
 		workloads:             o.Workloads,
 		logs:                  o.Logs,
+		exec:                  o.Exec,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -193,11 +198,16 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/rollback", h: s.handleRollbackService},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/tasks", h: s.handleServiceTasks},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/revisions", h: s.handleServiceRevisions},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/domains", h: s.handleListServiceDomains},
+		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/domains", h: s.handleAddServiceDomain},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/domains/{host}", h: s.handleRemoveServiceDomain},
+		{Method: "GET", Path: "/api/v1/domains/check", h: s.handleCheckDomain},
 		{Method: "GET", Path: "/api/v1/services", h: s.handleListAllServices},
 		{Method: "GET", Path: "/api/v1/tasks", h: s.handleListTasks},
 		{Method: "GET", Path: "/api/v1/logs", h: s.handleQueryLogs},
 		{Method: "GET", Path: "/api/v1/logs/tail", h: s.handleTailLogs},
 		{Method: "POST", Path: "/api/v1/tasks/{id}/restart", h: s.handleRestartTask},
+		{Method: "GET", Path: "/api/v1/tasks/{id}/exec", h: s.handleExec},
 		{Method: "GET", Path: "/api/v1/firewall/policies", h: s.handleListFirewallPolicies},
 		{Method: "POST", Path: "/api/v1/firewall/policies", h: s.handleCreateFirewallPolicy},
 		{Method: "PUT", Path: "/api/v1/firewall/policies/{id}", h: s.handleUpdateFirewallPolicy},

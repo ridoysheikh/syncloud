@@ -41,6 +41,8 @@ type Hooks struct {
 	OnDisconnect func(node store.Node)
 	// OnLogs runs for every batch of container output.
 	OnLogs func(node store.Node, b *agentv1.LogBatch)
+	// OnExecOutput runs for output of interactive exec sessions.
+	OnExecOutput func(node store.Node, o *agentv1.ExecOutput)
 }
 
 type Gateway struct {
@@ -244,6 +246,12 @@ func (g *Gateway) Connect(stream grpc.BidiStreamingServer[agentv1.ConnectRequest
 				for _, h := range g.hooks {
 					if h.OnLogs != nil {
 						h.OnLogs(node, m.Logs)
+					}
+				}
+			case *agentv1.ConnectRequest_ExecOutput:
+				for _, h := range g.hooks {
+					if h.OnExecOutput != nil {
+						h.OnExecOutput(node, m.ExecOutput)
 					}
 				}
 			case *agentv1.ConnectRequest_RenewCertificate:

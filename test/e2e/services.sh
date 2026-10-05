@@ -51,6 +51,15 @@ distinct=$(echo $seen | tr ' ' '\n' | sort -u | grep -c . || true)
 api "$SVC" | grep -q '"endpoints":\["http://web-production-shop.localhost:8080"\]' || fail "service endpoint missing"
 echo "  ✓ Traefik routes web-production-shop.localhost to all 3 tasks across nodes"
 
+# A custom domain routes to the same tasks; its DNS check reports the record to create.
+api "$SVC/domains" -d '{"host":"Shop.Example.TEST"}' | grep -q '"record":"shop.example.test. A ' || fail "domain add did not return the DNS record"
+for _ in $(seq 1 10); do x sc-e2e-ctl curl -fs -H 'Host: shop.example.test' http://127.0.0.1:8080/hostname >/dev/null 2>&1 && break; sleep 1; done
+x sc-e2e-ctl curl -fs -H 'Host: shop.example.test' http://127.0.0.1:8080/hostname >/dev/null || fail "custom domain not routed"
+api "$SVC" | grep -q 'http://shop.example.test:8080' || fail "custom domain missing from endpoints"
+api "$SVC/domains" -d '{"host":"shop.example.test"}' >/dev/null 2>&1 && fail "duplicate domain accepted"
+api -X DELETE "$SVC/domains/shop.example.test" >/dev/null
+echo "  ✓ custom domain routed through Traefik, listed in endpoints, removable"
+
 # Service discovery from inside a task: DNS names, search domains and the VIP.
 VIP=$(api "$SVC" | field vip)
 [ -n "$VIP" ] || fail "service has no VIP"
@@ -72,6 +81,18 @@ distinct=$(echo $seen | tr ' ' '\n' | sort -u | grep -c . || true)
 [ "$distinct" -ge 2 ] || fail "VIP reached $distinct distinct tasks via the short name, want at least 2 (responses: $seen)"
 echo "$seen" | tr ' ' '\n' | grep -qx "$(inx hostname)" || echo "  (the calling task did not pick itself in 30 tries; hairpin not exercised)"
 echo "  ✓ http://web:8080 (search domain + VIP) load-balanced over $distinct tasks on several nodes"
+
+echo "== exec"
+key=$(api localhost:7070/api/v1/iam/access-keys -d '{"description":"e2e"}')
+KID=$(echo "$key" | grep -o '"id":"SYNAK[A-Z0-9]*"' | cut -d'"' -f4); KSEC=$(echo "$key" | grep -o '"secretAccessKey":"[^"]*"' | cut -d'"' -f4)
+synctl() { x -i -e SYNCLOUD_ENDPOINT=http://127.0.0.1:7070 -e SYNCLOUD_ACCESS_KEY_ID="$KID" -e SYNCLOUD_SECRET_ACCESS_KEY="$KSEC" sc-e2e-ctl /opt/sc/synctl "$@"; }
+out=$(synctl exec service/web -p shop -- cat /etc/hostname </dev/null)
+[ -n "$out" ] || fail "exec printed nothing"
+out=$(echo 'echo hello-from-stdin' | synctl exec service/web -p shop -- sh)
+echo "$out" | grep -q hello-from-stdin || fail "exec stdin not delivered: $out"
+set +e; synctl exec service/web -p shop -- sh -c 'exit 3' </dev/null; code=$?; set -e
+[ "$code" = 3 ] || fail "exit code $code, want 3"
+echo "  ✓ synctl exec: output, stdin and exit code (3) through controller and agent"
 
 echo "== scale"
 api "$SVC/scale" -d '{"desiredCount":1}' >/dev/null

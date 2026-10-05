@@ -20,6 +20,7 @@ message ConnectRequest {
     TaskStatus task_status = 4;
     RenewCertificate renew_certificate = 5;
     LogBatch logs = 6;
+    ExecOutput exec_output = 7;
   }
 }
 
@@ -32,6 +33,7 @@ message ConnectResponse {
     CertificateIssued certificate = 5;
     ConfirmNetwork confirm_network = 6;
     Discovery discovery = 7;
+    ExecInput exec_input = 8;
   }
 }
 
@@ -287,4 +289,38 @@ message VirtualPort {
   string protocol = 1;          // tcp | udp
   uint32 port = 2;
   repeated string backends = 3; // ip:port of running tasks
+}
+
+// Interactive exec into a task container (§10, kubectl exec). Sessions are
+// multiplexed on the agent stream by session_id.
+message ExecInput {
+  string session_id = 1;
+  oneof msg {
+    ExecStart start = 2;
+    bytes stdin = 3;
+    ExecResize resize = 4;
+    bool close = 5;             // controller side went away: kill the session
+    bool stdin_eof = 6;         // no more input: close the command's stdin
+  }
+}
+
+message ExecStart {
+  string task_id = 1;
+  repeated string command = 2;  // default: sh
+  bool tty = 3;
+  uint32 cols = 4;
+  uint32 rows = 5;
+}
+
+message ExecResize {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+message ExecOutput {
+  string session_id = 1;
+  bytes data = 2;               // stdout (and stderr when tty)
+  bool exited = 3;
+  int32 exit_code = 4;
+  string error = 5;             // could not start
 }

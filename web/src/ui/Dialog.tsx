@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { cn } from "./cn";
 
 /** Modal dialog built on <dialog> (focus trapping and Esc handling come from the browser). */
 export function Dialog({
@@ -7,8 +8,11 @@ export function Dialog({
   title,
   children,
   footer,
+  wide,
 }: {
   open: boolean;
+  /** Wide layout (terminals, editors). */
+  wide?: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
@@ -26,7 +30,10 @@ export function Dialog({
     <dialog
       ref={ref}
       onClose={onClose}
-      className="bg-surface border-line-strong text-fg m-auto w-[calc(100%-2rem)] max-w-md rounded-md border p-0 backdrop:bg-black/60"
+      className={cn(
+        "bg-surface border-line-strong text-fg m-auto w-[calc(100%-2rem)] rounded-md border p-0 backdrop:bg-black/60",
+        wide ? "max-w-5xl" : "max-w-md",
+      )}
     >
       <div className="border-line flex h-9 items-center border-b px-3">
         <h2 className="text-sm font-semibold">{title}</h2>

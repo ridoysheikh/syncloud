@@ -1226,7 +1226,7 @@ Because there is only one controller:
 - **Host firewall** with nftables: default policies, commit-confirm, drift detection (§8.3).
 - Heartbeats, node list/detail UI, node metrics, mesh link stats, first charts.
 
-### Phase 2: Running Containers and Logs (3–4 wks)
+### Phase 2: Running Containers and Logs (3–4 wks) — ✅ done 2026-10-06 (middleware presets and the raw YAML editor move to Phase 5 with traffic insights)
 **Progress**
 - ✅ Slice 2a (2026-10-06), services, scheduler and reconciler:
   - Model: projects (each created with a first environment, default `production`), environments, services, **immutable task-definition revisions** (a spec change creates one, scaling does not), and tasks with history (the last 20 stopped tasks per service).
@@ -1254,6 +1254,11 @@ Because there is only one controller:
   - **VIPs** use nftables DNAT (decision changed from IPVS). There is one chain per service port with `numgen random` over per-backend chains, a hairpin mark plus masquerade for a task reaching itself, and an immediate reject (TCP reset) for VIPs with no running backend. Rendering is shared with the firewall and validates every value.
   - The service view shows `vip` and `dnsName`.
   - Verified in e2e: the DNS name resolves to the VIP, `tasks.` returns all three IPs, external names resolve, and `http://web:8080` from inside a task is spread over all three tasks, including the caller itself (hairpin).
+- ✅ Slice 2e (2026-10-06), exec:
+  - `GET /tasks/{id}/exec` is a same-origin WebSocket (binary frames for terminal I/O; JSON text frames for `resize`, `eof`, `exit` and `error`). The controller relays sessions multiplexed on the agent stream (`ExecInput`/`ExecOutput`). The agent uses Docker's hijacked exec API and queues input that arrives before the exec is attached. The relay never blocks the agent stream: output for a client that is not reading is dropped.
+  - `synctl exec TASK|service/NAME [-t] -- CMD…` uses raw terminal mode when interactive, propagates stdin EOF for pipes, and exits with the remote exit code. The dashboard has a shell button per running task (xterm.js, lazy-loaded). Every exec is audited (`task:Exec` with the command).
+- ✅ Slice 2f (2026-10-06), custom domains:
+  - `POST /…/services/{s}/domains` (`synctl services domains add|list|remove|check`) routes a host to one of the service's HTTP ports. The host is normalized and must be unique, and the platform's own hosts are refused. The response and list include a **DNS check**: the A record to create, current answers, and a ready flag. Domains join the route set, so they get Traefik routers and ACME certificates like default hostnames. The service page has a domains panel that polls DNS until it points here.
 - TaskDefinition, Service, Task model; reconciler; scheduler (spread/binpack, constraints).
 - Start, stop and restart; exec terminal.
 - **Centralized logging** (§9.2): agent log shipper with disk buffer, log ingest, VictoriaLogs, logs explorer with the per-service merged view and live tail.

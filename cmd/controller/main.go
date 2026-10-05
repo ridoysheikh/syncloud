@@ -27,6 +27,7 @@ import (
 	"syncloud/internal/discovery"
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
+	"syncloud/internal/execrelay"
 	"syncloud/internal/logs"
 	"syncloud/internal/mesh"
 	"syncloud/internal/nodes"
@@ -226,14 +227,25 @@ func serve(args []string) error {
 		return []string{mesh.Subnet(nn.SubnetIndex).Addr().Next().String()}, discovery.SearchDomains(sv)
 	}
 	workload.Discovery = func(sv store.Service) (string, string) { return disco.VIP(sv.ID), discovery.ServiceName(sv) }
+	execs := execrelay.New(gw)
+	gw.AddHooks(execs.Hooks())
 	logStore := logs.New(st, cfg.VictoriaLogsURL, log)
 	gw.AddHooks(agentgw.Hooks{OnLogs: logStore.OnLogs})
 	go logStore.Run(ctx)
-	workload.Endpoints = func(sv store.Service, spec workload.Spec) []string {
-		if base := domains.Base(); base != "" {
-			return workload.ServiceEndpoints(sv, spec, base, "https", httpsPort)
+	workload.Endpoints = func(sv store.Service, spec workload.Spec, custom []store.Domain) []string {
+		scheme, port, base := "https", httpsPort, domains.Base()
+		if base == "" {
+			scheme, port = "http", devPort(httpPort)
 		}
-		return workload.ServiceEndpoints(sv, spec, "", "http", devPort(httpPort))
+		out := workload.ServiceEndpoints(sv, spec, base, scheme, port)
+		for _, d := range custom {
+			u := scheme + "://" + d.Host
+			if port != "" {
+				u += ":" + port
+			}
+			out = append(out, u)
+		}
+		return out
 	}
 	domains.OnChange(func(ep domain.Endpoints) {
 		log.Info("base domain changed", "domain", ep.BaseDomain, "dashboard", ep.DashboardURL)
@@ -279,7 +291,7 @@ func serve(args []string) error {
 			"GET " + certs.ChallengePrefix: certMgr,
 		},
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
-		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, ControllerSchedulable: cfg.ControllerSchedulable,
+		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, ControllerSchedulable: cfg.ControllerSchedulable,
 		ACME: api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {
 			_ = os.Remove(filepath.Join(cfg.DataDir, setupTokenFile))

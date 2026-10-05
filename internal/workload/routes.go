@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 
 	"syncloud/internal/store"
@@ -66,6 +67,15 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 		m.log.Error("routes: list tasks", "err", err)
 		return c.routes
 	}
+	domains, err := m.st.ListDomains(ctx, "")
+	if err != nil {
+		m.log.Error("routes: list domains", "err", err)
+		return c.routes
+	}
+	byService := map[string][]store.Domain{}
+	for _, d := range domains {
+		byService[d.ServiceID] = append(byService[d.ServiceID], d)
+	}
 	running := map[string][]store.Task{}
 	for _, t := range tasks {
 		if t.Desired == "running" && t.State == store.TaskRunning && t.IP != "" {
@@ -95,6 +105,11 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 			}
 			sort.Strings(r.Servers)
 			out = append(out, r)
+			for _, d := range byService[sv.ID] {
+				if d.PortName == p.Name {
+					out = append(out, Route{Name: "dom-" + strings.TrimPrefix(d.ID, "dom_"), Host: d.Host, Servers: r.Servers, ServiceID: sv.ID})
+				}
+			}
 		}
 	}
 	c.routes, c.base, c.dirty = out, base, false

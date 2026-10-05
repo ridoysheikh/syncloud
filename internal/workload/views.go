@@ -53,7 +53,7 @@ type TaskView struct {
 }
 
 // Endpoints returns the public URLs of a service (set by the routing layer).
-var Endpoints = func(sv store.Service, spec Spec) []string { return nil }
+var Endpoints = func(sv store.Service, spec Spec, domains []store.Domain) []string { return nil }
 
 // Discovery returns a service's VIP and internal DNS name (set by the
 // discovery layer).
@@ -72,10 +72,14 @@ func (m *Manager) serviceView(ctx context.Context, sv store.Service) (ServiceVie
 	if err != nil {
 		return ServiceView{}, err
 	}
+	domains, err := m.st.ListDomains(ctx, sv.ID)
+	if err != nil {
+		return ServiceView{}, err
+	}
 	v := ServiceView{
 		ID: sv.ID, Project: sv.Project, Environment: sv.Environment, Name: sv.Name, Revision: sv.Revision,
 		DesiredCount: sv.DesiredCount, Status: sv.Status, Deleting: sv.Deleting, Spec: spec,
-		Endpoints: Endpoints(sv, spec), CreatedAt: sv.CreatedAt, UpdatedAt: sv.UpdatedAt,
+		Endpoints: Endpoints(sv, spec, domains), CreatedAt: sv.CreatedAt, UpdatedAt: sv.UpdatedAt,
 	}
 	if v.Endpoints == nil {
 		v.Endpoints = []string{}
@@ -281,4 +285,55 @@ func (m *Manager) RestartTask(ctx context.Context, taskID string) error {
 	m.stop(ctx, t, m.now())
 	m.Enqueue(t.ServiceID)
 	return nil
+}
+
+// AddDomain routes host to one of the service's HTTP ports ("" = the first).
+// The host must already be validated and normalized by the caller.
+func (m *Manager) AddDomain(ctx context.Context, serviceID, host, port string) (store.Domain, error) {
+	sv, err := m.st.ServiceByID(ctx, serviceID)
+	if err != nil {
+		return store.Domain{}, err
+	}
+	spec, err := m.SpecFor(ctx, sv.ID, sv.Revision)
+	if err != nil {
+		return store.Domain{}, err
+	}
+	ports := spec.HTTPPorts()
+	if len(ports) == 0 {
+		return store.Domain{}, ErrInvalid{errors.New("the service has no http port to route a domain to")}
+	}
+	if port == "" {
+		port = ports[0].Name
+	}
+	found := false
+	for _, p := range ports {
+		found = found || p.Name == port
+	}
+	if !found {
+		return store.Domain{}, ErrInvalid{fmt.Errorf("the service has no http port named %q", port)}
+	}
+	d := store.Domain{ID: auth.NewID("dom_"), ServiceID: sv.ID, Host: host, PortName: port, CreatedAt: m.now().UTC().Truncate(time.Second)}
+	if err := m.st.AddDomain(ctx, d); errors.Is(err, store.ErrNameTaken) {
+		return store.Domain{}, ErrInvalid{fmt.Errorf("%s is already routed to a service", host)}
+	} else if err != nil {
+		return store.Domain{}, err
+	}
+	m.domainsChanged()
+	return d, nil
+}
+
+// RemoveDomain stops routing host to the service.
+func (m *Manager) RemoveDomain(ctx context.Context, serviceID, host string) error {
+	if err := m.st.DeleteDomain(ctx, serviceID, host); err != nil {
+		return err
+	}
+	m.domainsChanged()
+	return nil
+}
+
+func (m *Manager) domainsChanged() {
+	m.routesDirty()
+	if m.OnChange != nil {
+		m.OnChange() // certificates for the new host set
+	}
 }
