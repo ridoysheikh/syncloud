@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -26,15 +27,53 @@ import (
 	"syncloud/internal/store"
 )
 
+// Hooks let other controller components react to agents. Hooks run on the
+// stream's goroutine and must not block.
+type Hooks struct {
+	// OnConnect runs after the Welcome, with the node's container snapshot.
+	OnConnect func(node store.Node, tasks []*agentv1.TaskStatus)
+	// OnTaskStatus runs for every task status the agent reports.
+	OnTaskStatus func(node store.Node, s *agentv1.TaskStatus)
+}
+
 type Gateway struct {
 	agentv1.UnimplementedAgentGatewayServiceServer
 	st       *store.Store
 	registry *nodes.Registry
 	log      *slog.Logger
+	hooks    Hooks
+
+	mu       sync.Mutex
+	sessions map[string]*session // by node ID
 }
 
+type session struct {
+	send chan *agentv1.ConnectResponse
+}
+
+var ErrNotConnected = errors.New("node is not connected")
+
 func New(st *store.Store, registry *nodes.Registry, log *slog.Logger) *Gateway {
-	return &Gateway{st: st, registry: registry, log: log}
+	return &Gateway{st: st, registry: registry, log: log, sessions: map[string]*session{}}
+}
+
+// SetHooks must be called before Serve.
+func (g *Gateway) SetHooks(h Hooks) { g.hooks = h }
+
+// Send queues a command for a connected node.
+func (g *Gateway) Send(nodeID string, msg *agentv1.ConnectResponse) error {
+	g.mu.Lock()
+	sess := g.sessions[nodeID]
+	g.mu.Unlock()
+	if sess == nil {
+		return ErrNotConnected
+	}
+	select {
+	case sess.send <- msg:
+		return nil
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("node %s: command queue full", nodeID)
+	}
 }
 
 // Serve listens on addr with mTLS until ctx ends. hosts are the names and IPs
@@ -98,22 +137,75 @@ func (g *Gateway) Connect(stream grpc.BidiStreamingServer[agentv1.ConnectRequest
 		return err
 	}
 
-	for {
-		msg, err := stream.Recv()
-		if err != nil {
-			if errors.Is(err, context.Canceled) || status.Code(err) == codes.Canceled {
-				return nil
+	// One writer per stream: Send() from other goroutines goes through the queue.
+	sess := &session{send: make(chan *agentv1.ConnectResponse, 64)}
+	g.mu.Lock()
+	g.sessions[node.ID] = sess // a reconnect replaces the old session
+	g.mu.Unlock()
+	defer func() {
+		g.mu.Lock()
+		if g.sessions[node.ID] == sess {
+			delete(g.sessions, node.ID)
+		}
+		g.mu.Unlock()
+	}()
+	writeErr := make(chan error, 1)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-sess.send:
+				if err := stream.Send(msg); err != nil {
+					writeErr <- err
+					return
+				}
 			}
+		}
+	}()
+
+	if g.hooks.OnConnect != nil {
+		g.hooks.OnConnect(node, hello.GetTasks())
+	}
+
+	recv := make(chan *agentv1.ConnectRequest)
+	recvErr := make(chan error, 1)
+	go func() {
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				recvErr <- err
+				return
+			}
+			select {
+			case recv <- msg:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	for {
+		select {
+		case err := <-writeErr:
 			g.log.Info("agent disconnected", "node", node.Name, "err", err)
 			return nil
-		}
-		switch m := msg.Msg.(type) {
-		case *agentv1.ConnectRequest_Heartbeat:
-			g.registry.Heartbeat(ctx, node.ID, metricsFrom(m.Heartbeat.GetMetrics()))
-		case *agentv1.ConnectRequest_Result:
-			// Command results arrive with the Docker runner.
-		case *agentv1.ConnectRequest_Hello:
-			return status.Error(codes.InvalidArgument, "Hello sent twice")
+		case err := <-recvErr:
+			if !errors.Is(err, context.Canceled) && status.Code(err) != codes.Canceled {
+				g.log.Info("agent disconnected", "node", node.Name, "err", err)
+			}
+			return nil
+		case msg := <-recv:
+			switch m := msg.Msg.(type) {
+			case *agentv1.ConnectRequest_Heartbeat:
+				g.registry.Heartbeat(ctx, node.ID, metricsFrom(m.Heartbeat.GetMetrics()))
+			case *agentv1.ConnectRequest_TaskStatus:
+				if g.hooks.OnTaskStatus != nil {
+					g.hooks.OnTaskStatus(node, m.TaskStatus)
+				}
+			case *agentv1.ConnectRequest_Result:
+			case *agentv1.ConnectRequest_Hello:
+				return status.Error(codes.InvalidArgument, "Hello sent twice")
+			}
 		}
 	}
 }

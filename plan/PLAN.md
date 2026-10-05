@@ -1168,7 +1168,12 @@ Because there is only one controller:
 **Progress**
 - ✅ Slice 1 (2026-10-06), agent link: internal CA, join tokens, `syncloud-agent join` (the node key is generated on the node; the controller signs its CSR), an mTLS gRPC stream (`proto/syncloud/agent/v1`), heartbeats with node metrics, Ready/Suspect/NotReady tracking (only transitions written to SQLite), revocation on node delete, a local `ctl-0` join token, `synctl nodes …`, and the dashboard Nodes page and overview.
   - Follow-up: node certificates are valid for 90 days; automatic renewal over the stream is still to do (before Phase 1 ends).
-- ⏳ Slice 2: Docker runner and system tasks.
+- ✅ Slice 2a (2026-10-06), Docker runner and system tasks:
+  - The agent's own minimal Docker Engine API client (API v1.44, Docker 25+), with an idempotent task runner (spec hash label, replace on change), Docker event watching, and a snapshot in Hello.
+  - The controller pushes RunTask/StopTask over the stream. System tasks (Traefik v3.7.13, VictoriaMetrics v1.153.0, VictoriaLogs v1.53.0) run on `ctl-0` and are re-applied every minute.
+  - The Traefik HTTP provider endpoint (token-protected) routes the dashboard. X-Forwarded-* is trusted from loopback only.
+  - Dev mode uses 127.0.0.1:8080/8443. Settings → Platform page; `synctl system tasks`.
+- ⏳ Slice 2b: private registry with token auth (registry 3.1.2), BuildKit.
 - ⏳ Slice 3: sslip.io base domain and certificates.
 - ⏳ Slice 4: install script, recovery key, Litestream.
 - Minimal agent: gRPC stream to the controller, Docker runner for system tasks.

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"syncloud/internal/store"
@@ -67,18 +68,36 @@ func checkOrigin(next http.Handler) http.Handler {
 	})
 }
 
-// clientIP returns the direct peer address. Once Traefik fronts the controller
-// (Phase 0b) this must honor X-Forwarded-For from trusted proxies only.
+// clientIP returns the caller's address. X-Forwarded-For is only trusted when
+// the direct peer is loopback, i.e. Traefik on the controller host (D20);
+// Traefik appends the real client address as the last entry.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if fromLocalProxy(host) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			if ip := strings.TrimSpace(parts[len(parts)-1]); net.ParseIP(ip) != nil {
+				return ip
+			}
+		}
 	}
 	return host
 }
 
+func fromLocalProxy(peer string) bool {
+	ip := net.ParseIP(peer)
+	return ip != nil && ip.IsLoopback()
+}
+
 func isHTTPS(r *http.Request) bool {
-	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	if r.TLS != nil {
+		return true
+	}
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return fromLocalProxy(host) && r.Header.Get("X-Forwarded-Proto") == "https"
 }
 
 // audit records an action. The credential used (session, token or access key)

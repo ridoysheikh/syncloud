@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,6 +25,8 @@ import (
 	"syncloud/internal/pki"
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
+	"syncloud/internal/system"
+	"syncloud/internal/traefik"
 	"syncloud/internal/version"
 	"syncloud/internal/web"
 )
@@ -79,16 +82,38 @@ func run(args []string) error {
 		return fmt.Errorf("local join token: %w", err)
 	}
 
-	srv := api.New(api.Options{
-		Store: st, Secrets: box, CA: ca, Nodes: registry, GatewayAddr: cfg.AgentAdvertise,
-		Bus: bus, Log: log, Web: web.FS(),
-	})
-
 	gwHost, _, err := net.SplitHostPort(cfg.AgentAdvertise)
 	if err != nil {
 		return fmt.Errorf("--agent-advertise: %w", err)
 	}
 	gw := agentgw.New(st, registry, log)
+
+	traefikToken, err := loadOrCreateToken(filepath.Join(cfg.DataDir, "traefik.token"))
+	if err != nil {
+		return err
+	}
+	controllerURL := "http://" + loopbackURLHost(cfg.Listen)
+	sysMgr := system.NewManager(gw, bus, log, system.Config{
+		ControllerURL: controllerURL, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS,
+		AdminAddr: cfg.TraefikAdmin, TraefikToken: traefikToken,
+	})
+	if cfg.SystemTasks {
+		gw.SetHooks(sysMgr.Hooks())
+		go sysMgr.Run(ctx)
+	}
+	traefikProvider := &traefik.Provider{
+		Token: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: controllerURL,
+		BaseDomain: func() string {
+			d, _, _ := st.GetSetting(context.Background(), store.SettingBaseDomain)
+			return d
+		},
+	}
+
+	srv := api.New(api.Options{
+		Store: st, Secrets: box, CA: ca, Nodes: registry, GatewayAddr: cfg.AgentAdvertise,
+		System: sysMgr, Internal: map[string]http.Handler{"GET /internal/traefik/config": traefikProvider},
+		Bus: bus, Log: log, Web: web.FS(),
+	})
 	go func() {
 		if err := gw.Serve(ctx, ca, cfg.AgentListen, []string{gwHost, "localhost", "127.0.0.1"}); err != nil {
 			log.Error("agent gateway stopped", "err", err)
@@ -221,4 +246,28 @@ func ensureLocalJoinToken(ctx context.Context, st *store.Store, dataDir string) 
 		return err
 	}
 	return os.WriteFile(path, []byte(tok+"\n"), 0o600)
+}
+
+// loadOrCreateToken reads a random secret from path, creating it (0600) once.
+func loadOrCreateToken(path string) (string, error) {
+	if b, err := os.ReadFile(path); err == nil {
+		return strings.TrimSpace(string(b)), nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	tok := auth.NewToken("")
+	return tok, os.WriteFile(path, []byte(tok+"\n"), 0o600)
+}
+
+// loopbackURLHost turns a listen address into something reachable from the
+// host network namespace (":7070" or "0.0.0.0:7070" become "127.0.0.1:7070").
+func loopbackURLHost(listen string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return listen
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
 }

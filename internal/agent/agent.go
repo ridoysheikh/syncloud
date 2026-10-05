@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net"
@@ -22,6 +23,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
+	"syncloud/internal/agent/docker"
 	"syncloud/internal/agent/sysinfo"
 	"syncloud/internal/client"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
@@ -123,6 +125,11 @@ func loadState(dataDir string) (State, *tls.Config, error) {
 
 // Run keeps the agent connected until ctx ends, reconnecting with backoff.
 func Run(ctx context.Context, dataDir string, log *slog.Logger) error {
+	return RunWith(ctx, dataDir, docker.New(docker.DefaultSocket), log)
+}
+
+// RunWith is Run with an explicit Docker client (tests).
+func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Logger) error {
 	st, tlsCfg, err := loadState(dataDir)
 	if err != nil {
 		return err
@@ -138,9 +145,12 @@ func Run(ctx context.Context, dataDir string, log *slog.Logger) error {
 	gw := agentv1.NewAgentGatewayServiceClient(conn)
 	info := sysinfo.StaticInfo(ctx, "/")
 
+	runner := NewRunner(d, log)
+	go runner.Watch(ctx)
+
 	log.Info("agent starting", "node", st.Name, "gateway", st.Gateway, "version", version.Version)
 	for attempt := 0; ; attempt++ {
-		connected, err := session(ctx, gw, info, log)
+		connected, err := session(ctx, gw, info, runner, log)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -162,7 +172,7 @@ func Run(ctx context.Context, dataDir string, log *slog.Logger) error {
 }
 
 // session runs one stream. connected reports whether the controller accepted it.
-func session(ctx context.Context, gw agentv1.AgentGatewayServiceClient, info nodes.Info, log *slog.Logger) (connected bool, err error) {
+func session(ctx context.Context, gw agentv1.AgentGatewayServiceClient, info nodes.Info, runner *Runner, log *slog.Logger) (connected bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := gw.Connect(ctx)
@@ -176,7 +186,12 @@ func session(ctx context.Context, gw agentv1.AgentGatewayServiceClient, info nod
 			CpuCores: int32(info.CPUCores), MemoryBytes: info.MemoryBytes, DiskBytes: info.DiskBytes,
 			DockerVersion: info.DockerVersion,
 		},
+		Tasks: runner.Snapshot(ctx),
 	}}})
+	if errors.Is(err, io.EOF) {
+		// The server ended the stream (e.g. rejected this node); Recv returns the real status.
+		_, err = stream.Recv()
+	}
 	if err != nil {
 		return false, err
 	}
@@ -195,39 +210,52 @@ func session(ctx context.Context, gw agentv1.AgentGatewayServiceClient, info nod
 		interval = nodes.HeartbeatInterval
 	}
 	errc := make(chan error, 2)
-	go func() { errc <- heartbeats(ctx, stream, interval) }()
+	go func() { errc <- writer(ctx, stream, interval, runner) }()
 	go func() {
 		for {
-			if _, err := stream.Recv(); err != nil { // commands arrive with the Docker runner
+			msg, err := stream.Recv()
+			if err != nil {
 				errc <- err
 				return
+			}
+			switch m := msg.Msg.(type) {
+			case *agentv1.ConnectResponse_RunTask:
+				go runner.Run(ctx, m.RunTask.GetSpec())
+			case *agentv1.ConnectResponse_StopTask:
+				st := m.StopTask
+				go runner.Stop(ctx, st.GetTaskId(), time.Duration(st.GetTimeoutSeconds())*time.Second, st.GetRemove())
 			}
 		}
 	}()
 	return true, <-errc
 }
 
-func heartbeats(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.ConnectRequest, agentv1.ConnectResponse], every time.Duration) error {
+// writer is the only goroutine that sends on the stream (gRPC streams are not
+// safe for concurrent sends): heartbeats on a ticker, task statuses as they come.
+func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.ConnectRequest, agentv1.ConnectResponse], every time.Duration, runner *Runner) error {
 	sampler := sysinfo.NewSampler("/")
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
+		var msg *agentv1.ConnectRequest
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case s := <-runner.out:
+			msg = &agentv1.ConnectRequest{Msg: &agentv1.ConnectRequest_TaskStatus{TaskStatus: s}}
 		case <-t.C:
 			m := sampler.Sample()
-			err := stream.Send(&agentv1.ConnectRequest{Msg: &agentv1.ConnectRequest_Heartbeat{Heartbeat: &agentv1.Heartbeat{
+			msg = &agentv1.ConnectRequest{Msg: &agentv1.ConnectRequest_Heartbeat{Heartbeat: &agentv1.Heartbeat{
 				Metrics: &agentv1.NodeMetrics{
 					CpuPercent: m.CPUPercent, MemoryUsedBytes: m.MemoryUsedBytes, MemoryTotalBytes: m.MemoryTotalBytes,
 					DiskUsedBytes: m.DiskUsedBytes, DiskTotalBytes: m.DiskTotalBytes,
 					Load1: m.Load1, Load5: m.Load5, Load15: m.Load15,
 					NetRxBytes: m.NetRxBytes, NetTxBytes: m.NetTxBytes, UptimeSeconds: m.UptimeSeconds,
 				},
-			}}})
-			if err != nil {
-				return err
-			}
+			}}}
+		}
+		if err := stream.Send(msg); err != nil {
+			return err
 		}
 	}
 }

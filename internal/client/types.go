@@ -173,3 +173,22 @@ func (c *Client) CreateJoinToken(ctx context.Context, description string, ttlMin
 func (c *Client) DeleteJoinToken(ctx context.Context, id string) error {
 	return c.Do(ctx, "DELETE", "/api/v1/nodes/join-tokens/"+id, nil, nil)
 }
+
+type SystemTask struct {
+	TaskID      string     `json:"taskId"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	Image       string     `json:"image"`
+	Node        string     `json:"node"`
+	State       string     `json:"state"`
+	Health      string     `json:"health"`
+	Error       string     `json:"error"`
+	ContainerID string     `json:"containerId"`
+	StartedAt   *time.Time `json:"startedAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
+
+func (c *Client) ListSystemTasks(ctx context.Context) ([]SystemTask, error) {
+	var out list[SystemTask]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/system/tasks", nil, &out)
+}

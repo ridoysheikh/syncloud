@@ -544,6 +544,27 @@
           }
         }
       }
+    },
+    "/api/v1/system/tasks": {
+      "get": {
+        "operationId": "listSystemTasks",
+        "tags": [
+          "system"
+        ],
+        "summary": "Platform components (system tasks) running on the controller node: Traefik, VictoriaMetrics, VictoriaLogs, …",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemTaskList"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1049,6 +1070,85 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/JoinToken"
+            }
+          }
+        }
+      },
+      "SystemTask": {
+        "type": "object",
+        "required": [
+          "taskId",
+          "name",
+          "description",
+          "image",
+          "node",
+          "state",
+          "health",
+          "error",
+          "containerId",
+          "startedAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "pulling",
+              "starting",
+              "running",
+              "exited",
+              "failed",
+              "removed"
+            ]
+          },
+          "health": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "containerId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SystemTaskList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SystemTask"
             }
           }
         }

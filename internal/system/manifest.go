@@ -1,0 +1,116 @@
+// Package system runs the platform's own components as system tasks on the
+// controller node (D20, §5.0): Traefik, VictoriaMetrics, VictoriaLogs, and
+// (next) the registry and BuildKit. Versions are pinned per SynCloud release.
+package system
+
+import (
+	"fmt"
+
+	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+)
+
+// Release manifest: tested image versions for this SynCloud release.
+const (
+	ImageTraefik         = "traefik:v3.7.13"
+	ImageVictoriaMetrics = "victoriametrics/victoria-metrics:v1.153.0"
+	ImageVictoriaLogs    = "victoriametrics/victoria-logs:v1.53.0"
+)
+
+// Network is the Docker bridge network system components share.
+const Network = "syncloud-system"
+
+// TaskIDPrefix marks system tasks; unknown ones found on the node are removed.
+const TaskIDPrefix = "sys-"
+
+type Config struct {
+	// ControllerURL is how Traefik (host network) reaches the controller API.
+	ControllerURL string
+	// HTTPAddr and HTTPSAddr are Traefik's public entrypoints (":80"/":443"; high ports in dev).
+	HTTPAddr  string
+	HTTPSAddr string
+	// AdminAddr serves Traefik's ping and Prometheus metrics (loopback only).
+	AdminAddr string
+	// TraefikToken authenticates Traefik to the controller's config endpoint.
+	TraefikToken string
+}
+
+// Component describes one system task for the dashboard.
+type Component struct {
+	TaskID      string
+	Name        string
+	Description string
+	spec        func(Config) *agentv1.TaskSpec
+}
+
+var Components = []Component{
+	{
+		TaskID: "sys-traefik", Name: "Traefik", Description: "Edge proxy: routes and TLS from the controller (§5.7)",
+		spec: traefikSpec,
+	},
+	{
+		TaskID: "sys-victoriametrics", Name: "VictoriaMetrics", Description: "Metrics store (§9.1)",
+		spec: func(Config) *agentv1.TaskSpec {
+			return &agentv1.TaskSpec{
+				TaskId: "sys-victoriametrics", Name: "syncloud-victoriametrics", Image: ImageVictoriaMetrics,
+				Command:     []string{"-storageDataPath=/storage", "-retentionPeriod=15d", "-httpListenAddr=:8428"},
+				Ports:       []*agentv1.PortBinding{{HostIp: "127.0.0.1", HostPort: 8428, ContainerPort: 8428}},
+				Mounts:      []*agentv1.Mount{{Type: agentv1.Mount_TYPE_VOLUME, Source: "syncloud-victoriametrics", Target: "/storage"}},
+				NetworkMode: Network, System: true,
+			}
+		},
+	},
+	{
+		TaskID: "sys-victorialogs", Name: "VictoriaLogs", Description: "Central log store (§9.2)",
+		spec: func(Config) *agentv1.TaskSpec {
+			return &agentv1.TaskSpec{
+				TaskId: "sys-victorialogs", Name: "syncloud-victorialogs", Image: ImageVictoriaLogs,
+				Command:     []string{"-storageDataPath=/vlogs", "-retentionPeriod=7d", "-httpListenAddr=:9428"},
+				Ports:       []*agentv1.PortBinding{{HostIp: "127.0.0.1", HostPort: 9428, ContainerPort: 9428}},
+				Mounts:      []*agentv1.Mount{{Type: agentv1.Mount_TYPE_VOLUME, Source: "syncloud-victorialogs", Target: "/vlogs"}},
+				NetworkMode: Network, System: true,
+			}
+		},
+	},
+}
+
+// Traefik runs in host networking so it can bind the public ports directly and
+// reach the controller on loopback and containers on any local network.
+func traefikSpec(c Config) *agentv1.TaskSpec {
+	return &agentv1.TaskSpec{
+		TaskId: "sys-traefik", Name: "syncloud-traefik", Image: ImageTraefik,
+		Command: []string{
+			"--global.checkNewVersion=false",
+			"--global.sendAnonymousUsage=false",
+			"--entrypoints.web.address=" + c.HTTPAddr,
+			"--entrypoints.websecure.address=" + c.HTTPSAddr,
+			"--entrypoints.websecure.http.tls=true",
+			"--entrypoints.admin.address=" + c.AdminAddr,
+			"--ping=true",
+			"--ping.entrypoint=admin",
+			"--metrics.prometheus=true",
+			"--metrics.prometheus.entrypoint=admin",
+			"--metrics.prometheus.addRoutersLabels=true",
+			"--metrics.prometheus.addServicesLabels=true",
+			"--providers.http.endpoint=" + c.ControllerURL + "/internal/traefik/config",
+			"--providers.http.pollInterval=2s",
+			fmt.Sprintf("--providers.http.headers.%s=%s", TraefikTokenHeader, c.TraefikToken),
+			"--accesslog=true",
+			"--accesslog.format=json",
+			"--log.level=INFO",
+		},
+		NetworkMode: "host",
+		System:      true,
+	}
+}
+
+// TraefikTokenHeader carries Config.TraefikToken on config polls.
+const TraefikTokenHeader = "X-Syncloud-Token"
+
+// Specs returns every system task spec for this release.
+func Specs(c Config) []*agentv1.TaskSpec {
+	out := make([]*agentv1.TaskSpec, 0, len(Components))
+	for _, comp := range Components {
+		out = append(out, comp.spec(c))
+	}
+	return out
+}

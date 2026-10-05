@@ -18,6 +18,14 @@ type Controller struct {
 	// AgentAdvertise is the gateway address given to joining nodes. In production
 	// this is the controller's WireGuard IP (10.90.0.1:7443, §8).
 	AgentAdvertise string
+	// PublicHTTP and PublicHTTPS are Traefik's public entrypoints
+	// (":80"/":443"; dev defaults to 127.0.0.1:8080/8443).
+	PublicHTTP  string
+	PublicHTTPS string
+	// TraefikAdmin serves Traefik's ping and metrics on loopback.
+	TraefikAdmin string
+	// SystemTasks runs the platform components on ctl-0 (D20). Off in tests.
+	SystemTasks bool
 	// Dev enables development behavior (verbose logs, relaxed origin checks for the Vite dev server).
 	Dev bool
 }
@@ -34,8 +42,18 @@ func LoadController(args []string) (Controller, error) {
 	fs.StringVar(&c.AgentListen, "agent-listen", env("SYNCLOUD_AGENT_LISTEN", "127.0.0.1:7443"), "agent gateway listen address")
 	fs.StringVar(&c.AgentAdvertise, "agent-advertise", env("SYNCLOUD_AGENT_ADVERTISE", ""), "agent gateway address for nodes (default: --agent-listen)")
 	fs.BoolVar(&c.Dev, "dev", env("SYNCLOUD_DEV", "") == "1", "development mode")
+	fs.StringVar(&c.PublicHTTP, "public-http", env("SYNCLOUD_PUBLIC_HTTP", ""), "Traefik HTTP entrypoint (default :80, dev 127.0.0.1:8080)")
+	fs.StringVar(&c.PublicHTTPS, "public-https", env("SYNCLOUD_PUBLIC_HTTPS", ""), "Traefik HTTPS entrypoint (default :443, dev 127.0.0.1:8443)")
+	fs.StringVar(&c.TraefikAdmin, "traefik-admin", env("SYNCLOUD_TRAEFIK_ADMIN", "127.0.0.1:8082"), "Traefik ping/metrics address (loopback)")
+	fs.BoolVar(&c.SystemTasks, "system-tasks", env("SYNCLOUD_SYSTEM_TASKS", "1") == "1", "run platform components (Traefik, metrics, logs) on the local node")
 	if err := fs.Parse(args); err != nil {
 		return c, err
+	}
+	if c.PublicHTTP == "" {
+		c.PublicHTTP = map[bool]string{true: "127.0.0.1:8080", false: ":80"}[c.Dev]
+	}
+	if c.PublicHTTPS == "" {
+		c.PublicHTTPS = map[bool]string{true: "127.0.0.1:8443", false: ":443"}[c.Dev]
 	}
 	if c.AgentAdvertise == "" {
 		c.AgentAdvertise = c.AgentListen

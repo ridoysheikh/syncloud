@@ -14,6 +14,7 @@ import (
 	"syncloud/internal/pki"
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
+	"syncloud/internal/system"
 )
 
 // OpenAPISpec is the API contract, served at /api/v1/openapi.json.
@@ -28,6 +29,8 @@ type Server struct {
 	ca          *pki.CA
 	nodes       *nodes.Registry
 	gatewayAddr string
+	system      *system.Manager
+	internal    map[string]http.Handler
 	bus         *events.Bus
 	log         *slog.Logger
 	web         fs.FS // built dashboard (may be empty in development)
@@ -45,9 +48,14 @@ type Options struct {
 	Nodes   *nodes.Registry
 	// GatewayAddr is the agent gateway address returned to joining nodes.
 	GatewayAddr string
-	Bus         *events.Bus
-	Log         *slog.Logger
-	Web         fs.FS
+	// System reports platform components (system tasks); may be nil in tests.
+	System *system.Manager
+	// Internal handlers are mounted as-is outside the public API (e.g. the
+	// Traefik config endpoint) and carry their own authentication.
+	Internal map[string]http.Handler
+	Bus      *events.Bus
+	Log      *slog.Logger
+	Web      fs.FS
 	// Now is overridable for tests.
 	Now func() time.Time
 }
@@ -62,6 +70,8 @@ func New(o Options) *Server {
 		ca:           o.CA,
 		nodes:        o.Nodes,
 		gatewayAddr:  o.GatewayAddr,
+		system:       o.System,
+		internal:     o.Internal,
 		bus:          o.Bus,
 		log:          o.Log,
 		web:          o.Web,
@@ -86,6 +96,7 @@ func (s *Server) Routes() []Route {
 	return []Route{
 		{Method: "GET", Path: "/api/v1/system/status", Public: true, h: s.handleStatus},
 		{Method: "GET", Path: "/api/v1/openapi.json", Public: true, h: handleOpenAPI},
+		{Method: "GET", Path: "/api/v1/system/tasks", h: s.handleSystemTasks},
 		{Method: "POST", Path: "/api/v1/setup", Public: true, h: s.handleSetup},
 		{Method: "POST", Path: "/api/v1/auth/login", Public: true, h: s.handleLogin},
 		{Method: "POST", Path: "/api/v1/auth/logout", h: s.handleLogout},
@@ -115,6 +126,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		mux.HandleFunc(rt.Method+" "+rt.Path, h)
 	}
+	for pattern, h := range s.internal {
+		mux.Handle(pattern, h)
+	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such endpoint")
 	})
@@ -136,4 +150,12 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "same-origin")
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) handleSystemTasks(w http.ResponseWriter, _ *http.Request) {
+	items := []system.TaskView{}
+	if s.system != nil {
+		items = s.system.List()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }

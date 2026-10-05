@@ -17,19 +17,24 @@ message ConnectRequest {
     Hello hello = 1;
     Heartbeat heartbeat = 2;
     CommandResult result = 3;
+    TaskStatus task_status = 4;
   }
 }
 
 message ConnectResponse {
   oneof msg {
     Welcome welcome = 1;
-    // Commands (StartTask, StopTask, PullImage, …) are added with the Docker runner.
+    RunTask run_task = 2;
+    StopTask stop_task = 3;
   }
 }
 
 message Hello {
   string agent_version = 1;
   NodeInfo info = 2;
+  // Every SynCloud-managed container on the node, so the controller can
+  // reconcile after a reconnect (§6.3).
+  repeated TaskStatus tasks = 3;
 }
 
 message NodeInfo {
@@ -71,4 +76,84 @@ message CommandResult {
   string command_id = 1;
   bool ok = 2;
   string error = 3;
+}
+
+// TaskSpec describes one container. The agent creates it idempotently: a
+// container whose spec hash matches is left running; otherwise it is replaced.
+message TaskSpec {
+  string task_id = 1;           // stable ID, also the container label syncloud.task_id
+  string name = 2;              // container name
+  string image = 3;
+  repeated string command = 4;  // overrides the image CMD when set
+  map<string, string> env = 5;
+  map<string, string> labels = 6;
+  repeated PortBinding ports = 7;
+  repeated Mount mounts = 8;
+  string network_mode = 9;      // "host", or a Docker network name (created if missing)
+  RestartPolicy restart = 10;
+  int64 memory_limit_bytes = 11; // 0 = unlimited
+  int64 nano_cpus = 12;          // 0 = unlimited; 1e9 = one CPU
+  repeated string extra_hosts = 13; // "name:ip" or "name:host-gateway"
+  bool system = 14;             // platform component (§5.0): never evicted by users
+}
+
+message PortBinding {
+  string host_ip = 1;           // e.g. "127.0.0.1"; empty = all interfaces
+  uint32 host_port = 2;
+  uint32 container_port = 3;
+  string protocol = 4;          // "tcp" (default) or "udp"
+}
+
+message Mount {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_VOLUME = 1;            // named Docker volume (node-local, D2)
+    TYPE_BIND = 2;              // host path
+  }
+  Type type = 1;
+  string source = 2;            // volume name or host path
+  string target = 3;            // path in the container
+  bool read_only = 4;
+}
+
+enum RestartPolicy {
+  RESTART_POLICY_UNSPECIFIED = 0; // same as UNLESS_STOPPED
+  RESTART_POLICY_NO = 1;
+  RESTART_POLICY_ALWAYS = 2;
+  RESTART_POLICY_UNLESS_STOPPED = 3;
+  RESTART_POLICY_ON_FAILURE = 4;
+}
+
+message RunTask {
+  string command_id = 1;
+  TaskSpec spec = 2;
+}
+
+message StopTask {
+  string command_id = 1;
+  string task_id = 2;
+  int32 timeout_seconds = 3;    // before SIGKILL
+  bool remove = 4;              // also remove the container
+}
+
+enum TaskState {
+  TASK_STATE_UNSPECIFIED = 0;
+  TASK_STATE_PULLING = 1;
+  TASK_STATE_STARTING = 2;
+  TASK_STATE_RUNNING = 3;
+  TASK_STATE_EXITED = 4;
+  TASK_STATE_FAILED = 5;        // could not be created/started (see error)
+  TASK_STATE_REMOVED = 6;
+}
+
+message TaskStatus {
+  string task_id = 1;
+  TaskState state = 2;
+  string container_id = 3;
+  string image = 4;
+  string health = 5;            // Docker health: "", starting, healthy, unhealthy
+  int32 exit_code = 6;
+  string error = 7;
+  int64 started_at_unix = 8;
+  string spec_hash = 9;
 }

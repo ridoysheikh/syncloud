@@ -24,6 +24,171 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type RestartPolicy int32
+
+const (
+	RestartPolicy_RESTART_POLICY_UNSPECIFIED    RestartPolicy = 0 // same as UNLESS_STOPPED
+	RestartPolicy_RESTART_POLICY_NO             RestartPolicy = 1
+	RestartPolicy_RESTART_POLICY_ALWAYS         RestartPolicy = 2
+	RestartPolicy_RESTART_POLICY_UNLESS_STOPPED RestartPolicy = 3
+	RestartPolicy_RESTART_POLICY_ON_FAILURE     RestartPolicy = 4
+)
+
+// Enum value maps for RestartPolicy.
+var (
+	RestartPolicy_name = map[int32]string{
+		0: "RESTART_POLICY_UNSPECIFIED",
+		1: "RESTART_POLICY_NO",
+		2: "RESTART_POLICY_ALWAYS",
+		3: "RESTART_POLICY_UNLESS_STOPPED",
+		4: "RESTART_POLICY_ON_FAILURE",
+	}
+	RestartPolicy_value = map[string]int32{
+		"RESTART_POLICY_UNSPECIFIED":    0,
+		"RESTART_POLICY_NO":             1,
+		"RESTART_POLICY_ALWAYS":         2,
+		"RESTART_POLICY_UNLESS_STOPPED": 3,
+		"RESTART_POLICY_ON_FAILURE":     4,
+	}
+)
+
+func (x RestartPolicy) Enum() *RestartPolicy {
+	p := new(RestartPolicy)
+	*p = x
+	return p
+}
+
+func (x RestartPolicy) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RestartPolicy) Descriptor() protoreflect.EnumDescriptor {
+	return file_syncloud_agent_v1_agent_proto_enumTypes[0].Descriptor()
+}
+
+func (RestartPolicy) Type() protoreflect.EnumType {
+	return &file_syncloud_agent_v1_agent_proto_enumTypes[0]
+}
+
+func (x RestartPolicy) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RestartPolicy.Descriptor instead.
+func (RestartPolicy) EnumDescriptor() ([]byte, []int) {
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{0}
+}
+
+type TaskState int32
+
+const (
+	TaskState_TASK_STATE_UNSPECIFIED TaskState = 0
+	TaskState_TASK_STATE_PULLING     TaskState = 1
+	TaskState_TASK_STATE_STARTING    TaskState = 2
+	TaskState_TASK_STATE_RUNNING     TaskState = 3
+	TaskState_TASK_STATE_EXITED      TaskState = 4
+	TaskState_TASK_STATE_FAILED      TaskState = 5 // could not be created/started (see error)
+	TaskState_TASK_STATE_REMOVED     TaskState = 6
+)
+
+// Enum value maps for TaskState.
+var (
+	TaskState_name = map[int32]string{
+		0: "TASK_STATE_UNSPECIFIED",
+		1: "TASK_STATE_PULLING",
+		2: "TASK_STATE_STARTING",
+		3: "TASK_STATE_RUNNING",
+		4: "TASK_STATE_EXITED",
+		5: "TASK_STATE_FAILED",
+		6: "TASK_STATE_REMOVED",
+	}
+	TaskState_value = map[string]int32{
+		"TASK_STATE_UNSPECIFIED": 0,
+		"TASK_STATE_PULLING":     1,
+		"TASK_STATE_STARTING":    2,
+		"TASK_STATE_RUNNING":     3,
+		"TASK_STATE_EXITED":      4,
+		"TASK_STATE_FAILED":      5,
+		"TASK_STATE_REMOVED":     6,
+	}
+)
+
+func (x TaskState) Enum() *TaskState {
+	p := new(TaskState)
+	*p = x
+	return p
+}
+
+func (x TaskState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (TaskState) Descriptor() protoreflect.EnumDescriptor {
+	return file_syncloud_agent_v1_agent_proto_enumTypes[1].Descriptor()
+}
+
+func (TaskState) Type() protoreflect.EnumType {
+	return &file_syncloud_agent_v1_agent_proto_enumTypes[1]
+}
+
+func (x TaskState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use TaskState.Descriptor instead.
+func (TaskState) EnumDescriptor() ([]byte, []int) {
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{1}
+}
+
+type Mount_Type int32
+
+const (
+	Mount_TYPE_UNSPECIFIED Mount_Type = 0
+	Mount_TYPE_VOLUME      Mount_Type = 1 // named Docker volume (node-local, D2)
+	Mount_TYPE_BIND        Mount_Type = 2 // host path
+)
+
+// Enum value maps for Mount_Type.
+var (
+	Mount_Type_name = map[int32]string{
+		0: "TYPE_UNSPECIFIED",
+		1: "TYPE_VOLUME",
+		2: "TYPE_BIND",
+	}
+	Mount_Type_value = map[string]int32{
+		"TYPE_UNSPECIFIED": 0,
+		"TYPE_VOLUME":      1,
+		"TYPE_BIND":        2,
+	}
+)
+
+func (x Mount_Type) Enum() *Mount_Type {
+	p := new(Mount_Type)
+	*p = x
+	return p
+}
+
+func (x Mount_Type) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Mount_Type) Descriptor() protoreflect.EnumDescriptor {
+	return file_syncloud_agent_v1_agent_proto_enumTypes[2].Descriptor()
+}
+
+func (Mount_Type) Type() protoreflect.EnumType {
+	return &file_syncloud_agent_v1_agent_proto_enumTypes[2]
+}
+
+func (x Mount_Type) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Mount_Type.Descriptor instead.
+func (Mount_Type) EnumDescriptor() ([]byte, []int) {
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{10, 0}
+}
+
 type ConnectRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Msg:
@@ -31,6 +196,7 @@ type ConnectRequest struct {
 	//	*ConnectRequest_Hello
 	//	*ConnectRequest_Heartbeat
 	//	*ConnectRequest_Result
+	//	*ConnectRequest_TaskStatus
 	Msg           isConnectRequest_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -100,6 +266,15 @@ func (x *ConnectRequest) GetResult() *CommandResult {
 	return nil
 }
 
+func (x *ConnectRequest) GetTaskStatus() *TaskStatus {
+	if x != nil {
+		if x, ok := x.Msg.(*ConnectRequest_TaskStatus); ok {
+			return x.TaskStatus
+		}
+	}
+	return nil
+}
+
 type isConnectRequest_Msg interface {
 	isConnectRequest_Msg()
 }
@@ -116,17 +291,25 @@ type ConnectRequest_Result struct {
 	Result *CommandResult `protobuf:"bytes,3,opt,name=result,proto3,oneof"`
 }
 
+type ConnectRequest_TaskStatus struct {
+	TaskStatus *TaskStatus `protobuf:"bytes,4,opt,name=task_status,json=taskStatus,proto3,oneof"`
+}
+
 func (*ConnectRequest_Hello) isConnectRequest_Msg() {}
 
 func (*ConnectRequest_Heartbeat) isConnectRequest_Msg() {}
 
 func (*ConnectRequest_Result) isConnectRequest_Msg() {}
 
+func (*ConnectRequest_TaskStatus) isConnectRequest_Msg() {}
+
 type ConnectResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Msg:
 	//
 	//	*ConnectResponse_Welcome
+	//	*ConnectResponse_RunTask
+	//	*ConnectResponse_StopTask
 	Msg           isConnectResponse_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -178,20 +361,53 @@ func (x *ConnectResponse) GetWelcome() *Welcome {
 	return nil
 }
 
+func (x *ConnectResponse) GetRunTask() *RunTask {
+	if x != nil {
+		if x, ok := x.Msg.(*ConnectResponse_RunTask); ok {
+			return x.RunTask
+		}
+	}
+	return nil
+}
+
+func (x *ConnectResponse) GetStopTask() *StopTask {
+	if x != nil {
+		if x, ok := x.Msg.(*ConnectResponse_StopTask); ok {
+			return x.StopTask
+		}
+	}
+	return nil
+}
+
 type isConnectResponse_Msg interface {
 	isConnectResponse_Msg()
 }
 
 type ConnectResponse_Welcome struct {
-	Welcome *Welcome `protobuf:"bytes,1,opt,name=welcome,proto3,oneof"` // Commands (StartTask, StopTask, PullImage, …) are added with the Docker runner.
+	Welcome *Welcome `protobuf:"bytes,1,opt,name=welcome,proto3,oneof"`
+}
+
+type ConnectResponse_RunTask struct {
+	RunTask *RunTask `protobuf:"bytes,2,opt,name=run_task,json=runTask,proto3,oneof"`
+}
+
+type ConnectResponse_StopTask struct {
+	StopTask *StopTask `protobuf:"bytes,3,opt,name=stop_task,json=stopTask,proto3,oneof"`
 }
 
 func (*ConnectResponse_Welcome) isConnectResponse_Msg() {}
 
+func (*ConnectResponse_RunTask) isConnectResponse_Msg() {}
+
+func (*ConnectResponse_StopTask) isConnectResponse_Msg() {}
+
 type Hello struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentVersion  string                 `protobuf:"bytes,1,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
-	Info          *NodeInfo              `protobuf:"bytes,2,opt,name=info,proto3" json:"info,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	AgentVersion string                 `protobuf:"bytes,1,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
+	Info         *NodeInfo              `protobuf:"bytes,2,opt,name=info,proto3" json:"info,omitempty"`
+	// Every SynCloud-managed container on the node, so the controller can
+	// reconcile after a reconnect (§6.3).
+	Tasks         []*TaskStatus `protobuf:"bytes,3,rep,name=tasks,proto3" json:"tasks,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -236,6 +452,13 @@ func (x *Hello) GetAgentVersion() string {
 func (x *Hello) GetInfo() *NodeInfo {
 	if x != nil {
 		return x.Info
+	}
+	return nil
+}
+
+func (x *Hello) GetTasks() []*TaskStatus {
+	if x != nil {
+		return x.Tasks
 	}
 	return nil
 }
@@ -621,22 +844,541 @@ func (x *CommandResult) GetError() string {
 	return ""
 }
 
+// TaskSpec describes one container. The agent creates it idempotently: a
+// container whose spec hash matches is left running; otherwise it is replaced.
+type TaskSpec struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	TaskId           string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"` // stable ID, also the container label syncloud.task_id
+	Name             string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                   // container name
+	Image            string                 `protobuf:"bytes,3,opt,name=image,proto3" json:"image,omitempty"`
+	Command          []string               `protobuf:"bytes,4,rep,name=command,proto3" json:"command,omitempty"` // overrides the image CMD when set
+	Env              map[string]string      `protobuf:"bytes,5,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels           map[string]string      `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Ports            []*PortBinding         `protobuf:"bytes,7,rep,name=ports,proto3" json:"ports,omitempty"`
+	Mounts           []*Mount               `protobuf:"bytes,8,rep,name=mounts,proto3" json:"mounts,omitempty"`
+	NetworkMode      string                 `protobuf:"bytes,9,opt,name=network_mode,json=networkMode,proto3" json:"network_mode,omitempty"` // "host", or a Docker network name (created if missing)
+	Restart          RestartPolicy          `protobuf:"varint,10,opt,name=restart,proto3,enum=syncloud.agent.v1.RestartPolicy" json:"restart,omitempty"`
+	MemoryLimitBytes int64                  `protobuf:"varint,11,opt,name=memory_limit_bytes,json=memoryLimitBytes,proto3" json:"memory_limit_bytes,omitempty"` // 0 = unlimited
+	NanoCpus         int64                  `protobuf:"varint,12,opt,name=nano_cpus,json=nanoCpus,proto3" json:"nano_cpus,omitempty"`                           // 0 = unlimited; 1e9 = one CPU
+	ExtraHosts       []string               `protobuf:"bytes,13,rep,name=extra_hosts,json=extraHosts,proto3" json:"extra_hosts,omitempty"`                      // "name:ip" or "name:host-gateway"
+	System           bool                   `protobuf:"varint,14,opt,name=system,proto3" json:"system,omitempty"`                                               // platform component (§5.0): never evicted by users
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *TaskSpec) Reset() {
+	*x = TaskSpec{}
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskSpec) ProtoMessage() {}
+
+func (x *TaskSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskSpec.ProtoReflect.Descriptor instead.
+func (*TaskSpec) Descriptor() ([]byte, []int) {
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *TaskSpec) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskSpec) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *TaskSpec) GetImage() string {
+	if x != nil {
+		return x.Image
+	}
+	return ""
+}
+
+func (x *TaskSpec) GetCommand() []string {
+	if x != nil {
+		return x.Command
+	}
+	return nil
+}
+
+func (x *TaskSpec) GetEnv() map[string]string {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+func (x *TaskSpec) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *TaskSpec) GetPorts() []*PortBinding {
+	if x != nil {
+		return x.Ports
+	}
+	return nil
+}
+
+func (x *TaskSpec) GetMounts() []*Mount {
+	if x != nil {
+		return x.Mounts
+	}
+	return nil
+}
+
+func (x *TaskSpec) GetNetworkMode() string {
+	if x != nil {
+		return x.NetworkMode
+	}
+	return ""
+}
+
+func (x *TaskSpec) GetRestart() RestartPolicy {
+	if x != nil {
+		return x.Restart
+	}
+	return RestartPolicy_RESTART_POLICY_UNSPECIFIED
+}
+
+func (x *TaskSpec) GetMemoryLimitBytes() int64 {
+	if x != nil {
+		return x.MemoryLimitBytes
+	}
+	return 0
+}
+
+func (x *TaskSpec) GetNanoCpus() int64 {
+	if x != nil {
+		return x.NanoCpus
+	}
+	return 0
+}
+
+func (x *TaskSpec) GetExtraHosts() []string {
+	if x != nil {
+		return x.ExtraHosts
+	}
+	return nil
+}
+
+func (x *TaskSpec) GetSystem() bool {
+	if x != nil {
+		return x.System
+	}
+	return false
+}
+
+type PortBinding struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	HostIp        string                 `protobuf:"bytes,1,opt,name=host_ip,json=hostIp,proto3" json:"host_ip,omitempty"` // e.g. "127.0.0.1"; empty = all interfaces
+	HostPort      uint32                 `protobuf:"varint,2,opt,name=host_port,json=hostPort,proto3" json:"host_port,omitempty"`
+	ContainerPort uint32                 `protobuf:"varint,3,opt,name=container_port,json=containerPort,proto3" json:"container_port,omitempty"`
+	Protocol      string                 `protobuf:"bytes,4,opt,name=protocol,proto3" json:"protocol,omitempty"` // "tcp" (default) or "udp"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PortBinding) Reset() {
+	*x = PortBinding{}
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PortBinding) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PortBinding) ProtoMessage() {}
+
+func (x *PortBinding) ProtoReflect() protoreflect.Message {
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PortBinding.ProtoReflect.Descriptor instead.
+func (*PortBinding) Descriptor() ([]byte, []int) {
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *PortBinding) GetHostIp() string {
+	if x != nil {
+		return x.HostIp
+	}
+	return ""
+}
+
+func (x *PortBinding) GetHostPort() uint32 {
+	if x != nil {
+		return x.HostPort
+	}
+	return 0
+}
+
+func (x *PortBinding) GetContainerPort() uint32 {
+	if x != nil {
+		return x.ContainerPort
+	}
+	return 0
+}
+
+func (x *PortBinding) GetProtocol() string {
+	if x != nil {
+		return x.Protocol
+	}
+	return ""
+}
+
+type Mount struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Type          Mount_Type             `protobuf:"varint,1,opt,name=type,proto3,enum=syncloud.agent.v1.Mount_Type" json:"type,omitempty"`
+	Source        string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"` // volume name or host path
+	Target        string                 `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"` // path in the container
+	ReadOnly      bool                   `protobuf:"varint,4,opt,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Mount) Reset() {
+	*x = Mount{}
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Mount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Mount) ProtoMessage() {}
+
+func (x *Mount) ProtoReflect() protoreflect.Message {
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Mount.ProtoReflect.Descriptor instead.
+func (*Mount) Descriptor() ([]byte, []int) {
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *Mount) GetType() Mount_Type {
+	if x != nil {
+		return x.Type
+	}
+	return Mount_TYPE_UNSPECIFIED
+}
+
+func (x *Mount) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *Mount) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *Mount) GetReadOnly() bool {
+	if x != nil {
+		return x.ReadOnly
+	}
+	return false
+}
+
+type RunTask struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	Spec          *TaskSpec              `protobuf:"bytes,2,opt,name=spec,proto3" json:"spec,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunTask) Reset() {
+	*x = RunTask{}
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunTask) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunTask) ProtoMessage() {}
+
+func (x *RunTask) ProtoReflect() protoreflect.Message {
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunTask.ProtoReflect.Descriptor instead.
+func (*RunTask) Descriptor() ([]byte, []int) {
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *RunTask) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *RunTask) GetSpec() *TaskSpec {
+	if x != nil {
+		return x.Spec
+	}
+	return nil
+}
+
+type StopTask struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	CommandId      string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	TaskId         string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	TimeoutSeconds int32                  `protobuf:"varint,3,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"` // before SIGKILL
+	Remove         bool                   `protobuf:"varint,4,opt,name=remove,proto3" json:"remove,omitempty"`                                       // also remove the container
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *StopTask) Reset() {
+	*x = StopTask{}
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StopTask) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StopTask) ProtoMessage() {}
+
+func (x *StopTask) ProtoReflect() protoreflect.Message {
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StopTask.ProtoReflect.Descriptor instead.
+func (*StopTask) Descriptor() ([]byte, []int) {
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *StopTask) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *StopTask) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *StopTask) GetTimeoutSeconds() int32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+func (x *StopTask) GetRemove() bool {
+	if x != nil {
+		return x.Remove
+	}
+	return false
+}
+
+type TaskStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	State         TaskState              `protobuf:"varint,2,opt,name=state,proto3,enum=syncloud.agent.v1.TaskState" json:"state,omitempty"`
+	ContainerId   string                 `protobuf:"bytes,3,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
+	Image         string                 `protobuf:"bytes,4,opt,name=image,proto3" json:"image,omitempty"`
+	Health        string                 `protobuf:"bytes,5,opt,name=health,proto3" json:"health,omitempty"` // Docker health: "", starting, healthy, unhealthy
+	ExitCode      int32                  `protobuf:"varint,6,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	Error         string                 `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`
+	StartedAtUnix int64                  `protobuf:"varint,8,opt,name=started_at_unix,json=startedAtUnix,proto3" json:"started_at_unix,omitempty"`
+	SpecHash      string                 `protobuf:"bytes,9,opt,name=spec_hash,json=specHash,proto3" json:"spec_hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskStatus) Reset() {
+	*x = TaskStatus{}
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskStatus) ProtoMessage() {}
+
+func (x *TaskStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskStatus.ProtoReflect.Descriptor instead.
+func (*TaskStatus) Descriptor() ([]byte, []int) {
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *TaskStatus) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskStatus) GetState() TaskState {
+	if x != nil {
+		return x.State
+	}
+	return TaskState_TASK_STATE_UNSPECIFIED
+}
+
+func (x *TaskStatus) GetContainerId() string {
+	if x != nil {
+		return x.ContainerId
+	}
+	return ""
+}
+
+func (x *TaskStatus) GetImage() string {
+	if x != nil {
+		return x.Image
+	}
+	return ""
+}
+
+func (x *TaskStatus) GetHealth() string {
+	if x != nil {
+		return x.Health
+	}
+	return ""
+}
+
+func (x *TaskStatus) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+func (x *TaskStatus) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *TaskStatus) GetStartedAtUnix() int64 {
+	if x != nil {
+		return x.StartedAtUnix
+	}
+	return 0
+}
+
+func (x *TaskStatus) GetSpecHash() string {
+	if x != nil {
+		return x.SpecHash
+	}
+	return ""
+}
+
 var File_syncloud_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x1dsyncloud/agent/v1/agent.proto\x12\x11syncloud.agent.v1\"\xc3\x01\n" +
+	"\x1dsyncloud/agent/v1/agent.proto\x12\x11syncloud.agent.v1\"\x85\x02\n" +
 	"\x0eConnectRequest\x120\n" +
 	"\x05hello\x18\x01 \x01(\v2\x18.syncloud.agent.v1.HelloH\x00R\x05hello\x12<\n" +
 	"\theartbeat\x18\x02 \x01(\v2\x1c.syncloud.agent.v1.HeartbeatH\x00R\theartbeat\x12:\n" +
-	"\x06result\x18\x03 \x01(\v2 .syncloud.agent.v1.CommandResultH\x00R\x06resultB\x05\n" +
-	"\x03msg\"P\n" +
+	"\x06result\x18\x03 \x01(\v2 .syncloud.agent.v1.CommandResultH\x00R\x06result\x12@\n" +
+	"\vtask_status\x18\x04 \x01(\v2\x1d.syncloud.agent.v1.TaskStatusH\x00R\n" +
+	"taskStatusB\x05\n" +
+	"\x03msg\"\xc5\x01\n" +
 	"\x0fConnectResponse\x126\n" +
-	"\awelcome\x18\x01 \x01(\v2\x1a.syncloud.agent.v1.WelcomeH\x00R\awelcomeB\x05\n" +
-	"\x03msg\"]\n" +
+	"\awelcome\x18\x01 \x01(\v2\x1a.syncloud.agent.v1.WelcomeH\x00R\awelcome\x127\n" +
+	"\brun_task\x18\x02 \x01(\v2\x1a.syncloud.agent.v1.RunTaskH\x00R\arunTask\x12:\n" +
+	"\tstop_task\x18\x03 \x01(\v2\x1b.syncloud.agent.v1.StopTaskH\x00R\bstopTaskB\x05\n" +
+	"\x03msg\"\x92\x01\n" +
 	"\x05Hello\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12/\n" +
-	"\x04info\x18\x02 \x01(\v2\x1b.syncloud.agent.v1.NodeInfoR\x04info\"\xe8\x01\n" +
+	"\x04info\x18\x02 \x01(\v2\x1b.syncloud.agent.v1.NodeInfoR\x04info\x123\n" +
+	"\x05tasks\x18\x03 \x03(\v2\x1d.syncloud.agent.v1.TaskStatusR\x05tasks\"\xe8\x01\n" +
 	"\bNodeInfo\x12\x1a\n" +
 	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x0e\n" +
 	"\x02os\x18\x02 \x01(\tR\x02os\x12\x16\n" +
@@ -672,7 +1414,79 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error2k\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\x9e\x05\n" +
+	"\bTaskSpec\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
+	"\x05image\x18\x03 \x01(\tR\x05image\x12\x18\n" +
+	"\acommand\x18\x04 \x03(\tR\acommand\x126\n" +
+	"\x03env\x18\x05 \x03(\v2$.syncloud.agent.v1.TaskSpec.EnvEntryR\x03env\x12?\n" +
+	"\x06labels\x18\x06 \x03(\v2'.syncloud.agent.v1.TaskSpec.LabelsEntryR\x06labels\x124\n" +
+	"\x05ports\x18\a \x03(\v2\x1e.syncloud.agent.v1.PortBindingR\x05ports\x120\n" +
+	"\x06mounts\x18\b \x03(\v2\x18.syncloud.agent.v1.MountR\x06mounts\x12!\n" +
+	"\fnetwork_mode\x18\t \x01(\tR\vnetworkMode\x12:\n" +
+	"\arestart\x18\n" +
+	" \x01(\x0e2 .syncloud.agent.v1.RestartPolicyR\arestart\x12,\n" +
+	"\x12memory_limit_bytes\x18\v \x01(\x03R\x10memoryLimitBytes\x12\x1b\n" +
+	"\tnano_cpus\x18\f \x01(\x03R\bnanoCpus\x12\x1f\n" +
+	"\vextra_hosts\x18\r \x03(\tR\n" +
+	"extraHosts\x12\x16\n" +
+	"\x06system\x18\x0e \x01(\bR\x06system\x1a6\n" +
+	"\bEnvEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x86\x01\n" +
+	"\vPortBinding\x12\x17\n" +
+	"\ahost_ip\x18\x01 \x01(\tR\x06hostIp\x12\x1b\n" +
+	"\thost_port\x18\x02 \x01(\rR\bhostPort\x12%\n" +
+	"\x0econtainer_port\x18\x03 \x01(\rR\rcontainerPort\x12\x1a\n" +
+	"\bprotocol\x18\x04 \x01(\tR\bprotocol\"\xc5\x01\n" +
+	"\x05Mount\x121\n" +
+	"\x04type\x18\x01 \x01(\x0e2\x1d.syncloud.agent.v1.Mount.TypeR\x04type\x12\x16\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x12\x16\n" +
+	"\x06target\x18\x03 \x01(\tR\x06target\x12\x1b\n" +
+	"\tread_only\x18\x04 \x01(\bR\breadOnly\"<\n" +
+	"\x04Type\x12\x14\n" +
+	"\x10TYPE_UNSPECIFIED\x10\x00\x12\x0f\n" +
+	"\vTYPE_VOLUME\x10\x01\x12\r\n" +
+	"\tTYPE_BIND\x10\x02\"Y\n" +
+	"\aRunTask\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12/\n" +
+	"\x04spec\x18\x02 \x01(\v2\x1b.syncloud.agent.v1.TaskSpecR\x04spec\"\x83\x01\n" +
+	"\bStopTask\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12'\n" +
+	"\x0ftimeout_seconds\x18\x03 \x01(\x05R\x0etimeoutSeconds\x12\x16\n" +
+	"\x06remove\x18\x04 \x01(\bR\x06remove\"\xa2\x02\n" +
+	"\n" +
+	"TaskStatus\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x122\n" +
+	"\x05state\x18\x02 \x01(\x0e2\x1c.syncloud.agent.v1.TaskStateR\x05state\x12!\n" +
+	"\fcontainer_id\x18\x03 \x01(\tR\vcontainerId\x12\x14\n" +
+	"\x05image\x18\x04 \x01(\tR\x05image\x12\x16\n" +
+	"\x06health\x18\x05 \x01(\tR\x06health\x12\x1b\n" +
+	"\texit_code\x18\x06 \x01(\x05R\bexitCode\x12\x14\n" +
+	"\x05error\x18\a \x01(\tR\x05error\x12&\n" +
+	"\x0fstarted_at_unix\x18\b \x01(\x03R\rstartedAtUnix\x12\x1b\n" +
+	"\tspec_hash\x18\t \x01(\tR\bspecHash*\xa3\x01\n" +
+	"\rRestartPolicy\x12\x1e\n" +
+	"\x1aRESTART_POLICY_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11RESTART_POLICY_NO\x10\x01\x12\x19\n" +
+	"\x15RESTART_POLICY_ALWAYS\x10\x02\x12!\n" +
+	"\x1dRESTART_POLICY_UNLESS_STOPPED\x10\x03\x12\x1d\n" +
+	"\x19RESTART_POLICY_ON_FAILURE\x10\x04*\xb6\x01\n" +
+	"\tTaskState\x12\x1a\n" +
+	"\x16TASK_STATE_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12TASK_STATE_PULLING\x10\x01\x12\x17\n" +
+	"\x13TASK_STATE_STARTING\x10\x02\x12\x16\n" +
+	"\x12TASK_STATE_RUNNING\x10\x03\x12\x15\n" +
+	"\x11TASK_STATE_EXITED\x10\x04\x12\x15\n" +
+	"\x11TASK_STATE_FAILED\x10\x05\x12\x16\n" +
+	"\x12TASK_STATE_REMOVED\x10\x062k\n" +
 	"\x13AgentGatewayService\x12T\n" +
 	"\aConnect\x12!.syncloud.agent.v1.ConnectRequest\x1a\".syncloud.agent.v1.ConnectResponse(\x010\x01B1Z/syncloud/internal/gen/syncloud/agent/v1;agentv1b\x06proto3"
 
@@ -688,31 +1502,55 @@ func file_syncloud_agent_v1_agent_proto_rawDescGZIP() []byte {
 	return file_syncloud_agent_v1_agent_proto_rawDescData
 }
 
-var file_syncloud_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_syncloud_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_syncloud_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_syncloud_agent_v1_agent_proto_goTypes = []any{
-	(*ConnectRequest)(nil),  // 0: syncloud.agent.v1.ConnectRequest
-	(*ConnectResponse)(nil), // 1: syncloud.agent.v1.ConnectResponse
-	(*Hello)(nil),           // 2: syncloud.agent.v1.Hello
-	(*NodeInfo)(nil),        // 3: syncloud.agent.v1.NodeInfo
-	(*Welcome)(nil),         // 4: syncloud.agent.v1.Welcome
-	(*Heartbeat)(nil),       // 5: syncloud.agent.v1.Heartbeat
-	(*NodeMetrics)(nil),     // 6: syncloud.agent.v1.NodeMetrics
-	(*CommandResult)(nil),   // 7: syncloud.agent.v1.CommandResult
+	(RestartPolicy)(0),      // 0: syncloud.agent.v1.RestartPolicy
+	(TaskState)(0),          // 1: syncloud.agent.v1.TaskState
+	(Mount_Type)(0),         // 2: syncloud.agent.v1.Mount.Type
+	(*ConnectRequest)(nil),  // 3: syncloud.agent.v1.ConnectRequest
+	(*ConnectResponse)(nil), // 4: syncloud.agent.v1.ConnectResponse
+	(*Hello)(nil),           // 5: syncloud.agent.v1.Hello
+	(*NodeInfo)(nil),        // 6: syncloud.agent.v1.NodeInfo
+	(*Welcome)(nil),         // 7: syncloud.agent.v1.Welcome
+	(*Heartbeat)(nil),       // 8: syncloud.agent.v1.Heartbeat
+	(*NodeMetrics)(nil),     // 9: syncloud.agent.v1.NodeMetrics
+	(*CommandResult)(nil),   // 10: syncloud.agent.v1.CommandResult
+	(*TaskSpec)(nil),        // 11: syncloud.agent.v1.TaskSpec
+	(*PortBinding)(nil),     // 12: syncloud.agent.v1.PortBinding
+	(*Mount)(nil),           // 13: syncloud.agent.v1.Mount
+	(*RunTask)(nil),         // 14: syncloud.agent.v1.RunTask
+	(*StopTask)(nil),        // 15: syncloud.agent.v1.StopTask
+	(*TaskStatus)(nil),      // 16: syncloud.agent.v1.TaskStatus
+	nil,                     // 17: syncloud.agent.v1.TaskSpec.EnvEntry
+	nil,                     // 18: syncloud.agent.v1.TaskSpec.LabelsEntry
 }
 var file_syncloud_agent_v1_agent_proto_depIdxs = []int32{
-	2, // 0: syncloud.agent.v1.ConnectRequest.hello:type_name -> syncloud.agent.v1.Hello
-	5, // 1: syncloud.agent.v1.ConnectRequest.heartbeat:type_name -> syncloud.agent.v1.Heartbeat
-	7, // 2: syncloud.agent.v1.ConnectRequest.result:type_name -> syncloud.agent.v1.CommandResult
-	4, // 3: syncloud.agent.v1.ConnectResponse.welcome:type_name -> syncloud.agent.v1.Welcome
-	3, // 4: syncloud.agent.v1.Hello.info:type_name -> syncloud.agent.v1.NodeInfo
-	6, // 5: syncloud.agent.v1.Heartbeat.metrics:type_name -> syncloud.agent.v1.NodeMetrics
-	0, // 6: syncloud.agent.v1.AgentGatewayService.Connect:input_type -> syncloud.agent.v1.ConnectRequest
-	1, // 7: syncloud.agent.v1.AgentGatewayService.Connect:output_type -> syncloud.agent.v1.ConnectResponse
-	7, // [7:8] is the sub-list for method output_type
-	6, // [6:7] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	5,  // 0: syncloud.agent.v1.ConnectRequest.hello:type_name -> syncloud.agent.v1.Hello
+	8,  // 1: syncloud.agent.v1.ConnectRequest.heartbeat:type_name -> syncloud.agent.v1.Heartbeat
+	10, // 2: syncloud.agent.v1.ConnectRequest.result:type_name -> syncloud.agent.v1.CommandResult
+	16, // 3: syncloud.agent.v1.ConnectRequest.task_status:type_name -> syncloud.agent.v1.TaskStatus
+	7,  // 4: syncloud.agent.v1.ConnectResponse.welcome:type_name -> syncloud.agent.v1.Welcome
+	14, // 5: syncloud.agent.v1.ConnectResponse.run_task:type_name -> syncloud.agent.v1.RunTask
+	15, // 6: syncloud.agent.v1.ConnectResponse.stop_task:type_name -> syncloud.agent.v1.StopTask
+	6,  // 7: syncloud.agent.v1.Hello.info:type_name -> syncloud.agent.v1.NodeInfo
+	16, // 8: syncloud.agent.v1.Hello.tasks:type_name -> syncloud.agent.v1.TaskStatus
+	9,  // 9: syncloud.agent.v1.Heartbeat.metrics:type_name -> syncloud.agent.v1.NodeMetrics
+	17, // 10: syncloud.agent.v1.TaskSpec.env:type_name -> syncloud.agent.v1.TaskSpec.EnvEntry
+	18, // 11: syncloud.agent.v1.TaskSpec.labels:type_name -> syncloud.agent.v1.TaskSpec.LabelsEntry
+	12, // 12: syncloud.agent.v1.TaskSpec.ports:type_name -> syncloud.agent.v1.PortBinding
+	13, // 13: syncloud.agent.v1.TaskSpec.mounts:type_name -> syncloud.agent.v1.Mount
+	0,  // 14: syncloud.agent.v1.TaskSpec.restart:type_name -> syncloud.agent.v1.RestartPolicy
+	2,  // 15: syncloud.agent.v1.Mount.type:type_name -> syncloud.agent.v1.Mount.Type
+	11, // 16: syncloud.agent.v1.RunTask.spec:type_name -> syncloud.agent.v1.TaskSpec
+	1,  // 17: syncloud.agent.v1.TaskStatus.state:type_name -> syncloud.agent.v1.TaskState
+	3,  // 18: syncloud.agent.v1.AgentGatewayService.Connect:input_type -> syncloud.agent.v1.ConnectRequest
+	4,  // 19: syncloud.agent.v1.AgentGatewayService.Connect:output_type -> syncloud.agent.v1.ConnectResponse
+	19, // [19:20] is the sub-list for method output_type
+	18, // [18:19] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_syncloud_agent_v1_agent_proto_init() }
@@ -724,22 +1562,26 @@ func file_syncloud_agent_v1_agent_proto_init() {
 		(*ConnectRequest_Hello)(nil),
 		(*ConnectRequest_Heartbeat)(nil),
 		(*ConnectRequest_Result)(nil),
+		(*ConnectRequest_TaskStatus)(nil),
 	}
 	file_syncloud_agent_v1_agent_proto_msgTypes[1].OneofWrappers = []any{
 		(*ConnectResponse_Welcome)(nil),
+		(*ConnectResponse_RunTask)(nil),
+		(*ConnectResponse_StopTask)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_syncloud_agent_v1_agent_proto_rawDesc), len(file_syncloud_agent_v1_agent_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   8,
+			NumEnums:      3,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_syncloud_agent_v1_agent_proto_goTypes,
 		DependencyIndexes: file_syncloud_agent_v1_agent_proto_depIdxs,
+		EnumInfos:         file_syncloud_agent_v1_agent_proto_enumTypes,
 		MessageInfos:      file_syncloud_agent_v1_agent_proto_msgTypes,
 	}.Build()
 	File_syncloud_agent_v1_agent_proto = out.File

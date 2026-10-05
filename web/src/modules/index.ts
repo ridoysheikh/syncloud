@@ -17,6 +17,7 @@ import { OverviewPage } from "./overview/OverviewPage";
 import { planned } from "./planned";
 import { CredentialsPage } from "./iam/CredentialsPage";
 import { NodesPage } from "./compute/NodesPage";
+import { PlatformPage } from "./settings/PlatformPage";
 
 /** The module registry. The side nav and routes are built from this list. */
 export const modules: DashboardModule[] = [
@@ -135,6 +136,7 @@ export const modules: DashboardModule[] = [
     icon: Settings,
     order: 110,
     pages: [
+      { path: "/settings/platform", label: "Platform", component: PlatformPage },
       { path: "/settings/domains", label: "Domains", component: planned(["Settings"], "Domains", "Phase 0b", "§5.0.2", "sslip.io base domain, your own domain and certificates.") },
       { path: "/settings/updates", label: "Updates", component: planned(["Settings"], "Updates", "Phase 9", "§5.0.1", "Controller upgrades with automatic rollback.") },
     ],

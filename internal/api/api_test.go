@@ -202,3 +202,25 @@ func TestSPAFallbackAndAPINotFound(t *testing.T) {
 		t.Fatalf("api 404: %d %v", resp.StatusCode, body)
 	}
 }
+
+func TestClientIPTrustsOnlyLocalProxy(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("X-Forwarded-For", "198.51.100.7, 203.0.113.9")
+	r.Header.Set("X-Forwarded-Proto", "https")
+
+	r.RemoteAddr = "127.0.0.1:5555" // Traefik on the same host
+	if got := clientIP(r); got != "203.0.113.9" {
+		t.Fatalf("via local proxy: %q", got)
+	}
+	if !isHTTPS(r) {
+		t.Fatal("X-Forwarded-Proto from local proxy ignored")
+	}
+
+	r.RemoteAddr = "192.0.2.1:5555" // anyone else: headers are ignored
+	if got := clientIP(r); got != "192.0.2.1" {
+		t.Fatalf("spoofed header trusted: %q", got)
+	}
+	if isHTTPS(r) {
+		t.Fatal("spoofed X-Forwarded-Proto trusted")
+	}
+}
