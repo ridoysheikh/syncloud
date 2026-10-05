@@ -21,6 +21,7 @@ import (
 	"syncloud/internal/agentgw"
 	"syncloud/internal/api"
 	"syncloud/internal/auth"
+	"syncloud/internal/backup"
 	"syncloud/internal/certs"
 	"syncloud/internal/config"
 	"syncloud/internal/domain"
@@ -43,7 +44,33 @@ func main() {
 	}
 }
 
+const usage = `Usage: syncloud-controller [serve] [flags]   run the controller (default)
+       syncloud-controller doctor [flags]    check every component and print fixes
+       syncloud-controller restore [flags]   restore a backup into the data directory
+       syncloud-controller version`
+
 func run(args []string) error {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		switch args[0] {
+		case "serve":
+			return serve(args[1:])
+		case "doctor":
+			return doctor(args[1:])
+		case "restore":
+			return restore(args[1:])
+		case "version":
+			fmt.Println(version.Version)
+			return nil
+		case "help":
+			fmt.Println(usage)
+			return nil
+		}
+		return fmt.Errorf("unknown command %q\n%s", args[0], usage)
+	}
+	return serve(args)
+}
+
+func serve(args []string) error {
 	cfg, err := config.LoadController(args)
 	if err != nil {
 		return err
@@ -63,14 +90,30 @@ func run(args []string) error {
 	}
 	defer st.Close()
 
-	box, err := secrets.LoadOrCreate(cfg.DataDir)
+	box, recoveryKey, err := secrets.LoadOrCreate(cfg.DataDir)
 	if err != nil {
 		return err
+	}
+	if recoveryKey != "" {
+		if err := st.SetSetting(ctx, store.SettingRecoverySuffixHash, auth.HashToken(secrets.RecoveryKeySuffix(recoveryKey))); err != nil {
+			return err
+		}
+		// For install.sh to show once; removed when setup completes.
+		if err := os.WriteFile(filepath.Join(cfg.DataDir, recoveryKeyFile), []byte(recoveryKey+"\n"), 0o600); err != nil {
+			return err
+		}
 	}
 
 	token, err := auth.EnsureSetupToken(ctx, st, time.Now())
 	if err != nil {
 		return fmt.Errorf("setup token: %w", err)
+	}
+	if token != "" {
+		if err := os.WriteFile(filepath.Join(cfg.DataDir, setupTokenFile), []byte(token+"\n"), 0o600); err != nil {
+			return err
+		}
+	} else {
+		_ = os.Remove(filepath.Join(cfg.DataDir, setupTokenFile))
 	}
 
 	ca, err := pki.LoadOrCreateCA(cfg.DataDir)
@@ -170,6 +213,12 @@ func run(args []string) error {
 		},
 	}
 
+	backups := backup.NewManager(st, box, cfg.DataDir, bus, log)
+	if err := backups.Load(ctx); err != nil {
+		return fmt.Errorf("load backup settings: %w", err)
+	}
+	go backups.Run(ctx)
+
 	srv := api.New(api.Options{
 		Store: st, Secrets: box, CA: ca, Nodes: registry, GatewayAddr: cfg.AgentAdvertise,
 		System: sysMgr, Registry: regIssuer,
@@ -177,9 +226,13 @@ func run(args []string) error {
 			"GET /internal/traefik/config": traefikProvider,
 			"GET " + certs.ChallengePrefix: certMgr,
 		},
-		Domains: domains, Detector: detector, Certs: certMgr,
+		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups,
 		ACME: api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
-		Bus:  bus, Log: log, Web: web.FS(),
+		OnSetup: func() {
+			_ = os.Remove(filepath.Join(cfg.DataDir, setupTokenFile))
+			_ = os.Remove(filepath.Join(cfg.DataDir, recoveryKeyFile))
+		},
+		Bus: bus, Log: log, Web: web.FS(),
 	})
 	go func() {
 		if err := gw.Serve(ctx, ca, cfg.AgentListen, []string{gwHost, "localhost", "127.0.0.1"}); err != nil {
@@ -201,7 +254,10 @@ func run(args []string) error {
 
 	log.Info("controller started", "version", version.Version, "listen", ln.Addr().String(), "data", cfg.DataDir)
 	if token != "" {
-		printSetupBanner(ln.Addr().String(), token)
+		printSetupBanner(domains.Endpoints().DashboardURL, token, recoveryKey)
+	} else if recoveryKey != "" {
+		log.Warn("a recovery key was created for this install; save it now, it is needed to restore backups", "recovery_key", recoveryKey,
+			"file", filepath.Join(cfg.DataDir, recoveryKeyFile))
 	}
 
 	go publishControllerStats(ctx, bus)
@@ -226,19 +282,24 @@ func run(args []string) error {
 	return nil
 }
 
-func printSetupBanner(addr, token string) {
-	fmt.Fprintf(os.Stderr, `
-  ┌──────────────────────────────────────────────────────────────────┐
-  │  SynCloud is ready for setup                                     │
-  │                                                                  │
-  │  Dashboard:    http://%-42s│
-  │  Setup token:  %-50s│
-  │                                                                  │
-  │  The token is valid for 1 hour. Restart the controller to get a  │
-  │  new one if it expires.                                          │
-  └──────────────────────────────────────────────────────────────────┘
+// Files install.sh reads to show the first-run secrets (both 0600).
+const (
+	setupTokenFile  = "setup-token"
+	recoveryKeyFile = "recovery-key"
+)
 
-`, addr, token)
+func printSetupBanner(url, token, recoveryKey string) {
+	line := func(label, v string) { fmt.Fprintf(os.Stderr, "  %-14s %s\n", label, v) }
+	fmt.Fprintln(os.Stderr, "\n  SynCloud is ready for setup")
+	fmt.Fprintln(os.Stderr, "  "+strings.Repeat("─", 66))
+	line("Dashboard:", url)
+	line("Setup token:", token+"  (valid 1 hour; restart for a new one)")
+	if recoveryKey != "" {
+		line("Recovery key:", recoveryKey)
+		fmt.Fprintln(os.Stderr, "\n  Store the recovery key somewhere safe. It is shown only once and is")
+		fmt.Fprintln(os.Stderr, "  needed to restore backups. Setup asks for its last 6 characters.")
+	}
+	fmt.Fprintln(os.Stderr, "  "+strings.Repeat("─", 66)+"\n")
 }
 
 // ControllerStats is published on the bus every few seconds; the dashboard's
@@ -342,7 +403,18 @@ func loopbackURLHost(listen string) string {
 // initBaseDomain stores the first base domain: --base-domain, or outside dev
 // mode <public-ip>.sslip.io (§5.0.2). An existing setting is never replaced.
 func initBaseDomain(ctx context.Context, cfg config.Controller, domains *domain.Service, det *domain.Detector, log *slog.Logger) error {
-	if domains.Base() != "" {
+	if cur := domains.Base(); cur != "" {
+		// After a restore on a new host, an sslip.io/nip.io domain still names the old IP.
+		if svc, ok := domain.WildcardService(cur); ok && !cfg.Dev {
+			dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			ip, err := det.PublicIP(dctx)
+			cancel()
+			if want := domain.Wildcard(ip, svc); err == nil && want != cur {
+				log.Warn("public IP changed: moving the base domain", "from", cur, "to", want)
+				_, err = domains.Set(ctx, want)
+				return err
+			}
+		}
 		return nil
 	}
 	base := cfg.BaseDomain

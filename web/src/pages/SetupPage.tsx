@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type User } from "@/lib/api";
+import { statusQuery } from "@/lib/auth";
 import { Alert, Button, Field, Input } from "@/ui/controls";
 import { AuthLayout } from "./AuthLayout";
 
@@ -11,7 +12,8 @@ const MIN_PASSWORD = 12;
 export function SetupPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [form, setForm] = useState({ setupToken: "", name: "", email: "", password: "", confirm: "" });
+  const [form, setForm] = useState({ setupToken: "", name: "", email: "", password: "", confirm: "", recoveryKeySuffix: "" });
+  const { data: status } = useQuery(statusQuery);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -54,6 +56,21 @@ export function SetupPage() {
             autoFocus
           />
         </Field>
+        {status?.recoveryConfirmRequired && (
+          <Field label="Recovery key: last 6 characters" hint="Printed with the setup token. You need it to restore backups, so store it safely first.">
+            <Input
+              value={form.recoveryKeySuffix}
+              onChange={set("recoveryKeySuffix")}
+              placeholder="ABC234"
+              className="font-mono text-xs uppercase"
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={6}
+              minLength={6}
+              required
+            />
+          </Field>
+        )}
         <Field label="Name">
           <Input value={form.name} onChange={set("name")} autoComplete="name" required maxLength={100} />
         </Field>

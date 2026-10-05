@@ -25,6 +25,18 @@ func Wildcard(ip, service string) string {
 	return strings.NewReplacer(".", "-", ":", "-").Replace(ip) + "." + service
 }
 
+var wildcardRE = regexp.MustCompile(`^\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3}\.(sslip\.io|nip\.io)$`)
+
+// WildcardService reports whether base is exactly "<a-b-c-d>.<service>" and
+// returns the service.
+func WildcardService(base string) (string, bool) {
+	m := wildcardRE.FindStringSubmatch(base)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
 // RegistryHost is the registry's hostname for a base domain.
 func RegistryHost(base string) string { return "registry." + base }
 

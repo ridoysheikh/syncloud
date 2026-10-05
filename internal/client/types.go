@@ -238,3 +238,56 @@ func (c *Client) ListCertificates(ctx context.Context) ([]Certificate, error) {
 func (c *Client) RenewCertificate(ctx context.Context, host string) error {
 	return c.Do(ctx, "POST", "/api/v1/certificates/"+url.PathEscape(host)+"/renew", nil, nil)
 }
+
+type BackupConfig struct {
+	Endpoint        string `json:"endpoint"`
+	Region          string `json:"region"`
+	Bucket          string `json:"bucket"`
+	Prefix          string `json:"prefix"`
+	AccessKeyID     string `json:"accessKeyId"`
+	SecretAccessKey string `json:"secretAccessKey,omitempty"`
+	IntervalMinutes int    `json:"intervalMinutes"`
+	Retain          int    `json:"retain"`
+}
+
+type BackupSettings struct {
+	Configured bool          `json:"configured"`
+	Config     *BackupConfig `json:"config"`
+	Status     struct {
+		LastRunAt     *time.Time `json:"lastRunAt"`
+		LastSuccessAt *time.Time `json:"lastSuccessAt"`
+		LastError     string     `json:"lastError"`
+		LastObject    string     `json:"lastObject"`
+		LastSize      int64      `json:"lastSize"`
+	} `json:"status"`
+}
+
+type BackupObject struct {
+	Name      string    `json:"name"`
+	Size      int64     `json:"size"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+func (c *Client) GetBackupConfig(ctx context.Context) (BackupSettings, error) {
+	var out BackupSettings
+	return out, c.Do(ctx, "GET", "/api/v1/backups/config", nil, &out)
+}
+
+func (c *Client) SetBackupConfig(ctx context.Context, cfg BackupConfig) (BackupSettings, error) {
+	var out BackupSettings
+	return out, c.Do(ctx, "PUT", "/api/v1/backups/config", cfg, &out)
+}
+
+func (c *Client) DisableBackups(ctx context.Context) error {
+	return c.Do(ctx, "DELETE", "/api/v1/backups/config", nil, nil)
+}
+
+func (c *Client) ListBackups(ctx context.Context) ([]BackupObject, error) {
+	var out list[BackupObject]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/backups", nil, &out)
+}
+
+func (c *Client) RunBackup(ctx context.Context) (BackupObject, error) {
+	var out BackupObject
+	return out, c.Do(ctx, "POST", "/api/v1/backups", nil, &out)
+}

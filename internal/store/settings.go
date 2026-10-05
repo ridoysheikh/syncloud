@@ -12,6 +12,9 @@ const (
 	SettingSetupTokenHash    = "setup.token_hash"
 	SettingSetupTokenExpires = "setup.token_expires"
 	SettingBaseDomain        = "domain.base"
+	// SettingRecoverySuffixHash lets the setup wizard confirm the user saved the
+	// recovery key (they type its last 6 characters).
+	SettingRecoverySuffixHash = "recovery.suffix_hash"
 )
 
 // GetSetting returns ("", false, nil) when the key is not set.

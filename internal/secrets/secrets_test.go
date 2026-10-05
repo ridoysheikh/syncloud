@@ -8,7 +8,7 @@ import (
 
 func TestLoadOrCreatePersistsKey(t *testing.T) {
 	dir := t.TempDir()
-	a, err := LoadOrCreate(dir)
+	a, _, err := LoadOrCreate(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,7 +18,7 @@ func TestLoadOrCreatePersistsKey(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("key file mode: %v %v", info.Mode(), err)
 	}
-	b, err := LoadOrCreate(dir) // reload: same key
+	b, _, err := LoadOrCreate(dir) // reload: same key
 	if err != nil {
 		t.Fatal(err)
 	}

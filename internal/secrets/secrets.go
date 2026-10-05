@@ -1,10 +1,9 @@
 // Package secrets encrypts values at rest with the controller's master key
-// (AES-256-GCM, §14). In Phase 0b the master key file becomes wrapped by the
-// recovery key (§5.0.1); callers of Seal/Open don't change.
+// (AES-256-GCM, §14). The key file is protected by permissions; a copy wrapped
+// by the recovery key goes into backups (§5.0.1).
 package secrets
 
 import (
-	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"errors"
@@ -15,10 +14,40 @@ import (
 
 const keyFile = "master.key"
 
-type Box struct{ aead cipher.AEAD }
+type Box struct {
+	aead    cipher.AEAD
+	key     []byte
+	wrapped []byte
+}
 
-// LoadOrCreate reads <dataDir>/master.key, creating it (0600) on first start.
-func LoadOrCreate(dataDir string) (*Box, error) {
+// Wrapped returns the master key wrapped by the recovery key (safe to back up).
+func (b *Box) Wrapped() []byte { return b.wrapped }
+
+// LoadOrCreate reads <dataDir>/master.key, creating it (0600) on first start,
+// and makes sure a wrapped copy exists. When it creates a new recovery key
+// (first start, or an install from before recovery keys), it returns it so the
+// caller can show it once; otherwise recoveryKey is "".
+func LoadOrCreate(dataDir string) (box *Box, recoveryKey string, err error) {
+	box, err = loadOrCreateKey(dataDir)
+	if err != nil {
+		return nil, "", err
+	}
+	wpath := filepath.Join(dataDir, wrappedFile)
+	box.wrapped, err = os.ReadFile(wpath)
+	if errors.Is(err, os.ErrNotExist) {
+		recoveryKey = NewRecoveryKey()
+		if box.wrapped, err = Wrap(box.key, recoveryKey); err != nil {
+			return nil, "", err
+		}
+		if err := os.WriteFile(wpath, box.wrapped, 0o600); err != nil {
+			return nil, "", err
+		}
+		return box, recoveryKey, nil
+	}
+	return box, "", err
+}
+
+func loadOrCreateKey(dataDir string) (*Box, error) {
 	path := filepath.Join(dataDir, keyFile)
 	key, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -51,15 +80,11 @@ func New(key []byte) (*Box, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("master key must be 32 bytes, got %d", len(key))
 	}
-	block, err := aes.NewCipher(key)
+	aead, err := gcm(key)
 	if err != nil {
 		return nil, err
 	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	return &Box{aead: aead}, nil
+	return &Box{aead: aead, key: key}, nil
 }
 
 // Seal encrypts plaintext. aad binds the ciphertext to its context (e.g. the
@@ -78,4 +103,19 @@ func (b *Box) Open(ciphertext, aad []byte) ([]byte, error) {
 		return nil, errors.New("ciphertext too short")
 	}
 	return b.aead.Open(nil, ciphertext[:n], ciphertext[n:], aad)
+}
+
+// Restore writes a master key (unwrapped from a backup) and its wrapped copy
+// into dataDir.
+func Restore(dataDir string, master, wrapped []byte) error {
+	if _, err := New(master); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, keyFile), master, 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dataDir, wrappedFile), wrapped, 0o600)
 }

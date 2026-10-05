@@ -31,6 +31,7 @@ export interface SystemStatus {
   version: string;
   setupRequired: boolean;
   baseDomain: string;
+  recoveryConfirmRequired?: boolean;
 }
 
 export interface User {

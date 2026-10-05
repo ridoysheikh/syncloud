@@ -19,6 +19,7 @@ import { CredentialsPage } from "./iam/CredentialsPage";
 import { NodesPage } from "./compute/NodesPage";
 import { PlatformPage } from "./settings/PlatformPage";
 import { DomainsPage } from "./settings/DomainsPage";
+import { BackupsPage } from "./settings/BackupsPage";
 
 /** The module registry. The side nav and routes are built from this list. */
 export const modules: DashboardModule[] = [
@@ -139,6 +140,7 @@ export const modules: DashboardModule[] = [
     pages: [
       { path: "/settings/platform", label: "Platform", component: PlatformPage },
       { path: "/settings/domains", label: "Domains", component: DomainsPage },
+      { path: "/settings/backups", label: "Backups", component: BackupsPage },
       { path: "/settings/updates", label: "Updates", component: planned(["Settings"], "Updates", "Phase 9", "§5.0.1", "Controller upgrades with automatic rollback.") },
     ],
   },

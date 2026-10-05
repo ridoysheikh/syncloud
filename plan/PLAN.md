@@ -1161,7 +1161,7 @@ Because there is only one controller:
 - Single dashboard shell: Tailwind dark design tokens, compact primitives, module registry plus modular side nav, header, the ECharts minimal theme, and live WebSocket plumbing (§10.1).
 - First-run wizard (setup token → admin account).
 
-### Phase 0b: Install and system tasks (2 wks)
+### Phase 0b: Install and system tasks (2 wks) — ✅ done 2026-10-06
 *Depends on a minimal agent (Docker runner + gRPC link), which is pulled forward from Phases 1–2.*
 
 **Progress**
@@ -1185,7 +1185,14 @@ Because there is only one controller:
   - Changing the base domain (Settings → Domains, `synctl domain set`) moves the routes, re-requests certificates, and re-renders the registry's token realm (the registry container is recreated).
   - Verified end to end against Pebble with a real Traefik: issuance, TLS chain, redirects, and a live domain change.
   - Dev mode: no base domain and ACME off by default.
-- ⏳ Slice 4: install script, recovery key, Litestream.
+- ✅ Slice 4 (2026-10-06), install, recovery and backups:
+  - **Recovery key** (`SYNRK-…`, 200 bits) wraps the master key (HKDF + AES-GCM). It is printed once and written to `<data>/recovery-key` for install.sh; the setup wizard asks for its last 6 characters, then the file is deleted. Existing installs get one on their next start.
+  - **Backups (changed from Litestream)**: encrypted bundles instead of WAL streaming. Each holds a `VACUUM INTO` snapshot plus the CA, registry and Traefik keys, sealed with the master key; the header carries the wrapped master key. They go to any S3 (minio-go) on a schedule (default hourly, keep 48), on demand, or as a download. Settings → Backups, `synctl backups …`, and a header warning while backups are off or failing. The DB is small, so a full snapshot is cheap; Litestream can come back in Phase 9 if a lower RPO is needed.
+  - **Restore**: `syncloud-controller restore --file … | --s3-… --recovery-key …`. An sslip.io/nip.io base domain follows a changed public IP on start.
+  - **`scripts/install.sh`**: preflight (OS, arch, CPU/RAM/disk, ports 80/443, kernel modules, NTP), Docker install, SHA-256 checksums (minisign signature check, active once a release key exists), systemd units, the local agent joined as `ctl-0`, waiting for system tasks, then the dashboard URL, setup token and recovery key. Also `--uninstall [--purge]`. `make release` builds the artifacts.
+  - `syncloud-controller doctor` checks the keys, DB, API, disk, Docker, each system task, the base domain DNS, certificates and backups, and prints a fix for each failure.
+  - Verified: backup to SeaweedFS S3, restore into an empty directory, sign-in on the restored controller; installer preflight in an Ubuntu 24.04 container. A full install on a fresh VM is still to be done.
+  - Deferred to Phase 1: WireGuard (`wg0`) at install, and the host firewall.
 - Minimal agent: gRPC stream to the controller, Docker runner for system tasks.
 - Controller **installation** (§5.0): preflight checks, signed binaries, systemd units, `init` / `doctor`, the local agent, and **system tasks** (Traefik with the UI as the first route, private registry, BuildKit, VictoriaMetrics, VictoriaLogs).
 - **sslip.io base domain**, controller-managed certificates (ACME) with the fallback (§5.0.2), served to Traefik; recovery key; Litestream backup wiring.

@@ -17,6 +17,8 @@ type statusResponse struct {
 	Version       string `json:"version"`
 	SetupRequired bool   `json:"setupRequired"`
 	BaseDomain    string `json:"baseDomain"`
+	// RecoveryConfirmRequired asks the setup wizard for the recovery key's last 6 characters.
+	RecoveryConfirmRequired bool `json:"recoveryConfirmRequired"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +32,15 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "get base domain", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, statusResponse{Version: version.Version, SetupRequired: n == 0, BaseDomain: baseDomain})
+	resp := statusResponse{Version: version.Version, SetupRequired: n == 0, BaseDomain: baseDomain}
+	if resp.SetupRequired {
+		_, resp.RecoveryConfirmRequired, err = s.store.GetSetting(r.Context(), store.SettingRecoverySuffixHash)
+		if err != nil {
+			s.internalError(w, "get recovery setting", err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type userResponse struct {
@@ -50,6 +60,8 @@ type setupRequest struct {
 	Email      string `json:"email"`
 	Name       string `json:"name"`
 	Password   string `json:"password"`
+	// RecoveryKeySuffix is the last 6 characters of the recovery key.
+	RecoveryKeySuffix string `json:"recoveryKeySuffix"`
 }
 
 // handleSetup exchanges the one-time setup token for the root account (§5.0, §7.1)
@@ -81,6 +93,13 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, msg)
 		return
 	}
+	if want, ok, err := s.store.GetSetting(r.Context(), store.SettingRecoverySuffixHash); err != nil {
+		s.internalError(w, "get recovery setting", err)
+		return
+	} else if ok && !auth.TokenMatches(strings.ToUpper(strings.TrimSpace(req.RecoveryKeySuffix)), want) {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "the last 6 characters of the recovery key do not match; it was printed with the setup token")
+		return
+	}
 	hash, err := auth.HashPassword(req.Password)
 	if errors.Is(err, auth.ErrWeakPassword) {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
@@ -100,6 +119,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, u.ID, "setup:CreateRoot", "srn:syncloud:user/"+u.ID, nil)
 	s.log.Info("setup completed", "user", u.Email)
+	if s.onSetup != nil {
+		s.onSetup()
+	}
 
 	if !s.startSession(w, r, u) {
 		return

@@ -15,6 +15,17 @@ func TestWildcard(t *testing.T) {
 	}
 }
 
+func TestWildcardService(t *testing.T) {
+	if svc, ok := WildcardService("203-0-113-10.nip.io"); !ok || svc != "nip.io" {
+		t.Fatal(svc, ok)
+	}
+	for _, s := range []string{"app.203-0-113-10.sslip.io", "example.com", "203-0-113.sslip.io"} {
+		if _, ok := WildcardService(s); ok {
+			t.Errorf("%s matched", s)
+		}
+	}
+}
+
 func TestNormalize(t *testing.T) {
 	ok := map[string]string{"Example.COM.": "example.com", " 1-2-3-4.sslip.io ": "1-2-3-4.sslip.io"}
 	for in, want := range ok {

@@ -737,6 +737,142 @@
           }
         }
       }
+    },
+    "/api/v1/backups/config": {
+      "get": {
+        "operationId": "getBackupConfig",
+        "tags": [
+          "backups"
+        ],
+        "summary": "S3 backup destination, schedule and last run",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupSettings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setBackupConfig",
+        "tags": [
+          "backups"
+        ],
+        "summary": "Set the S3 destination. The bucket is checked before saving; an empty secret keeps the stored one. A first backup starts right away.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupConfig"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "disableBackups",
+        "tags": [
+          "backups"
+        ],
+        "summary": "Turn backups off (stored backups are kept)",
+        "responses": {
+          "204": {
+            "description": "Disabled"
+          }
+        }
+      }
+    },
+    "/api/v1/backups": {
+      "get": {
+        "operationId": "listBackups",
+        "tags": [
+          "backups"
+        ],
+        "summary": "Backups stored in S3, newest first",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupList"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "runBackup",
+        "tags": [
+          "backups"
+        ],
+        "summary": "Take a backup now",
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupObject"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/backups/download": {
+      "get": {
+        "operationId": "downloadBackup",
+        "tags": [
+          "backups"
+        ],
+        "summary": "Download a fresh encrypted backup bundle (restore needs the recovery key)",
+        "responses": {
+          "200": {
+            "description": "Backup bundle",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -820,6 +956,9 @@
           },
           "baseDomain": {
             "type": "string"
+          },
+          "recoveryConfirmRequired": {
+            "type": "boolean"
           }
         }
       },
@@ -846,6 +985,10 @@
           "password": {
             "type": "string",
             "minLength": 12
+          },
+          "recoveryKeySuffix": {
+            "type": "string",
+            "description": "Last 6 characters of the recovery key printed at install (required when status.recoveryConfirmRequired)"
           }
         }
       },
@@ -1423,6 +1566,115 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Certificate"
+            }
+          }
+        }
+      },
+      "BackupConfig": {
+        "type": "object",
+        "required": [
+          "endpoint",
+          "bucket",
+          "accessKeyId"
+        ],
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "example": "https://s3.eu-central-1.amazonaws.com"
+          },
+          "region": {
+            "type": "string"
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "accessKeyId": {
+            "type": "string"
+          },
+          "secretAccessKey": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "intervalMinutes": {
+            "type": "integer",
+            "minimum": 5,
+            "description": "default 60"
+          },
+          "retain": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "default 48"
+          }
+        }
+      },
+      "BackupStatus": {
+        "type": "object",
+        "properties": {
+          "lastRunAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lastSuccessAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "lastObject": {
+            "type": "string"
+          },
+          "lastSize": {
+            "type": "integer"
+          }
+        }
+      },
+      "BackupSettings": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "config": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BackupConfig"
+              }
+            ],
+            "nullable": true
+          },
+          "status": {
+            "$ref": "#/components/schemas/BackupStatus"
+          }
+        }
+      },
+      "BackupObject": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BackupList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackupObject"
             }
           }
         }

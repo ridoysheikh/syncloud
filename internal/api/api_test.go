@@ -273,3 +273,22 @@ func TestDomainSettings(t *testing.T) {
 		t.Fatalf("renew unknown: %d", resp.StatusCode)
 	}
 }
+
+func TestSetupRequiresRecoveryKeySuffix(t *testing.T) {
+	e := newEnv(t)
+	if err := e.st.SetSetting(context.Background(), store.SettingRecoverySuffixHash, auth.HashToken("ABC234")); err != nil {
+		t.Fatal(err)
+	}
+	_, body := e.do(t, "GET", "/api/v1/system/status", nil, nil)
+	if body["recoveryConfirmRequired"] != true {
+		t.Fatalf("status: %v", body)
+	}
+	req := map[string]string{"setupToken": e.token, "email": "root@example.com", "name": "Root", "password": "correct horse battery", "recoveryKeySuffix": "XXXXXX"}
+	if resp, _ := e.do(t, "POST", "/api/v1/setup", req, nil); resp.StatusCode != 400 {
+		t.Fatalf("wrong suffix: %d", resp.StatusCode)
+	}
+	req["recoveryKeySuffix"] = "abc234"
+	if resp, body := e.do(t, "POST", "/api/v1/setup", req, nil); resp.StatusCode != 201 {
+		t.Fatalf("setup: %d %v", resp.StatusCode, body)
+	}
+}

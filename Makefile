@@ -1,4 +1,4 @@
-.PHONY: all build controller agent synctl web proto test vet fmt dev dev-controller dev-agent dev-web clean
+.PHONY: all build controller agent synctl web proto test vet fmt dev dev-controller dev-agent dev-web clean release
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 LDFLAGS := -s -w -X syncloud/internal/version.Version=$(VERSION)
@@ -25,6 +25,18 @@ web: web/node_modules
 web/node_modules: web/package.json web/pnpm-lock.yaml
 	cd web && pnpm install --frozen-lockfile
 	@touch $@
+
+## release: linux binaries for amd64/arm64 plus SHA256SUMS in dist/ (what install.sh downloads)
+release: web
+	rm -rf dist && mkdir -p dist
+	for arch in amd64 arm64; do \
+	  for cmd in controller agent; do \
+	    CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o dist/syncloud-$$cmd-linux-$$arch ./cmd/$$cmd || exit 1; \
+	  done; \
+	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o dist/synctl-linux-$$arch ./cmd/synctl || exit 1; \
+	done
+	cp scripts/install.sh dist/
+	cd dist && sha256sum syncloud-* synctl-* > SHA256SUMS
 
 ## proto: regenerate gRPC code (tools are installed into .tools/ on first use)
 proto: .tools/buf .tools/protoc-gen-go .tools/protoc-gen-go-grpc

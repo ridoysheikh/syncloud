@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
-import { Bell, ChevronDown, LogOut, Search, SquareTerminal } from "lucide-react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bell, ChevronDown, LogOut, Search, SquareTerminal, TriangleAlert } from "lucide-react";
+import { backupQuery } from "@/lib/backups";
 import { api, type User } from "@/lib/api";
 import { stopStream, useStreamState } from "@/lib/stream";
 import { IconButton } from "@/ui/controls";
@@ -39,6 +40,7 @@ export function Header({ user, onToggleDrawer, drawerOpen }: { user: User; onTog
         </button>
       </div>
 
+      <BackupWarning />
       <StreamIndicator />
       <IconButton label="Notifications" disabled>
         <Bell className="size-4" />
@@ -48,6 +50,25 @@ export function Header({ user, onToggleDrawer, drawerOpen }: { user: User; onTog
       </IconButton>
       <UserMenu user={user} />
     </header>
+  );
+}
+
+/** A permanent warning until S3 backups are configured and working (§5.0). */
+function BackupWarning() {
+  const { data } = useQuery(backupQuery);
+  if (!data) return null;
+  const failing = data.configured && data.status.lastError !== "";
+  if (data.configured && !failing) return null;
+  const backupsPath: string = "/settings/backups";
+  return (
+    <Link
+      to={backupsPath}
+      className="border-warn/40 bg-warn/10 text-warn hidden h-7 items-center gap-1.5 rounded-sm border px-2 text-xs font-medium md:flex"
+      title={failing ? data.status.lastError : "The controller is not backed up. Configure an S3 destination."}
+    >
+      <TriangleAlert className="size-3.5" />
+      {failing ? "Backup failing" : "Backups are off"}
+    </Link>
   );
 }
 

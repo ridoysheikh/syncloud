@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"syncloud/internal/backup"
 	"syncloud/internal/certs"
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
@@ -39,6 +40,8 @@ type Server struct {
 	detector    *domain.Detector
 	certs       *certs.Manager
 	acme        ACMEInfo
+	onSetup     func()
+	backups     *backup.Manager
 	bus         *events.Bus
 	log         *slog.Logger
 	web         fs.FS // built dashboard (may be empty in development)
@@ -68,9 +71,13 @@ type Options struct {
 	Detector *domain.Detector
 	Certs    *certs.Manager
 	ACME     ACMEInfo
-	Bus      *events.Bus
-	Log      *slog.Logger
-	Web      fs.FS
+	// OnSetup runs after the root account is created.
+	OnSetup func()
+	// Backups manages S3 backups (§13); may be nil.
+	Backups *backup.Manager
+	Bus     *events.Bus
+	Log     *slog.Logger
+	Web     fs.FS
 	// Now is overridable for tests.
 	Now func() time.Time
 }
@@ -92,6 +99,8 @@ func New(o Options) *Server {
 		detector:     o.Detector,
 		certs:        o.Certs,
 		acme:         o.ACME,
+		onSetup:      o.OnSetup,
+		backups:      o.Backups,
 		bus:          o.Bus,
 		log:          o.Log,
 		web:          o.Web,
@@ -139,6 +148,12 @@ func (s *Server) Routes() []Route {
 		{Method: "PUT", Path: "/api/v1/settings/domain", h: s.handleSetDomain},
 		{Method: "GET", Path: "/api/v1/certificates", h: s.handleListCertificates},
 		{Method: "POST", Path: "/api/v1/certificates/{host}/renew", h: s.handleRenewCertificate},
+		{Method: "GET", Path: "/api/v1/backups/config", h: s.handleGetBackupConfig},
+		{Method: "PUT", Path: "/api/v1/backups/config", h: s.handleSetBackupConfig},
+		{Method: "DELETE", Path: "/api/v1/backups/config", h: s.handleDeleteBackupConfig},
+		{Method: "GET", Path: "/api/v1/backups", h: s.handleListBackups},
+		{Method: "POST", Path: "/api/v1/backups", h: s.handleRunBackup},
+		{Method: "GET", Path: "/api/v1/backups/download", h: s.handleDownloadBackup},
 	}
 }
 
