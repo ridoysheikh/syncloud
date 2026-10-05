@@ -169,7 +169,7 @@ func (s *Server) handleEffectiveFirewall(w http.ResponseWriter, r *http.Request)
 		s.internalError(w, "node config", err)
 		return
 	}
-	ruleset, err := firewall.Render(cfg, cfg.GetFirewall())
+	ruleset, err := firewall.Render(cfg, cfg.GetFirewall(), nil)
 	if err != nil {
 		s.internalError(w, "render firewall", err)
 		return

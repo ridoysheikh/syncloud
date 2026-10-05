@@ -51,6 +51,28 @@ distinct=$(echo $seen | tr ' ' '\n' | sort -u | grep -c . || true)
 api "$SVC" | grep -q '"endpoints":\["http://web-production-shop.localhost:8080"\]' || fail "service endpoint missing"
 echo "  ✓ Traefik routes web-production-shop.localhost to all 3 tasks across nodes"
 
+# Service discovery from inside a task: DNS names, search domains and the VIP.
+VIP=$(api "$SVC" | field vip)
+[ -n "$VIP" ] || fail "service has no VIP"
+one=$(tasks | grep -o '"node":"w2","desired":"running","state":"running","ip":"[^"]*","containerId":"[a-f0-9]*"' | head -1 | grep -o '"containerId":"[a-f0-9]*"' | cut -d'"' -f4)
+[ -n "$one" ] || fail "no running task on w2"
+inx() { x sc-e2e-w2 docker exec "$one" "$@"; }
+for _ in $(seq 1 15); do inx nslookup web.production.shop.syncloud.internal 2>/dev/null | grep -q "$VIP" && break; sleep 1; done
+inx nslookup web.production.shop.syncloud.internal 2>&1 | grep -q "$VIP" || fail "DNS name does not resolve to the VIP $VIP"
+n=$(inx nslookup tasks.web.production.shop.syncloud.internal 2>/dev/null | grep -c 'Address.*10\.91\.' || true)
+[ "$n" -eq 3 ] || fail "tasks record has $n addresses, want 3"
+inx nslookup example.com >/dev/null 2>&1 || fail "external names do not resolve inside tasks"
+echo "  ✓ DNS: web.production.shop.syncloud.internal → $VIP, tasks.… → 3 IPs, external names forwarded"
+seen=""
+for _ in $(seq 1 30); do
+  h=$(inx wget -q -T 3 -O - "http://web:8080/hostname" 2>/dev/null || true)
+  [ -n "$h" ] && seen="$seen $h"
+done
+distinct=$(echo $seen | tr ' ' '\n' | sort -u | grep -c . || true)
+[ "$distinct" -ge 2 ] || fail "VIP reached $distinct distinct tasks via the short name, want at least 2 (responses: $seen)"
+echo "$seen" | tr ' ' '\n' | grep -qx "$(inx hostname)" || echo "  (the calling task did not pick itself in 30 tries; hairpin not exercised)"
+echo "  ✓ http://web:8080 (search domain + VIP) load-balanced over $distinct tasks on several nodes"
+
 echo "== scale"
 api "$SVC/scale" -d '{"desiredCount":1}' >/dev/null
 wait_for "scaled to 1" sh -c "[ \$(docker exec sc-e2e-ctl curl -fs -b /tmp/jar localhost:7070/api/v1/projects/shop/environments/production/services/web/tasks | grep -o '\"desired\":\"running\"' | wc -l) -eq 1 ]"

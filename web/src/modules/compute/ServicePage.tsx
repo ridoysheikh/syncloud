@@ -84,15 +84,33 @@ export function ServicePage() {
         <StatTile label="Reserved per task" value={`${svc.spec.resources.cpu ?? 0.1} CPU`} hint={`${svc.spec.resources.memory ?? 128} MiB memory`} />
         <StatTile label="Placement" value={svc.spec.placement.strategy ?? "spread"} />
       </div>
-      {svc.endpoints.length > 0 && (
+      {(svc.endpoints.length > 0 || svc.vip) && (
         <Panel title="Endpoints">
-          <div className="flex flex-col gap-1">
-            {svc.endpoints.map((e) => (
-              <a key={e} href={e} target="_blank" rel="noreferrer" className="hover:text-accent inline-flex items-center gap-1 font-mono text-xs">
-                {e} <ExternalLink className="size-3" />
-              </a>
-            ))}
-          </div>
+          <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-xs">
+            {svc.endpoints.length > 0 && (
+              <>
+                <dt className="text-muted">Public</dt>
+                <dd className="flex flex-col gap-0.5">
+                  {svc.endpoints.map((e) => (
+                    <a key={e} href={e} target="_blank" rel="noreferrer" className="hover:text-accent inline-flex items-center gap-1 font-mono">
+                      {e} <ExternalLink className="size-3" />
+                    </a>
+                  ))}
+                </dd>
+              </>
+            )}
+            {svc.vip && (
+              <>
+                <dt className="text-muted">Internal</dt>
+                <dd className="font-mono">
+                  {svc.dnsName} <span className="text-faint">→ {svc.vip}</span>
+                  <div className="text-faint font-sans">
+                    Other services in {svc.project}/{svc.environment} can use <span className="font-mono">{svc.name}</span>; load-balanced on every node.
+                  </div>
+                </dd>
+              </>
+            )}
+          </dl>
         </Panel>
       )}
       <div className="border-line flex gap-3 border-b text-xs">

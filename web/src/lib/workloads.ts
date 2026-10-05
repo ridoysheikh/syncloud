@@ -31,6 +31,8 @@ export interface Service {
   deleting: boolean;
   spec: Spec;
   endpoints: string[];
+  vip: string;
+  dnsName: string;
   createdAt: string;
   updatedAt: string;
 }

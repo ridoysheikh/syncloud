@@ -294,6 +294,8 @@ func createRequest(spec *agentv1.TaskSpec, hash string) docker.CreateRequest {
 			Memory:        spec.MemoryLimitBytes,
 			NanoCPUs:      spec.NanoCpus,
 			ExtraHosts:    spec.ExtraHosts,
+			DNS:           spec.DnsServers,
+			DNSSearch:     spec.DnsSearch,
 			// Bounded local logs until centralized logging ships (§9.2).
 			LogConfig: docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 		},

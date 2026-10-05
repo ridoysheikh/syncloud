@@ -48,8 +48,13 @@ type Manager struct {
 	bus      *events.Bus
 	log      *slog.Logger
 	now      func() time.Time
-	// OnChange runs after a reconcile that changed tasks (routes, DNS, VIPs).
+	// OnChange runs after a reconcile that changed tasks or services (routes, certificates).
 	OnChange func()
+	// OnTaskChange runs whenever a task's state changes (service directory).
+	OnTaskChange func()
+	// DNS returns the resolver and search domains for a task on a node
+	// (nil before the node's private network exists).
+	DNS func(nodeID string, sv store.Service) (servers, search []string)
 
 	queue    chan string
 	mu       sync.Mutex
@@ -444,6 +449,9 @@ func (m *Manager) setDesired(ctx context.Context, t store.Task, state string, no
 		m.log.Error("update task", "task", t.ID, "err", err)
 	}
 	m.routesDirty() // stop sending traffic before the container stops
+	if m.OnTaskChange != nil {
+		m.OnTaskChange()
+	}
 	if state != "" {
 		t.State = state
 	}
@@ -476,7 +484,11 @@ func (m *Manager) sendRun(ctx context.Context, sv store.Service, spec Spec, t st
 		}
 		spec = s
 	}
-	err := m.gw.Send(t.NodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_RunTask{RunTask: &agentv1.RunTask{Spec: TaskSpec(sv, spec, t)}}})
+	ts := TaskSpec(sv, spec, t)
+	if m.DNS != nil {
+		ts.DnsServers, ts.DnsSearch = m.DNS(t.NodeID, sv)
+	}
+	err := m.gw.Send(t.NodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_RunTask{RunTask: &agentv1.RunTask{Spec: ts}}})
 	if err != nil && !errors.Is(err, agentgw.ErrNotConnected) {
 		m.log.Warn("send run", "task", t.ID, "err", err)
 	}
@@ -579,6 +591,9 @@ func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
 		return
 	}
 	m.routesDirty()
+	if m.OnTaskChange != nil {
+		m.OnTaskChange()
+	}
 	m.publishTask(ctx, t)
 	m.Enqueue(t.ServiceID)
 }

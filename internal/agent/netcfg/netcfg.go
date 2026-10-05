@@ -18,6 +18,7 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"google.golang.org/protobuf/proto"
 
+	"syncloud/internal/agent/dnssrv"
 	"syncloud/internal/agent/docker"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 )
@@ -61,12 +62,16 @@ type Manager struct {
 	rejectedGen uint64
 
 	sys platform // OS-specific state (userspace WireGuard device, probe listener)
+
+	discovery *agentv1.Discovery // service directory (VIPs and DNS records)
+	dns       *dnssrv.Server
 }
 
 // New loads (or creates) the node's WireGuard key. With enabled false the
 // manager does nothing and the node stays out of the mesh.
 func New(dataDir string, d *docker.Client, log *slog.Logger, enabled bool) (*Manager, error) {
-	m := &Manager{dataDir: dataDir, docker: d, log: log, enabled: enabled, rtt: map[string]float64{}, kick: make(chan struct{}, 1)}
+	m := &Manager{dataDir: dataDir, docker: d, log: log, enabled: enabled, rtt: map[string]float64{}, kick: make(chan struct{}, 1),
+		dns: dnssrv.New(DNSZone, log)}
 	if !enabled {
 		return m, nil
 	}
@@ -99,6 +104,35 @@ func (m *Manager) PublicKey() string {
 	return m.key.PublicKey().String()
 }
 
+// DNSZone is the internal zone served to tasks (§8.1).
+const DNSZone = "syncloud.internal"
+
+// SubmitDiscovery installs a new service directory: DNS answers change at
+// once, VIP rules on the next apply (immediately).
+func (m *Manager) SubmitDiscovery(d *agentv1.Discovery) {
+	if !m.enabled {
+		return
+	}
+	recs := map[string][]string{}
+	for _, r := range d.GetRecords() {
+		recs[r.GetName()] = r.GetIps()
+	}
+	m.dns.SetRecords(recs)
+	m.mu.Lock()
+	m.discovery = d
+	m.mu.Unlock()
+	select {
+	case m.kick <- struct{}{}:
+	default:
+	}
+}
+
+func (m *Manager) services() []*agentv1.VirtualService {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.discovery.GetServices()
+}
+
 // Submit queues cfg; the newest config wins.
 func (m *Manager) Submit(cfg *agentv1.NetworkConfig) {
 	if !m.enabled {
@@ -120,6 +154,7 @@ func (m *Manager) Run(ctx context.Context) {
 		return
 	}
 	defer m.sys.close()
+	defer m.dns.Close()
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 	probe := time.NewTicker(10 * time.Second)

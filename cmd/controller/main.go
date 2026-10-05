@@ -24,6 +24,7 @@ import (
 	"syncloud/internal/backup"
 	"syncloud/internal/certs"
 	"syncloud/internal/config"
+	"syncloud/internal/discovery"
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
 	"syncloud/internal/logs"
@@ -211,6 +212,20 @@ func serve(args []string) error {
 	certMgr.SetHosts(certHosts(domains.Endpoints()))
 	gw.AddHooks(workloads.Hooks())
 	go workloads.Run(ctx)
+	disco := discovery.NewManager(st, gw, workloads, log)
+	gw.AddHooks(disco.Hooks())
+	go disco.Run(ctx)
+	workloads.OnTaskChange = disco.Kick
+	prevOnChange := workloads.OnChange
+	workloads.OnChange = func() { prevOnChange(); disco.Kick() }
+	workloads.DNS = func(nodeID string, sv store.Service) ([]string, []string) {
+		nn, err := st.NodeNetwork(context.Background(), nodeID)
+		if err != nil || !meshMgr.IsMember(nodeID) {
+			return nil, nil // no private network (development): Docker's default DNS
+		}
+		return []string{mesh.Subnet(nn.SubnetIndex).Addr().Next().String()}, discovery.SearchDomains(sv)
+	}
+	workload.Discovery = func(sv store.Service) (string, string) { return disco.VIP(sv.ID), discovery.ServiceName(sv) }
 	logStore := logs.New(st, cfg.VictoriaLogsURL, log)
 	gw.AddHooks(agentgw.Hooks{OnLogs: logStore.OnLogs})
 	go logStore.Run(ctx)

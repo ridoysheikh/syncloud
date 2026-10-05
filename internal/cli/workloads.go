@@ -185,6 +185,9 @@ func (a *app) servicesCmd() *cobra.Command {
 		for _, e := range v.Endpoints {
 			fmt.Fprintf(a.out, "  %s\n", e)
 		}
+		if v.VIP != "" {
+			fmt.Fprintf(a.out, "  internal: %s (%s)\n", v.DNSName, v.VIP)
+		}
 		if v.Status != "" {
 			fmt.Fprintf(a.out, "  status: %s\n", v.Status)
 		}

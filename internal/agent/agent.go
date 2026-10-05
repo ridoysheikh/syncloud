@@ -279,6 +279,8 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 				go runner.Stop(ctx, st.GetTaskId(), time.Duration(st.GetTimeoutSeconds())*time.Second, st.GetRemove())
 			case *agentv1.ConnectResponse_Network:
 				a.net.Submit(m.Network)
+			case *agentv1.ConnectResponse_Discovery:
+				a.net.SubmitDiscovery(m.Discovery)
 			case *agentv1.ConnectResponse_ConfirmNetwork:
 				a.net.Confirm(m.ConfirmNetwork.GetGeneration())
 			case *agentv1.ConnectResponse_Certificate:

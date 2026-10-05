@@ -479,3 +479,47 @@ func (s *Store) SetNodeSchedulable(ctx context.Context, id string, on bool) erro
 	}
 	return nil
 }
+
+// EnsureServiceVIP returns the service's VIP index, allocating the lowest
+// free one on first use.
+func (s *Store) EnsureServiceVIP(ctx context.Context, serviceID string, pool IndexPool, cooldown time.Duration, now time.Time) (int, error) {
+	var cur sql.NullInt64
+	if err := s.R.QueryRowContext(ctx, `SELECT vip_index FROM services WHERE id = ?`, serviceID).Scan(&cur); errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	} else if err != nil {
+		return 0, err
+	}
+	if cur.Valid {
+		return int(cur.Int64), nil
+	}
+	tx, err := s.W.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	taken := map[int]bool{}
+	rows, err := tx.QueryContext(ctx, `SELECT vip_index FROM services WHERE vip_index IS NOT NULL
+		UNION SELECT idx FROM ipam_released WHERE kind = 'vip' AND released_at > ?`, now.Add(-cooldown).Unix())
+	if err != nil {
+		return 0, err
+	}
+	for rows.Next() {
+		var i int
+		if err := rows.Scan(&i); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		taken[i] = true
+	}
+	rows.Close()
+	for i := pool.Min; i <= pool.Max; i++ {
+		if taken[i] || (pool.Skip != nil && pool.Skip(i)) {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE services SET vip_index = ? WHERE id = ? AND vip_index IS NULL`, i, serviceID); err != nil {
+			return 0, err
+		}
+		return i, tx.Commit()
+	}
+	return 0, ErrPoolExhausted
+}

@@ -45,7 +45,7 @@ func TestRender(t *testing.T) {
 			{Id: "fwp_x:0", Protocol: "udp", Ports: "53", Sources: []string{"cluster"}},
 		},
 	}
-	out, err := Render(cfg, fw)
+	out, err := Render(cfg, fw, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,12 +64,45 @@ func TestRender(t *testing.T) {
 		}
 	}
 	// Without a firewall there is no input chain.
-	out, _ = Render(cfg, nil)
+	out, _ = Render(cfg, nil, nil)
 	if strings.Contains(out, "chain input") {
 		t.Fatal("input chain without firewall")
 	}
 	// A bad rule never reaches nft.
-	if _, err := Render(cfg, &agentv1.Firewall{Rules: []*agentv1.FirewallRule{{Id: "x", Protocol: "tcp", Ports: "1; flush ruleset"}}}); err == nil {
+	if _, err := Render(cfg, &agentv1.Firewall{Rules: []*agentv1.FirewallRule{{Id: "x", Protocol: "tcp", Ports: "1; flush ruleset"}}}, nil); err == nil {
 		t.Fatal("bad rule rendered")
+	}
+}
+
+func TestRenderServices(t *testing.T) {
+	cfg := &agentv1.NetworkConfig{ContainerSubnet: "10.91.2.0/24", MeshCidr: "10.90.0.0/16", ContainerCidr: "10.91.0.0/16", ServiceCidr: "10.92.0.0/16"}
+	out, err := Render(cfg, nil, []*agentv1.VirtualService{{Id: "abc123", Vip: "10.92.0.1", Ports: []*agentv1.VirtualPort{
+		{Protocol: "tcp", Port: 8080, Backends: []string{"10.91.1.2:8080", "10.91.2.3:8080"}},
+		{Protocol: "udp", Port: 53},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"ip daddr 10.92.0.1 tcp dport 8080 goto s-abc123-tcp-8080",
+		"numgen random mod 2 vmap { 0 : goto s-abc123-tcp-8080-0, 1 : goto s-abc123-tcp-8080-1 }",
+		"ip saddr 10.91.2.3 meta mark set meta mark | 0x4000",
+		"meta l4proto tcp dnat ip to 10.91.2.3:8080",
+		"type nat hook prerouting priority dstnat - 10",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "udp dport 53 goto") {
+		t.Error("a port without backends got a dispatch rule")
+	}
+	for _, bad := range []*agentv1.VirtualService{
+		{Id: "x; flush", Vip: "10.92.0.1"},
+		{Id: "x", Vip: "10.92.0.1", Ports: []*agentv1.VirtualPort{{Protocol: "tcp", Port: 80, Backends: []string{"1.2.3.4:80 }"}}}},
+	} {
+		if _, err := Render(cfg, nil, []*agentv1.VirtualService{bad}); err == nil {
+			t.Errorf("%v rendered", bad)
+		}
 	}
 }

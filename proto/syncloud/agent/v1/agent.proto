@@ -31,6 +31,7 @@ message ConnectResponse {
     NetworkConfig network = 4;
     CertificateIssued certificate = 5;
     ConfirmNetwork confirm_network = 6;
+    Discovery discovery = 7;
   }
 }
 
@@ -107,6 +108,8 @@ message TaskSpec {
   int64 nano_cpus = 12;          // 0 = unlimited; 1e9 = one CPU
   repeated string extra_hosts = 13; // "name:ip" or "name:host-gateway"
   bool system = 14;             // platform component (§5.0): never evicted by users
+  repeated string dns_servers = 15; // the node's discovery DNS (§8.1)
+  repeated string dns_search = 16;  // e.g. production.shop.syncloud.internal
 }
 
 message PortBinding {
@@ -259,4 +262,29 @@ message LogLine {
   int64 time_unix_nano = 2;
   string stream = 3;            // stdout | stderr
   string line = 4;
+}
+
+// Discovery is the cluster's service directory (§8.1, §8.6): DNS records and
+// virtual IPs with their backends. Sent in full whenever it changes.
+message Discovery {
+  uint64 generation = 1;
+  repeated DNSRecord records = 2;
+  repeated VirtualService services = 3;
+}
+
+message DNSRecord {
+  string name = 1;              // fully qualified, lowercase, no trailing dot
+  repeated string ips = 2;
+}
+
+message VirtualService {
+  string id = 1;                // service ID (used in nftables chain names)
+  string vip = 2;
+  repeated VirtualPort ports = 3;
+}
+
+message VirtualPort {
+  string protocol = 1;          // tcp | udp
+  uint32 port = 2;
+  repeated string backends = 3; // ip:port of running tasks
 }

@@ -432,6 +432,8 @@ type Service struct {
 	Deleting     bool        `json:"deleting"`
 	Spec         ServiceSpec `json:"spec"`
 	Endpoints    []string    `json:"endpoints"`
+	VIP          string      `json:"vip"`
+	DNSName      string      `json:"dnsName"`
 	CreatedAt    time.Time   `json:"createdAt"`
 	UpdatedAt    time.Time   `json:"updatedAt"`
 }

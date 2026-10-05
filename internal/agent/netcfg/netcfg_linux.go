@@ -95,7 +95,11 @@ func (m *Manager) apply(ctx context.Context, cfg *agentv1.NetworkConfig) (string
 	if err != nil {
 		return mode, fmt.Errorf("docker network %s: %w", Network, err)
 	}
-	ruleset, err := firewall.Render(cfg, m.firewallFor(cfg))
+	// Tasks resolve through the agent's DNS on the bridge gateway (§8.1).
+	if err := m.dns.Listen(gateway.String()); err != nil {
+		return mode, fmt.Errorf("DNS server on %s: %w", gateway, err)
+	}
+	ruleset, err := firewall.Render(cfg, m.firewallFor(cfg), m.services())
 	if err != nil {
 		return mode, err
 	}

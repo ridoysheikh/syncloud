@@ -75,10 +75,17 @@ func parseSource(s string) (netip.Prefix, error) {
 	return netip.PrefixFrom(a, a.BitLen()), nil
 }
 
+// hairpinMark marks connections a task makes to itself through a VIP; they
+// are masqueraded so replies come back through the host (§8.6).
+const hairpinMark = "0x4000"
+
+var chainIDRE = regexp.MustCompile(`^[a-z0-9]{1,40}$`)
+
 // Render returns the complete "inet syncloud" table for cfg. It replaces the
 // table atomically when fed to `nft -f`. fw may differ from cfg.Firewall
-// (after a rollback the agent renders the last confirmed firewall).
-func Render(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall) (string, error) {
+// (after a rollback the agent renders the last confirmed firewall). svcs are
+// the service VIPs to load-balance (§8.6).
+func Render(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall, svcs []*agentv1.VirtualService) (string, error) {
 	var b strings.Builder
 	internal := strings.Join([]string{cfg.GetMeshCidr(), cfg.GetContainerCidr(), cfg.GetServiceCidr()}, ", ")
 	// "ip syncloud" was the table name before the host firewall existed.
@@ -121,18 +128,25 @@ func Render(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall) (string, error) {
 		b.WriteString("\t\tcounter drop comment \"default deny\"\n\t}\n")
 	}
 
+	if err := renderServices(&b, cfg.GetServiceCidr(), svcs); err != nil {
+		return "", err
+	}
 	fmt.Fprintf(&b, `	chain forward {
 		type filter hook forward priority filter - 10; policy accept;
 		# Container IPs are only reachable from the mesh and the local bridge.
 		ip daddr %[1]s iifname != { "%[2]s", "%[3]s" } ct state new drop
+		# A VIP still addressed here has no running backend: fail fast.
+		ip daddr %[6]s meta l4proto tcp reject with tcp reset
+		ip daddr %[6]s reject
 	}
 	chain postrouting {
 		type nat hook postrouting priority srcnat + 10; policy accept;
+		meta mark & %[7]s == %[7]s masquerade comment "VIP hairpin"
 		# No NAT inside the private network; masquerade to the internet.
 		ip saddr %[4]s ip daddr != { %[5]s } oifname != "%[3]s" masquerade
 	}
 }
-`, cfg.GetContainerCidr(), Interface, Bridge, cfg.GetContainerSubnet(), internal)
+`, cfg.GetContainerCidr(), Interface, Bridge, cfg.GetContainerSubnet(), internal, cfg.GetServiceCidr(), hairpinMark)
 	return b.String(), nil
 }
 
@@ -197,4 +211,47 @@ func renderRule(r *agentv1.FirewallRule) ([]string, error) {
 		lines = append(lines, join("ip6 saddr { "+strings.Join(v6, ", ")+" }", match))
 	}
 	return lines, nil
+}
+
+// renderServices writes the VIP load balancer: DNAT to a random running
+// backend, one chain per service port and per backend (as kube-proxy's
+// nftables mode does).
+func renderServices(b *strings.Builder, serviceCIDR string, svcs []*agentv1.VirtualService) error {
+	if serviceCIDR == "" {
+		return nil
+	}
+	var dispatch, chains strings.Builder
+	for _, vs := range svcs {
+		vip, err := netip.ParseAddr(vs.GetVip())
+		if err != nil || !vip.Is4() || !chainIDRE.MatchString(vs.GetId()) {
+			return fmt.Errorf("invalid virtual service %q", vs.GetId())
+		}
+		for _, p := range vs.GetPorts() {
+			proto := p.GetProtocol()
+			if (proto != "tcp" && proto != "udp") || p.GetPort() == 0 || p.GetPort() > 65535 {
+				return fmt.Errorf("invalid port on service %s", vs.GetId())
+			}
+			if len(p.GetBackends()) == 0 {
+				continue // falls through to the reject in forward
+			}
+			svcChain := fmt.Sprintf("s-%s-%s-%d", vs.GetId(), proto, p.GetPort())
+			fmt.Fprintf(&dispatch, "\t\tip daddr %s %s dport %d goto %s\n", vip, proto, p.GetPort(), svcChain)
+			var arms []string
+			for i, be := range p.GetBackends() {
+				ap, err := netip.ParseAddrPort(be)
+				if err != nil || !ap.Addr().Is4() {
+					return fmt.Errorf("invalid backend %q", be)
+				}
+				epChain := fmt.Sprintf("%s-%d", svcChain, i)
+				arms = append(arms, fmt.Sprintf("%d : goto %s", i, epChain))
+				fmt.Fprintf(&chains, "\tchain %s {\n\t\tip saddr %s meta mark set meta mark | %s\n\t\tmeta l4proto %s dnat ip to %s\n\t}\n",
+					epChain, ap.Addr(), hairpinMark, proto, ap)
+			}
+			fmt.Fprintf(&chains, "\tchain %s {\n\t\tnumgen random mod %d vmap { %s }\n\t}\n", svcChain, len(arms), strings.Join(arms, ", "))
+		}
+	}
+	fmt.Fprintf(b, "\tchain services {\n%s\t}\n%s", dispatch.String(), chains.String())
+	fmt.Fprintf(b, "\tchain vip_prerouting {\n\t\ttype nat hook prerouting priority dstnat - 10; policy accept;\n\t\tip daddr %s jump services\n\t}\n", serviceCIDR)
+	fmt.Fprintf(b, "\tchain vip_output {\n\t\ttype nat hook output priority dstnat - 10; policy accept;\n\t\tip daddr %s jump services\n\t}\n", serviceCIDR)
+	return nil
 }

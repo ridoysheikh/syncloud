@@ -24,6 +24,8 @@ type ServiceView struct {
 	Deleting     bool      `json:"deleting"`
 	Spec         Spec      `json:"spec"`
 	Endpoints    []string  `json:"endpoints"`
+	VIP          string    `json:"vip"`
+	DNSName      string    `json:"dnsName"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
@@ -53,6 +55,10 @@ type TaskView struct {
 // Endpoints returns the public URLs of a service (set by the routing layer).
 var Endpoints = func(sv store.Service, spec Spec) []string { return nil }
 
+// Discovery returns a service's VIP and internal DNS name (set by the
+// discovery layer).
+var Discovery = func(sv store.Service) (vip, dnsName string) { return "", "" }
+
 func (m *Manager) ServiceView(ctx context.Context, id string) (ServiceView, error) {
 	sv, err := m.st.ServiceByID(ctx, id)
 	if err != nil {
@@ -74,6 +80,7 @@ func (m *Manager) serviceView(ctx context.Context, sv store.Service) (ServiceVie
 	if v.Endpoints == nil {
 		v.Endpoints = []string{}
 	}
+	v.VIP, v.DNSName = Discovery(sv)
 	tasks, err := m.st.ServiceTasks(ctx, sv.ID, 0)
 	if err != nil {
 		return v, err

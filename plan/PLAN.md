@@ -1248,6 +1248,12 @@ Because there is only one controller:
   - Queries use LogsQL built only from exact-match labels and a **quoted** substring, so user input can never widen the scope (ready for IAM scoping in Phase 7).
   - API `GET /logs` (history, oldest first) and `GET /logs/tail` (Server-Sent Events). `synctl logs [-f] [-A] NAME --since --grep --task --node`. The Logs page has project, environment and service filters, history plus live tail with per-task colors and levels, and the service page gets a Logs tab.
   - Verified in e2e with a real VictoriaLogs: the tail streams lines, and history merges two tasks on two nodes.
+- ✅ Slice 2d (2026-10-06), service discovery (§8.1, §8.6):
+  - Every service with ports gets a **stable VIP** from `10.92.0.0/16` (lowest free index, with a 1-hour cool-down after deletion). The controller builds a **service directory** of VIPs with running backends (old revisions' ports are honoured during rollouts) and DNS records, and pushes it in full to every node when it changes (debounced to 300ms, with a resync every 30s). Agents keep the last copy, so DNS and VIPs survive a controller outage.
+  - **DNS**: the agent serves `syncloud.internal` (`<svc>.<env>.<project>`, `tasks.<svc>.<env>.<project>`, `<node>.node`) on the `syncloud` bridge gateway, port 53, and forwards other names to the host's resolvers. Tasks get this server plus search domains (`<env>.<project>.syncloud.internal`, …), so `http://api:8080` works within an environment. (Development nodes without the mesh keep Docker's default DNS.)
+  - **VIPs** use nftables DNAT (decision changed from IPVS). There is one chain per service port with `numgen random` over per-backend chains, a hairpin mark plus masquerade for a task reaching itself, and an immediate reject (TCP reset) for VIPs with no running backend. Rendering is shared with the firewall and validates every value.
+  - The service view shows `vip` and `dnsName`.
+  - Verified in e2e: the DNS name resolves to the VIP, `tasks.` returns all three IPs, external names resolve, and `http://web:8080` from inside a task is spread over all three tasks, including the caller itself (hairpin).
 - TaskDefinition, Service, Task model; reconciler; scheduler (spread/binpack, constraints).
 - Start, stop and restart; exec terminal.
 - **Centralized logging** (§9.2): agent log shipper with disk buffer, log ingest, VictoriaLogs, logs explorer with the per-service merged view and live tail.

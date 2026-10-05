@@ -3267,6 +3267,14 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "vip": {
+            "type": "string",
+            "description": "stable virtual IP inside the private network (\u00a78.6)"
+          },
+          "dnsName": {
+            "type": "string",
+            "example": "api.production.shop.syncloud.internal"
           }
         }
       },

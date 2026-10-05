@@ -318,6 +318,13 @@ func (m *Manager) onHeartbeat(node store.Node, hb *agentv1.Heartbeat) {
 	m.mu.Unlock()
 }
 
+// IsMember reports whether the node's agent runs mesh networking.
+func (m *Manager) IsMember(nodeID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.members[nodeID]
+}
+
 // NetworkReady reports whether tasks can be placed on the node: either it is
 // not a mesh member (single-node development), or its network is applied.
 func (m *Manager) NetworkReady(nodeID string) bool {

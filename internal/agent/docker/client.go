@@ -185,6 +185,8 @@ type HostConfig struct {
 	Memory        int64                    `json:"Memory,omitempty"`
 	NanoCPUs      int64                    `json:"NanoCpus,omitempty"`
 	ExtraHosts    []string                 `json:"ExtraHosts,omitempty"`
+	DNS           []string                 `json:"Dns,omitempty"`
+	DNSSearch     []string                 `json:"DnsSearch,omitempty"`
 	LogConfig     LogConfig                `json:"LogConfig"`
 }
 
