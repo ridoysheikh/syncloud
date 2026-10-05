@@ -1242,6 +1242,12 @@ Because there is only one controller:
   - The Traefik config adds one router and load balancer per route. Servers are the running tasks' mesh IPs. A retry middleware (2 attempts) is on, and with a base domain routes are HTTPS with an HTTP→HTTPS redirect. Route hosts are added to the certificate manager, so each gets its own ACME certificate.
   - Routes are cached and invalidated by task and service changes. Stopping a task removes it from routing before the container stops.
   - Services report `endpoints`. Verified in e2e with a real Traefik on the controller node: 30 requests to the default hostname reached all three tasks on three nodes over the mesh.
+- ✅ Slice 2c (2026-10-06), centralized logs:
+  - The agent follows every managed container through the Docker logs API (demultiplexing stdout and stderr, with timestamps). It saves per-container positions in `logpos.json`, so a restarted agent resumes without gaps or duplicates. Lines queue in a 20k-line memory buffer that drops the oldest and counts drops; batches of up to 500 lines or 256 KiB go out as `LogBatch` messages on the agent stream. The disk buffer (§9.2) moves to Phase 9.
+  - The controller labels lines from the task ID (project, environment, service, revision, node; system tasks show as project `syncloud`, env `system`). It detects the level from JSON fields or keywords, writes batches to VictoriaLogs (`/insert/jsonline`) and fans out to live tails.
+  - Queries use LogsQL built only from exact-match labels and a **quoted** substring, so user input can never widen the scope (ready for IAM scoping in Phase 7).
+  - API `GET /logs` (history, oldest first) and `GET /logs/tail` (Server-Sent Events). `synctl logs [-f] [-A] NAME --since --grep --task --node`. The Logs page has project, environment and service filters, history plus live tail with per-task colors and levels, and the service page gets a Logs tab.
+  - Verified in e2e with a real VictoriaLogs: the tail streams lines, and history merges two tasks on two nodes.
 - TaskDefinition, Service, Task model; reconciler; scheduler (spread/binpack, constraints).
 - Start, stop and restart; exec terminal.
 - **Centralized logging** (§9.2): agent log shipper with disk buffer, log ingest, VictoriaLogs, logs explorer with the per-service merged view and live tail.

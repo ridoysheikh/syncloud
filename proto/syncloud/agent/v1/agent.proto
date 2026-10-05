@@ -19,6 +19,7 @@ message ConnectRequest {
     CommandResult result = 3;
     TaskStatus task_status = 4;
     RenewCertificate renew_certificate = 5;
+    LogBatch logs = 6;
   }
 }
 
@@ -244,4 +245,18 @@ message RenewCertificate {
 
 message CertificateIssued {
   string certificate = 1;       // PEM; the previous certificate stays valid until the agent reconnects with this one
+}
+
+// LogBatch carries container output (§9.2). Labels (project, service, …) are
+// added by the controller from the task ID.
+message LogBatch {
+  repeated LogLine lines = 1;
+  uint64 dropped = 2;           // lines dropped on the node since the last batch (buffer full)
+}
+
+message LogLine {
+  string task_id = 1;
+  int64 time_unix_nano = 2;
+  string stream = 3;            // stdout | stderr
+  string line = 4;
 }

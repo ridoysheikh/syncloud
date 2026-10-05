@@ -9,6 +9,7 @@ WITH_TRAEFIK=1
 trap cleanup EXIT
 setup_cluster
 start_traefik
+start_vlogs
 wait_mesh
 
 SVC=localhost:7070/api/v1/projects/shop/environments/production/services/web
@@ -78,6 +79,24 @@ v=$(api "$SVC/rollback" -d '{"revision":1}')
 echo "$v" | grep -q '"VERSION":"one"' || fail "revision 3 does not carry revision 1's spec"
 wait_for "revision 3 running" sh -c "docker exec sc-e2e-ctl curl -fs -b /tmp/jar localhost:7070/api/v1/projects/shop/environments/production/services/web/tasks | grep -o '\"revision\":3,[^}]*\"desired\":\"running\",\"state\":\"running\"' | wc -l | grep -q 2"
 echo "  ✓ rolled back to revision 1's spec as revision 3"
+
+echo "== logs"
+LOG=localhost:7070/api/v1/projects/shop/environments/production/services/logger
+api -X PUT "$LOG" -d '{"image":"busybox:1.37","command":["sh","-c","i=0; while true; do echo \"tick $i from $HOSTNAME\"; i=$((i+1)); sleep 1; done"],"resources":{"cpu":0.05,"memory":16},"desiredCount":2}' >/dev/null
+tailout=$(x sc-e2e-ctl sh -c "timeout 6 curl -sN -b /tmp/jar 'localhost:7070/api/v1/logs/tail?project=shop&service=logger' || true")
+echo "$tailout" | grep -q '^data: {.*"message":"tick ' || fail "live tail delivered no lines"
+echo "  ✓ live tail streams lines"
+for _ in $(seq 1 20); do
+  hist=$(api "localhost:7070/api/v1/logs?project=shop&service=logger&since=10m&limit=1000" || true)
+  tasks_seen=$(echo "$hist" | grep -o '"taskId":"task_[a-z0-9]*"' | sort -u | wc -l || true)
+  nodes_seen=$(echo "$hist" | grep -o '"node":"[a-z0-9-]*"' | sort -u | wc -l || true)
+  [ "$tasks_seen" -ge 2 ] && [ "$nodes_seen" -ge 2 ] && break
+  sleep 2
+done
+[ "$tasks_seen" -ge 2 ] && [ "$nodes_seen" -ge 2 ] || fail "history has lines from $tasks_seen tasks on $nodes_seen nodes, want 2 and 2"
+echo "$hist" | grep -q '"message":"tick 0 from ' || fail "first lines missing from history"
+echo "  ✓ history merges lines from 2 tasks on 2 nodes (VictoriaLogs)"
+api -X DELETE "$LOG" >/dev/null
 
 echo "== delete"
 svc -X DELETE >/dev/null

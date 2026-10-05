@@ -114,3 +114,36 @@ func decodeError(status int, data []byte) error {
 	}
 	return &Error{Status: status, Code: env.Error.Code, Message: env.Error.Message}
 }
+
+// Stream sends a signed GET and returns the open response body for
+// streaming endpoints (e.g. Server-Sent Events). The caller closes it.
+func (c *Client) Stream(ctx context.Context, path string) (io.ReadCloser, error) {
+	ref, err := url.Parse(path)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint.ResolveReference(ref).String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	switch {
+	case c.creds.AccessKeyID != "":
+		sigv.Sign(req, c.creds.AccessKeyID, c.creds.SecretAccessKey, nil, c.now())
+	case c.creds.Token != "":
+		req.Header.Set("Authorization", "Bearer "+c.creds.Token)
+	}
+	// Streams outlive the client's request timeout.
+	hc := *c.http
+	hc.Timeout = 0
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return resp.Body, nil
+}

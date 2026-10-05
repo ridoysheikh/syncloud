@@ -32,6 +32,8 @@ docker save busybox:1.37 -o "$BIN/busybox.tar"
 if [ "${WITH_TRAEFIK:-0}" = 1 ]; then
   docker image inspect traefik:v3.7.13 >/dev/null 2>&1 || docker pull -q traefik:v3.7.13 >/dev/null
   docker save traefik:v3.7.13 -o "$BIN/traefik.tar"
+  docker image inspect victoriametrics/victoria-logs:v1.53.0 >/dev/null 2>&1 || docker pull -q victoriametrics/victoria-logs:v1.53.0 >/dev/null
+  docker save victoriametrics/victoria-logs:v1.53.0 -o "$BIN/vlogs.tar"
 fi
 
 echo "== nodes"
@@ -80,6 +82,12 @@ wait_mesh() {
     sleep 2
   done
   [ $ok = 1 ] || { echo "$m"; fail "mesh did not converge (applied=$applied handshakes=$handshakes)"; }
+}
+
+# start_vlogs runs VictoriaLogs on the controller node like the system task.
+start_vlogs() {
+  x sc-e2e-ctl docker load -q -i /opt/sc/vlogs.tar >/dev/null
+  x sc-e2e-ctl docker run -d --name vlogs -p 127.0.0.1:9428:9428 victoriametrics/victoria-logs:v1.53.0 -storageDataPath=/vlogs >/dev/null
 }
 
 # start_traefik runs Traefik on the controller node like the system task does,

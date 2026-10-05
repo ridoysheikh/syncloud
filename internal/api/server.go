@@ -13,6 +13,7 @@ import (
 	"syncloud/internal/certs"
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
+	"syncloud/internal/logs"
 	"syncloud/internal/mesh"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
@@ -47,6 +48,7 @@ type Server struct {
 	mesh                  *mesh.Manager
 	downloadsDir          string
 	workloads             *workload.Manager
+	logs                  *logs.Store
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -87,6 +89,8 @@ type Options struct {
 	DownloadsDir string
 	// Workloads runs services (§5.2); may be nil.
 	Workloads *workload.Manager
+	// Logs serves container logs (§9.2); may be nil.
+	Logs *logs.Store
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -118,6 +122,7 @@ func New(o Options) *Server {
 		mesh:                  o.Mesh,
 		downloadsDir:          o.DownloadsDir,
 		workloads:             o.Workloads,
+		logs:                  o.Logs,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -190,6 +195,8 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/revisions", h: s.handleServiceRevisions},
 		{Method: "GET", Path: "/api/v1/services", h: s.handleListAllServices},
 		{Method: "GET", Path: "/api/v1/tasks", h: s.handleListTasks},
+		{Method: "GET", Path: "/api/v1/logs", h: s.handleQueryLogs},
+		{Method: "GET", Path: "/api/v1/logs/tail", h: s.handleTailLogs},
 		{Method: "POST", Path: "/api/v1/tasks/{id}/restart", h: s.handleRestartTask},
 		{Method: "GET", Path: "/api/v1/firewall/policies", h: s.handleListFirewallPolicies},
 		{Method: "POST", Path: "/api/v1/firewall/policies", h: s.handleCreateFirewallPolicy},

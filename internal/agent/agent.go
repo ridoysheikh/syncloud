@@ -170,11 +170,13 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 	}
 	go net.Run(ctx)
 	runner.NetworkReady = net.Ready
+	logs := NewLogShipper(d, dataDir, log)
+	go logs.Run(ctx)
 	renewBefore := opts.RenewBefore
 	if renewBefore == 0 {
 		renewBefore = 30 * 24 * time.Hour
 	}
-	a := &agentLink{info: info, runner: runner, net: net, advertise: opts.AdvertiseAddress, log: log,
+	a := &agentLink{info: info, runner: runner, net: net, logs: logs, advertise: opts.AdvertiseAddress, log: log,
 		dataDir: dataDir, certs: certs, renewBefore: renewBefore}
 
 	log.Info("agent starting", "node", st.Name, "gateway", st.Gateway, "version", version.Version)
@@ -205,6 +207,7 @@ type agentLink struct {
 	info        nodes.Info
 	runner      *Runner
 	net         *netcfg.Manager
+	logs        *LogShipper
 	advertise   string
 	log         *slog.Logger
 	dataDir     string
@@ -260,7 +263,7 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 	if req := a.renewalRequest(); req != nil {
 		renew <- req
 	}
-	go func() { errc <- writer(ctx, stream, interval, runner, a.net, renew) }()
+	go func() { errc <- writer(ctx, stream, interval, runner, a.net, a.logs, renew) }()
 	go func() {
 		for {
 			msg, err := stream.Recv()
@@ -288,7 +291,7 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 
 // writer is the only goroutine that sends on the stream (gRPC streams are not
 // safe for concurrent sends): heartbeats on a ticker, task statuses as they come.
-func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.ConnectRequest, agentv1.ConnectResponse], every time.Duration, runner *Runner, net *netcfg.Manager, extra <-chan *agentv1.ConnectRequest) error {
+func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.ConnectRequest, agentv1.ConnectResponse], every time.Duration, runner *Runner, net *netcfg.Manager, logs *LogShipper, extra <-chan *agentv1.ConnectRequest) error {
 	sampler := sysinfo.NewSampler("/")
 	t := time.NewTicker(every)
 	defer t.Stop()
@@ -300,6 +303,8 @@ func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.Connect
 		case s := <-runner.out:
 			msg = &agentv1.ConnectRequest{Msg: &agentv1.ConnectRequest_TaskStatus{TaskStatus: s}}
 		case msg = <-extra:
+		case l := <-logs.out:
+			msg = logs.batch(l)
 		case <-t.C:
 			m := sampler.Sample()
 			msg = &agentv1.ConnectRequest{Msg: &agentv1.ConnectRequest_Heartbeat{Heartbeat: &agentv1.Heartbeat{

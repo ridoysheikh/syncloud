@@ -25,6 +25,7 @@ import { DomainsPage } from "./settings/DomainsPage";
 import { BackupsPage } from "./settings/BackupsPage";
 import { TopologyPage } from "./network/TopologyPage";
 import { FirewallPage } from "./network/FirewallPage";
+import { LogsPage } from "./logs/LogsPage";
 
 /** The module registry. The side nav and routes are built from this list. */
 export const modules: DashboardModule[] = [
@@ -68,7 +69,7 @@ export const modules: DashboardModule[] = [
     label: "Logs",
     icon: ScrollText,
     order: 30,
-    pages: [{ path: "/logs", label: "Logs", component: planned([], "Logs", "Phase 2", "§9.2", "Merged per-service logs from every node, live tail and search.") }],
+    pages: [{ path: "/logs", label: "Logs", component: LogsPage }],
   },
   {
     id: "storage",

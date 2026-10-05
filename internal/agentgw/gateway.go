@@ -39,6 +39,8 @@ type Hooks struct {
 	OnHeartbeat func(node store.Node, hb *agentv1.Heartbeat)
 	// OnDisconnect runs when the stream ends.
 	OnDisconnect func(node store.Node)
+	// OnLogs runs for every batch of container output.
+	OnLogs func(node store.Node, b *agentv1.LogBatch)
 }
 
 type Gateway struct {
@@ -236,6 +238,12 @@ func (g *Gateway) Connect(stream grpc.BidiStreamingServer[agentv1.ConnectRequest
 				for _, h := range g.hooks {
 					if h.OnTaskStatus != nil {
 						h.OnTaskStatus(node, m.TaskStatus)
+					}
+				}
+			case *agentv1.ConnectRequest_Logs:
+				for _, h := range g.hooks {
+					if h.OnLogs != nil {
+						h.OnLogs(node, m.Logs)
 					}
 				}
 			case *agentv1.ConnectRequest_RenewCertificate:

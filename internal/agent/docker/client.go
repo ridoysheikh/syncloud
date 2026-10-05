@@ -357,3 +357,63 @@ func (c *Client) EnsureBridge(ctx context.Context, name, subnet, gateway string,
 		"IPAM": map[string]any{"Driver": "default", "Config": []map[string]string{{"Subnet": subnet, "Gateway": gateway}}},
 	}, nil)
 }
+
+// LogEntry is one line of container output.
+type LogEntry struct {
+	Time   time.Time
+	Stream string // stdout | stderr
+	Line   string
+}
+
+// Logs follows a container's output from since (exclusive) until the
+// container stops or ctx ends. Lines longer than 64 KiB are split.
+func (c *Client) Logs(ctx context.Context, id string, since time.Time, fn func(LogEntry)) error {
+	q := url.Values{"follow": {"1"}, "stdout": {"1"}, "stderr": {"1"}, "timestamps": {"1"}}
+	if !since.IsZero() {
+		q.Set("since", fmt.Sprintf("%d.%09d", since.Unix(), since.Nanosecond()))
+	}
+	resp, err := c.do(ctx, "GET", "/containers/"+id+"/logs", q, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	// Non-TTY output is multiplexed: an 8-byte header (stream, 0, 0, 0, size
+	// big-endian) before each frame.
+	r := bufio.NewReaderSize(resp.Body, 64<<10)
+	hdr := make([]byte, 8)
+	partial := map[byte]string{}
+	for {
+		if _, err := io.ReadFull(r, hdr); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil
+			}
+			return err
+		}
+		n := int(hdr[4])<<24 | int(hdr[5])<<16 | int(hdr[6])<<8 | int(hdr[7])
+		frame := make([]byte, n)
+		if _, err := io.ReadFull(r, frame); err != nil {
+			return err
+		}
+		stream := "stdout"
+		if hdr[0] == 2 {
+			stream = "stderr"
+		}
+		text := partial[hdr[0]] + string(frame)
+		lines := strings.Split(text, "\n")
+		partial[hdr[0]] = lines[len(lines)-1] // incomplete last line
+		if len(partial[hdr[0]]) > 64<<10 {
+			lines = append(lines[:len(lines)-1], partial[hdr[0]], "")
+			partial[hdr[0]] = ""
+		}
+		for _, l := range lines[:len(lines)-1] {
+			ts, msg, ok := strings.Cut(l, " ")
+			e := LogEntry{Stream: stream, Line: msg}
+			if t, err := time.Parse(time.RFC3339Nano, ts); ok && err == nil {
+				e.Time = t
+			} else {
+				e.Time, e.Line = time.Now(), l
+			}
+			fn(e)
+		}
+	}
+}

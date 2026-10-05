@@ -1,8 +1,12 @@
 package client
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -547,4 +551,68 @@ func (c *Client) RestartTask(ctx context.Context, id string) error {
 func (c *Client) SetNodeSchedulable(ctx context.Context, id string, on bool) (Node, error) {
 	var out Node
 	return out, c.Do(ctx, "PUT", "/api/v1/nodes/"+url.PathEscape(id)+"/schedulable", map[string]bool{"schedulable": on}, &out)
+}
+
+type LogLine struct {
+	Time        time.Time `json:"time"`
+	Project     string    `json:"project"`
+	Environment string    `json:"environment"`
+	Service     string    `json:"service"`
+	TaskID      string    `json:"taskId"`
+	Revision    string    `json:"revision"`
+	Node        string    `json:"node"`
+	Stream      string    `json:"stream"`
+	Level       string    `json:"level"`
+	Message     string    `json:"message"`
+}
+
+// LogQuery selects log lines; empty fields match everything.
+type LogQuery struct {
+	Project, Environment, Service, Task, Node, Text string
+	Since                                           string // e.g. "1h"
+	Limit                                           int
+}
+
+func (q LogQuery) values() url.Values {
+	v := url.Values{}
+	for k, val := range map[string]string{"project": q.Project, "environment": q.Environment, "service": q.Service, "task": q.Task, "node": q.Node, "q": q.Text, "since": q.Since} {
+		if val != "" {
+			v.Set(k, val)
+		}
+	}
+	if q.Limit > 0 {
+		v.Set("limit", fmt.Sprint(q.Limit))
+	}
+	return v
+}
+
+func (c *Client) QueryLogs(ctx context.Context, q LogQuery) ([]LogLine, error) {
+	var out list[LogLine]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/logs?"+q.values().Encode(), nil, &out)
+}
+
+// TailLogs calls fn for every new line until ctx ends or the stream breaks.
+func (c *Client) TailLogs(ctx context.Context, q LogQuery, fn func(LogLine)) error {
+	q.Since, q.Limit = "", 0
+	body, err := c.Stream(ctx, "/api/v1/logs/tail?"+q.values().Encode())
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+	sc := bufio.NewScanner(body)
+	sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
+	for sc.Scan() {
+		data, ok := strings.CutPrefix(sc.Text(), "data: ")
+		if !ok {
+			continue
+		}
+		var l LogLine
+		if json.Unmarshal([]byte(data), &l) == nil {
+			fn(l)
+		}
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	return sc.Err()
 }

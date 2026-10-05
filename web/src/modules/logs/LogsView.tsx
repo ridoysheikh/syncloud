@@ -1,0 +1,151 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Pause, Play, ScrollText } from "lucide-react";
+import { api, ApiError } from "@/lib/api";
+import { Panel } from "@/ui/Panel";
+import { EmptyState } from "@/ui/EmptyState";
+import { Alert, Button, Input } from "@/ui/controls";
+import { cn } from "@/ui/cn";
+
+export interface LogLine {
+  time: string;
+  project: string;
+  environment: string;
+  service: string;
+  taskId: string;
+  node: string;
+  stream: string;
+  level?: string;
+  message: string;
+}
+
+export interface LogFilter {
+  project?: string;
+  environment?: string;
+  service?: string;
+}
+
+const MAX_LINES = 3000;
+const taskColors = ["text-sky-400", "text-violet-400", "text-teal-400", "text-amber-400", "text-pink-400", "text-lime-400"];
+const levelColor: Record<string, string> = { fatal: "text-bad", error: "text-bad", warn: "text-warn", debug: "text-faint" };
+
+function colorOf(id: string) {
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return taskColors[h % taskColors.length];
+}
+
+/** Merged logs from every node (§9.2): history from VictoriaLogs plus a live tail. */
+export function LogsView({ filter, showSource = true }: { filter: LogFilter; showSource?: boolean }) {
+  const [since, setSince] = useState("1h");
+  const [text, setText] = useState("");
+  const [applied, setApplied] = useState("");
+  const [live, setLive] = useState(true);
+  const [tail, setTail] = useState<LogLine[]>([]);
+  const box = useRef<HTMLDivElement>(null);
+  const params = useMemo(() => {
+    const p = new URLSearchParams();
+    if (filter.project) p.set("project", filter.project);
+    if (filter.environment) p.set("environment", filter.environment);
+    if (filter.service) p.set("service", filter.service);
+    if (applied) p.set("q", applied);
+    return p;
+  }, [filter.project, filter.environment, filter.service, applied]);
+
+  const history = useQuery({
+    queryKey: ["logs", params.toString(), since],
+    queryFn: async () => (await api<{ items: LogLine[] }>("GET", `/logs?${params}&since=${since}&limit=1000`)).items,
+    retry: false,
+  });
+
+  useEffect(() => {
+    setTail([]);
+    if (!live) return;
+    const es = new EventSource(`/api/v1/logs/tail?${params}`);
+    es.onmessage = (e) => {
+      const l = JSON.parse(e.data) as LogLine;
+      setTail((prev) => (prev.length >= MAX_LINES ? [...prev.slice(-MAX_LINES / 2), l] : [...prev, l]));
+    };
+    return () => es.close();
+  }, [params, live]);
+
+  const lines = useMemo(() => {
+    const hist = history.data ?? [];
+    const last = hist.at(-1)?.time ?? "";
+    return [...hist, ...tail.filter((l) => l.time > last)].slice(-MAX_LINES);
+  }, [history.data, tail]);
+
+  // Follow the bottom while tailing, unless the user scrolled up.
+  const stick = useRef(true);
+  useEffect(() => {
+    const el = box.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [lines]);
+
+  return (
+    <Panel
+      flush
+      title={
+        <span className="flex items-center gap-2">
+          Logs <span className="text-faint normal-case">{lines.length} lines</span>
+        </span>
+      }
+      actions={
+        <>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setApplied(text.trim());
+            }}
+          >
+            <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search text…" className="h-7 w-40 sm:w-56" />
+          </form>
+          <select value={since} onChange={(e) => setSince(e.target.value)} className="bg-bg border-line h-7 rounded-sm border px-1.5 text-xs">
+            {["5m", "15m", "1h", "6h", "24h", "168h"].map((s) => (
+              <option key={s} value={s}>
+                last {s === "168h" ? "7d" : s}
+              </option>
+            ))}
+          </select>
+          <Button variant={live ? "primary" : "default"} onClick={() => setLive(!live)} title="Live tail">
+            {live ? <Pause className="size-3.5" /> : <Play className="size-3.5" />} {live ? "Live" : "Paused"}
+          </Button>
+        </>
+      }
+    >
+      {history.error && (
+        <div className="p-2">
+          <Alert tone="warn">
+            {history.error instanceof ApiError ? history.error.message : "Log history unavailable"}. Live lines still appear below.
+          </Alert>
+        </div>
+      )}
+      <div
+        ref={box}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        }}
+        className="h-[60vh] overflow-auto px-2 py-1 font-mono text-[11px] leading-[1.45]"
+      >
+        {lines.length === 0 && !history.isLoading ? (
+          <EmptyState icon={ScrollText} title="No log lines">
+            Lines from every task of every node appear here as they are written.
+          </EmptyState>
+        ) : (
+          lines.map((l, i) => (
+            <div key={`${l.time}-${l.taskId}-${i}`} className="hover:bg-hover flex gap-2 whitespace-pre-wrap break-all">
+              <span className="text-faint shrink-0" title={l.time}>
+                {new Date(l.time).toLocaleTimeString(undefined, { hour12: false })}
+              </span>
+              <span className={cn("shrink-0", colorOf(l.taskId))} title={`${l.taskId} on ${l.node}`}>
+                {showSource ? `${l.project}/${l.service}` : l.taskId.replace("task_", "").slice(0, 6)}
+              </span>
+              <span className={cn(levelColor[l.level ?? ""] ?? (l.stream === "stderr" ? "text-muted" : "text-fg"))}>{l.message}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </Panel>
+  );
+}

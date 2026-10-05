@@ -14,6 +14,7 @@ import { since } from "@/lib/nodes";
 import { serviceState } from "./ServicesPage";
 import { TasksTable } from "./TasksPage";
 import { useTasks } from "@/lib/workloads";
+import { LogsView } from "@/modules/logs/LogsView";
 
 interface Revision {
   revision: number;
@@ -23,7 +24,7 @@ interface Revision {
   createdBy: string;
 }
 
-type Tab = "tasks" | "revisions" | "spec";
+type Tab = "tasks" | "logs" | "revisions" | "spec";
 
 /** One service: scale, tasks, revisions and its spec (§4). */
 export function ServicePage() {
@@ -95,7 +96,7 @@ export function ServicePage() {
         </Panel>
       )}
       <div className="border-line flex gap-3 border-b text-xs">
-        {(["tasks", "revisions", "spec"] as Tab[]).map((t) => (
+        {(["tasks", "logs", "revisions", "spec"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -106,6 +107,7 @@ export function ServicePage() {
         ))}
       </div>
       {tab === "tasks" && <ServiceTasks id={svc.id} path={path} />}
+      {tab === "logs" && <LogsView filter={{ project, environment: env, service: name }} showSource={false} />}
       {tab === "revisions" && <Revisions path={path} />}
       {tab === "spec" && <SpecEditor path={path} spec={svc.spec} />}
     </div>

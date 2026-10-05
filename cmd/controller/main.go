@@ -26,6 +26,7 @@ import (
 	"syncloud/internal/config"
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
+	"syncloud/internal/logs"
 	"syncloud/internal/mesh"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
@@ -210,6 +211,9 @@ func serve(args []string) error {
 	certMgr.SetHosts(certHosts(domains.Endpoints()))
 	gw.AddHooks(workloads.Hooks())
 	go workloads.Run(ctx)
+	logStore := logs.New(st, cfg.VictoriaLogsURL, log)
+	gw.AddHooks(agentgw.Hooks{OnLogs: logStore.OnLogs})
+	go logStore.Run(ctx)
 	workload.Endpoints = func(sv store.Service, spec workload.Spec) []string {
 		if base := domains.Base(); base != "" {
 			return workload.ServiceEndpoints(sv, spec, base, "https", httpsPort)
@@ -260,7 +264,7 @@ func serve(args []string) error {
 			"GET " + certs.ChallengePrefix: certMgr,
 		},
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
-		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, ControllerSchedulable: cfg.ControllerSchedulable,
+		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, ControllerSchedulable: cfg.ControllerSchedulable,
 		ACME: api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {
 			_ = os.Remove(filepath.Join(cfg.DataDir, setupTokenFile))
