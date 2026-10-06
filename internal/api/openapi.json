@@ -3025,6 +3025,10 @@
                           },
                           "tags": {
                             "type": "integer"
+                          },
+                          "lifecycle": {
+                            "type": "boolean",
+                            "description": "has a lifecycle policy"
                           }
                         }
                       }
@@ -3750,6 +3754,237 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/registry/lifecycle": {
+      "get": {
+        "operationId": "getLifecyclePolicy",
+        "tags": [
+          "registry"
+        ],
+        "summary": "A repository's lifecycle policy",
+        "parameters": [
+          {
+            "name": "repository",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "e.g. shop/api"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifecyclePolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putLifecyclePolicy",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Set a repository's lifecycle policy; it applies on the next cleanup run",
+        "parameters": [
+          {
+            "name": "repository",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "e.g. shop/api"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rules": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/LifecycleRule"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifecyclePolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteLifecyclePolicy",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Remove a repository's lifecycle policy",
+        "parameters": [
+          {
+            "name": "repository",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "e.g. shop/api"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/registry/lifecycle/preview": {
+      "post": {
+        "operationId": "previewLifecyclePolicy",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Dry run: what rules would delete from a repository now (images in use are never deleted)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repository": {
+                    "type": "string"
+                  },
+                  "rules": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/LifecycleRule"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "images": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LifecycleDecision"
+                      }
+                    },
+                    "expire": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/registry/gc": {
+      "get": {
+        "operationId": "listRegistryCleanups",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Recent cleanup runs (lifecycle policies, then garbage collection)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GCRun"
+                      }
+                    },
+                    "running": {
+                      "type": "boolean"
+                    },
+                    "everyHours": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "startRegistryCleanup",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Apply lifecycle policies and collect garbage now (pushes are refused while it runs; pulls keep working)",
+        "responses": {
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GCRun"
+                }
+              }
+            }
+          },
+          "409": {
             "$ref": "#/components/responses/Error"
           },
           "503": {
@@ -5905,6 +6140,139 @@
                 "$ref": "#/components/schemas/MetricSeries"
               }
             }
+          }
+        }
+      },
+      "LifecycleRule": {
+        "type": "object",
+        "required": [
+          "priority"
+        ],
+        "properties": {
+          "priority": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "lower runs first; an image belongs to the first rule whose prefix matches"
+          },
+          "description": {
+            "type": "string"
+          },
+          "tagPrefix": {
+            "type": "string",
+            "description": "\"\" matches every tag"
+          },
+          "keepLast": {
+            "type": "integer",
+            "description": "keep the newest N, expire the rest (set this or olderThanDays)"
+          },
+          "olderThanDays": {
+            "type": "integer",
+            "description": "expire images created more than N days ago"
+          }
+        }
+      },
+      "LifecyclePolicy": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LifecycleRule"
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LifecycleDecision": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Image"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "expire": {
+                "type": "boolean"
+              },
+              "inUse": {
+                "type": "boolean",
+                "description": "used by a service's current or previous revision; never expired"
+              },
+              "rule": {
+                "type": "integer"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "GCRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "schedule",
+              "manual"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "expired": {
+            "type": "integer"
+          },
+          "reclaimedBytes": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           }
         }
       }

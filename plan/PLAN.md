@@ -1300,7 +1300,28 @@ Because there is only one controller:
   - `@registry/<repo>:<tag>` in a task definition resolves to the registry host (`registry.<base-domain>`, or `--registry-pull-host`). The node gets a **pull-only bearer token for that repository** (30 min, `X-Registry-Auth` `registrytoken`), excluded from the spec hash so rotating tokens never recreate containers. Nodes need no `docker login`.
   - **Registry browser**: the controller reads the registry with tokens it issues to itself. It lists repositories (paginated catalog, empty ones hidden) and images (tag, digest, compressed size, platforms from the index or config, created time) and deletes tags (by manifest digest). API `/registry/info|repositories|images`; synctl `registry info|repos|images|delete`; the Registry dashboard (counts and copyable push commands) and Repositories pages.
   - Verified with `test/e2e/registry.sh`: `docker login` with an access key, push, browse, a service deployed from `@registry/…` pulled by the node with a minted token, and tag deletion.
-  - Still to do in Phase 4: lifecycle policies, garbage collection, upstream credentials and per-project permissions (Phase 7 IAM).
+  - Per-project registry permissions arrive with Phase 7 IAM.
+- ✅ Slice 4c (2026-10-06), registry lifecycle policies and garbage collection:
+  - **Lifecycle policies per repository** (SQLite), ECR-like:
+    - Rules have a priority, a tag prefix ("" = every tag) and either `keepLast N` or `olderThanDays N`.
+    - Each image belongs to the first rule whose prefix matches it, so a lower-priority rule never expires what a higher one kept.
+    - A digest is only deleted when every tag pointing at it expires.
+    - **In use = never deleted:** every service's current and previous revision (the rollback target) and both ends of in-flight deployments, whether written as `@registry/…` or with the registry host, by tag or digest.
+    - **Preview (dry run)** shows each image's result, deciding rule and reason before saving.
+  - **Cleanup runs**, every 24h or on demand (only when the registry system task runs):
+    1. Apply the policies (delete manifests).
+    2. Switch the registry to read-only maintenance mode (`REGISTRY_STORAGE_MAINTENANCE_READONLY`; pushes are refused, pulls keep working). The container is recreated.
+    3. Run `registry garbage-collect --delete-untagged` inside it through the exec relay, measuring `du` before and after for the space reclaimed.
+    4. Switch back. Every run is logged with what it expired; runs interrupted by a restart are marked failed.
+  - API `/registry/lifecycle` (GET, PUT, DELETE, plus `/preview`) and `/registry/gc` (GET runs, POST start). The repository list flags repositories with a policy. synctl `registry lifecycle get|set|preview|delete` (with `--keep-last`/`--older-than`/`--prefix` shortcuts) and `registry gc run [--wait]|runs`.
+  - **Dashboard:** a Lifecycle policy tab per repository (rules editor, preview table) and a Cleanup panel on the registry dashboard (runs, reclaimed space, "Clean up now").
+  - Verified with `test/e2e/lifecycle.sh`, using the controller's real system tasks:
+    - Pushes v1..v4 plus an overwritten tag; a service runs v1.
+    - The preview keeps v1 as in use and expires v2; invalid rules are refused.
+    - `synctl registry gc run --wait` expires v2 and reclaims space (untagged layers included).
+    - Pushes work again afterwards, and the service kept running.
+    - Screenshots checked.
+  - Still to do in Phase 4: upstream credentials, pre-pull before deploys, registry event tracking (last pulled), watch rules and path filters, Nixpacks.
 - ✅ Slice 4b (2026-10-06), Git builds:
   - **Git source per service**: an https URL, branch, context directory, Dockerfile, an optional token (sealed with the master key), auto-deploy, and a poll interval of at least 15s. Connecting runs a smart-HTTP `ls-remote` (no git binary on the controller) to fail early on a wrong URL, branch or token.
   - **Polling with backoff**: errors double the interval, up to 1h. **Webhooks**: `POST /api/v1/hooks/git/{id}` accepts GitHub `X-Hub-Signature-256`, Gitea/Forgejo `X-Gitea-Signature` (HMAC-SHA256) and the GitLab `X-Gitlab-Token`. A webhook only triggers a check, so the payload is never trusted. Each commit is built once (unique on service plus SHA).

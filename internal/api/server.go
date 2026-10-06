@@ -23,6 +23,7 @@ import (
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
 	"syncloud/internal/registry"
+	"syncloud/internal/regmaint"
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 	"syncloud/internal/system"
@@ -60,6 +61,7 @@ type Server struct {
 	registryBrowser       *registry.Browser
 	builds                *builds.Manager
 	metrics               *metrics.Store
+	regMaint              *regmaint.Manager
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -114,6 +116,8 @@ type Options struct {
 	Builds *builds.Manager
 	// Metrics reads task resource usage (§9.1); may be nil.
 	Metrics *metrics.Store
+	// RegistryMaint applies lifecycle policies and runs GC (§5.10); may be nil.
+	RegistryMaint *regmaint.Manager
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -152,6 +156,7 @@ func New(o Options) *Server {
 		registryBrowser:       o.RegistryBrowser,
 		builds:                o.Builds,
 		metrics:               o.Metrics,
+		regMaint:              o.RegistryMaint,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -183,6 +188,12 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/registry/repositories", h: s.handleListRepositories},
 		{Method: "GET", Path: "/api/v1/registry/images", h: s.handleListImages},
 		{Method: "DELETE", Path: "/api/v1/registry/images", h: s.handleDeleteImage},
+		{Method: "GET", Path: "/api/v1/registry/lifecycle", h: s.handleGetLifecycle},
+		{Method: "PUT", Path: "/api/v1/registry/lifecycle", h: s.handlePutLifecycle},
+		{Method: "DELETE", Path: "/api/v1/registry/lifecycle", h: s.handleDeleteLifecycle},
+		{Method: "POST", Path: "/api/v1/registry/lifecycle/preview", h: s.handlePreviewLifecycle},
+		{Method: "GET", Path: "/api/v1/registry/gc", h: s.handleGCRuns},
+		{Method: "POST", Path: "/api/v1/registry/gc", h: s.handleStartGC},
 		{Method: "POST", Path: "/api/v1/setup", Public: true, h: s.handleSetup},
 		{Method: "POST", Path: "/api/v1/auth/login", Public: true, h: s.handleLogin},
 		{Method: "POST", Path: "/api/v1/auth/logout", h: s.handleLogout},

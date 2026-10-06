@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, Check, Copy, Trash2 } from "lucide-react";
+import { Boxes, Check, Copy, Eraser, Trash2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { bytes, since } from "@/lib/nodes";
 import { PageHeader } from "@/ui/PageHeader";
@@ -8,12 +8,26 @@ import { Panel } from "@/ui/Panel";
 import { StatTile } from "@/ui/StatTile";
 import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
-import { Alert, IconButton } from "@/ui/controls";
+import { Alert, Button, IconButton, StatusBadge } from "@/ui/controls";
+import { LifecyclePanel } from "./LifecyclePanel";
 import { cn, gap } from "@/ui/cn";
 
 interface Repository {
   name: string;
   tags: number;
+  lifecycle: boolean;
+}
+
+interface GCRun {
+  id: string;
+  trigger: string;
+  status: "running" | "succeeded" | "failed";
+  expired: number;
+  reclaimedBytes: number;
+  message: string;
+  startedAt: string;
+  finishedAt: string | null;
+  details: { repository: string; tag: string; reason: string }[];
 }
 
 interface Image {
@@ -109,7 +123,113 @@ export function RegistryDashboard() {
         <StatTile label="Tags" value={tags} />
       </div>
       <PushCommands />
+      <Cleanup />
     </div>
+  );
+}
+
+/** Lifecycle + garbage collection runs, with "Clean up now" (§5.10). */
+function Cleanup() {
+  const qc = useQueryClient();
+  const { data, error } = useQuery({
+    queryKey: ["registry", "gc"],
+    queryFn: () =>
+      api<{ items: GCRun[]; running: boolean; everyHours: number }>(
+        "GET",
+        "/registry/gc",
+      ),
+    refetchInterval: (q) => (q.state.data?.running ? 2000 : 30_000),
+    retry: false,
+  });
+  const start = useMutation({
+    mutationFn: () => api("POST", "/registry/gc"),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["registry"] }),
+  });
+  if (error) return null; // cleanup needs the registry system task
+  const runs = data?.items ?? [];
+  return (
+    <Panel
+      title="Cleanup"
+      flush
+      actions={
+        <Button
+          onClick={() =>
+            confirm(
+              "Apply lifecycle policies and collect garbage now? Pushes are refused for the minute it runs; pulls keep working.",
+            ) && start.mutate()
+          }
+          disabled={data?.running || start.isPending}
+        >
+          <Eraser className="size-3.5" />
+          {data?.running ? "Running…" : "Clean up now"}
+        </Button>
+      }
+    >
+      <p className="text-muted px-3 py-2 text-xs">
+        Every {data?.everyHours ?? 24} hours: lifecycle policies delete expired
+        images, then garbage collection frees their layers and untagged images.
+      </p>
+      {start.error && (
+        <div className="px-3 pb-2">
+          <Alert>
+            {start.error instanceof ApiError
+              ? start.error.message
+              : "Could not start"}
+          </Alert>
+        </div>
+      )}
+      <DataTable
+        rows={runs.slice(0, 10)}
+        rowKey={(r) => r.id}
+        empty={<EmptyState icon={Eraser} title="No cleanups yet" />}
+        columns={[
+          {
+            header: "Started",
+            cell: (r) => (
+              <span className="text-muted">{since(r.startedAt)}</span>
+            ),
+          },
+          {
+            header: "Status",
+            cell: (r) => (
+              <StatusBadge
+                tone={
+                  r.status === "succeeded"
+                    ? "ok"
+                    : r.status === "failed"
+                      ? "bad"
+                      : "info"
+                }
+              >
+                {r.status}
+              </StatusBadge>
+            ),
+          },
+          {
+            header: "Trigger",
+            cell: (r) => <span className="text-muted">{r.trigger}</span>,
+          },
+          {
+            header: "Expired",
+            cell: (r) => (
+              <span
+                title={r.details
+                  .map((d) => `${d.repository}:${d.tag}`)
+                  .join("\n")}
+              >
+                {r.expired}
+              </span>
+            ),
+          },
+          { header: "Reclaimed", cell: (r) => bytes(r.reclaimedBytes) },
+          {
+            header: "Message",
+            className: "w-full",
+            cell: (r) => <span className="text-muted">{r.message || "—"}</span>,
+          },
+        ]}
+      />
+    </Panel>
   );
 }
 
@@ -118,6 +238,7 @@ export function RepositoriesPage() {
   const qc = useQueryClient();
   const { data: repos = [], isLoading, error } = useRepos();
   const [repo, setRepo] = useState("");
+  const [tab, setTab] = useState<"images" | "lifecycle">("images");
   const current = repo || repos[0]?.name || "";
   const images = useQuery({
     queryKey: ["registry", "images", current],
@@ -165,75 +286,109 @@ export function RepositoriesPage() {
                     )}
                   >
                     <span className="truncate">{r.name}</span>
-                    <span className="text-faint">{r.tags}</span>
+                    <span className="text-faint flex items-center gap-1.5">
+                      {r.lifecycle && (
+                        <span
+                          title="lifecycle policy"
+                          className="bg-ok size-1.5 rounded-full"
+                        />
+                      )}
+                      {r.tags}
+                    </span>
                   </button>
                 </li>
               ))}
             </ul>
           )}
         </Panel>
-        <Panel title={current || "Images"} flush>
-          <DataTable
-            rows={images.data ?? []}
-            rowKey={(i) => i.tag}
-            empty={
-              current &&
-              !images.isLoading && <EmptyState icon={Boxes} title="No tags" />
-            }
-            columns={[
-              {
-                header: "Tag",
-                cell: (i) => (
-                  <span className="flex items-center gap-1 font-mono">
-                    {i.tag}
-                    <CopyText text={`@registry/${current}:${i.tag}`} />
-                  </span>
-                ),
-              },
-              {
-                header: "Digest",
-                cell: (i) => (
-                  <span className="text-muted font-mono" title={i.digest}>
-                    {i.digest.slice(7, 19)}
-                  </span>
-                ),
-              },
-              { header: "Size", cell: (i) => bytes(i.sizeBytes) },
-              {
-                header: "Platforms",
-                cell: (i) => (
-                  <span className="text-muted">
-                    {i.platforms.join(", ") || "—"}
-                  </span>
-                ),
-              },
-              {
-                header: "Created",
-                className: "w-full",
-                cell: (i) => (
-                  <span className="text-muted">
-                    {i.created ? since(i.created) : "—"}
-                  </span>
-                ),
-              },
-              {
-                header: "",
-                cell: (i) => (
-                  <IconButton
-                    label="Delete tag"
-                    onClick={() =>
-                      confirm(
-                        `Delete ${current}:${i.tag}? Tags with the same digest are deleted too.`,
-                      ) && del.mutate(i.tag)
-                    }
-                  >
-                    <Trash2 className="size-3.5" />
-                  </IconButton>
-                ),
-              },
-            ]}
-          />
-        </Panel>
+        <div className={cn("flex min-w-0 flex-col", gap)}>
+          {current && (
+            <div className="border-line flex gap-3 border-b text-xs">
+              {(["images", "lifecycle"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={cn(
+                    "-mb-px border-b-2 px-1 pb-1.5",
+                    tab === t
+                      ? "border-accent text-fg"
+                      : "text-muted hover:text-fg border-transparent",
+                  )}
+                >
+                  {t === "images" ? "Images" : "Lifecycle policy"}
+                </button>
+              ))}
+            </div>
+          )}
+          {tab === "lifecycle" && current ? (
+            <LifecyclePanel key={current} repo={current} />
+          ) : (
+            <Panel title={current || "Images"} flush>
+              <DataTable
+                rows={images.data ?? []}
+                rowKey={(i) => i.tag}
+                empty={
+                  current &&
+                  !images.isLoading && (
+                    <EmptyState icon={Boxes} title="No tags" />
+                  )
+                }
+                columns={[
+                  {
+                    header: "Tag",
+                    cell: (i) => (
+                      <span className="flex items-center gap-1 font-mono">
+                        {i.tag}
+                        <CopyText text={`@registry/${current}:${i.tag}`} />
+                      </span>
+                    ),
+                  },
+                  {
+                    header: "Digest",
+                    cell: (i) => (
+                      <span className="text-muted font-mono" title={i.digest}>
+                        {i.digest.slice(7, 19)}
+                      </span>
+                    ),
+                  },
+                  { header: "Size", cell: (i) => bytes(i.sizeBytes) },
+                  {
+                    header: "Platforms",
+                    cell: (i) => (
+                      <span className="text-muted">
+                        {i.platforms.join(", ") || "—"}
+                      </span>
+                    ),
+                  },
+                  {
+                    header: "Created",
+                    className: "w-full",
+                    cell: (i) => (
+                      <span className="text-muted">
+                        {i.created ? since(i.created) : "—"}
+                      </span>
+                    ),
+                  },
+                  {
+                    header: "",
+                    cell: (i) => (
+                      <IconButton
+                        label="Delete tag"
+                        onClick={() =>
+                          confirm(
+                            `Delete ${current}:${i.tag}? Tags with the same digest are deleted too.`,
+                          ) && del.mutate(i.tag)
+                        }
+                      >
+                        <Trash2 className="size-3.5" />
+                      </IconButton>
+                    ),
+                  },
+                ]}
+              />
+            </Panel>
+          )}
+        </div>
       </div>
     </div>
   );

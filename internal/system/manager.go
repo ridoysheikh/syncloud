@@ -42,6 +42,7 @@ type Manager struct {
 	bus   *events.Bus
 	log   *slog.Logger
 	specs []*agentv1.TaskSpec
+	cfg   Config
 
 	mu     sync.Mutex
 	nodeID string // ctl-0 when connected
@@ -49,7 +50,7 @@ type Manager struct {
 }
 
 func NewManager(gw *agentgw.Gateway, bus *events.Bus, log *slog.Logger, cfg Config) *Manager {
-	m := &Manager{gw: gw, bus: bus, log: log, specs: Specs(cfg), tasks: map[string]*TaskView{}}
+	m := &Manager{gw: gw, bus: bus, log: log, specs: Specs(cfg), cfg: cfg, tasks: map[string]*TaskView{}}
 	for _, c := range Components {
 		m.tasks[c.TaskID] = &TaskView{TaskID: c.TaskID, Name: c.Name, Description: c.Description, Node: LocalNode, State: "pending"}
 	}
@@ -122,8 +123,10 @@ func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
 // SetConfig re-renders the specs (e.g. after a base domain change) and applies
 // them; agents recreate only the containers whose spec changed.
 func (m *Manager) SetConfig(cfg Config) {
-	specs := Specs(cfg)
 	m.mu.Lock()
+	cfg.RegistryReadOnly = m.cfg.RegistryReadOnly // owned by SetRegistryReadOnly
+	specs := Specs(cfg)
+	m.cfg = cfg
 	m.specs = specs
 	id := m.nodeID
 	m.mu.Unlock()
@@ -196,4 +199,35 @@ func stateName(s agentv1.TaskState) string {
 		return "removed"
 	}
 	return "pending"
+}
+
+// SetRegistryReadOnly switches the registry in or out of read-only
+// maintenance mode (the container is recreated).
+func (m *Manager) SetRegistryReadOnly(ro bool) {
+	m.mu.Lock()
+	m.cfg.RegistryReadOnly = ro
+	m.specs = Specs(m.cfg)
+	id := m.nodeID
+	m.mu.Unlock()
+	if id != "" {
+		m.applyAll(id)
+	}
+}
+
+// NodeID is the controller node's ID ("" until it connects).
+func (m *Manager) NodeID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.nodeID
+}
+
+// Task returns one system task's current view.
+func (m *Manager) Task(id string) (TaskView, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tasks[id]
+	if !ok {
+		return TaskView{}, false
+	}
+	return *t, true
 }

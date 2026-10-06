@@ -41,6 +41,7 @@ import (
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
 	dockerregistry "syncloud/internal/registry"
+	"syncloud/internal/regmaint"
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 	"syncloud/internal/system"
@@ -281,6 +282,14 @@ func serve(args []string) error {
 	go healthMon.Run(ctx)
 	execs := execrelay.New(gw)
 	gw.AddHooks(execs.Hooks())
+	regBrowser := &dockerregistry.Browser{URL: "http://" + system.RegistryAddr, Issuer: regIssuer}
+	// Lifecycle policies and garbage collection need the registry system task.
+	var regMaint *regmaint.Manager
+	if cfg.SystemTasks {
+		regMaint = regmaint.New(st, regBrowser, sysMgr, execs, workloads, bus, log)
+		regMaint.RegistryHosts = func() []string { return []string{registryHost(), domains.Endpoints().RegistryHost} }
+		go regMaint.Run(ctx)
+	}
 	logStore := logs.New(st, cfg.VictoriaLogsURL, log)
 	gw.AddHooks(agentgw.Hooks{OnLogs: logStore.OnLogs})
 	go logStore.Run(ctx)
@@ -344,7 +353,8 @@ func serve(args []string) error {
 		},
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
 		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon,
-		RegistryBrowser:       &dockerregistry.Browser{URL: "http://" + system.RegistryAddr, Issuer: regIssuer},
+		RegistryBrowser:       regBrowser,
+		RegistryMaint:         regMaint,
 		Builds:                buildMgr,
 		Metrics:               metricStore,
 		ControllerSchedulable: cfg.ControllerSchedulable,

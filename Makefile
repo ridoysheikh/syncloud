@@ -44,6 +44,7 @@ e2e:
 	test/e2e/services.sh
 	test/e2e/deploy.sh
 	test/e2e/registry.sh
+	test/e2e/lifecycle.sh
 	test/e2e/builds.sh
 	test/e2e/metrics.sh
 

@@ -40,6 +40,9 @@ type Config struct {
 	RegistryRealm string
 	// RegistryTokenCert is the absolute path of the token issuer certificate.
 	RegistryTokenCert string
+	// RegistryReadOnly rejects pushes while garbage collection runs; pulls
+	// keep working.
+	RegistryReadOnly bool
 }
 
 // Component describes one system task for the dashboard.
@@ -116,7 +119,7 @@ func traefikSpec(c Config) *agentv1.TaskSpec {
 }
 
 func registrySpec(c Config) *agentv1.TaskSpec {
-	return &agentv1.TaskSpec{
+	spec := &agentv1.TaskSpec{
 		TaskId: "sys-registry", Name: "syncloud-registry", Image: ImageRegistry,
 		Env: map[string]string{
 			"REGISTRY_HTTP_ADDR":                 ":5000",
@@ -135,6 +138,10 @@ func registrySpec(c Config) *agentv1.TaskSpec {
 		},
 		NetworkMode: Network, System: true,
 	}
+	if c.RegistryReadOnly {
+		spec.Env["REGISTRY_STORAGE_MAINTENANCE_READONLY"] = `{"enabled": true}`
+	}
+	return spec
 }
 
 // TraefikTokenHeader carries Config.TraefikToken on config polls.

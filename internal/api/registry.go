@@ -163,10 +163,24 @@ func (s *Server) handleListRepositories(w http.ResponseWriter, r *http.Request) 
 		s.registryErr(w, err)
 		return
 	}
-	if repos == nil {
-		repos = []registry.Repository{}
+	policies, err := s.store.ListLifecyclePolicies(r.Context())
+	if err != nil {
+		s.internalError(w, "list lifecycle policies", err)
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": repos})
+	hasPolicy := map[string]bool{}
+	for _, p := range policies {
+		hasPolicy[p.Repository] = true
+	}
+	type repoView struct {
+		registry.Repository
+		Lifecycle bool `json:"lifecycle"`
+	}
+	out := make([]repoView, 0, len(repos))
+	for _, rp := range repos {
+		out = append(out, repoView{Repository: rp, Lifecycle: hasPolicy[rp.Name]})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
 func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {

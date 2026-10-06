@@ -44,9 +44,13 @@ func (a *app) registryCmd() *cobra.Command {
 				}
 				rows := make([][]string, 0, len(rs))
 				for _, x := range rs {
-					rows = append(rows, []string{x.Name, fmt.Sprint(x.Tags)})
+					lc := "-"
+					if x.Lifecycle {
+						lc = "active"
+					}
+					rows = append(rows, []string{x.Name, fmt.Sprint(x.Tags), lc})
 				}
-				return a.printer().table(rs, []string{"REPOSITORY", "TAGS"}, rows)
+				return a.printer().table(rs, []string{"REPOSITORY", "TAGS", "LIFECYCLE"}, rows)
 			},
 		},
 		&cobra.Command{
@@ -96,5 +100,6 @@ func (a *app) registryCmd() *cobra.Command {
 			},
 		},
 	)
+	r.AddCommand(a.lifecycleCmd(), a.gcCmd())
 	return r
 }

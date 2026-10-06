@@ -835,8 +835,9 @@ func (c *Client) Incidents(ctx context.Context, openOnly bool) ([]Incident, erro
 }
 
 type Repository struct {
-	Name string `json:"name"`
-	Tags int    `json:"tags"`
+	Name      string `json:"name"`
+	Tags      int    `json:"tags"`
+	Lifecycle bool   `json:"lifecycle"`
 }
 
 type Image struct {
@@ -957,4 +958,81 @@ func (c *Client) Metrics(ctx context.Context, project, env, service, rng string)
 		path = svcPath(project, env, service)
 	}
 	return out, c.Do(ctx, "GET", path+"/metrics?range="+url.QueryEscape(rng), nil, &out)
+}
+
+type LifecycleRule struct {
+	Priority      int    `json:"priority"`
+	Description   string `json:"description,omitempty"`
+	TagPrefix     string `json:"tagPrefix"`
+	KeepLast      int    `json:"keepLast,omitempty"`
+	OlderThanDays int    `json:"olderThanDays,omitempty"`
+}
+
+type LifecyclePolicy struct {
+	Repository string          `json:"repository"`
+	Rules      []LifecycleRule `json:"rules"`
+	UpdatedAt  time.Time       `json:"updatedAt"`
+}
+
+type LifecycleDecision struct {
+	Image
+	Expire bool   `json:"expire"`
+	InUse  bool   `json:"inUse"`
+	Rule   int    `json:"rule"`
+	Reason string `json:"reason"`
+}
+
+type GCRun struct {
+	ID             string     `json:"id"`
+	Trigger        string     `json:"trigger"`
+	Status         string     `json:"status"`
+	Expired        int        `json:"expired"`
+	ReclaimedBytes int64      `json:"reclaimedBytes"`
+	Message        string     `json:"message"`
+	StartedAt      time.Time  `json:"startedAt"`
+	FinishedAt     *time.Time `json:"finishedAt"`
+	Details        []struct {
+		Repository string `json:"repository"`
+		Tag        string `json:"tag"`
+		Reason     string `json:"reason"`
+	} `json:"details"`
+}
+
+func lifecyclePath(repo string) string {
+	return "/api/v1/registry/lifecycle?repository=" + url.QueryEscape(repo)
+}
+
+func (c *Client) GetLifecyclePolicy(ctx context.Context, repo string) (LifecyclePolicy, error) {
+	var out LifecyclePolicy
+	return out, c.Do(ctx, "GET", lifecyclePath(repo), nil, &out)
+}
+
+func (c *Client) PutLifecyclePolicy(ctx context.Context, repo string, rules []LifecycleRule) (LifecyclePolicy, error) {
+	var out LifecyclePolicy
+	return out, c.Do(ctx, "PUT", lifecyclePath(repo), map[string]any{"rules": rules}, &out)
+}
+
+func (c *Client) DeleteLifecyclePolicy(ctx context.Context, repo string) error {
+	return c.Do(ctx, "DELETE", lifecyclePath(repo), nil, nil)
+}
+
+// PreviewLifecyclePolicy is a dry run of rules against a repository.
+func (c *Client) PreviewLifecyclePolicy(ctx context.Context, repo string, rules []LifecycleRule) ([]LifecycleDecision, error) {
+	var out struct {
+		Images []LifecycleDecision `json:"images"`
+	}
+	return out.Images, c.Do(ctx, "POST", "/api/v1/registry/lifecycle/preview", map[string]any{"repository": repo, "rules": rules}, &out)
+}
+
+func (c *Client) RegistryCleanups(ctx context.Context) ([]GCRun, bool, error) {
+	var out struct {
+		Items   []GCRun `json:"items"`
+		Running bool    `json:"running"`
+	}
+	return out.Items, out.Running, c.Do(ctx, "GET", "/api/v1/registry/gc", nil, &out)
+}
+
+func (c *Client) StartRegistryCleanup(ctx context.Context) (GCRun, error) {
+	var out GCRun
+	return out, c.Do(ctx, "POST", "/api/v1/registry/gc", nil, &out)
 }
