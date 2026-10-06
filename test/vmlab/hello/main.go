@@ -37,7 +37,9 @@ func main() {
 		}
 		writeJSON(w, map[string]any{"task": host, "spins": x})
 	})
-	mux.HandleFunc("GET /fail", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "on purpose", http.StatusInternalServerError) })
+	mux.HandleFunc("GET /fail", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "on purpose", http.StatusInternalServerError)
+	})
 	addr := ":" + envOr("PORT", "8080")
 	log.Printf("hello %s listening on %s", version, addr)
 	log.Fatal(http.ListenAndServe(addr, logged(mux)))
