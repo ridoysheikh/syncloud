@@ -11,6 +11,7 @@ import {
   useSharedVars,
   type Deployment,
   type Spec,
+  serviceState,
 } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
@@ -19,8 +20,8 @@ import { DataTable } from "@/ui/DataTable";
 import { Alert, Button, IconButton, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { since } from "@/lib/nodes";
-import { serviceState } from "./ServicesPage";
 import { DomainsPanel } from "./DomainsPanel";
+import { MetricsPanel } from "@/modules/projects/MetricsPanel";
 import {
   toRows,
   toVars,
@@ -42,6 +43,7 @@ interface Revision {
 }
 
 type Tab =
+  | "metrics"
   | "tasks"
   | "logs"
   | "deployments"
@@ -64,7 +66,7 @@ export function ServicePage() {
     (s) => s.project === project && s.environment === env && s.name === name,
   );
   const path = servicePath({ project, environment: env, name });
-  const [tab, setTab] = useState<Tab>("tasks");
+  const [tab, setTab] = useState<Tab>("metrics");
 
   const scale = useMutation({
     mutationFn: (n: number) =>
@@ -74,7 +76,7 @@ export function ServicePage() {
   const del = useMutation({
     mutationFn: () => api("DELETE", path),
     onSuccess: () => {
-      const to: string = "/compute/services";
+      const to: string = `/projects/${project}/${env}`;
       void navigate({ to });
     },
   });
@@ -91,7 +93,9 @@ export function ServicePage() {
     <div className={cn("flex flex-col", gap)}>
       <PageHeader
         crumbs={[
-          "Compute",
+          <Link key="ps" to={"/projects" as string} className="hover:text-fg">
+            Projects
+          </Link>,
           <Link
             key="p"
             to={`/projects/${project}/${env}` as string}
@@ -229,8 +233,9 @@ export function ServicePage() {
       <div className="border-line flex gap-3 border-b text-xs">
         {(
           [
-            "tasks",
+            "metrics",
             "logs",
+            "tasks",
             "deployments",
             "builds",
             "variables",
@@ -252,6 +257,14 @@ export function ServicePage() {
           </button>
         ))}
       </div>
+      {tab === "metrics" && (
+        <MetricsPanel
+          path={path}
+          by="task"
+          shorten={shortTask}
+          memoryLimit={(svc.spec.resources.memoryLimit ?? 0) * 1024 * 1024}
+        />
+      )}
       {tab === "tasks" && <ServiceTasks id={svc.id} path={path} />}
       {tab === "logs" && (
         <LogsView
@@ -530,3 +543,5 @@ function ServiceVariables({
     </Panel>
   );
 }
+
+const shortTask = (id: string) => id.replace(/^(task|run)_/, "").slice(0, 8);

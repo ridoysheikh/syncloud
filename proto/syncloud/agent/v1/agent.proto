@@ -71,6 +71,25 @@ message Welcome {
 message Heartbeat {
   NodeMetrics metrics = 1;
   NetworkStatus network = 2;
+  repeated TaskMetrics tasks = 3; // samples taken since the last heartbeat (§9.1)
+}
+
+// TaskMetrics is one resource sample of a task's container. Byte counters
+// are cumulative since the container started.
+message TaskMetrics {
+  string task_id = 1;
+  string service_id = 2;
+  string project = 3;
+  string environment = 4;
+  string service = 5;
+  int64 at_unix_ms = 6;
+  double cpu_percent = 7;          // 100 = one full core
+  uint64 memory_bytes = 8;         // usage minus page cache
+  uint64 memory_limit_bytes = 9;
+  uint64 net_rx_bytes = 10;
+  uint64 net_tx_bytes = 11;
+  uint64 block_read_bytes = 12;
+  uint64 block_write_bytes = 13;
 }
 
 message NodeMetrics {

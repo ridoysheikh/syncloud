@@ -10,6 +10,7 @@ import {
   useServices,
   useSharedVars,
   type Spec,
+  serviceUrl,
 } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
@@ -164,7 +165,11 @@ export function NewServiceWizard() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["services"] });
-      const to: string = `/compute/services/${project}/${env}/${f.name}`;
+      const to: string = serviceUrl({
+        project,
+        environment: env,
+        name: f.name,
+      });
       void navigate({ to });
     },
   });
@@ -175,11 +180,7 @@ export function NewServiceWizard() {
   return (
     <div className={cn("mx-auto flex w-full max-w-5xl flex-col", gap)}>
       <PageHeader
-        crumbs={[
-          "Compute",
-          "Projects",
-          ...(params.project ? [params.project] : []),
-        ]}
+        crumbs={["Projects", ...(params.project ? [params.project] : [])]}
         title="New service"
         actions={
           <Link to={backTo}>

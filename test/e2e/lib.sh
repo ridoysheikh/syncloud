@@ -38,6 +38,10 @@ if [ "${WITH_BUILDS:-0}" = 1 ]; then
   docker image inspect moby/buildkit:v0.25.1 >/dev/null 2>&1 || docker pull -q moby/buildkit:v0.25.1 >/dev/null
   docker save moby/buildkit:v0.25.1 -o "$BIN/buildkit.tar"
 fi
+if [ "${WITH_METRICS:-0}" = 1 ]; then
+  docker image inspect victoriametrics/victoria-metrics:v1.153.0 >/dev/null 2>&1 || docker pull -q victoriametrics/victoria-metrics:v1.153.0 >/dev/null
+  docker save victoriametrics/victoria-metrics:v1.153.0 -o "$BIN/vmetrics.tar"
+fi
 if [ "${WITH_TRAEFIK:-0}" = 1 ]; then
   docker image inspect traefik:v3.7.13 >/dev/null 2>&1 || docker pull -q traefik:v3.7.13 >/dev/null
   docker save traefik:v3.7.13 -o "$BIN/traefik.tar"
@@ -97,6 +101,12 @@ wait_mesh() {
 start_vlogs() {
   x sc-e2e-ctl docker load -q -i /opt/sc/vlogs.tar >/dev/null
   x sc-e2e-ctl docker run -d --name vlogs -p 127.0.0.1:9428:9428 victoriametrics/victoria-logs:v1.53.0 -storageDataPath=/vlogs >/dev/null
+}
+
+# start_vmetrics runs VictoriaMetrics on the controller node like the system task.
+start_vmetrics() {
+  x sc-e2e-ctl docker load -q -i /opt/sc/vmetrics.tar >/dev/null
+  x sc-e2e-ctl docker run -d --name vmetrics -p 127.0.0.1:8428:8428 victoriametrics/victoria-metrics:v1.153.0 -storageDataPath=/vm -search.latencyOffset=0s >/dev/null
 }
 
 # start_traefik runs Traefik on the controller node like the system task does,

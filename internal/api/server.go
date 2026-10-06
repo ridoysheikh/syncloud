@@ -19,6 +19,7 @@ import (
 	"syncloud/internal/jobs"
 	"syncloud/internal/logs"
 	"syncloud/internal/mesh"
+	"syncloud/internal/metrics"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
 	"syncloud/internal/registry"
@@ -58,6 +59,7 @@ type Server struct {
 	health                *health.Monitor
 	registryBrowser       *registry.Browser
 	builds                *builds.Manager
+	metrics               *metrics.Store
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -110,6 +112,8 @@ type Options struct {
 	RegistryBrowser *registry.Browser
 	// Builds builds Git commits into images (§5.8); may be nil.
 	Builds *builds.Manager
+	// Metrics reads task resource usage (§9.1); may be nil.
+	Metrics *metrics.Store
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -147,6 +151,7 @@ func New(o Options) *Server {
 		health:                o.Health,
 		registryBrowser:       o.RegistryBrowser,
 		builds:                o.Builds,
+		metrics:               o.Metrics,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -215,6 +220,8 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments", h: s.handleCreateEnvironment},
 		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}", h: s.handleDeleteEnvironment},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/variables", h: s.handleGetSharedEnv},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/metrics", h: s.handleEnvironmentMetrics},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/metrics", h: s.handleServiceMetrics},
 		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/variables", h: s.handleSetSharedEnv},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services", h: s.handleListServices},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}", h: s.handleGetService},

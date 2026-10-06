@@ -934,3 +934,27 @@ func (c *Client) DeployBuild(ctx context.Context, id string) (Build, error) {
 	var out Build
 	return out, c.Do(ctx, "POST", "/api/v1/builds/"+url.PathEscape(id)+"/deploy", nil, &out)
 }
+
+type MetricSeries struct {
+	Key    string       `json:"key"`
+	Node   string       `json:"node"`
+	Points [][2]float64 `json:"points"`
+}
+
+type Metrics struct {
+	Start  time.Time                 `json:"start"`
+	End    time.Time                 `json:"end"`
+	Step   int                       `json:"stepSeconds"`
+	Charts map[string][]MetricSeries `json:"charts"`
+}
+
+// Metrics charts a service (a series per task) or, with service "", a whole
+// environment (a series per service). rng is 15m, 1h, 6h, 24h or 7d.
+func (c *Client) Metrics(ctx context.Context, project, env, service, rng string) (Metrics, error) {
+	var out Metrics
+	path := "/api/v1/projects/" + url.PathEscape(project) + "/environments/" + url.PathEscape(env)
+	if service != "" {
+		path = svcPath(project, env, service)
+	}
+	return out, c.Do(ctx, "GET", path+"/metrics?range="+url.QueryEscape(rng), nil, &out)
+}

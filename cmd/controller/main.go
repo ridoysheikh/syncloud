@@ -32,10 +32,12 @@ import (
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
 	"syncloud/internal/execrelay"
+	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 	"syncloud/internal/health"
 	"syncloud/internal/jobs"
 	"syncloud/internal/logs"
 	"syncloud/internal/mesh"
+	"syncloud/internal/metrics"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
 	dockerregistry "syncloud/internal/registry"
@@ -269,6 +271,10 @@ func serve(args []string) error {
 		RegistryHost: registryHost, RegistryInsecure: cfg.RegistryInsecure, Node: cfg.BuildNode,
 	})
 	go buildMgr.Run(ctx)
+	// Task resource samples ride on agent heartbeats (§9.1).
+	metricStore := metrics.New(cfg.VictoriaMetricsURL, log)
+	go metricStore.Run(ctx)
+	gw.AddHooks(agentgw.Hooks{OnHeartbeat: func(node store.Node, hb *agentv1.Heartbeat) { metricStore.Add(node.Name, hb.GetTasks()) }})
 	healthMon := health.New(st, workloads, bus, log, health.Config{
 		BaseDomain: domains.Base, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS, VictoriaMetricsURL: cfg.VictoriaMetricsURL,
 	})
@@ -340,6 +346,7 @@ func serve(args []string) error {
 		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon,
 		RegistryBrowser:       &dockerregistry.Browser{URL: "http://" + system.RegistryAddr, Issuer: regIssuer},
 		Builds:                buildMgr,
+		Metrics:               metricStore,
 		ControllerSchedulable: cfg.ControllerSchedulable,
 		ACME:                  api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {

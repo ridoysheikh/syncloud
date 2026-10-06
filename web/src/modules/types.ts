@@ -18,7 +18,7 @@ export interface DashboardModule {
 }
 
 export interface ModulePage {
-  /** Absolute path, e.g. "/compute/services". */
+  /** Absolute path, e.g. "/compute/nodes". */
   path: string;
   label: string;
   component: () => ReactNode;

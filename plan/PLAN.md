@@ -1337,6 +1337,20 @@ Because there is only one controller:
     - Unit test `TestSharedEnvRollsOutAsRevisions`.
     - `test/e2e/builds.sh` now creates the service as `@build` and checks that shared variables reach the container, with the service's own value winning.
     - The dashboard was checked in headless Chrome against a scratch controller (both wizard paths, and Git failure cleanup).
+- ✅ Services only under projects, plus service metrics (2026-10-06), user-requested:
+  - **No cluster-wide service list.**
+    - "Projects" is its own top-level nav entry. Compute keeps Tasks, Jobs and Nodes.
+    - Service pages live at `/projects/{p}/{env}/services/{name}`, and every link uses one `serviceUrl` helper.
+    - The old `/compute/services` routes are gone. A service could never exist outside a project environment; now the UI reflects that too.
+  - **Task metrics (§9.1)**:
+    - **Sampling:** every 10s, each agent takes one-shot Docker stats for its running task containers. It computes CPU from consecutive samples (100% = one core), memory without page cache, and cumulative network and block I/O. Samples ride on the next heartbeat (`Heartbeat.tasks`), queued up to 5000 while the controller is unreachable.
+    - **Storage:** the controller batches them into VictoriaMetrics as `syncloud_task_*`, labelled task, service_id, project, environment, service and node.
+    - **API and CLI:** `GET …/services/{s}/metrics` (a series per task) and `GET …/environments/{env}/metrics` (a series per service), with ranges 15m, 1h, 6h, 24h and 7d. Each point averages CPU and takes peak memory over its step. The query ends on the next step boundary so the newest samples show at every range. synctl `metrics [SERVICE]` shows the latest values and peak CPU.
+    - **Dashboard:** a **Metrics** tab (default) and Logs on every service; **Metrics** and **Logs** tabs on the project page for the selected environment. Charts cover CPU, memory (with the limit line), network in/out and disk read/write.
+  - Verified with `test/e2e/metrics.sh`:
+    - A CPU-burning service and an idle one, spread over 3 DinD nodes, give per-task and per-service series (burner ≈100% per task).
+    - Every range shows the newest samples, and synctl `metrics` works.
+    - Screenshots of both Metrics tabs were checked against that cluster.
 - ECR-style registry UI (§5.10): dashboard, repositories, images, push commands, lifecycle policies with preview, permissions, upstream credentials, registry tokens; registry event tracking; pre-pull before deploys.
 - (v1.1) Trivy scanning and the deploy gate.
 - GitHub App, GitLab, Gitea and generic Git; webhooks plus the polling scheduler (watch rules, path filters, SHA dedup, backoff) (§5.8).

@@ -9,7 +9,7 @@ const Terminal = lazy(() =>
 );
 import { api } from "@/lib/api";
 import { since } from "@/lib/nodes";
-import { taskTone, useTasks, type Task } from "@/lib/workloads";
+import { taskTone, useTasks, type Task, serviceUrl } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
@@ -71,7 +71,11 @@ export function TasksTable({
                 {
                   header: "Service",
                   cell: (t: Task) => {
-                    const to: string = `/compute/services/${t.project}/${t.environment}/${t.service}`;
+                    const to: string = serviceUrl({
+                      project: t.project,
+                      environment: t.environment,
+                      name: t.service,
+                    });
                     return (
                       <Link to={to} className="hover:text-accent">
                         {t.project}/{t.environment}/{t.service}

@@ -1,3 +1,4 @@
+import { serviceUrl } from "@/lib/workloads";
 import { useEffect } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -119,7 +120,11 @@ export function ServiceHealthPage() {
             {
               header: "Service",
               cell: (h) => {
-                const to: string = `/compute/services/${h.project}/${h.environment}/${h.service}`;
+                const to: string = serviceUrl({
+                  project: h.project,
+                  environment: h.environment,
+                  name: h.service,
+                });
                 return (
                   <Link
                     to={to}

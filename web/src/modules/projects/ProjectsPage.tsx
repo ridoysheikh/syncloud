@@ -8,13 +8,13 @@ import {
   useServices,
   type Project,
   type Service,
+  serviceState,
 } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap, pad } from "@/ui/cn";
-import { serviceState } from "@/modules/compute/ServicesPage";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 
@@ -26,7 +26,7 @@ export function ProjectsPage() {
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader
-        crumbs={["Compute"]}
+        crumbs={[]}
         title="Projects"
         actions={
           <Link to={newTo}>
@@ -154,7 +154,7 @@ export function NewProjectPage() {
   };
   return (
     <div className={cn("mx-auto flex w-full max-w-2xl flex-col", gap)}>
-      <PageHeader crumbs={["Compute", "Projects"]} title="New project" />
+      <PageHeader crumbs={["Projects"]} title="New project" />
       <Panel>
         <form onSubmit={submit} className="flex flex-col gap-3">
           <Field

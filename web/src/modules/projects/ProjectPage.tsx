@@ -10,6 +10,8 @@ import {
   useServices,
   useSharedVars,
   type Service,
+  serviceState,
+  serviceUrl,
 } from "@/lib/workloads";
 import { since } from "@/lib/nodes";
 import { PageHeader } from "@/ui/PageHeader";
@@ -17,7 +19,8 @@ import { Panel } from "@/ui/Panel";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap, pad } from "@/ui/cn";
-import { serviceState } from "@/modules/compute/ServicesPage";
+import { MetricsPanel } from "./MetricsPanel";
+import { LogsView } from "@/modules/logs/LogsView";
 import {
   toRows,
   toVars,
@@ -26,7 +29,7 @@ import {
   type VarRow,
 } from "./VarsEditor";
 
-type Tab = "services" | "variables" | "settings";
+type Tab = "services" | "metrics" | "logs" | "variables" | "settings";
 
 /** One project: its environments, their services and shared variables. */
 export function ProjectPage() {
@@ -55,7 +58,11 @@ export function ProjectPage() {
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader
-        crumbs={["Compute", "Projects"]}
+        crumbs={[
+          <Link key="p" to={"/projects" as string} className="hover:text-fg">
+            Projects
+          </Link>,
+        ]}
         title={p.name}
         actions={
           <Link to={newTo}>
@@ -70,7 +77,9 @@ export function ProjectPage() {
       )}
       <div className="border-line flex flex-wrap items-center justify-between gap-2 border-b">
         <div className="flex gap-3 text-xs">
-          {(["services", "variables", "settings"] as Tab[]).map((t) => (
+          {(
+            ["services", "metrics", "logs", "variables", "settings"] as Tab[]
+          ).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -107,6 +116,12 @@ export function ProjectPage() {
         </div>
       </div>
       {tab === "services" && <ServiceGrid services={inEnv} newTo={newTo} />}
+      {tab === "metrics" && (
+        <MetricsPanel key={env} path={envPath(p.name, env)} by="service" />
+      )}
+      {tab === "logs" && (
+        <LogsView key={env} filter={{ project: p.name, environment: env }} />
+      )}
       {tab === "variables" && (
         <SharedVariables
           key={env}
@@ -161,7 +176,7 @@ function ServiceGrid({
 
 function ServiceCard({ s }: { s: Service }) {
   const st = serviceState(s);
-  const to: string = `/compute/services/${s.project}/${s.environment}/${s.name}`;
+  const to: string = serviceUrl(s);
   const built =
     s.spec.image === AWAITING_BUILD ||
     s.spec.image.startsWith(`@registry/${s.project}/${s.name}:`);

@@ -222,3 +222,25 @@ export function useSharedVars(project: string, env: string) {
       ).variables,
   });
 }
+
+/** Dashboard URL of a service: services always live inside a project. */
+export const serviceUrl = (s: {
+  project: string;
+  environment: string;
+  name: string;
+}) => `/projects/${s.project}/${s.environment}/services/${s.name}`;
+
+export function serviceState(s: Service): {
+  tone: "ok" | "warn" | "bad" | "info" | "neutral";
+  label: string;
+} {
+  if (s.deleting) return { tone: "neutral", label: "deleting" };
+  if (s.spec.image === AWAITING_BUILD)
+    return { tone: "info", label: "awaiting build" };
+  if (s.status) return { tone: "bad", label: "degraded" };
+  if (s.desiredCount === 0) return { tone: "neutral", label: "stopped" };
+  if (s.running >= s.desiredCount && s.pending === 0)
+    return { tone: "ok", label: "healthy" };
+  if (s.running === 0) return { tone: "warn", label: "starting" };
+  return { tone: "info", label: "deploying" };
+}

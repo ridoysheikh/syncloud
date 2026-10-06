@@ -172,12 +172,14 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 	runner.NetworkReady = net.Ready
 	logs := NewLogShipper(d, dataDir, log)
 	go logs.Run(ctx)
+	stats := NewTaskStats(d, log)
+	go stats.Run(ctx)
 	execs := newExecSessions(d, log)
 	renewBefore := opts.RenewBefore
 	if renewBefore == 0 {
 		renewBefore = 30 * 24 * time.Hour
 	}
-	a := &agentLink{info: info, runner: runner, net: net, logs: logs, execs: execs, advertise: opts.AdvertiseAddress, log: log,
+	a := &agentLink{info: info, runner: runner, net: net, logs: logs, stats: stats, execs: execs, advertise: opts.AdvertiseAddress, log: log,
 		dataDir: dataDir, certs: certs, renewBefore: renewBefore}
 
 	log.Info("agent starting", "node", st.Name, "gateway", st.Gateway, "version", version.Version)
@@ -209,6 +211,7 @@ type agentLink struct {
 	runner      *Runner
 	net         *netcfg.Manager
 	logs        *LogShipper
+	stats       *TaskStats
 	execs       *execSessions
 	advertise   string
 	log         *slog.Logger
@@ -265,7 +268,7 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 	if req := a.renewalRequest(); req != nil {
 		renew <- req
 	}
-	go func() { errc <- writer(ctx, stream, interval, runner, a.net, a.logs, a.execs.out, renew) }()
+	go func() { errc <- writer(ctx, stream, interval, runner, a.net, a.logs, a.stats, a.execs.out, renew) }()
 	go func() {
 		for {
 			msg, err := stream.Recv()
@@ -297,7 +300,7 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 
 // writer is the only goroutine that sends on the stream (gRPC streams are not
 // safe for concurrent sends): heartbeats on a ticker, task statuses as they come.
-func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.ConnectRequest, agentv1.ConnectResponse], every time.Duration, runner *Runner, net *netcfg.Manager, logs *LogShipper, execOut <-chan *agentv1.ExecOutput, extra <-chan *agentv1.ConnectRequest) error {
+func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.ConnectRequest, agentv1.ConnectResponse], every time.Duration, runner *Runner, net *netcfg.Manager, logs *LogShipper, stats *TaskStats, execOut <-chan *agentv1.ExecOutput, extra <-chan *agentv1.ConnectRequest) error {
 	sampler := sysinfo.NewSampler("/")
 	t := time.NewTicker(every)
 	defer t.Stop()
@@ -323,6 +326,7 @@ func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.Connect
 					NetRxBytes: m.NetRxBytes, NetTxBytes: m.NetTxBytes, UptimeSeconds: m.UptimeSeconds,
 				},
 				Network: net.Status(),
+				Tasks:   stats.Take(),
 			}}}
 		}
 		if err := stream.Send(msg); err != nil {

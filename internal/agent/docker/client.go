@@ -422,3 +422,37 @@ func (c *Client) Logs(ctx context.Context, id string, since time.Time, fn func(L
 		}
 	}
 }
+
+// Stats is one sample of a container's resource usage (GET /containers/{id}/stats).
+type Stats struct {
+	Read     time.Time `json:"read"`
+	CPUStats struct {
+		CPUUsage struct {
+			TotalUsage uint64 `json:"total_usage"`
+		} `json:"cpu_usage"`
+		SystemUsage uint64 `json:"system_cpu_usage"`
+		OnlineCPUs  uint32 `json:"online_cpus"`
+	} `json:"cpu_stats"`
+	MemoryStats struct {
+		Usage uint64            `json:"usage"`
+		Limit uint64            `json:"limit"`
+		Stats map[string]uint64 `json:"stats"`
+	} `json:"memory_stats"`
+	Networks map[string]struct {
+		RxBytes uint64 `json:"rx_bytes"`
+		TxBytes uint64 `json:"tx_bytes"`
+	} `json:"networks"`
+	BlkioStats struct {
+		IOServiceBytesRecursive []struct {
+			Op    string `json:"op"`
+			Value uint64 `json:"value"`
+		} `json:"io_service_bytes_recursive"`
+	} `json:"blkio_stats"`
+}
+
+// Stats takes a single sample without waiting for a second one (one-shot),
+// so CPU usage must be derived from consecutive samples by the caller.
+func (c *Client) Stats(ctx context.Context, id string) (Stats, error) {
+	var out Stats
+	return out, c.json(ctx, "GET", "/containers/"+id+"/stats", url.Values{"stream": {"false"}, "one-shot": {"true"}}, nil, &out)
+}

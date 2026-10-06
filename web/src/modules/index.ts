@@ -2,6 +2,7 @@ import {
   Activity,
   Boxes,
   Cpu,
+  FolderKanban,
   GitBranch,
   HeartPulse,
   KeyRound,
@@ -17,7 +18,6 @@ import { OverviewPage } from "./overview/OverviewPage";
 import { planned } from "./planned";
 import { CredentialsPage } from "./iam/CredentialsPage";
 import { NodesPage } from "./compute/NodesPage";
-import { ServicesPage } from "./compute/ServicesPage";
 import { NewProjectPage, ProjectsPage } from "./projects/ProjectsPage";
 import { ProjectPage } from "./projects/ProjectPage";
 import { NewServiceWizard } from "./projects/NewServiceWizard";
@@ -43,19 +43,27 @@ export const modules: DashboardModule[] = [
     pages: [{ path: "/", label: "Overview", component: OverviewPage }],
   },
   {
-    id: "compute",
-    label: "Compute",
-    icon: Cpu,
-    order: 10,
+    // Services only exist inside a project environment, so they are reached
+    // through their project (no cluster-wide service list).
+    id: "projects",
+    label: "Projects",
+    icon: FolderKanban,
+    order: 5,
     pages: [
       { path: "/projects", label: "Projects", component: ProjectsPage },
       { path: "/projects/new", label: "New project", component: NewProjectPage, hidden: true },
       { path: "/projects/$project", label: "Project", component: ProjectPage, hidden: true },
       { path: "/projects/$project/$env", label: "Project", component: ProjectPage, hidden: true },
       { path: "/projects/$project/$env/new-service", label: "New service", component: NewServiceWizard, hidden: true },
-      { path: "/compute/services", label: "Services", component: ServicesPage },
-      { path: "/compute/services/new", label: "New service", component: NewServiceWizard, hidden: true },
-      { path: "/compute/services/$project/$env/$name", label: "Service", component: ServicePage, hidden: true },
+      { path: "/projects/$project/$env/services/$name", label: "Service", component: ServicePage, hidden: true },
+    ],
+  },
+  {
+    id: "compute",
+    label: "Compute",
+    icon: Cpu,
+    order: 10,
+    pages: [
       { path: "/compute/tasks", label: "Tasks", component: TasksPage },
       { path: "/compute/jobs", label: "Jobs", component: JobsPage },
       { path: "/compute/nodes", label: "Nodes", component: NodesPage },
