@@ -4820,6 +4820,400 @@
           }
         }
       }
+    },
+    "/api/v1/alerts/channels": {
+      "get": {
+        "operationId": "listAlertChannels",
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Notification channels (secrets are never returned)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AlertChannel"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createAlertChannel",
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Add a webhook, Slack, Discord, Telegram or email channel",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertChannelInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertChannel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/channels/{id}": {
+      "put": {
+        "operationId": "updateAlertChannel",
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Replace a channel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertChannelInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertChannel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteAlertChannel",
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Delete a channel no rule uses",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/channels/{id}/test": {
+      "post": {
+        "operationId": "testAlertChannel",
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Send a test notification",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "delivered": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/rules": {
+      "get": {
+        "operationId": "listAlertRules",
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Alert rules, with the rule types and metrics",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AlertRule"
+                      }
+                    },
+                    "types": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "metrics": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createAlertRule",
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Create an alert rule (evaluated every 30s)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertRule"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertRule"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/rules/{id}": {
+      "put": {
+        "operationId": "updateAlertRule",
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Replace an alert rule (its open alerts start over)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertRule"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertRule"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteAlertRule",
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Delete an alert rule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/active": {
+      "get": {
+        "operationId": "listActiveAlerts",
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Alerts whose condition holds: firing, or pending until forSeconds pass",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AlertState"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/events": {
+      "get": {
+        "operationId": "listAlertEvents",
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Notifications sent (kept 90 days), newest first",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "1-1000, default 100"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AlertEvent"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7498,6 +7892,299 @@
           "reason": {
             "type": "string",
             "description": "e.g. cpu 82 > target 60 % of reserved CPU \u2192 3\u21925 tasks"
+          }
+        }
+      },
+      "AlertChannelConfig": {
+        "type": "object",
+        "description": "write-only (sealed at rest); the fields of the channel's type",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "webhook, slack, discord"
+          },
+          "botToken": {
+            "type": "string",
+            "description": "telegram"
+          },
+          "chatId": {
+            "type": "string",
+            "description": "telegram"
+          },
+          "smtpHost": {
+            "type": "string",
+            "description": "email"
+          },
+          "smtpPort": {
+            "type": "integer",
+            "description": "email (default 587; 465 = implicit TLS)"
+          },
+          "username": {
+            "type": "string",
+            "description": "email"
+          },
+          "password": {
+            "type": "string",
+            "description": "email"
+          },
+          "from": {
+            "type": "string",
+            "description": "email"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "email"
+          }
+        }
+      },
+      "AlertChannelInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "type",
+          "config"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "webhook",
+              "slack",
+              "discord",
+              "telegram",
+              "email"
+            ]
+          },
+          "config": {
+            "$ref": "#/components/schemas/AlertChannelConfig"
+          }
+        }
+      },
+      "AlertChannel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string",
+            "description": "what it sends to, without secrets"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AlertRule": {
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "readOnly": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "metric",
+              "promql",
+              "log",
+              "health",
+              "node",
+              "deployment",
+              "build",
+              "job"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "critical"
+            ],
+            "default": "warning"
+          },
+          "project": {
+            "type": "string",
+            "description": "scope; empty = every project"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "metric": {
+            "type": "string",
+            "enum": [
+              "cpu",
+              "memory",
+              "rps",
+              "error_rate",
+              "latency"
+            ],
+            "description": "metric rules"
+          },
+          "query": {
+            "type": "string",
+            "description": "promql rules"
+          },
+          "text": {
+            "type": "string",
+            "description": "log rules: substring"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warn",
+              "fatal"
+            ],
+            "description": "log rules"
+          },
+          "op": {
+            "type": "string",
+            "enum": [
+              ">",
+              "<"
+            ],
+            "default": ">"
+          },
+          "threshold": {
+            "type": "number"
+          },
+          "windowSeconds": {
+            "type": "integer",
+            "default": 300
+          },
+          "forSeconds": {
+            "type": "integer",
+            "description": "the condition must hold this long before firing"
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "channel IDs"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true
+          }
+        }
+      },
+      "AlertState": {
+        "type": "object",
+        "properties": {
+          "ruleId": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "firing"
+            ]
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "value": {
+            "type": "number",
+            "nullable": true
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "AlertEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "ruleId": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "firing",
+              "resolved",
+              "event"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number",
+            "nullable": true
+          },
+          "delivery": {
+            "type": "string",
+            "description": "per channel: ok or the error"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }

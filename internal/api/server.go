@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"syncloud/internal/alerts"
 	"syncloud/internal/autoscale"
 	"syncloud/internal/backup"
 	"syncloud/internal/builds"
@@ -67,6 +68,7 @@ type Server struct {
 	upstreams             *upstream.Manager
 	registryHosts         func() []string
 	autoscaler            *autoscale.Manager
+	alerts                *alerts.Manager
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -129,6 +131,8 @@ type Options struct {
 	RegistryHosts func() []string
 	// Autoscaler runs target tracking policies (§5.5).
 	Autoscaler *autoscale.Manager
+	// Alerts evaluates alert rules and notifies channels (§9).
+	Alerts *alerts.Manager
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -171,6 +175,7 @@ func New(o Options) *Server {
 		upstreams:             o.Upstreams,
 		registryHosts:         o.RegistryHosts,
 		autoscaler:            o.Autoscaler,
+		alerts:                o.Alerts,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -293,6 +298,17 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/health/incidents", h: s.handleIncidents},
 		{Method: "GET", Path: "/api/v1/services", h: s.handleListAllServices},
 		{Method: "GET", Path: "/api/v1/tasks", h: s.handleListTasks},
+		{Method: "GET", Path: "/api/v1/alerts/channels", h: s.handleListAlertChannels},
+		{Method: "POST", Path: "/api/v1/alerts/channels", h: s.handleCreateAlertChannel},
+		{Method: "PUT", Path: "/api/v1/alerts/channels/{id}", h: s.handleUpdateAlertChannel},
+		{Method: "DELETE", Path: "/api/v1/alerts/channels/{id}", h: s.handleDeleteAlertChannel},
+		{Method: "POST", Path: "/api/v1/alerts/channels/{id}/test", h: s.handleTestAlertChannel},
+		{Method: "GET", Path: "/api/v1/alerts/rules", h: s.handleListAlertRules},
+		{Method: "POST", Path: "/api/v1/alerts/rules", h: s.handleCreateAlertRule},
+		{Method: "PUT", Path: "/api/v1/alerts/rules/{id}", h: s.handleUpdateAlertRule},
+		{Method: "DELETE", Path: "/api/v1/alerts/rules/{id}", h: s.handleDeleteAlertRule},
+		{Method: "GET", Path: "/api/v1/alerts/active", h: s.handleActiveAlerts},
+		{Method: "GET", Path: "/api/v1/alerts/events", h: s.handleAlertEvents},
 		{Method: "GET", Path: "/api/v1/traffic", h: s.handleTraffic},
 		{Method: "GET", Path: "/api/v1/traffic/map", h: s.handleTrafficMap},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/traffic", h: s.handleEnvironmentTraffic},

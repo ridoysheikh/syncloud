@@ -1124,6 +1124,97 @@ func (c *Client) ScalingEvents(ctx context.Context, project, env, service string
 	return out.Items, c.Do(ctx, "GET", svcPath(project, env, service)+"/scaling-events?limit="+fmt.Sprint(limit), nil, &out)
 }
 
+// AlertChannel is a notification channel (secrets are never returned).
+type AlertChannel struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Summary string `json:"summary"`
+}
+
+// AlertChannelConfig holds the settings of one channel type.
+type AlertChannelConfig struct {
+	URL      string   `json:"url,omitempty"`
+	BotToken string   `json:"botToken,omitempty"`
+	ChatID   string   `json:"chatId,omitempty"`
+	SMTPHost string   `json:"smtpHost,omitempty"`
+	SMTPPort int      `json:"smtpPort,omitempty"`
+	Username string   `json:"username,omitempty"`
+	Password string   `json:"password,omitempty"`
+	From     string   `json:"from,omitempty"`
+	To       []string `json:"to,omitempty"`
+}
+
+func (c *Client) ListAlertChannels(ctx context.Context) ([]AlertChannel, error) {
+	var out list[AlertChannel]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/alerts/channels", nil, &out)
+}
+
+// PutAlertChannel creates (id "") or replaces a channel.
+func (c *Client) PutAlertChannel(ctx context.Context, id, name, typ string, cfg AlertChannelConfig) (AlertChannel, error) {
+	var out AlertChannel
+	body := map[string]any{"name": name, "type": typ, "config": cfg}
+	if id == "" {
+		return out, c.Do(ctx, "POST", "/api/v1/alerts/channels", body, &out)
+	}
+	return out, c.Do(ctx, "PUT", "/api/v1/alerts/channels/"+url.PathEscape(id), body, &out)
+}
+
+func (c *Client) DeleteAlertChannel(ctx context.Context, id string) error {
+	return c.Do(ctx, "DELETE", "/api/v1/alerts/channels/"+url.PathEscape(id), nil, nil)
+}
+
+func (c *Client) TestAlertChannel(ctx context.Context, id string) error {
+	return c.Do(ctx, "POST", "/api/v1/alerts/channels/"+url.PathEscape(id)+"/test", nil, nil)
+}
+
+func (c *Client) ListAlertRules(ctx context.Context) ([]map[string]any, error) {
+	var out list[map[string]any]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/alerts/rules", nil, &out)
+}
+
+// PutAlertRule creates (id "") or replaces a rule given as JSON fields.
+func (c *Client) PutAlertRule(ctx context.Context, id string, rule map[string]any) (map[string]any, error) {
+	var out map[string]any
+	if id == "" {
+		return out, c.Do(ctx, "POST", "/api/v1/alerts/rules", rule, &out)
+	}
+	return out, c.Do(ctx, "PUT", "/api/v1/alerts/rules/"+url.PathEscape(id), rule, &out)
+}
+
+func (c *Client) DeleteAlertRule(ctx context.Context, id string) error {
+	return c.Do(ctx, "DELETE", "/api/v1/alerts/rules/"+url.PathEscape(id), nil, nil)
+}
+
+type AlertState struct {
+	Rule     string    `json:"rule"`
+	Severity string    `json:"severity"`
+	Label    string    `json:"label"`
+	State    string    `json:"state"`
+	Since    time.Time `json:"since"`
+	Message  string    `json:"message"`
+}
+
+func (c *Client) ActiveAlerts(ctx context.Context) ([]AlertState, error) {
+	var out list[AlertState]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/alerts/active", nil, &out)
+}
+
+type AlertEvent struct {
+	Rule     string    `json:"rule"`
+	Severity string    `json:"severity"`
+	Kind     string    `json:"kind"`
+	Label    string    `json:"label"`
+	Message  string    `json:"message"`
+	Delivery string    `json:"delivery"`
+	At       time.Time `json:"at"`
+}
+
+func (c *Client) AlertEvents(ctx context.Context, limit int) ([]AlertEvent, error) {
+	var out list[AlertEvent]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/alerts/events?limit="+fmt.Sprint(limit), nil, &out)
+}
+
 type LifecycleRule struct {
 	Priority      int    `json:"priority"`
 	Description   string `json:"description,omitempty"`

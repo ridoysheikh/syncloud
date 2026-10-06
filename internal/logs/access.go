@@ -138,3 +138,28 @@ func (s *Store) UpstreamCounts(ctx context.Context, window time.Duration) ([]Ups
 	}
 	return out, nil
 }
+
+// Count is how many lines one service wrote.
+type Count struct {
+	Project, Environment, Service string
+	Lines                         int
+}
+
+// Count counts lines matching f (and level, when set) per service over the
+// last window, for log-based alerts.
+func (s *Store) Count(ctx context.Context, f Filter, level string, window time.Duration) ([]Count, error) {
+	q := f.LogsQL(window)
+	if level != "" {
+		q += " level:=" + quote(level)
+	}
+	rows, err := s.queryRows(ctx, q+" | stats by (project, environment, service) count() as n")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Count, 0, len(rows))
+	for _, r := range rows {
+		n, _ := strconv.Atoi(r["n"])
+		out = append(out, Count{Project: r["project"], Environment: r["environment"], Service: r["service"], Lines: n})
+	}
+	return out, nil
+}

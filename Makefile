@@ -49,6 +49,7 @@ e2e:
 	test/e2e/metrics.sh
 	test/e2e/traffic.sh
 	test/e2e/autoscale.sh
+	test/e2e/alerts.sh
 
 ## proto: regenerate gRPC code (tools are installed into .tools/ on first use)
 proto: .tools/buf .tools/protoc-gen-go .tools/protoc-gen-go-grpc

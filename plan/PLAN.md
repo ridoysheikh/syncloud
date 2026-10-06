@@ -1411,6 +1411,24 @@ Because there is only one controller:
 
 ### Phase 5: Autoscaling and Traffic Insights (2–3 wks)
 **Progress**
+- ✅ Slice 5c (2026-10-06), alerts and notification channels (§9):
+  - **Channels**: webhook (JSON), Slack, Discord, Telegram and email (SMTP: STARTTLS on 587, implicit TLS on 465). URLs, tokens and passwords are sealed with the master key; the API only shows a summary (host, chat, recipients). A test notification per channel; a channel a rule uses cannot be deleted.
+  - **Rules**, evaluated every 30s, scoped to a project, environment and/or service:
+    - `metric`: 5xx error rate, p95 latency, request rate (Traefik), CPU, memory % of limit (agents), per service over a window.
+    - `promql`: any query, each series an instance.
+    - `log`: lines containing a text (case-insensitive) and/or with a level, counted per service over a window.
+    - `health`: a service degraded or down. `node`: a node not reporting.
+    - `deployment`, `build`, `job`: each failure notifies once.
+  - Instances go pending → firing after `forSeconds` → resolved, with a notification on firing and on resolving. States live in SQLite, so a restart does not notify again; an evaluation error leaves alerts as they are. Editing a rule starts its alerts over. Notifications carry the rule, severity, instance, message, value and a dashboard link. Delivery results are recorded per channel; history is kept 90 days.
+  - API `/alerts/channels` (+ `/test`), `/alerts/rules`, `/alerts/active`, `/alerts/events`; synctl `alerts active|events`, `alerts rules list|apply -f|delete` (channels by name), `alerts channels add|list|test|delete`.
+  - **Dashboard**: Monitoring › Alerts (Active, Rules, Channels with add and test, History with delivery results), a full-page rule editor, and the header bell shows the firing count (red when critical).
+  - Verified with `test/e2e/alerts.sh` on the real system tasks, notifications to a webhook sink:
+    - Channel secrets are not returned, and the test notification arrives.
+    - A 5xx-rate rule fires to the webhook (JSON) and Slack (text), then resolves once the service answers 200.
+    - A log rule and a health rule fire, and a failed deployment notifies once.
+    - A node whose agent was killed fires, then resolves when the agent comes back.
+    - synctl works. Unit tests cover the state machine, payload formats and validation.
+  - Not done: uptime and certificate-expiry rules, quota and firewall alerts (later phases), silences and routing by severity.
 - ✅ Slice 5b (2026-10-06), target tracking autoscaling (§5.5):
   - One policy per service: min/max tasks, a metric and its target — **CPU** or **memory** (average per task, % of the reservation, from the agents' samples), **requests per task** or **p95 latency** (from Traefik) — plus a scale-out cooldown (default 60s), a scale-in cooldown (300s) and scale-in checks (4 × 15s).
   - Every 15s: `desired = ceil(current × value / target)`, clamped to min/max, nothing within ±10% of the target. Scale-out waits for starting tasks and the cooldown; scale-in needs N consecutive checks below target and then goes to the highest count any of them wanted. A count outside min/max is corrected at once. No data holds the count (an idle routed service counts as 0 req/s). Cooldowns survive restarts (last event).

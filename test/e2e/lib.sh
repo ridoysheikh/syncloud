@@ -38,6 +38,9 @@ if [ "${WITH_BUILDS:-0}" = 1 ]; then
   docker image inspect moby/buildkit:v0.25.1 >/dev/null 2>&1 || docker pull -q moby/buildkit:v0.25.1 >/dev/null
   docker save moby/buildkit:v0.25.1 -o "$BIN/buildkit.tar"
 fi
+if [ "${WITH_ALERTS:-0}" = 1 ]; then
+  CGO_ENABLED=0 GOOS=linux go build -o "$BIN/hooksink" ./test/e2e/hooksink
+fi
 if [ "${WITH_METRICS:-0}" = 1 ]; then
   docker image inspect victoriametrics/victoria-metrics:v1.153.0 >/dev/null 2>&1 || docker pull -q victoriametrics/victoria-metrics:v1.153.0 >/dev/null
   docker save victoriametrics/victoria-metrics:v1.153.0 -o "$BIN/vmetrics.tar"

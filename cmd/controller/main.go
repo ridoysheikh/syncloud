@@ -22,6 +22,7 @@ import (
 	_ "time/tzdata" // job schedules use IANA timezones even on hosts without tzdata
 
 	"syncloud/internal/agentgw"
+	"syncloud/internal/alerts"
 	"syncloud/internal/api"
 	"syncloud/internal/auth"
 	"syncloud/internal/autoscale"
@@ -318,6 +319,9 @@ func serve(args []string) error {
 	logStore := logs.New(st, cfg.VictoriaLogsURL, log)
 	gw.AddHooks(agentgw.Hooks{OnLogs: logStore.OnLogs})
 	go logStore.Run(ctx)
+	alertMgr := alerts.New(st, box, metricStore, logStore, healthMon, bus, log)
+	alertMgr.DashboardURL = func() string { return domains.Endpoints().DashboardURL }
+	go alertMgr.Run(ctx)
 	workload.Endpoints = func(sv store.Service, spec workload.Spec, custom []store.Domain) []string {
 		scheme, port, base := "https", httpsPort, domains.Base()
 		if base == "" {
@@ -386,6 +390,7 @@ func serve(args []string) error {
 		Builds:                buildMgr,
 		Metrics:               metricStore,
 		Autoscaler:            autoscaler,
+		Alerts:                alertMgr,
 		ControllerSchedulable: cfg.ControllerSchedulable,
 		ACME:                  api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {

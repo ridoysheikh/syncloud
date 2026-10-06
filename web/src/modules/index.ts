@@ -34,6 +34,8 @@ import { TopologyPage } from "./network/TopologyPage";
 import { FirewallPage } from "./network/FirewallPage";
 import { LogsPage } from "./logs/LogsPage";
 import { TrafficPage } from "./traffic/Traffic";
+import { AlertsPage } from "./monitoring/AlertsPage";
+import { AlertRulePage } from "./monitoring/AlertRulePage";
 import { BuildsPage, GitSourcesPage } from "./git/GitPages";
 
 /** The module registry. The side nav and routes are built from this list. */
@@ -139,7 +141,9 @@ export const modules: DashboardModule[] = [
     order: 80,
     pages: [
       { path: "/monitoring/metrics", label: "Metrics", component: planned(["Monitoring"], "Metrics explorer", "Phase 1", "§9.1", "PromQL explorer over VictoriaMetrics.") },
-      { path: "/monitoring/alerts", label: "Alerts", component: planned(["Monitoring"], "Alerts", "Phase 5", "§9", "Alert rules and notification channels.") },
+      { path: "/monitoring/alerts", label: "Alerts", component: AlertsPage },
+      { path: "/monitoring/alerts/rules/new", label: "New alert rule", component: AlertRulePage, hidden: true },
+      { path: "/monitoring/alerts/rules/$id", label: "Alert rule", component: AlertRulePage, hidden: true },
     ],
   },
   {

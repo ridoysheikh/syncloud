@@ -7,6 +7,7 @@ import { api, type User } from "@/lib/api";
 import { stopStream, useStreamState } from "@/lib/stream";
 import { IconButton } from "@/ui/controls";
 import { cn } from "@/ui/cn";
+import { useActiveAlerts } from "@/modules/monitoring/AlertsPage";
 
 export function Header({ user, onToggleDrawer, drawerOpen }: { user: User; onToggleDrawer: () => void; drawerOpen: boolean }) {
   return (
@@ -42,14 +43,38 @@ export function Header({ user, onToggleDrawer, drawerOpen }: { user: User; onTog
 
       <BackupWarning />
       <StreamIndicator />
-      <IconButton label="Notifications" disabled>
-        <Bell className="size-4" />
-      </IconButton>
+      <AlertBell />
       <IconButton label="Toggle Cloud Shell" onClick={onToggleDrawer} className={cn(drawerOpen && "text-fg bg-hover")}>
         <SquareTerminal className="size-4" />
       </IconButton>
       <UserMenu user={user} />
     </header>
+  );
+}
+
+/** Firing alerts (§9): a count on the bell, which opens the Alerts page. */
+function AlertBell() {
+  const { data = [] } = useActiveAlerts();
+  const firing = data.filter((a) => a.state === "firing");
+  const critical = firing.some((a) => a.severity === "critical");
+  return (
+    <Link
+      to={"/monitoring/alerts" as string}
+      title={firing.length ? `${firing.length} alert${firing.length > 1 ? "s" : ""} firing` : "No alerts firing"}
+      className="text-muted hover:text-fg hover:bg-hover relative flex size-7 items-center justify-center rounded-sm"
+    >
+      <Bell className="size-4" />
+      {firing.length > 0 && (
+        <span
+          className={cn(
+            "absolute -top-0.5 -right-0.5 min-w-3.5 rounded-full px-1 text-center text-[9px] leading-3.5 font-semibold text-white",
+            critical ? "bg-bad" : "bg-warn",
+          )}
+        >
+          {firing.length}
+        </span>
+      )}
+    </Link>
   );
 }
 
