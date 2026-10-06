@@ -32,7 +32,7 @@ func TestSettingsValidate(t *testing.T) {
 
 func TestStaticArgsAreStable(t *testing.T) {
 	s := DefaultSettings()
-	if got := s.StaticArgs(); !slices.Equal(got, []string{"--log.level=INFO"}) {
+	if got := s.StaticArgs(); !slices.Equal(got, []string{"--log.level=INFO", "--serversTransport.forwardingTimeouts.dialTimeout=2s"}) {
 		t.Fatalf("defaults add flags: %v", got)
 	}
 	s.ReadTimeout, s.IdleTimeout, s.TrustedIPs, s.ProxyProtocol, s.HTTP3 = "120s", "5m", []string{"10.0.0.0/8"}, true, true
@@ -54,7 +54,7 @@ func TestStaticArgsAreStable(t *testing.T) {
 		}
 	}
 	base := []string{"--ping=true", "--log.level=INFO"}
-	if got := WithStatic(base, Settings{LogLevel: "DEBUG"}); !slices.Equal(got, []string{"--ping=true", "--log.level=DEBUG"}) {
+	if got := WithStatic(base, Settings{LogLevel: "DEBUG"}); !slices.Equal(got, []string{"--ping=true", "--log.level=DEBUG", "--serversTransport.forwardingTimeouts.dialTimeout=2s"}) {
 		t.Fatalf("WithStatic: %v", got)
 	}
 }
@@ -112,5 +112,19 @@ func TestGitServerRoute(t *testing.T) {
 	}
 	if _, ok := p.EdgeConfig()["http"].(map[string]any)["routers"].(map[string]any)["syncloud-git"]; ok {
 		t.Fatal("edges cannot reach the controller's loopback Git server")
+	}
+}
+
+func TestRouteHealthCheck(t *testing.T) {
+	p := &Provider{ControllerURL: "http://c", BaseDomain: func() string { return "example.com" }, ServiceRoutes: func() []ServiceRoute {
+		return []ServiceRoute{{Name: "a", Host: "a.example.com", Servers: []string{"http://10.91.0.2:80"}, HealthPath: "/healthz"},
+			{Name: "b", Host: "b.example.com", Servers: []string{"http://10.91.0.3:80"}}}
+	}}
+	d := p.Config()
+	if h := d.HTTP.Services["a"].LoadBalancer.HealthCheck; h == nil || h.Path != "/healthz" || h.Interval != "2s" {
+		t.Fatalf("health check: %+v", h)
+	}
+	if d.HTTP.Services["b"].LoadBalancer.HealthCheck != nil {
+		t.Fatal("a service without a health check is probed")
 	}
 }

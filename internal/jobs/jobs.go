@@ -233,7 +233,7 @@ func (m *Manager) start(ctx context.Context, t runTarget, trigger string, attemp
 	if t.service != nil {
 		run.ServiceID = t.service.ID
 	}
-	nodeID, why := m.wl.PlaceSpec(ctx, t.spec)
+	nodeID, why := m.place(ctx, trigger, t.spec)
 	if nodeID == "" {
 		run.Message = "waiting for a node: " + why
 	}
@@ -568,4 +568,12 @@ func (m *Manager) View(ctx context.Context, r store.JobRun) RunView {
 
 func (m *Manager) publish(ctx context.Context, r store.JobRun) {
 	m.bus.Publish(TopicRun, m.View(ctx, r))
+}
+
+// place picks a node for a run; builds may use the controller node.
+func (m *Manager) place(ctx context.Context, trigger string, spec workload.Spec) (string, string) {
+	if trigger == TriggerBuild {
+		return m.wl.PlaceBuild(ctx, spec)
+	}
+	return m.wl.PlaceSpec(ctx, spec)
 }

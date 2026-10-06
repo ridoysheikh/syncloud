@@ -115,6 +115,8 @@ type joinTokenResponse struct {
 	SingleUse   bool      `json:"singleUse"`
 	Uses        int       `json:"uses"`
 	Token       string    `json:"token,omitempty"`
+	// Command is the line to run on a new server (when the token is created).
+	Command string `json:"command,omitempty"`
 }
 
 func toJoinTokenResponse(t store.JoinToken) joinTokenResponse {
@@ -151,6 +153,7 @@ func (s *Server) handleCreateJoinToken(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, u.ID, "node:CreateJoinToken", "srn:syncloud:join-token/"+t.ID, nil)
 	resp := toJoinTokenResponse(t)
 	resp.Token = tok
+	resp.Command = s.joinCommand(r, "--token "+tok)
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -238,4 +241,43 @@ func (s *Server) handleDrainNode(w http.ResponseWriter, r *http.Request) {
 	}
 	v, _ := s.nodes.Get(id)
 	writeJSON(w, http.StatusOK, v)
+}
+
+// joinBase is the URL new servers download join.sh from.
+func (s *Server) joinBase(r *http.Request) string {
+	base := ""
+	if s.domains != nil {
+		base = s.domains.Endpoints().DashboardURL
+	}
+	if base == "" {
+		scheme := "http"
+		if isHTTPS(r) {
+			scheme = "https"
+		}
+		base = scheme + "://" + r.Host
+	}
+	return base
+}
+
+// joinPin is the controller certificate's key pin while it is self-signed
+// (a private network, where ACME cannot issue), else "".
+func (s *Server) joinPin() string {
+	if s.certs == nil || s.domains == nil {
+		return ""
+	}
+	base := s.domains.Endpoints().BaseDomain
+	if base == "" {
+		return ""
+	}
+	return s.certs.Pin(base)
+}
+
+// joinCommand is the one line that joins a server; with a self-signed
+// certificate it pins the controller's key instead of skipping checks.
+func (s *Server) joinCommand(r *http.Request, args string) string {
+	base := s.joinBase(r)
+	if pin := s.joinPin(); pin != "" && strings.HasPrefix(base, "https://") {
+		return "curl -fsSLk --pinnedpubkey '" + pin + "' " + base + "/join.sh | sudo bash -s -- --pin '" + pin + "' " + args
+	}
+	return "curl -fsSL " + base + "/join.sh | sudo bash -s -- " + args
 }

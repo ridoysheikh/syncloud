@@ -25,8 +25,11 @@ func (a *app) registryCmd() *cobra.Command {
 				if a.output == "json" {
 					return a.printer().json(info)
 				}
-				h := info["host"]
-				fmt.Fprintf(a.out, "Registry: %s\n\n  %s\n  docker tag my-app %s/<project>/<name>:<tag>\n  docker push %s/<project>/<name>:<tag>\n\nUse it in a service as \"@registry/<project>/<name>:<tag>\".\n", h, info["login"], h, h)
+				h := info.Host
+				if info.SelfSigned {
+					fmt.Fprintf(a.out, "The registry's certificate is self-signed (a private network). Trust it once on each machine that pushes:\n\n%s\n\n", info.Trust)
+				}
+				fmt.Fprintf(a.out, "Registry: %s\n\n  %s\n  docker tag my-app %s/<project>/<name>:<tag>\n  docker push %s/<project>/<name>:<tag>\n\nUse it in a service as \"@registry/<project>/<name>:<tag>\".\n", h, info.Login, h, h)
 				return nil
 			},
 		},

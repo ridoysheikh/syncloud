@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"syncloud/internal/auth"
+	"syncloud/internal/domain"
 	"syncloud/internal/registry"
 	"syncloud/internal/store"
 )
@@ -174,11 +175,24 @@ func (s *Server) handleRegistryInfo(w http.ResponseWriter, r *http.Request) {
 	if s.domains != nil {
 		host = s.domains.Endpoints().RegistryHost
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"host":  host,
 		"alias": "@registry",
 		"login": "docker login " + host + " -u <access-key-id> -p <secret>   (or any user name and a personal access token)",
-	})
+	}
+	// On a private network the certificate is self-signed: Docker clients
+	// must be told to trust it (nodes are handled automatically).
+	if s.certs != nil && s.domains != nil {
+		if base := s.domains.Endpoints().BaseDomain; base != "" {
+			if pemText := s.certs.SelfSignedBundle(domain.RegistryHost(base), base); pemText != "" {
+				out["selfSigned"] = true
+				out["certificate"] = pemText
+				out["trust"] = "sudo mkdir -p /etc/docker/certs.d/" + host + " && sudo tee /etc/docker/certs.d/" + host + "/ca.crt >/dev/null <<'EOF'\n" +
+					strings.TrimSpace(pemText) + "\nEOF"
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleListRepositories(w http.ResponseWriter, r *http.Request) {

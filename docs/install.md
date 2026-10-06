@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- **Controller host:** Linux (x86-64 or arm64) with systemd. At least 2 vCPU, 2 GB RAM and 20 GB of disk. A cluster of 50 nodes and 2,000 tasks fits on 4 vCPU and 8 GB.
+- **Controller host:** Linux (x86-64 or arm64) with systemd. At least 2 vCPU, 2 GB RAM and 10 GB of disk (4 GB and 40 GB recommended when the controller also builds images; the platform itself uses about 650 MB). Workers can be as small as 1 vCPU and 1 GB. A cluster of 50 nodes and 2,000 tasks fits on 4 vCPU and 8 GB.
 - **Ports:** 80 and 443 must be open to the internet (Traefik). 7443/tcp must be reachable from nodes (agent gateway). 51820/udp must be reachable between all nodes (WireGuard).
 - **Nodes:** Linux with systemd. The installer adds Docker if it is missing. WireGuard runs in the kernel when the module is available, otherwise in userspace.
 - **Clock:** time must be in sync (NTP). Certificates and signed requests depend on it.

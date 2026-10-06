@@ -51,7 +51,7 @@ func main() {
 		name := fmt.Sprintf("%s-%03d", *prefix, i)
 		d := filepath.Join(*dir, name)
 		if _, err := os.Stat(filepath.Join(d, "agent.json")); err != nil {
-			if _, err := agent.Join(ctx, d, *controller, *token, name); err != nil {
+			if _, err := agent.Join(ctx, d, *controller, *token, name, ""); err != nil {
 				log.Fatalf("%s: join: %v", name, err)
 			}
 		}

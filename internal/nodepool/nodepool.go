@@ -112,6 +112,8 @@ type Manager struct {
 	now func() time.Time
 	// ControllerURL is the address new servers join through (public).
 	ControllerURL func() string
+	// Pin is the controller certificate's key pin while it is self-signed.
+	Pin func() string
 
 	mu       sync.Mutex
 	pools    map[string]store.NodePool // by ID
@@ -221,7 +223,10 @@ func (m *Manager) JoinToken(ctx context.Context, poolID, nodeName string, ttl ti
 }
 
 // UserData is the cloud-init script a new server runs to join.
-func UserData(controller, token, name string) string {
+func UserData(controller, token, name, pin string) string {
+	if pin != "" { // a self-signed controller certificate: pin its key
+		return fmt.Sprintf("#!/bin/bash\n# SynCloud node pool server: join the cluster (§6.5)\ncurl -fsSLk --pinnedpubkey '%s' %s/join.sh | bash -s -- --pin '%s' --token %s --name %s\n", pin, controller, pin, token, name)
+	}
 	return fmt.Sprintf("#!/bin/bash\n# SynCloud node pool server: join the cluster (§6.5)\ncurl -fsSL %s/join.sh | bash -s -- --token %s --name %s\n", controller, token, name)
 }
 
@@ -417,6 +422,10 @@ func (m *Manager) scaleOut(ctx context.Context, p store.NodePool, spec Spec, pro
 	if m.ControllerURL != nil {
 		controller = m.ControllerURL()
 	}
+	pin := ""
+	if m.Pin != nil {
+		pin = m.Pin()
+	}
 	var created []string
 	for range n {
 		name := p.Name + "-" + randName()
@@ -426,7 +435,7 @@ func (m *Manager) scaleOut(ctx context.Context, p store.NodePool, spec Spec, pro
 			return
 		}
 		srv, err := prov.CreateServer(ctx, cloud.ServerSpec{Name: name, Region: spec.Region, Type: spec.Type, Image: spec.Image, SSHKeys: spec.SSHKeys,
-			UserData: UserData(controller, tok, name), Labels: map[string]string{"syncloud-pool": p.Name, "syncloud-node": name}})
+			UserData: UserData(controller, tok, name, pin), Labels: map[string]string{"syncloud-pool": p.Name, "syncloud-node": name}})
 		if err != nil {
 			m.event(ctx, p.ID, "failed", fmt.Sprintf("create server %s: %v", name, err))
 			return

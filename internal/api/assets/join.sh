@@ -5,15 +5,17 @@
 #
 # Options: --token T (required), --name N (default: hostname),
 #          --advertise-address IP (address other nodes use for WireGuard),
-#          --skip-docker
+#          --pin sha256//… (the controller's key, when its certificate is
+#          self-signed, e.g. on a private network), --skip-docker
 set -euo pipefail
 CONTROLLER="{{URL}}"
-TOKEN="" NAME="" ADVERTISE="" SKIP_DOCKER=0
+TOKEN="" NAME="" ADVERTISE="" PIN="" SKIP_DOCKER=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --token) TOKEN="$2"; shift 2 ;;
     --name) NAME="$2"; shift 2 ;;
     --advertise-address) ADVERTISE="$2"; shift 2 ;;
+    --pin) PIN="$2"; shift 2 ;;
     --skip-docker) SKIP_DOCKER=1; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -39,9 +41,12 @@ fi
 ok "nftables"
 if ss -Hlun "sport = :51820" 2>/dev/null | grep -q .; then die "UDP port 51820 (WireGuard) is in use"; fi
 
+# A self-signed controller certificate is accepted only with its pinned key.
+CURL=(curl -fsSL)
+[ -n "$PIN" ] && CURL+=(-k --pinnedpubkey "$PIN")
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-curl -fsSL -o "$tmp/syncloud-agent-linux-$ARCH" "$CONTROLLER/downloads/syncloud-agent-linux-$ARCH" || die "agent download failed"
-curl -fsSL -o "$tmp/SHA256SUMS" "$CONTROLLER/downloads/SHA256SUMS" || die "checksum download failed"
+"${CURL[@]}" -o "$tmp/syncloud-agent-linux-$ARCH" "$CONTROLLER/downloads/syncloud-agent-linux-$ARCH" || die "agent download failed"
+"${CURL[@]}" -o "$tmp/SHA256SUMS" "$CONTROLLER/downloads/SHA256SUMS" || die "checksum download failed"
 (cd "$tmp" && grep " syncloud-agent-linux-$ARCH\$" SHA256SUMS | sha256sum -c --quiet) || die "checksum mismatch"
 install -m 0755 "$tmp/syncloud-agent-linux-$ARCH" /usr/local/bin/syncloud-agent
 ok "agent $(/usr/local/bin/syncloud-agent version)"
@@ -70,6 +75,7 @@ systemctl daemon-reload
 if [ ! -f /var/lib/syncloud-agent/agent.json ]; then
   args=(join --controller "$CONTROLLER" --token "$TOKEN" --data-dir /var/lib/syncloud-agent)
   [ -n "$NAME" ] && args+=(--name "$NAME")
+  [ -n "$PIN" ] && args+=(--pin "$PIN")
   /usr/local/bin/syncloud-agent "${args[@]}"
 else
   ok "already joined; restarting the agent"

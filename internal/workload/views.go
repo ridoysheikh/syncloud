@@ -360,8 +360,12 @@ func (m *Manager) prePull(ctx context.Context, serviceID string, fromRev, toRev 
 	if m.ResolveImage != nil {
 		image, auth = m.ResolveImage(image)
 	}
+	ca := ""
+	if m.RegistryCA != nil {
+		ca = m.RegistryCA(image)
+	}
 	for id := range targets {
-		_ = m.gw.Send(id, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_PullImage{PullImage: &agentv1.PullImage{Image: image, RegistryAuth: auth}}})
+		_ = m.gw.Send(id, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_PullImage{PullImage: &agentv1.PullImage{Image: image, RegistryAuth: auth, RegistryCa: ca}}})
 	}
 	m.log.Info("pre-pulling image", "service", sv.Name, "image", image, "nodes", len(targets))
 }

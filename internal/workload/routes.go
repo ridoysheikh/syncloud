@@ -17,6 +17,10 @@ type Route struct {
 	Host      string   // public hostname
 	Servers   []string // http://<task-ip>:<port> of running tasks
 	ServiceID string
+	// HealthPath is the HTTP health check of this port ("" = none): Traefik
+	// probes it too, so a task on a crashed node leaves the route within
+	// seconds (§5.6).
+	HealthPath string
 }
 
 // HostName is the default hostname of a service's HTTP port:
@@ -102,6 +106,12 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 		}
 		for i, p := range spec.HTTPPorts() {
 			r := Route{Name: fmt.Sprintf("svc-%s-%s", sv.ID, p.Name), Host: HostName(sv, p, i == 0, base), ServiceID: sv.ID}
+			if h := spec.Health; h != nil && h.Type == "http" && (h.Port == "" && i == 0 || h.Port == p.Name) {
+				r.HealthPath = h.Path
+				if r.HealthPath == "" {
+					r.HealthPath = "/"
+				}
+			}
 			for _, t := range running[sv.ID] {
 				// Tasks of older revisions may expose the port differently.
 				port := p.Container
@@ -116,7 +126,7 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 			out = append(out, r)
 			for _, d := range byService[sv.ID] {
 				if d.PortName == p.Name {
-					out = append(out, Route{Name: "dom-" + strings.TrimPrefix(d.ID, "dom_"), Host: d.Host, Servers: r.Servers, ServiceID: sv.ID})
+					out = append(out, Route{Name: "dom-" + strings.TrimPrefix(d.ID, "dom_"), Host: d.Host, Servers: r.Servers, ServiceID: sv.ID, HealthPath: r.HealthPath})
 				}
 			}
 		}

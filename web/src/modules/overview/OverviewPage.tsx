@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { statusQuery } from "@/lib/auth";
 import { useStreamTopic, type StreamEvent } from "@/lib/stream";
 import { bytes, pct, useNodes, type Node } from "@/lib/nodes";
+import { useServices } from "@/lib/workloads";
 import { TimeSeriesChart, type TimeSeriesHandle } from "@/charts/TimeSeriesChart";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
@@ -79,6 +80,9 @@ export function OverviewPage() {
     return () => clearInterval(id);
   }, []);
 
+  const { data: services = [] } = useServices();
+  const tasks = services.reduce((n, sv) => n + sv.running, 0);
+  const degraded = services.filter((sv) => sv.running < sv.desiredCount).length;
   const t = totals(nodes);
   const ready = nodes.filter((n) => n.status === "ready").length;
   const unhealthy = nodes.filter((n) => n.status === "suspect" || n.status === "not_ready").length;
@@ -100,7 +104,12 @@ export function OverviewPage() {
         <StatTile label="CPU" value={t.cores ? t.cpu.toFixed(0) : "—"} unit={t.cores ? "%" : undefined} hint={t.cores ? `${t.cores} cores` : "no node metrics yet"} />
         <StatTile label="Memory" value={t.memTotal ? pct(t.memUsed, t.memTotal).toFixed(0) : "—"} unit={t.memTotal ? "%" : undefined} hint={t.memTotal ? `${bytes(t.memUsed)} of ${bytes(t.memTotal)}` : undefined} />
         <StatTile label="Disk" value={t.diskTotal ? pct(t.diskUsed, t.diskTotal).toFixed(0) : "—"} unit={t.diskTotal ? "%" : undefined} hint={t.diskTotal ? `${bytes(t.diskUsed)} of ${bytes(t.diskTotal)}` : undefined} />
-        <StatTile label="Services" value={0} hint="deploy in Phase 2" />
+        <StatTile
+          label="Services"
+          value={services.length}
+          tone={degraded ? "warn" : undefined}
+          hint={services.length ? `${tasks} task${tasks === 1 ? "" : "s"} running${degraded ? ` · ${degraded} below desired` : ""}` : "none yet"}
+        />
         <StatTile label="Controller" value={status?.version ?? "—"} hint={stats ? `up ${formatUptime(stats.uptimeSec)}` : undefined} />
       </div>
 

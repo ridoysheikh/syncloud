@@ -64,6 +64,7 @@ message UpgradeResult {
 message PullImage {
   string image = 1;
   string registry_auth = 2; // X-Registry-Auth (short-lived)
+  string registry_ca = 3;   // PEM to trust for the image's registry (self-signed, private networks)
 }
 
 message Hello {
@@ -164,6 +165,9 @@ message TaskSpec {
   bool privileged = 19;         // only for platform builds (BuildKit, §5.8); never user-settable
   string registry_auth = 18;    // X-Registry-Auth for the pull (short-lived; not part of the spec hash)
   repeated string entrypoint = 20; // overrides the image ENTRYPOINT when set
+  // registry_ca is a certificate to trust for the image's registry, when the
+  // platform registry only has a self-signed one (§5.9; not part of the spec hash).
+  string registry_ca = 21;
 }
 
 message PortBinding {

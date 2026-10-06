@@ -97,8 +97,12 @@ func (a *app) joinTokensCmd() *cobra.Command {
 			if a.output == "json" {
 				return a.printer().json(t)
 			}
-			fmt.Fprintf(a.out, "Join token (expires %s, %s):\n\n  %s\n\nRun on the new server:\n\n  curl -fsSL %s/join.sh | sudo bash -s -- --token %s\n",
-				t.ExpiresAt.Local().Format(time.RFC822), map[bool]string{true: "single use", false: "reusable"}[t.SingleUse], t.Token, p.Endpoint, t.Token)
+			command := t.Command
+			if command == "" { // older controllers
+				command = "curl -fsSL " + p.Endpoint + "/join.sh | sudo bash -s -- --token " + t.Token
+			}
+			fmt.Fprintf(a.out, "Join token (expires %s, %s):\n\n  %s\n\nRun on the new server:\n\n  %s\n",
+				t.ExpiresAt.Local().Format(time.RFC822), map[bool]string{true: "single use", false: "reusable"}[t.SingleUse], t.Token, command)
 			return nil
 		},
 	}

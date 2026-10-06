@@ -6,6 +6,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"github.com/coder/websocket"
@@ -44,6 +45,13 @@ func New(endpoint string, creds Credentials) (*Client, error) {
 		return nil, fmt.Errorf("invalid endpoint %q: want http(s)://host[:port]", endpoint)
 	}
 	return &Client{endpoint: u, creds: creds, http: &http.Client{Timeout: 60 * time.Second}, now: time.Now}, nil
+}
+
+// WithTLS sets the TLS configuration for the controller connection (for
+// example a pinned self-signed certificate while joining).
+func (c *Client) WithTLS(cfg *tls.Config) *Client {
+	c.http.Transport = &http.Transport{TLSClientConfig: cfg, Proxy: http.ProxyFromEnvironment}
+	return c
 }
 
 // Error is an API error response.

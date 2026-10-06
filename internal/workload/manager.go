@@ -13,6 +13,7 @@ import (
 	"syncloud/internal/auth"
 	"syncloud/internal/events"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	"syncloud/internal/mesh"
 	"syncloud/internal/nodes"
 	"syncloud/internal/store"
 )
@@ -72,6 +73,9 @@ type Manager struct {
 	// ResolveImage turns "@registry/…" into the private registry's reference
 	// and returns pull credentials for the node (§5.9); may be nil.
 	ResolveImage func(image string) (ref, registryAuth string)
+	// RegistryCA returns a certificate nodes must trust to pull a resolved
+	// image ("" = none): the platform registry's, while self-signed.
+	RegistryCA func(ref string) string
 	// S3Bindings lists a service's S3 bindings for a new revision; S3Env
 	// turns one into environment variables with credentials (§16).
 	S3Bindings func(ctx context.Context, serviceID string) ([]S3Ref, error)
@@ -324,7 +328,7 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			placed := 0
 			defer func() { m.trackUnplaced(sv.ID, spec, missing-placed, status, now) }()
 			for range min(missing, room) {
-				nodeID, why := m.place(ctx, spec, sv.ID)
+				nodeID, why := m.place(ctx, spec, sv.ID, sv.Revision, false)
 				if nodeID == "" {
 					status = "cannot place task: " + why
 					m.enqueueAfter(sv.ID, 15*time.Second)
@@ -551,7 +555,10 @@ func (m *Manager) backoff(serviceID string, now time.Time) time.Duration {
 }
 
 // place builds candidates from live node state and current reservations.
-func (m *Manager) place(ctx context.Context, spec Spec, serviceID string) (string, string) {
+// place picks a node for a new task of serviceID's revision rev. Spreading
+// counts only tasks of that revision: old ones about to be retired by a
+// rollout would otherwise push every new task onto the other nodes.
+func (m *Manager) place(ctx context.Context, spec Spec, serviceID string, rev int, platform bool) (string, string) {
 	all, err := m.st.ActiveTasks(ctx)
 	if err != nil {
 		return "", err.Error()
@@ -573,7 +580,7 @@ func (m *Manager) place(ctx context.Context, spec Spec, serviceID string) (strin
 			u.mem += s.Resources.Memory
 		}
 		u.all++
-		if t.ServiceID == serviceID {
+		if t.ServiceID == serviceID && t.Revision == rev {
 			u.svc++
 		}
 	}
@@ -587,7 +594,7 @@ func (m *Manager) place(ctx context.Context, spec Spec, serviceID string) (strin
 		switch {
 		case n.Status != store.NodeReady || !n.Connected:
 			c.Eligible, c.Why = false, "not ready"
-		case !n.Schedulable:
+		case !n.Schedulable && !(platform && n.Name == mesh.ControllerNode):
 			c.Eligible, c.Why = false, "not schedulable"
 		case n.Info.DockerVersion == "":
 			c.Eligible, c.Why = false, "without Docker"
@@ -618,9 +625,29 @@ func (m *Manager) setDesired(ctx context.Context, t store.Task, state string, no
 	m.publishTask(ctx, t)
 }
 
+// stop retires a task. One that was serving leaves the routes and VIPs at
+// once and keeps running for its drain time (§5.4): otherwise Traefik, which
+// polls its configuration every 2s, can still send a request to a container
+// that is gone, and it hangs instead of failing over.
 func (m *Manager) stop(ctx context.Context, t store.Task, now time.Time) {
+	serving := t.State == store.TaskRunning && t.Desired == "running"
 	m.setDesired(ctx, t, "", now)
+	if d := m.drainTime(ctx, t); serving && d > 0 {
+		time.AfterFunc(d, func() { m.sendStop(t) })
+		return
+	}
 	m.sendStop(t)
+}
+
+func (m *Manager) drainTime(ctx context.Context, t store.Task) time.Duration {
+	spec, err := m.SpecFor(ctx, t.ServiceID, t.Revision)
+	if err != nil || len(spec.Ports) == 0 {
+		return 0 // nothing routes to it
+	}
+	if d := spec.Deployment.DrainSeconds; d != nil {
+		return time.Duration(*d) * time.Second
+	}
+	return DefaultDrain
 }
 
 func (m *Manager) sendStop(t store.Task) {
@@ -663,7 +690,15 @@ type DeployHooks interface {
 
 // PlaceSpec picks a node for a one-off task with spec's resources.
 func (m *Manager) PlaceSpec(ctx context.Context, spec Spec) (string, string) {
-	return m.place(ctx, spec, "")
+	return m.place(ctx, spec, "", 0, false)
+}
+
+// PlaceBuild picks a node for a platform build: like PlaceSpec, but the
+// controller node is a candidate even when it takes no user tasks, as
+// BuildKit runs there by default (§5.0) and small clusters may have no
+// worker with room for a build.
+func (m *Manager) PlaceBuild(ctx context.Context, spec Spec) (string, string) {
+	return m.place(ctx, spec, "", 0, true)
 }
 
 // RunSpec builds the agent spec for a job run on a node, with the node's DNS.
@@ -674,6 +709,9 @@ func (m *Manager) RunSpec(sv store.Service, spec Spec, t store.Task) *agentv1.Ta
 	}
 	if m.ResolveImage != nil {
 		ts.Image, ts.RegistryAuth = m.ResolveImage(ts.Image)
+	}
+	if m.RegistryCA != nil {
+		ts.RegistryCa = m.RegistryCA(ts.Image)
 	}
 	if m.S3Env != nil {
 		for _, ref := range spec.S3 {

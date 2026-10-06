@@ -162,7 +162,7 @@ func (m *Manager) watch(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			if nodeID, why := m.wl.PlaceSpec(ctx, spec); nodeID != "" {
+			if nodeID, why := m.place(ctx, r.Trigger, spec); nodeID != "" {
 				r.NodeID, r.Message = nodeID, ""
 				_ = m.st.UpdateRun(ctx, r)
 				m.send(ctx, r)

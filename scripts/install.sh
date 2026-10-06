@@ -94,8 +94,14 @@ ok "architecture: $ARCH"
 cpus=$(nproc); mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
 disk_gb=$(df -BG --output=avail /var/lib 2>/dev/null | tail -1 | tr -dc 0-9)
 [ "$cpus" -ge 2 ] && ok "CPUs: $cpus" || bad "CPUs: $cpus (minimum 2)"
-[ "$mem_mb" -ge 3500 ] && ok "memory: ${mem_mb} MB" || bad "memory: ${mem_mb} MB (minimum 4 GB)"
-[ "${disk_gb:-0}" -ge 20 ] && ok "free disk in /var/lib: ${disk_gb} GB" || bad "free disk in /var/lib: ${disk_gb:-?} GB (minimum 20 GB, 40 GB recommended)"
+# The platform itself uses about 650 MB (measured on a 2 GB VM); builds and
+# apps need the rest.
+if [ "$mem_mb" -ge 3500 ]; then ok "memory: ${mem_mb} MB"
+elif [ "$mem_mb" -ge 1800 ]; then warn "memory: ${mem_mb} MB (works for small clusters; 4 GB recommended for builds and apps on this node)"
+else bad "memory: ${mem_mb} MB (minimum 2 GB)"; fi
+if [ "${disk_gb:-0}" -ge 20 ]; then ok "free disk in /var/lib: ${disk_gb} GB"
+elif [ "${disk_gb:-0}" -ge 10 ]; then warn "free disk in /var/lib: ${disk_gb} GB (works; 40 GB recommended for images and builds)"
+else bad "free disk in /var/lib: ${disk_gb:-?} GB (minimum 10 GB, 40 GB recommended)"; fi
 
 for port in 80 443; do
   holder=$(ss -Hltnp "sport = :$port" 2>/dev/null | grep -o 'users:(("[^"]*' | cut -d'"' -f2 | head -1 || true)

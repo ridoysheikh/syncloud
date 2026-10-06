@@ -7,6 +7,17 @@ step() { printf '==> %s\n' "$*"; }
 
 mkdir -p "$DOCKER_CONFIG"
 printf '%s' "$BUILD_REGISTRY_AUTH" > "$DOCKER_CONFIG/config.json"
+# Private networks: the registry and the built-in Git server have
+# self-signed certificates, passed in to be trusted.
+if [ -n "${REGISTRY_CA:-}" ]; then
+  printf '%s\n' "$REGISTRY_CA" > /tmp/registry-ca.pem
+  printf '[registry."%s"]\n  ca = ["/tmp/registry-ca.pem"]\n' "$REGISTRY_HOST" > /tmp/buildkitd.toml
+  export BUILDKITD_FLAGS="${BUILDKITD_FLAGS:-} --config /tmp/buildkitd.toml"
+fi
+if [ -n "${GIT_CA:-}" ]; then
+  printf '%s\n' "$GIT_CA" > /tmp/git-ca.pem
+  git config --global http.sslCAInfo /tmp/git-ca.pem
+fi
 
 step "fetching $GIT_REF at $(printf %.12s "$GIT_SHA")"
 git init -q /src

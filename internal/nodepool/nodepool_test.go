@@ -27,7 +27,7 @@ func TestValidate(t *testing.T) {
 			t.Errorf("%s accepted", name)
 		}
 	}
-	if ud := UserData("https://ctl.example", "SYN-JOIN-x", "w-abc"); !strings.Contains(ud, "curl -fsSL https://ctl.example/join.sh | bash -s -- --token SYN-JOIN-x --name w-abc") {
+	if ud := UserData("https://ctl.example", "SYN-JOIN-x", "w-abc", ""); !strings.Contains(ud, "curl -fsSL https://ctl.example/join.sh | bash -s -- --token SYN-JOIN-x --name w-abc") {
 		t.Error(ud)
 	}
 }

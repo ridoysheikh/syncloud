@@ -95,7 +95,7 @@ func TestJoinConnectAndRevoke(t *testing.T) {
 	dataDir := t.TempDir()
 
 	tok := c.joinToken(t, true)
-	st, err := Join(ctx, dataDir, c.apiURL, tok, "w-01")
+	st, err := Join(ctx, dataDir, c.apiURL, tok, "w-01", "")
 	if err != nil {
 		t.Fatalf("join: %v", err)
 	}
@@ -103,14 +103,14 @@ func TestJoinConnectAndRevoke(t *testing.T) {
 		t.Fatalf("node id %q", st.NodeID)
 	}
 	// Single-use token cannot be reused, and a machine cannot join twice.
-	if _, err := Join(ctx, t.TempDir(), c.apiURL, tok, "w-02"); err == nil {
+	if _, err := Join(ctx, t.TempDir(), c.apiURL, tok, "w-02", ""); err == nil {
 		t.Fatal("single-use token accepted twice")
 	}
-	if _, err := Join(ctx, dataDir, c.apiURL, c.joinToken(t, true), "w-03"); err == nil {
+	if _, err := Join(ctx, dataDir, c.apiURL, c.joinToken(t, true), "w-03", ""); err == nil {
 		t.Fatal("joined twice from the same data dir")
 	}
 	// Names are unique.
-	if _, err := Join(ctx, t.TempDir(), c.apiURL, c.joinToken(t, true), "w-01"); err == nil {
+	if _, err := Join(ctx, t.TempDir(), c.apiURL, c.joinToken(t, true), "w-01", ""); err == nil {
 		t.Fatal("duplicate node name accepted")
 	}
 
@@ -154,7 +154,7 @@ func TestHeartbeatsCarryMetrics(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dataDir := t.TempDir()
-	st, err := Join(ctx, dataDir, c.apiURL, c.joinToken(t, true), "w-01")
+	st, err := Join(ctx, dataDir, c.apiURL, c.joinToken(t, true), "w-01", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestUntrustedClientRejected(t *testing.T) {
 	c := startCluster(t)
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	if _, err := Join(ctx, dataDir, c.apiURL, c.joinToken(t, true), "w-01"); err != nil {
+	if _, err := Join(ctx, dataDir, c.apiURL, c.joinToken(t, true), "w-01", ""); err != nil {
 		t.Fatal(err)
 	}
 	// A certificate from a different CA must not be accepted.
@@ -213,7 +213,7 @@ func TestCertificateRenewal(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dataDir := t.TempDir()
-	st, err := Join(ctx, dataDir, c.apiURL, c.joinToken(t, true), "w-01")
+	st, err := Join(ctx, dataDir, c.apiURL, c.joinToken(t, true), "w-01", "")
 	if err != nil {
 		t.Fatal(err)
 	}

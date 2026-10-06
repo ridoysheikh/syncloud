@@ -39,8 +39,16 @@ type Service struct {
 }
 
 type LoadBalancer struct {
-	Servers        []Server `json:"servers"`
-	PassHostHeader bool     `json:"passHostHeader"`
+	Servers        []Server     `json:"servers"`
+	PassHostHeader bool         `json:"passHostHeader"`
+	HealthCheck    *HealthCheck `json:"healthCheck,omitempty"`
+}
+
+// HealthCheck is Traefik's active check of each server.
+type HealthCheck struct {
+	Path     string `json:"path"`
+	Interval string `json:"interval"`
+	Timeout  string `json:"timeout"`
 }
 
 type Server struct {
@@ -74,6 +82,8 @@ type ServiceRoute struct {
 	// OwnRetry set, one of them replaces the default retry.
 	Middlewares []string
 	OwnRetry    bool
+	// HealthPath makes Traefik probe each task too ("" = no check).
+	HealthPath string
 }
 
 type RedirectScheme struct {
@@ -180,7 +190,13 @@ func (p *Provider) Config() Dynamic {
 		for _, u := range r.Servers {
 			servers = append(servers, Server{URL: u})
 		}
-		d.HTTP.Services[r.Name] = Service{LoadBalancer: LoadBalancer{Servers: servers, PassHostHeader: true}}
+		lb := LoadBalancer{Servers: servers, PassHostHeader: true}
+		if r.HealthPath != "" {
+			// Probed by every Traefik replica: a task whose node crashed is
+			// out of rotation within seconds, before the controller notices.
+			lb.HealthCheck = &HealthCheck{Path: r.HealthPath, Interval: "2s", Timeout: "1s"}
+		}
+		d.HTTP.Services[r.Name] = Service{LoadBalancer: lb}
 		if base == "" {
 			d.HTTP.Routers[r.Name] = Router{Rule: host(r.Host), EntryPoints: web, Middlewares: chain, Service: r.Name}
 			continue

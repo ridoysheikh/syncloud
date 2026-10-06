@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"syncloud/internal/events"
+	"syncloud/internal/pki"
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 )
@@ -357,4 +358,44 @@ func selfSigned(host string, now time.Time) (certPEM, keyPEM []byte, notAfter ti
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
 		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kder}), notAfter, nil
+}
+
+// Pin returns the public-key pin ("sha256//<base64>", as curl's
+// --pinnedpubkey takes it) of host's certificate while it is self-signed,
+// and "" once a CA issued it. Join commands carry the pin so new nodes can
+// verify the controller on a private network where ACME cannot issue.
+func (m *Manager) Pin(host string) string {
+	m.mu.Lock()
+	e, ok := m.cache[host]
+	m.mu.Unlock()
+	if !ok || e.rec.Issuer != IssuerSelfSigned {
+		return ""
+	}
+	pin, _ := pki.SPKIPin([]byte(e.rec.CertPEM))
+	return pin
+}
+
+// SelfSignedPEM returns host's certificate while it is self-signed, for
+// clients that must be told to trust it (Docker on nodes, §5.9), else "".
+func (m *Manager) SelfSignedPEM(host string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if e, ok := m.cache[host]; ok && e.rec.Issuer == IssuerSelfSigned {
+		return e.rec.CertPEM
+	}
+	return ""
+}
+
+// SelfSignedBundle concatenates the self-signed certificates of hosts
+// (skipping CA-issued ones): what a client of the registry must trust, as
+// Docker also fetches tokens from the dashboard host.
+func (m *Manager) SelfSignedBundle(hosts ...string) string {
+	var b strings.Builder
+	for _, h := range hosts {
+		if p := m.SelfSignedPEM(h); p != "" {
+			b.WriteString(strings.TrimSpace(p))
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
 }

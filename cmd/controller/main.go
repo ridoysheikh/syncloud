@@ -41,6 +41,7 @@ import (
 	"syncloud/internal/gc"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 	"syncloud/internal/gitconn"
+	"syncloud/internal/gitremote"
 	"syncloud/internal/gitserver"
 	"syncloud/internal/health"
 	"syncloud/internal/jobs"
@@ -204,6 +205,16 @@ func serve(args []string) error {
 	certMgr := certs.New(st, box, bus, log, certs.Config{
 		ACME: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail, HTTPClient: acmeHTTP,
 	})
+	// platformCA is what to trust for a platform host while its certificate
+	// is self-signed (private networks): the registry bundle includes the
+	// dashboard, where Docker fetches registry tokens.
+	platformCA := func(host string) string {
+		base := domains.Base()
+		if base != "" && host == domain.RegistryHost(base) {
+			return certMgr.SelfSignedBundle(host, base)
+		}
+		return certMgr.SelfSignedPEM(host)
+	}
 	if err := certMgr.Load(ctx); err != nil {
 		return fmt.Errorf("load certificates: %w", err)
 	}
@@ -214,6 +225,15 @@ func serve(args []string) error {
 		return fmt.Errorf("load Traefik settings and middlewares: %w", err)
 	}
 	gitServer := gitserver.New(st, box, domains.Endpoints, log)
+	gitServer.CADir = filepath.Join(cfg.DataDir, "gitserver-ca")
+	gitServer.TrustPEM = func() string {
+		// The dashboard (webhook target) while its certificate is self-signed.
+		base := domains.Base()
+		if base == "" {
+			return ""
+		}
+		return certMgr.SelfSignedBundle(base)
+	}
 	if err := gitServer.Load(ctx); err != nil {
 		return fmt.Errorf("load the built-in Git server settings: %w", err)
 	}
@@ -297,6 +317,15 @@ func serve(args []string) error {
 		authJSON, _ := json.Marshal(map[string]string{"registrytoken": tok})
 		return host + "/" + path, base64.URLEncoding.EncodeToString(authJSON)
 	}
+	// On a private network the registry's certificate is self-signed: nodes
+	// are handed it with each pull and Docker trusts it for that registry.
+	workloads.RegistryCA = func(ref string) string {
+		ep := domains.Endpoints()
+		if ep.BaseDomain == "" || !strings.HasPrefix(ref, ep.RegistryHost+"/") {
+			return ""
+		}
+		return platformCA(domain.RegistryHost(ep.BaseDomain))
+	}
 	disco := discovery.NewManager(st, gw, workloads, log)
 	disco.Security = cfg.SecurityGroups
 	gw.AddHooks(disco.Hooks())
@@ -320,10 +349,12 @@ func serve(args []string) error {
 	buildMgr := builds.New(st, box, jobMgr, workloads, regIssuer, bus, log, builds.Config{
 		RegistryHost: registryHost, RegistryInsecure: cfg.RegistryInsecure, Node: cfg.BuildNode,
 		UpstreamAuths: func() map[string]any { return upstreams.DockerConfigAuths(context.Background()) },
+		SelfSignedCA:  platformCA,
 	})
 	dashboardURL := func() string { return domains.Endpoints().DashboardURL }
 	gitConns := gitconn.New(st, box, dashboardURL, log)
 	buildMgr.Connections, buildMgr.DashboardURL = gitConns, dashboardURL
+	gitremote.SelfSignedCA = certMgr.SelfSignedPEM
 	go buildMgr.Run(ctx)
 	// Task resource samples ride on agent heartbeats (§9.1).
 	metricStore := metrics.New(cfg.VictoriaMetricsURL, log)
@@ -349,6 +380,7 @@ func serve(args []string) error {
 		return fmt.Errorf("load node pools: %w", err)
 	}
 	pools.ControllerURL = func() string { return domains.Endpoints().DashboardURL }
+	pools.Pin = func() string { return certMgr.Pin(domains.Endpoints().BaseDomain) }
 	workloads.NodePool = pools.PoolOf
 	s3Mgr := s3.New(st, box)
 	workloads.S3Bindings = func(ctx context.Context, serviceID string) ([]workload.S3Ref, error) {
@@ -471,7 +503,7 @@ func serve(args []string) error {
 			var out []traefik.ServiceRoute
 			for _, r := range workloads.Routes(context.Background(), domains.Base()) {
 				chain, own := traefikExtras.Chain(r.ServiceID)
-				out = append(out, traefik.ServiceRoute{Name: r.Name, Host: r.Host, Servers: r.Servers, Middlewares: chain, OwnRetry: own})
+				out = append(out, traefik.ServiceRoute{Name: r.Name, Host: r.Host, Servers: r.Servers, Middlewares: chain, OwnRetry: own, HealthPath: r.HealthPath})
 			}
 			return out
 		},

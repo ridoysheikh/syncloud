@@ -63,6 +63,8 @@ interface RegistryInfo {
   host: string;
   alias: string;
   login: string;
+  selfSigned?: boolean;
+  trust?: string;
 }
 
 function CopyText({ text }: { text: string }) {
@@ -182,6 +184,21 @@ function PushCommands() {
   return (
     <Panel title="Push an image">
       <div className="flex flex-col gap-1 text-xs">
+        {data.selfSigned && data.trust && (
+          <div className="border-warn/40 bg-warn/10 mb-1 flex flex-col gap-1 rounded-sm border p-2">
+            <span className="text-warn">
+              The registry has a self-signed certificate (a private network).
+              Nodes trust it automatically; run this once on each machine you
+              push from:
+            </span>
+            <div className="flex items-start justify-between gap-2">
+              <pre className="max-h-32 overflow-auto font-mono text-[11px] whitespace-pre-wrap">
+                {data.trust}
+              </pre>
+              <CopyText text={data.trust} />
+            </div>
+          </div>
+        )}
         {lines.map((l) => (
           <div
             key={l}

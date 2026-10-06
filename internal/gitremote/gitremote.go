@@ -6,6 +6,8 @@ package gitremote
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +20,27 @@ import (
 )
 
 var client = &http.Client{Timeout: 20 * time.Second}
+
+// SelfSignedCA returns the certificate of a platform host (the built-in Git
+// server) while it is self-signed, so polling it works on private networks;
+// nil or "" = system roots only.
+var SelfSignedCA func(host string) string
+
+func clientFor(u *url.URL) *http.Client {
+	if SelfSignedCA == nil || u.Scheme != "https" {
+		return client
+	}
+	ca := SelfSignedCA(u.Hostname())
+	if ca == "" {
+		return client
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+	}
+	pool.AppendCertsFromPEM([]byte(ca))
+	return &http.Client{Timeout: client.Timeout, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, Proxy: http.ProxyFromEnvironment}}
+}
 
 // ValidateURL accepts http(s) repository URLs without embedded credentials.
 func ValidateURL(raw string) error {
@@ -42,7 +65,7 @@ func LsRemote(ctx context.Context, repoURL, token string) (map[string]string, er
 	if token != "" {
 		req.SetBasicAuth("syncloud", token) // GitHub, GitLab and Gitea accept a token as the password
 	}
-	resp, err := client.Do(req)
+	resp, err := clientFor(req.URL).Do(req)
 	if err != nil {
 		return nil, err
 	}

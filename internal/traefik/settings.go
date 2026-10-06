@@ -47,6 +47,9 @@ type Settings struct {
 	MaxBodyMB     int    `json:"maxBodyMb"`     // request body limit, 0 = unlimited
 }
 
+// DefaultDialTimeout bounds connecting to a task (over the private network).
+const DefaultDialTimeout = "2s"
+
 // DefaultSettings are what a fresh install uses.
 func DefaultSettings() Settings {
 	return Settings{LogLevel: "INFO", TrustedIPs: []string{}, RedirectHTTPS: true, MinTLS: "1.2", RetryAttempts: 2}
@@ -149,9 +152,14 @@ func (s Settings) StaticArgs() []string {
 	if s.HTTP3 {
 		args = append(args, "--entrypoints.websecure.http3=true")
 	}
-	if s.DialTimeout != "" {
-		args = append(args, "--serversTransport.forwardingTimeouts.dialTimeout="+s.DialTimeout)
+	// A task that just died (a crashed node) never answers the dial; a short
+	// timeout lets the retry move the request to another task quickly
+	// instead of hanging for Traefik's default 30s.
+	dial := s.DialTimeout
+	if dial == "" {
+		dial = DefaultDialTimeout
 	}
+	args = append(args, "--serversTransport.forwardingTimeouts.dialTimeout="+dial)
 	if s.ResponseHeaderTimeout != "" {
 		args = append(args, "--serversTransport.forwardingTimeouts.responseHeaderTimeout="+s.ResponseHeaderTimeout)
 	}

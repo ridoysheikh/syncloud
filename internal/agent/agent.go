@@ -52,7 +52,9 @@ type State struct {
 
 // Join registers this machine with the controller using a join token. The
 // node key is generated here and never leaves the machine.
-func Join(ctx context.Context, dataDir, controllerURL, token, name string) (State, error) {
+// pin, when set, is the controller certificate's public-key pin
+// (pki.SPKIPin): its certificate is self-signed on private networks.
+func Join(ctx context.Context, dataDir, controllerURL, token, name, pin string) (State, error) {
 	if _, err := os.Stat(filepath.Join(dataDir, stateFile)); err == nil {
 		return State{}, fmt.Errorf("this machine has already joined (state in %s); remove it to join again", dataDir)
 	}
@@ -63,6 +65,9 @@ func Join(ctx context.Context, dataDir, controllerURL, token, name string) (Stat
 	c, err := client.New(controllerURL, client.Credentials{})
 	if err != nil {
 		return State{}, err
+	}
+	if pin != "" {
+		c.WithTLS(pki.PinnedTLS(pin))
 	}
 	resp, err := c.JoinNode(ctx, client.JoinRequest{Token: token, Name: name, CSR: string(csrPEM)})
 	if err != nil {
@@ -306,7 +311,7 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 			case *agentv1.ConnectResponse_Certificate:
 				a.installCertificate(m.Certificate.GetCertificate())
 			case *agentv1.ConnectResponse_PullImage:
-				go runner.PrePull(ctx, m.PullImage.GetImage(), m.PullImage.GetRegistryAuth())
+				go runner.PrePull(ctx, m.PullImage.GetImage(), m.PullImage.GetRegistryAuth(), m.PullImage.GetRegistryCa())
 			case *agentv1.ConnectResponse_UpgradeAgent:
 				a.upgrade.chunk(m.UpgradeAgent)
 			}

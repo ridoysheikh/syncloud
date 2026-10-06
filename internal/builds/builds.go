@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -69,6 +70,9 @@ type Config struct {
 	// UpstreamAuths are docker config.json "auths" for third-party
 	// registries (private FROM images); may be nil.
 	UpstreamAuths func() map[string]any
+	// SelfSignedCA returns the certificate of a platform host (the
+	// registry, the built-in Git server) while it is self-signed, else "".
+	SelfSignedCA func(host string) string
 }
 
 // Connections resolves Git provider connections (§5.8).
@@ -698,6 +702,7 @@ func (m *Manager) start(ctx context.Context, b store.Build) {
 	}
 	now := m.now().UTC()
 	b.Status, b.RunID, b.StartedAt = BuildBuilding, run.ID, &now
+	b.Message = run.Message // e.g. "waiting for a node: …" until one has room
 	_ = m.st.UpdateBuild(ctx, b)
 	m.bus.Publish(TopicBuild, b)
 	m.log.Info("build started", "service", sv.Project+"/"+sv.Name, "sha", b.SHA[:12], "run", run.ID)
@@ -748,6 +753,18 @@ func (m *Manager) buildSpec(ctx context.Context, sv store.Service, g store.GitSo
 	if env["BUILDER"] == "" {
 		env["BUILDER"] = "auto"
 	}
+	if m.cfg.SelfSignedCA != nil {
+		// Private networks: trust the platform's self-signed certificates.
+		regHost, _, _ := strings.Cut(host, ":")
+		if ca := m.cfg.SelfSignedCA(regHost); ca != "" {
+			env["REGISTRY_HOST"], env["REGISTRY_CA"] = host, ca
+		}
+		if u, err := url.Parse(g.URL); err == nil && u.Scheme == "https" {
+			if ca := m.cfg.SelfSignedCA(u.Hostname()); ca != "" {
+				env["GIT_CA"] = ca
+			}
+		}
+	}
 	if t := m.token(ctx, g); t != "" {
 		env["GIT_TOKEN"] = t
 	}
@@ -755,8 +772,10 @@ func (m *Manager) buildSpec(ctx context.Context, sv store.Service, g store.GitSo
 		Image:      BuildKitImage,
 		Entrypoint: []string{"sh", "-c", buildScript, "build"}, // the image's entrypoint is buildkitd
 		Env:        env,
-		Resources:  workload.Resources{CPU: 1, Memory: 1024, MemoryLimit: 8192},
-		Placement:  workload.Placement{Node: m.cfg.Node},
+		// A modest reservation so small nodes can build (CPU is not limited;
+		// memory may grow to the limit).
+		Resources: workload.Resources{CPU: 0.25, Memory: 512, MemoryLimit: 8192},
+		Placement: workload.Placement{Node: m.cfg.Node},
 	}
 	if err := spec.Normalize(); err != nil {
 		return workload.Spec{}, err
@@ -814,7 +833,12 @@ func (m *Manager) onRunFinished(ctx context.Context, run store.JobRun) {
 	}
 	b.Status = BuildSucceeded
 	state, desc := gitprovider.StateSuccess, "Built; deploy it from the dashboard"
-	if g, err := m.st.GitSourceByService(ctx, b.ServiceID); err == nil && g.AutoDeploy {
+	if g, err := m.st.GitSourceByService(ctx, b.ServiceID); err == nil && g.AutoDeploy && m.newerDeployed(ctx, b) {
+		// Two pushes built at once: never roll back to the older commit
+		// because its build happened to finish last.
+		b.Message = "not deployed: a newer commit of " + gitremote.ShortRef(b.Ref) + " is already deployed"
+		desc = "Built; a newer commit is already deployed"
+	} else if err == nil && g.AutoDeploy {
 		if err := m.Deploy(ctx, b); err != nil {
 			b.Message = "deploy failed: " + err.Error()
 			state, desc = gitprovider.StateFailure, "Built, but the "+b.Message
@@ -899,4 +923,19 @@ func (m *Manager) sendStatus(r statusReport) {
 	if err := prov.SetStatus(ctx, g.Repo, r.b.SHA, st); err != nil {
 		m.log.Warn("set commit status", "repo", g.Repo, "sha", r.b.SHA[:12], "err", err)
 	}
+}
+
+// newerDeployed reports whether a build of the same ref queued after b is
+// already deployed.
+func (m *Manager) newerDeployed(ctx context.Context, b store.Build) bool {
+	recent, err := m.st.ServiceBuilds(ctx, b.ServiceID, 50)
+	if err != nil {
+		return false
+	}
+	for _, o := range recent {
+		if o.ID != b.ID && o.Ref == b.Ref && o.Deployed && o.CreatedAt.After(b.CreatedAt) {
+			return true
+		}
+	}
+	return false
 }

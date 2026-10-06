@@ -69,6 +69,9 @@ type GitServerConfig struct {
 	// SecretKey and InternalToken are Forgejo's own secrets, generated once.
 	SecretKey     string
 	InternalToken string
+	// CADir holds the cluster's self-signed certificates (private networks)
+	// for Forgejo to trust, so its webhooks reach the dashboard ("" = none).
+	CADir string
 }
 
 // Component describes one system task for the dashboard.
@@ -220,7 +223,7 @@ func gitServerSpec(c Config) *agentv1.TaskSpec {
 	if u, err := url.Parse(g.RootURL); err == nil && u.Hostname() != "" {
 		domain = u.Hostname()
 	}
-	return &agentv1.TaskSpec{
+	spec := &agentv1.TaskSpec{
 		TaskId: GitServerTaskID, Name: "syncloud-git", Image: ImageForgejo,
 		Env: map[string]string{
 			"GITEA__server__HTTP_ADDR":             host,
@@ -245,4 +248,10 @@ func gitServerSpec(c Config) *agentv1.TaskSpec {
 		Mounts:      []*agentv1.Mount{{Type: agentv1.Mount_TYPE_VOLUME, Source: "syncloud-git", Target: "/var/lib/gitea"}},
 		NetworkMode: "host", System: true,
 	}
+	if g.CADir != "" {
+		// Go reads every PEM file in SSL_CERT_DIR (system roots stay trusted).
+		spec.Env["SSL_CERT_DIR"] = "/etc/ssl/certs:/etc/syncloud/ca"
+		spec.Mounts = append(spec.Mounts, &agentv1.Mount{Type: agentv1.Mount_TYPE_BIND, Source: g.CADir, Target: "/etc/syncloud/ca", ReadOnly: true})
+	}
+	return spec
 }

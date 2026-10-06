@@ -76,9 +76,9 @@ func (r *Runner) emit(s *agentv1.TaskStatus) {
 
 // SpecHash identifies a spec's content; a changed hash means "recreate".
 func SpecHash(spec *agentv1.TaskSpec) string {
-	if spec.GetRegistryAuth() != "" { // credentials rotate; the container does not change
+	if spec.GetRegistryAuth() != "" || spec.GetRegistryCa() != "" { // credentials rotate; the container does not change
 		spec = proto.Clone(spec).(*agentv1.TaskSpec)
-		spec.RegistryAuth = ""
+		spec.RegistryAuth, spec.RegistryCa = "", ""
 	}
 	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(spec)
 	if err != nil {
@@ -138,6 +138,7 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 		status.State = agentv1.TaskState_TASK_STATE_PULLING
 		r.emit(proto.Clone(status).(*agentv1.TaskStatus))
 		r.log.Info("pulling image", "image", spec.Image)
+		trustRegistry(r.log, spec.Image, spec.GetRegistryCa())
 		if err := r.docker.Pull(ctx, spec.Image, spec.GetRegistryAuth()); err != nil {
 			fail(err)
 			return
@@ -366,7 +367,7 @@ func restartName(p agentv1.RestartPolicy) string {
 // PrePull downloads an image ahead of a deployment unless it is already
 // present or being pulled; failures are only logged (the task's own pull
 // reports them).
-func (r *Runner) PrePull(ctx context.Context, image, registryAuth string) {
+func (r *Runner) PrePull(ctx context.Context, image, registryAuth, registryCA string) {
 	if _, busy := r.prePulls.LoadOrStore(image, true); busy {
 		return
 	}
@@ -374,6 +375,7 @@ func (r *Runner) PrePull(ctx context.Context, image, registryAuth string) {
 	if ok, err := r.docker.ImageExists(ctx, image); err != nil || ok {
 		return
 	}
+	trustRegistry(r.log, image, registryCA)
 	pctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 	start := time.Now()

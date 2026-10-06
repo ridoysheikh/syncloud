@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -128,5 +129,27 @@ func TestRunnerReportsBadImage(t *testing.T) {
 		case <-time.After(60 * time.Second):
 			t.Fatal("no failure reported for an unpullable image")
 		}
+	}
+}
+
+func TestTrustRegistry(t *testing.T) {
+	DockerCertsDir = t.TempDir()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	trustRegistry(log, "registry.10-77-0-11.sslip.io/shop/hello:v1", "PEM")
+	b, err := os.ReadFile(filepath.Join(DockerCertsDir, "registry.10-77-0-11.sslip.io", "ca.crt"))
+	if err != nil || string(b) != "PEM" {
+		t.Fatalf("ca.crt: %q %v", b, err)
+	}
+	for _, image := range []string{"busybox:1.37", "../etc/x/y:1", "library/nginx"} {
+		trustRegistry(log, image, "PEM")
+	}
+	entries, _ := os.ReadDir(DockerCertsDir)
+	if len(entries) != 1 {
+		t.Fatalf("wrote certificates for images without a registry host: %v", entries)
+	}
+	a := &agentv1.TaskSpec{TaskId: "t", Image: "x"}
+	b2 := &agentv1.TaskSpec{TaskId: "t", Image: "x", RegistryCa: "PEM", RegistryAuth: "tok"}
+	if SpecHash(a) != SpecHash(b2) {
+		t.Fatal("the registry certificate changes the spec hash (would recreate containers)")
 	}
 }

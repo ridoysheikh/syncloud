@@ -18,6 +18,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +76,11 @@ type Manager struct {
 	OnChange func()
 	// API is where the controller reaches the server (loopback).
 	API string
+	// CADir is where the cluster's self-signed certificates are written for
+	// the server to trust ("" = none); TrustPEM returns them ("" = none,
+	// e.g. once ACME issued real ones).
+	CADir    string
+	TrustPEM func() string
 
 	mu      sync.Mutex
 	s       state
@@ -150,13 +157,33 @@ func (m *Manager) Config() *system.GitServerConfig {
 	if !s.Enabled {
 		return nil
 	}
-	return &system.GitServerConfig{RootURL: m.RootURL(), SecretKey: s.SecretKey, InternalToken: s.InternalToken}
+	return &system.GitServerConfig{RootURL: m.RootURL(), SecretKey: s.SecretKey, InternalToken: s.InternalToken, CADir: m.syncCA()}
 }
 
 func randomHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// syncCA writes the certificates to trust into CADir and returns the
+// directory ("" when there is none). The file is rewritten only on change.
+func (m *Manager) syncCA() string {
+	if m.CADir == "" || m.TrustPEM == nil {
+		return ""
+	}
+	if err := os.MkdirAll(m.CADir, 0o755); err != nil {
+		m.log.Warn("git server trust directory", "err", err)
+		return ""
+	}
+	path := filepath.Join(m.CADir, "syncloud.pem")
+	pemText := m.TrustPEM()
+	if cur, err := os.ReadFile(path); err != nil || string(cur) != pemText {
+		if err := os.WriteFile(path, []byte(pemText), 0o644); err != nil {
+			m.log.Warn("git server trust file", "err", err)
+		}
+	}
+	return m.CADir
 }
 
 // SetEnabled turns the server on or off. Turning it off keeps its data
@@ -243,6 +270,9 @@ func (m *Manager) Run(ctx context.Context) {
 		m.mu.Lock()
 		on, ready := m.s.Enabled, m.ready
 		m.mu.Unlock()
+		if on {
+			m.syncCA() // certificates change when ACME issues or renews
+		}
 		if on && !ready {
 			err := m.provision(ctx)
 			m.mu.Lock()

@@ -724,6 +724,7 @@ type PullImage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Image         string                 `protobuf:"bytes,1,opt,name=image,proto3" json:"image,omitempty"`
 	RegistryAuth  string                 `protobuf:"bytes,2,opt,name=registry_auth,json=registryAuth,proto3" json:"registry_auth,omitempty"` // X-Registry-Auth (short-lived)
+	RegistryCa    string                 `protobuf:"bytes,3,opt,name=registry_ca,json=registryCa,proto3" json:"registry_ca,omitempty"`       // PEM to trust for the image's registry (self-signed, private networks)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -768,6 +769,13 @@ func (x *PullImage) GetImage() string {
 func (x *PullImage) GetRegistryAuth() string {
 	if x != nil {
 		return x.RegistryAuth
+	}
+	return ""
+}
+
+func (x *PullImage) GetRegistryCa() string {
+	if x != nil {
+		return x.RegistryCa
 	}
 	return ""
 }
@@ -1417,8 +1425,11 @@ type TaskSpec struct {
 	Privileged       bool                   `protobuf:"varint,19,opt,name=privileged,proto3" json:"privileged,omitempty"`                                       // only for platform builds (BuildKit, §5.8); never user-settable
 	RegistryAuth     string                 `protobuf:"bytes,18,opt,name=registry_auth,json=registryAuth,proto3" json:"registry_auth,omitempty"`                // X-Registry-Auth for the pull (short-lived; not part of the spec hash)
 	Entrypoint       []string               `protobuf:"bytes,20,rep,name=entrypoint,proto3" json:"entrypoint,omitempty"`                                        // overrides the image ENTRYPOINT when set
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// registry_ca is a certificate to trust for the image's registry, when the
+	// platform registry only has a self-signed one (§5.9; not part of the spec hash).
+	RegistryCa    string `protobuf:"bytes,21,opt,name=registry_ca,json=registryCa,proto3" json:"registry_ca,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskSpec) Reset() {
@@ -1589,6 +1600,13 @@ func (x *TaskSpec) GetEntrypoint() []string {
 		return x.Entrypoint
 	}
 	return nil
+}
+
+func (x *TaskSpec) GetRegistryCa() string {
+	if x != nil {
+		return x.RegistryCa
+	}
+	return ""
 }
 
 type PortBinding struct {
@@ -3837,10 +3855,12 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\x04last\x18\x06 \x01(\bR\x04last\"?\n" +
 	"\rUpgradeResult\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"F\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"g\n" +
 	"\tPullImage\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12#\n" +
-	"\rregistry_auth\x18\x02 \x01(\tR\fregistryAuth\"\x92\x01\n" +
+	"\rregistry_auth\x18\x02 \x01(\tR\fregistryAuth\x12\x1f\n" +
+	"\vregistry_ca\x18\x03 \x01(\tR\n" +
+	"registryCa\"\x92\x01\n" +
 	"\x05Hello\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12/\n" +
 	"\x04info\x18\x02 \x01(\v2\x1b.syncloud.agent.v1.NodeInfoR\x04info\x123\n" +
@@ -3905,7 +3925,7 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xfb\x06\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\x9c\a\n" +
 	"\bTaskSpec\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -3934,7 +3954,9 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\rregistry_auth\x18\x12 \x01(\tR\fregistryAuth\x12\x1e\n" +
 	"\n" +
 	"entrypoint\x18\x14 \x03(\tR\n" +
-	"entrypoint\x1a6\n" +
+	"entrypoint\x12\x1f\n" +
+	"\vregistry_ca\x18\x15 \x01(\tR\n" +
+	"registryCa\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a9\n" +

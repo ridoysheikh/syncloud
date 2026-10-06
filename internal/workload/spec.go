@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Spec is one immutable task definition revision (one container per task).
@@ -58,7 +59,14 @@ type Deployment struct {
 	CircuitBreaker *bool `json:"circuitBreaker,omitempty"`
 	// Rollback returns to the previous revision when the breaker trips (default on).
 	Rollback *bool `json:"rollback,omitempty"`
+	// DrainSeconds keeps a retired task running after it leaves the routes
+	// and service VIPs, so Traefik (which polls every 2s) and in-flight
+	// requests stop using it before it stops (default 5, 0 = stop at once).
+	DrainSeconds *int `json:"drainSeconds,omitempty"`
 }
+
+// DefaultDrain is the drain time of tasks with ports when the spec sets none.
+var DefaultDrain = 5 * time.Second
 
 func boolPtr(b bool) *bool { return &b }
 
@@ -167,6 +175,9 @@ func (s *Spec) Normalize() error {
 	}
 	if r.Memory < 4 || r.Memory > 4<<20 || r.MemoryLimit < r.Memory {
 		return errors.New("memory must be 4 MiB–4 TiB, and memoryLimit at least memory")
+	}
+	if d := s.Deployment.DrainSeconds; d != nil && (*d < 0 || *d > 300) {
+		return errors.New("deployment.drainSeconds must be between 0 and 300")
 	}
 	if s.Deployment.CircuitBreaker == nil {
 		s.Deployment.CircuitBreaker = boolPtr(true)

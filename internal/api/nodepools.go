@@ -370,20 +370,9 @@ func (s *Server) handlePoolJoinCommand(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "join token", err)
 		return
 	}
-	base := ""
-	if s.domains != nil {
-		base = s.domains.Endpoints().DashboardURL
-	}
-	if base == "" {
-		scheme := "http"
-		if isHTTPS(r) {
-			scheme = "https"
-		}
-		base = scheme + "://" + r.Host
-	}
 	u, _ := currentUser(r.Context())
 	s.audit(r, u.ID, "nodepool:CreatePoolJoinToken", "srn:syncloud:node-pool/"+p.Name, nil)
-	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "command": "curl -fsSL " + base + "/join.sh | sudo bash -s -- --token " + tok, "expiresIn": 86400})
+	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "command": s.joinCommand(r, "--token "+tok), "expiresIn": 86400})
 }
 
 // handleSetNodePool moves a node into a pool and sets its scale-in protection.
@@ -462,17 +451,6 @@ func (s *Server) handleRejoinToken(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "join token", err)
 		return
 	}
-	base := ""
-	if s.domains != nil {
-		base = s.domains.Endpoints().DashboardURL
-	}
-	if base == "" {
-		scheme := "http"
-		if isHTTPS(r) {
-			scheme = "https"
-		}
-		base = scheme + "://" + r.Host
-	}
 	s.audit(r, u.ID, "node:CreateRejoinToken", "srn:syncloud:node/"+n.ID, nil)
-	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "command": "curl -fsSL " + base + "/join.sh | sudo bash -s -- --token " + tok + " --name " + n.Name, "expiresIn": 86400})
+	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "command": s.joinCommand(r, "--token "+tok+" --name "+n.Name), "expiresIn": 86400})
 }

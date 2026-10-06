@@ -54,6 +54,7 @@ func run(args []string) error {
 		token := fs.String("token", "", "join token")
 		tokenFile := fs.String("token-file", "", "read the join token from a file")
 		name := fs.String("name", "", "node name (default: hostname)")
+		pin := fs.String("pin", "", "the controller certificate's key pin (sha256//…), for a self-signed certificate")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -70,7 +71,7 @@ func run(args []string) error {
 		if *name == "" {
 			*name = defaultName()
 		}
-		st, err := agent.Join(ctx, *dataDir, *controller, *token, *name)
+		st, err := agent.Join(ctx, *dataDir, *controller, *token, *name, *pin)
 		if err != nil {
 			return err
 		}

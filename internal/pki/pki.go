@@ -8,9 +8,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -230,4 +232,39 @@ func writeExclusive(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	return f.Close()
+}
+
+// SPKIPin is the SHA-256 pin of a PEM certificate's public key, in curl's
+// --pinnedpubkey form: "sha256//<base64>".
+func SPKIPin(certPEM []byte) (string, error) {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return "", errors.New("not a PEM certificate")
+	}
+	c, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(c.RawSubjectPublicKeyInfo)
+	return "sha256//" + base64.StdEncoding.EncodeToString(sum[:]), nil
+}
+
+// PinnedTLS accepts exactly the server whose leaf public key matches pin
+// (from SPKIPin), whoever signed it: for joining a controller that only has
+// a self-signed certificate.
+func PinnedTLS(pin string) *tls.Config {
+	return &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true, // replaced by the pin check below
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("the controller sent no certificate")
+			}
+			sum := sha256.Sum256(cs.PeerCertificates[0].RawSubjectPublicKeyInfo)
+			if "sha256//"+base64.StdEncoding.EncodeToString(sum[:]) != pin {
+				return errors.New("the controller's certificate does not match the pinned key (--pin)")
+			}
+			return nil
+		},
+	}
 }

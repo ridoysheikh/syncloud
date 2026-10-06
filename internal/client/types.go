@@ -141,6 +141,7 @@ type JoinToken struct {
 	SingleUse   bool      `json:"singleUse"`
 	Uses        int       `json:"uses"`
 	Token       string    `json:"token,omitempty"`
+	Command     string    `json:"command,omitempty"`
 }
 
 type JoinRequest struct {
@@ -882,8 +883,18 @@ func (c *Client) ListRegistryEvents(ctx context.Context, repo string, limit int)
 	return out.Items, c.Do(ctx, "GET", "/api/v1/registry/events?"+q.Encode(), nil, &out)
 }
 
-func (c *Client) RegistryInfo(ctx context.Context) (map[string]string, error) {
-	var out map[string]string
+// RegistryInfo is the registry's address and how to push to it.
+type RegistryInfo struct {
+	Host        string `json:"host"`
+	Alias       string `json:"alias"`
+	Login       string `json:"login"`
+	SelfSigned  bool   `json:"selfSigned,omitempty"`
+	Certificate string `json:"certificate,omitempty"`
+	Trust       string `json:"trust,omitempty"`
+}
+
+func (c *Client) RegistryInfo(ctx context.Context) (RegistryInfo, error) {
+	var out RegistryInfo
 	return out, c.Do(ctx, "GET", "/api/v1/registry/info", nil, &out)
 }
 

@@ -14,6 +14,7 @@ import { NodesTable } from "./NodesTable";
 interface JoinToken {
   id: string;
   token?: string;
+  command?: string;
   expiresAt: string;
   singleUse: boolean;
 }
@@ -167,7 +168,7 @@ function AddNodeDialog({
         <div className="flex flex-col gap-2.5">
           <Field label="Run on the new server">
             <CommandBox
-              value={`curl -fsSL ${origin}/join.sh | sudo bash -s -- --token ${token.token}`}
+              value={token.command ?? `curl -fsSL ${origin}/join.sh | sudo bash -s -- --token ${token.token}`}
             />
           </Field>
           <p className="text-faint text-xs">

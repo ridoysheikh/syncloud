@@ -3061,6 +3061,18 @@
                     },
                     "login": {
                       "type": "string"
+                    },
+                    "selfSigned": {
+                      "type": "boolean",
+                      "description": "the certificate is self-signed (a private network)"
+                    },
+                    "certificate": {
+                      "type": "string",
+                      "description": "the self-signed certificate (PEM)"
+                    },
+                    "trust": {
+                      "type": "string",
+                      "description": "shell command that makes Docker trust it"
                     }
                   }
                 }
@@ -11851,6 +11863,10 @@
           "token": {
             "type": "string",
             "description": "Only present in the create response"
+          },
+          "command": {
+            "type": "string",
+            "description": "the line to run on a new server (returned when the token is created); with a self-signed controller certificate it pins the certificate's key"
           }
         }
       },
@@ -12599,6 +12615,12 @@
               "rollback": {
                 "type": "boolean",
                 "default": true
+              },
+              "drainSeconds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 300,
+                "description": "seconds a retired task keeps running after it leaves the routes (default 5)"
               }
             }
           }
