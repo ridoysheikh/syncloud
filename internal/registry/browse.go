@@ -41,11 +41,14 @@ type Image struct {
 const manifestAccept = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, " +
 	"application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
 
+// BrowserSubject is the token subject the controller reads the registry as.
+const BrowserSubject = "syncloud-controller"
+
 // ErrUnavailable means the registry could not be reached.
 var ErrUnavailable = errors.New("registry unavailable")
 
 func (b *Browser) do(ctx context.Context, method, path, accept string, access []Access) (*http.Response, error) {
-	tok, err := b.Issuer.Issue("syncloud-controller", access, time.Now())
+	tok, err := b.Issuer.Issue(BrowserSubject, access, time.Now())
 	if err != nil {
 		return nil, err
 	}

@@ -64,6 +64,7 @@ type Server struct {
 	metrics               *metrics.Store
 	regMaint              *regmaint.Manager
 	upstreams             *upstream.Manager
+	registryHosts         func() []string
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -122,6 +123,8 @@ type Options struct {
 	RegistryMaint *regmaint.Manager
 	// Upstreams stores third-party registry credentials (§5.9); may be nil.
 	Upstreams *upstream.Manager
+	// RegistryHosts are the names images use for the private registry.
+	RegistryHosts func() []string
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -162,6 +165,7 @@ func New(o Options) *Server {
 		metrics:               o.Metrics,
 		regMaint:              o.RegistryMaint,
 		upstreams:             o.Upstreams,
+		registryHosts:         o.RegistryHosts,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -198,6 +202,7 @@ func (s *Server) Routes() []Route {
 		{Method: "DELETE", Path: "/api/v1/registry/lifecycle", h: s.handleDeleteLifecycle},
 		{Method: "POST", Path: "/api/v1/registry/lifecycle/preview", h: s.handlePreviewLifecycle},
 		{Method: "GET", Path: "/api/v1/registry/gc", h: s.handleGCRuns},
+		{Method: "GET", Path: "/api/v1/registry/events", h: s.handleRegistryEvents},
 		{Method: "GET", Path: "/api/v1/registry/upstreams", h: s.handleListUpstreams},
 		{Method: "PUT", Path: "/api/v1/registry/upstreams", h: s.handlePutUpstream},
 		{Method: "DELETE", Path: "/api/v1/registry/upstreams/{id}", h: s.handleDeleteUpstream},

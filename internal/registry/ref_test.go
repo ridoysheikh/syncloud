@@ -1,4 +1,4 @@
-package regmaint
+package registry
 
 import "testing"
 
@@ -16,7 +16,7 @@ func TestParseRef(t *testing.T) {
 		{"nginx:1.27", "", "", "", false},
 		{"ghcr.io/acme/app:1", "", "", "", false},
 	} {
-		repo, tag, digest, ok := parseRef(c.in, hosts)
+		repo, tag, digest, ok := ParseRef(c.in, hosts)
 		if repo != c.repo || tag != c.tag || digest != c.digest || ok != c.ok {
 			t.Errorf("%s: got %q %q %q %v", c.in, repo, tag, digest, ok)
 		}

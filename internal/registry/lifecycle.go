@@ -137,3 +137,29 @@ func Evaluate(images []Image, rules []Rule, inUse func(digest string) bool, now 
 	}
 	return out
 }
+
+// ParseRef splits a private-registry image reference into repository,
+// tag and digest. Other images return ok=false.
+func ParseRef(image string, hosts []string) (repo, tag, digest string, ok bool) {
+	path, found := strings.CutPrefix(image, "@registry/")
+	for _, h := range hosts {
+		if found {
+			break
+		}
+		if h != "" {
+			path, found = strings.CutPrefix(image, h+"/")
+		}
+	}
+	if !found {
+		return "", "", "", false
+	}
+	if i := strings.IndexByte(path, '@'); i >= 0 {
+		path, digest = path[:i], path[i+1:]
+	}
+	if i := strings.LastIndexByte(path, ':'); i > strings.LastIndexByte(path, '/') {
+		path, tag = path[:i], path[i+1:]
+	} else if digest == "" {
+		tag = "latest"
+	}
+	return path, tag, digest, path != ""
+}

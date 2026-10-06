@@ -65,7 +65,11 @@ reclaimed=$(echo "$out" | grep -o '"reclaimedBytes": [0-9]*' | grep -o '[0-9]*$'
 [ "${reclaimed:-0}" -gt 0 ] || fail "nothing reclaimed: $out"
 tags=$(api "localhost:7070/api/v1/registry/images?repository=shop/web" | grep -o '"tag":"[^"]*"' | cut -d'"' -f4 | sort | tr '\n' ' ')
 [ "$tags" = "dev v1 v3 v4 " ] || fail "tags after cleanup: $tags"
-echo "  ✓ cleanup expired v2 and reclaimed $((reclaimed / 1024)) KiB (untagged dev included); v1, v3, v4, dev remain"
+for _ in $(seq 1 10); do api "localhost:7070/api/v1/registry/events?repository=shop/web" | grep -q '"action":"delete"' && break; sleep 1; done
+ev=$(api "localhost:7070/api/v1/registry/events?repository=shop/web&limit=1000")
+[ "$(echo "$ev" | grep -o '"action":"push"' | wc -l)" -ge 6 ] || fail "pushes missing from registry events: $ev"
+echo "$ev" | grep -q '"action":"delete"' || fail "the cleanup's delete is missing from registry events"
+echo "  ✓ cleanup expired v2 and reclaimed $((reclaimed / 1024)) KiB (untagged dev included); v1, v3, v4, dev remain; pushes and the delete arrived as registry notifications"
 
 echo "== after"
 for _ in $(seq 1 30); do api localhost:7070/api/v1/system/tasks | grep -q '"taskId":"sys-registry"[^}]*"state":"running"' && break; sleep 1; done

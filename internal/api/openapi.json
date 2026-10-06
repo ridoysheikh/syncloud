@@ -3029,6 +3029,19 @@
                           "lifecycle": {
                             "type": "boolean",
                             "description": "has a lifecycle policy"
+                          },
+                          "pulls": {
+                            "type": "integer"
+                          },
+                          "lastPushedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "lastPulledAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
                           }
                         }
                       }
@@ -4093,6 +4106,56 @@
             "description": "Deleted"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/registry/events": {
+      "get": {
+        "operationId": "listRegistryEvents",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Recent manifest pushes, pulls and deletes reported by the registry (kept 30 days)",
+        "parameters": [
+          {
+            "name": "repository",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "only this repository"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "1-1000, default 100"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RegistryEvent"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -6044,6 +6107,41 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "pushes": {
+            "type": "integer"
+          },
+          "pulls": {
+            "type": "integer",
+            "description": "manifest pulls recorded from registry notifications"
+          },
+          "lastPushedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lastPulledAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "inUseBy": {
+            "type": "array",
+            "description": "services whose current revision runs this image",
+            "items": {
+              "type": "object",
+              "properties": {
+                "project": {
+                  "type": "string"
+                },
+                "environment": {
+                  "type": "string"
+                },
+                "service": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },
@@ -6401,6 +6499,45 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "RegistryEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "push",
+              "pull",
+              "delete"
+            ]
+          },
+          "repository": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string",
+            "description": "user email, node, build or controller"
+          },
+          "addr": {
+            "type": "string"
+          },
+          "userAgent": {
+            "type": "string"
           }
         }
       }

@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, Check, Copy, Eraser, Trash2 } from "lucide-react";
+import { Activity, Boxes, Check, Copy, Eraser, Trash2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
+import { useStreamTopic } from "@/lib/stream";
+import { serviceUrl } from "@/lib/workloads";
 import { bytes, since } from "@/lib/nodes";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
@@ -16,6 +19,21 @@ interface Repository {
   name: string;
   tags: number;
   lifecycle: boolean;
+  pulls: number;
+  lastPushedAt: string | null;
+  lastPulledAt: string | null;
+}
+
+interface RegistryEvent {
+  id: number;
+  at: string;
+  action: "push" | "pull" | "delete";
+  repository: string;
+  tag: string;
+  digest: string;
+  actor: string;
+  addr: string;
+  userAgent: string;
 }
 
 interface GCRun {
@@ -36,6 +54,9 @@ interface Image {
   sizeBytes: number;
   platforms: string[];
   created: string | null;
+  pulls: number;
+  lastPulledAt: string | null;
+  inUseBy: { project: string; environment: string; service: string }[];
 }
 
 interface RegistryInfo {
@@ -57,6 +78,83 @@ function CopyText({ text }: { text: string }) {
     >
       {done ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
     </IconButton>
+  );
+}
+
+/** Refetches registry queries when the registry reports pushes and pulls. */
+function useRegistryEvents() {
+  const qc = useQueryClient();
+  const onEvent = useCallback(
+    () => void qc.invalidateQueries({ queryKey: ["registry"] }),
+    [qc],
+  );
+  useStreamTopic("registry.event", onEvent);
+}
+
+const actionTone = { push: "ok", pull: "info", delete: "bad" } as const;
+
+/** Recent pushes, pulls and deletes (§5.9 event tracking). */
+function ActivityPanel({ repo }: { repo?: string }) {
+  const {
+    data = [],
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["registry", "events", repo ?? ""],
+    queryFn: async () =>
+      (
+        await api<{ items: RegistryEvent[] }>(
+          "GET",
+          `/registry/events?limit=${repo ? 100 : 15}${repo ? `&repository=${encodeURIComponent(repo)}` : ""}`,
+        )
+      ).items,
+  });
+  if (error) return null;
+  return (
+    <Panel title={repo ? `Activity: ${repo}` : "Recent activity"} flush>
+      <DataTable
+        rows={data}
+        rowKey={(e) => String(e.id)}
+        empty={
+          !isLoading && (
+            <EmptyState icon={Activity} title="No activity yet">
+              Pushes, pulls and deletes show up here as they happen.
+            </EmptyState>
+          )
+        }
+        columns={[
+          {
+            header: "When",
+            cell: (e) => <span className="text-muted">{since(e.at)}</span>,
+          },
+          {
+            header: "Action",
+            cell: (e) => (
+              <StatusBadge tone={actionTone[e.action]}>{e.action}</StatusBadge>
+            ),
+          },
+          {
+            header: "Image",
+            cell: (e) => (
+              <span className="font-mono" title={e.digest}>
+                {repo ? "" : e.repository}
+                {e.tag ? `:${e.tag}` : `@${e.digest.slice(7, 19)}`}
+              </span>
+            ),
+          },
+          {
+            header: "By",
+            className: "w-full",
+            cell: (e) => (
+              <span className="text-muted" title={e.userAgent}>
+                {e.actor || "—"}
+                {e.addr && <span className="text-faint"> · {e.addr}</span>}
+              </span>
+            ),
+          },
+        ]}
+      />
+    </Panel>
   );
 }
 
@@ -108,8 +206,15 @@ function PushCommands() {
 
 /** Registry overview (§5.10). */
 export function RegistryDashboard() {
+  useRegistryEvents();
   const { data: repos = [], error } = useRepos();
   const tags = repos.reduce((n, r) => n + r.tags, 0);
+  const pulls = repos.reduce((n, r) => n + r.pulls, 0);
+  const lastPush = repos
+    .map((r) => r.lastPushedAt)
+    .filter((t): t is string => !!t)
+    .sort()
+    .at(-1);
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader crumbs={["Registry"]} title="Registry" />
@@ -121,8 +226,13 @@ export function RegistryDashboard() {
       <div className={cn("grid grid-cols-2 md:grid-cols-4", gap)}>
         <StatTile label="Repositories" value={repos.length} />
         <StatTile label="Tags" value={tags} />
+        <StatTile label="Pulls" value={pulls} />
+        <StatTile label="Last push" value={lastPush ? since(lastPush) : "—"} />
       </div>
-      <PushCommands />
+      <div className={cn("grid grid-cols-1 xl:grid-cols-2", gap)}>
+        <PushCommands />
+        <ActivityPanel />
+      </div>
       <Cleanup />
     </div>
   );
@@ -236,9 +346,10 @@ function Cleanup() {
 /** Repositories and their images (§5.10). */
 export function RepositoriesPage() {
   const qc = useQueryClient();
+  useRegistryEvents();
   const { data: repos = [], isLoading, error } = useRepos();
   const [repo, setRepo] = useState("");
-  const [tab, setTab] = useState<"images" | "lifecycle">("images");
+  const [tab, setTab] = useState<"images" | "activity" | "lifecycle">("images");
   const current = repo || repos[0]?.name || "";
   const images = useQuery({
     queryKey: ["registry", "images", current],
@@ -286,7 +397,14 @@ export function RepositoriesPage() {
                     )}
                   >
                     <span className="truncate">{r.name}</span>
-                    <span className="text-faint flex items-center gap-1.5">
+                    <span
+                      className="text-faint flex items-center gap-1.5"
+                      title={
+                        r.lastPulledAt
+                          ? `last pulled ${since(r.lastPulledAt)}`
+                          : "never pulled"
+                      }
+                    >
                       {r.lifecycle && (
                         <span
                           title="lifecycle policy"
@@ -304,7 +422,7 @@ export function RepositoriesPage() {
         <div className={cn("flex min-w-0 flex-col", gap)}>
           {current && (
             <div className="border-line flex gap-3 border-b text-xs">
-              {(["images", "lifecycle"] as const).map((t) => (
+              {(["images", "activity", "lifecycle"] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
@@ -315,13 +433,21 @@ export function RepositoriesPage() {
                       : "text-muted hover:text-fg border-transparent",
                   )}
                 >
-                  {t === "images" ? "Images" : "Lifecycle policy"}
+                  {
+                    {
+                      images: "Images",
+                      activity: "Activity",
+                      lifecycle: "Lifecycle policy",
+                    }[t]
+                  }
                 </button>
               ))}
             </div>
           )}
           {tab === "lifecycle" && current ? (
             <LifecyclePanel key={current} repo={current} />
+          ) : tab === "activity" && current ? (
+            <ActivityPanel repo={current} />
           ) : (
             <Panel title={current || "Images"} flush>
               <DataTable
@@ -362,12 +488,52 @@ export function RepositoriesPage() {
                   },
                   {
                     header: "Created",
-                    className: "w-full",
                     cell: (i) => (
                       <span className="text-muted">
                         {i.created ? since(i.created) : "—"}
                       </span>
                     ),
+                  },
+                  {
+                    header: "Last pull",
+                    cell: (i) => (
+                      <span
+                        className="text-muted whitespace-nowrap"
+                        title={`${i.pulls} pulls`}
+                      >
+                        {i.lastPulledAt ? since(i.lastPulledAt) : "never"}
+                        {i.pulls > 0 && (
+                          <span className="text-faint"> · {i.pulls}×</span>
+                        )}
+                      </span>
+                    ),
+                  },
+                  {
+                    header: "In use by",
+                    className: "w-full",
+                    cell: (i) =>
+                      i.inUseBy.length === 0 ? (
+                        <span className="text-faint">—</span>
+                      ) : (
+                        <span className="flex flex-wrap gap-x-2">
+                          {i.inUseBy.map((u) => {
+                            const to: string = serviceUrl({
+                              project: u.project,
+                              environment: u.environment,
+                              name: u.service,
+                            });
+                            return (
+                              <Link
+                                key={to}
+                                to={to}
+                                className="hover:text-accent"
+                              >
+                                {u.project}/{u.environment}/{u.service}
+                              </Link>
+                            );
+                          })}
+                        </span>
+                      ),
                   },
                   {
                     header: "",

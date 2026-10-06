@@ -172,13 +172,32 @@ func (s *Server) handleListRepositories(w http.ResponseWriter, r *http.Request) 
 	for _, p := range policies {
 		hasPolicy[p.Repository] = true
 	}
+	stats, err := s.store.ImageStatsFor(r.Context(), "")
+	if err != nil {
+		s.internalError(w, "registry stats", err)
+		return
+	}
 	type repoView struct {
 		registry.Repository
-		Lifecycle bool `json:"lifecycle"`
+		Lifecycle    bool       `json:"lifecycle"`
+		Pulls        int        `json:"pulls"`
+		LastPushedAt *time.Time `json:"lastPushedAt"`
+		LastPulledAt *time.Time `json:"lastPulledAt"`
 	}
+	byRepo := map[string]*repoView{}
 	out := make([]repoView, 0, len(repos))
 	for _, rp := range repos {
 		out = append(out, repoView{Repository: rp, Lifecycle: hasPolicy[rp.Name]})
+	}
+	for i := range out {
+		byRepo[out[i].Name] = &out[i]
+	}
+	for _, st := range stats {
+		if v := byRepo[st.Repository]; v != nil {
+			v.Pulls += st.Pulls
+			v.LastPushedAt = latest(v.LastPushedAt, st.LastPushedAt)
+			v.LastPulledAt = latest(v.LastPulledAt, st.LastPulledAt)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
@@ -197,7 +216,12 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
 		s.registryErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": imgs})
+	out, err := s.imageViews(r.Context(), repo, imgs)
+	if err != nil {
+		s.internalError(w, "registry image stats", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
 func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {

@@ -41,6 +41,22 @@ api "$SVC/tasks" | grep -q '"state":"running"' || { api "$SVC/tasks"; fail "task
 x sc-e2e-ctl docker image inspect 127.0.0.1:5000/shop/hello:v1 >/dev/null || fail "image was not pulled from the registry"
 echo "  ✓ node pulled @registry/shop/hello:v1 with a controller-minted token (no docker login)"
 
+echo "== registry events"
+for _ in $(seq 1 20); do api "localhost:7070/api/v1/registry/events?repository=shop/hello" | grep -q '"action":"pull"' && break; sleep 1; done
+ev=$(api "localhost:7070/api/v1/registry/events?repository=shop/hello")
+echo "$ev" | grep -q '"action":"push","repository":"shop/hello","tag":"v1"' || fail "push event missing: $ev"
+echo "$ev" | grep -q '"action":"pull","repository":"shop/hello","tag":"v1"[^}]*"actor":"node"' || fail "node pull event missing: $ev"
+img=$(api "localhost:7070/api/v1/registry/images?repository=shop/hello")
+echo "$img" | grep -q '"pulls":[1-9]' || fail "pull count missing: $img"
+echo "$img" | grep -q '"lastPulledAt":"20' || fail "last pulled missing: $img"
+echo "$img" | grep -q '"inUseBy":\[{"project":"shop","environment":"production","service":"hello"}\]' || fail "in use by missing: $img"
+api localhost:7070/api/v1/registry/repositories | grep -q '"lastPushedAt":"20[^"]*","lastPulledAt":"20' || fail "repository times missing"
+pulls=$(echo "$img" | grep -o '"pulls":[0-9]*' | head -1)
+api "localhost:7070/api/v1/registry/images?repository=shop/hello" | grep -q "$pulls" || fail "browsing the registry counted as a pull"
+synctl() { x -i -e SYNCLOUD_ENDPOINT=http://127.0.0.1:7070 -e SYNCLOUD_ACCESS_KEY_ID="$KID" -e SYNCLOUD_SECRET_ACCESS_KEY="$KSEC" sc-e2e-ctl /opt/sc/synctl "$@"; }
+synctl registry events shop/hello </dev/null | grep -q 'PULL.*shop/hello:v1.*node' || fail "synctl registry events"
+echo "  ✓ push and node pull recorded; pulls, last pulled and in use by on the image"
+
 echo "== pre-pull"
 x sc-e2e-ctl sh -c "echo '$KSEC' | docker login 127.0.0.1:5000 -u '$KID' --password-stdin" >/dev/null 2>&1
 x sc-e2e-ctl sh -c "printf 'FROM busybox:1.37\nRUN echo two > /v\n' | docker build -q -t 127.0.0.1:5000/shop/hello:v2 - >/dev/null && docker push -q 127.0.0.1:5000/shop/hello:v2 >/dev/null && docker rmi 127.0.0.1:5000/shop/hello:v2 >/dev/null"

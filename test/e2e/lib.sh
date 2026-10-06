@@ -124,7 +124,13 @@ start_traefik() {
 # system task: token auth against the controller (§5.9).
 start_registry() {
   x sc-e2e-ctl docker load -q -i /opt/sc/registry.tar >/dev/null
-  x sc-e2e-ctl docker run -d --name registry -p 127.0.0.1:5000:5000 -v /data/registry/registry-token.crt:/etc/syncloud/registry-token.crt:ro \
+  # Host networking on loopback, like the system task, so notifications
+  # reach the controller's loopback API.
+  local tok notify
+  tok=$(x sc-e2e-ctl cat /data/traefik.token)
+  notify="[{\"name\":\"syncloud\",\"url\":\"http://127.0.0.1:7070/internal/registry/events\",\"headers\":{\"X-Syncloud-Token\":[\"$tok\"]},\"timeout\":\"3s\",\"threshold\":5,\"backoff\":\"10s\"}]"
+  x sc-e2e-ctl docker run -d --name registry --network host -v /data/registry/registry-token.crt:/etc/syncloud/registry-token.crt:ro \
+    -e REGISTRY_HTTP_ADDR=127.0.0.1:5000 -e REGISTRY_HTTP_DEBUG_ADDR=127.0.0.1:5001 -e "REGISTRY_NOTIFICATIONS_ENDPOINTS=$notify" \
     -e REGISTRY_AUTH_TOKEN_REALM=http://127.0.0.1:7070/api/v1/registry/token -e REGISTRY_AUTH_TOKEN_SERVICE=syncloud-registry \
     -e REGISTRY_AUTH_TOKEN_ISSUER=syncloud -e REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE=/etc/syncloud/registry-token.crt \
     -e REGISTRY_STORAGE_DELETE_ENABLED=true -e OTEL_TRACES_EXPORTER=none registry:3.1.2 >/dev/null

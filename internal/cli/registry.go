@@ -48,9 +48,9 @@ func (a *app) registryCmd() *cobra.Command {
 					if x.Lifecycle {
 						lc = "active"
 					}
-					rows = append(rows, []string{x.Name, fmt.Sprint(x.Tags), lc})
+					rows = append(rows, []string{x.Name, fmt.Sprint(x.Tags), lc, ago(x.LastPushedAt), ago(x.LastPulledAt), fmt.Sprint(x.Pulls)})
 				}
-				return a.printer().table(rs, []string{"REPOSITORY", "TAGS", "LIFECYCLE"}, rows)
+				return a.printer().table(rs, []string{"REPOSITORY", "TAGS", "LIFECYCLE", "PUSHED", "PULLED", "PULLS"}, rows)
 			},
 		},
 		&cobra.Command{
@@ -75,9 +75,17 @@ func (a *app) registryCmd() *cobra.Command {
 					if len(d) > 19 {
 						d = d[:19]
 					}
-					rows = append(rows, []string{x.Tag, d, bytesIEC(uint64(x.SizeBytes)), strings.Join(x.Platforms, ","), created})
+					var users []string
+					for _, u := range x.InUseBy {
+						users = append(users, u.Project+"/"+u.Environment+"/"+u.Service)
+					}
+					inUse := "-"
+					if len(users) > 0 {
+						inUse = strings.Join(users, ",")
+					}
+					rows = append(rows, []string{x.Tag, d, bytesIEC(uint64(x.SizeBytes)), strings.Join(x.Platforms, ","), created, ago(x.LastPulledAt), fmt.Sprint(x.Pulls), inUse})
 				}
-				return a.printer().table(is, []string{"TAG", "DIGEST", "SIZE", "PLATFORMS", "CREATED"}, rows)
+				return a.printer().table(is, []string{"TAG", "DIGEST", "SIZE", "PLATFORMS", "CREATED", "PULLED", "PULLS", "IN USE BY"}, rows)
 			},
 		},
 		&cobra.Command{
@@ -100,6 +108,37 @@ func (a *app) registryCmd() *cobra.Command {
 			},
 		},
 	)
-	r.AddCommand(a.lifecycleCmd(), a.gcCmd(), a.upstreamsCmd())
+	var limit int
+	evCmd := &cobra.Command{
+		Use: "events [REPOSITORY]", Aliases: []string{"activity"}, Short: "Recent pushes, pulls and deletes", Args: cobra.MaximumNArgs(1),
+		Annotations: op("listRegistryEvents"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			repo := ""
+			if len(args) == 1 {
+				repo = args[0]
+			}
+			evs, err := c.ListRegistryEvents(ctx(cmd), repo, limit)
+			if err != nil {
+				return err
+			}
+			rows := make([][]string, 0, len(evs))
+			for _, e := range evs {
+				ref := e.Repository
+				if e.Tag != "" {
+					ref += ":" + e.Tag
+				} else if e.Digest != "" {
+					ref += "@" + e.Digest[:min(len(e.Digest), 19)]
+				}
+				rows = append(rows, []string{age(e.At), strings.ToUpper(e.Action), ref, e.Actor, e.Addr})
+			}
+			return a.printer().table(evs, []string{"WHEN", "ACTION", "IMAGE", "BY", "FROM"}, rows)
+		},
+	}
+	evCmd.Flags().IntVar(&limit, "limit", 50, "how many events to show (max 1000)")
+	r.AddCommand(evCmd, a.lifecycleCmd(), a.gcCmd(), a.upstreamsCmd())
 	return r
 }

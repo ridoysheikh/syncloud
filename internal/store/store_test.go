@@ -104,3 +104,45 @@ func TestSessionExpiry(t *testing.T) {
 		t.Fatalf("deleted %d err=%v", n, err)
 	}
 }
+
+func TestRegistryEventsCountOnePullPerPull(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	at := time.Unix(1_800_000_000, 0)
+	ev := func(id, action, tag, digest string, sec int) RegistryEvent {
+		return RegistryEvent{EventID: id, At: at.Add(time.Duration(sec) * time.Second), Action: action, Repository: "shop/api",
+			Tag: tag, Digest: digest, Actor: "node", Addr: "10.90.0.2"}
+	}
+	n, err := s.RecordRegistryEvents(ctx, []RegistryEvent{
+		ev("1", "push", "v1", "sha256:a", 0),
+		ev("2", "pull", "v1", "sha256:a", 10), // HEAD by tag
+		ev("3", "pull", "", "sha256:a", 11),   // GET by digest: same pull
+		ev("4", "pull", "v1", "sha256:a", 100),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Errorf("recorded %d events, want 3", n)
+	}
+	if n, _ := s.RecordRegistryEvents(ctx, []RegistryEvent{ev("1", "push", "v1", "sha256:a", 0)}); n != 0 {
+		t.Errorf("a redelivered event was recorded again")
+	}
+	st, err := s.ImageStatsFor(ctx, "shop/api")
+	if err != nil || len(st) != 1 {
+		t.Fatalf("stats %v %v", st, err)
+	}
+	if st[0].Pushes != 1 || st[0].Pulls != 2 || !st[0].LastPulledAt.Equal(at.Add(100*time.Second)) {
+		t.Errorf("stats %+v", st[0])
+	}
+	if _, err := s.RecordRegistryEvents(ctx, []RegistryEvent{ev("5", "delete", "", "sha256:a", 200)}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.ImageStatsFor(ctx, "shop/api"); len(st) != 0 {
+		t.Errorf("stats kept after delete: %v", st)
+	}
+	evs, _ := s.ListRegistryEvents(ctx, "shop/api", 10)
+	if len(evs) != 4 || evs[0].Action != "delete" {
+		t.Errorf("events %+v", evs)
+	}
+}

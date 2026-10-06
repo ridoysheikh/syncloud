@@ -835,17 +835,46 @@ func (c *Client) Incidents(ctx context.Context, openOnly bool) ([]Incident, erro
 }
 
 type Repository struct {
-	Name      string `json:"name"`
-	Tags      int    `json:"tags"`
-	Lifecycle bool   `json:"lifecycle"`
+	Name         string     `json:"name"`
+	Tags         int        `json:"tags"`
+	Lifecycle    bool       `json:"lifecycle"`
+	Pulls        int        `json:"pulls"`
+	LastPushedAt *time.Time `json:"lastPushedAt"`
+	LastPulledAt *time.Time `json:"lastPulledAt"`
 }
 
 type Image struct {
-	Tag       string     `json:"tag"`
-	Digest    string     `json:"digest"`
-	SizeBytes int64      `json:"sizeBytes"`
-	Platforms []string   `json:"platforms"`
-	Created   *time.Time `json:"created"`
+	Tag          string     `json:"tag"`
+	Digest       string     `json:"digest"`
+	SizeBytes    int64      `json:"sizeBytes"`
+	Platforms    []string   `json:"platforms"`
+	Created      *time.Time `json:"created"`
+	Pulls        int        `json:"pulls"`
+	LastPulledAt *time.Time `json:"lastPulledAt"`
+	InUseBy      []struct {
+		Project     string `json:"project"`
+		Environment string `json:"environment"`
+		Service     string `json:"service"`
+	} `json:"inUseBy"`
+}
+
+type RegistryEvent struct {
+	At         time.Time `json:"at"`
+	Action     string    `json:"action"`
+	Repository string    `json:"repository"`
+	Tag        string    `json:"tag"`
+	Digest     string    `json:"digest"`
+	Actor      string    `json:"actor"`
+	Addr       string    `json:"addr"`
+}
+
+func (c *Client) ListRegistryEvents(ctx context.Context, repo string, limit int) ([]RegistryEvent, error) {
+	var out list[RegistryEvent]
+	q := url.Values{"limit": {fmt.Sprint(limit)}}
+	if repo != "" {
+		q.Set("repository", repo)
+	}
+	return out.Items, c.Do(ctx, "GET", "/api/v1/registry/events?"+q.Encode(), nil, &out)
 }
 
 func (c *Client) RegistryInfo(ctx context.Context) (map[string]string, error) {

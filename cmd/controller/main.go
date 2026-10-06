@@ -287,6 +287,12 @@ func serve(args []string) error {
 	execs := execrelay.New(gw)
 	gw.AddHooks(execs.Hooks())
 	regBrowser := &dockerregistry.Browser{URL: "http://" + system.RegistryAddr, Issuer: regIssuer}
+	// Push, pull and delete notifications from the registry (§5.9).
+	regEvents := &dockerregistry.Events{
+		Store: st, Token: traefikToken, TokenHeader: system.TraefikTokenHeader, Log: log,
+		OnEvent: func(repos []string) { bus.Publish("registry.event", repos) },
+	}
+	go regEvents.Prune(ctx)
 	// Lifecycle policies and garbage collection need the registry system task.
 	var regMaint *regmaint.Manager
 	if cfg.SystemTasks {
@@ -352,14 +358,16 @@ func serve(args []string) error {
 		Store: st, Secrets: box, CA: ca, Nodes: registry, GatewayAddr: cfg.AgentAdvertise,
 		System: sysMgr, Registry: regIssuer,
 		Internal: map[string]http.Handler{
-			"GET /internal/traefik/config": traefikProvider,
-			"GET " + certs.ChallengePrefix: certMgr,
+			"GET /internal/traefik/config":      traefikProvider,
+			"POST " + system.RegistryEventsPath: regEvents,
+			"GET " + certs.ChallengePrefix:      certMgr,
 		},
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
 		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon,
 		RegistryBrowser:       regBrowser,
 		RegistryMaint:         regMaint,
 		Upstreams:             upstreams,
+		RegistryHosts:         func() []string { return []string{registryHost(), domains.Endpoints().RegistryHost} },
 		Builds:                buildMgr,
 		Metrics:               metricStore,
 		ControllerSchedulable: cfg.ControllerSchedulable,

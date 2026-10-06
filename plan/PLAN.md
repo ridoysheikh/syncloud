@@ -1321,7 +1321,7 @@ Because there is only one controller:
     - `synctl registry gc run --wait` expires v2 and reclaims space (untagged layers included).
     - Pushes work again afterwards, and the service kept running.
     - Screenshots checked.
-  - Still to do in Phase 4: registry event tracking (last pulled), watch rules and path filters, Nixpacks.
+  - Still to do in Phase 4: watch rules and path filters, Nixpacks.
 - ✅ Slice 4d (2026-10-06), upstream credentials and pre-pull:
   - **Upstream credentials (§5.9)**:
     - One credential per registry host (Docker Hub aliases normalized to `docker.io`). The password is sealed with the master key and never returned.
@@ -1334,6 +1334,14 @@ Because there is only one controller:
     - A new revision's image is pre-pulled.
     - An image from the same registry by host name (no `@registry`, no docker login) is refused, then pulls once a credential is stored, and the API never returns the password.
     - `deploy.sh` and `services.sh` still pass.
+- ✅ Slice 4e (2026-10-06), registry event tracking (§5.9):
+  - The registry system task posts its **notifications** to the controller (`/internal/registry/events`, authenticated with the internal token). To reach the controller's loopback API it now runs in host networking on `127.0.0.1:5000` (debug server on `127.0.0.1:5001`), like Traefik.
+  - Only manifest events are kept (layers and configs are noise), including HEAD requests: Docker resolves a tag with HEAD, often the only manifest request on a warm node. The manifest requests of one pull (HEAD by tag, index, platform manifest) are merged per repository, actor and address within 30s. The dashboard reading manifests is not a pull. Redelivered events are ignored (unique event ID).
+  - SQLite keeps events for 30 days and per-digest counters (pushes, pulls, last pushed, last pulled) until the image is deleted.
+  - **In use by**: the services whose current revision runs each image (by tag or digest, `@registry/…` or host name).
+  - API `GET /registry/events?repository=&limit=`; repositories gain `pulls`, `lastPushedAt`, `lastPulledAt`; images gain `pulls`, `lastPulledAt`, `inUseBy`. synctl `registry events [REPO]`, plus PULLED, PULLS and IN USE BY columns.
+  - **Dashboard:** Pulls and Last push tiles and a Recent activity panel on the registry dashboard; an Activity tab per repository; Last pull and In use by (linked to the service) on images. Pages refresh live on `registry.event`.
+  - Verified: `test/e2e/registry.sh` (push and node pull recorded, counters, in use by, browsing not counted, synctl) and `test/e2e/lifecycle.sh` (the real system task delivers pushes and the cleanup's delete).
 - ✅ Slice 4b (2026-10-06), Git builds:
   - **Git source per service**: an https URL, branch, context directory, Dockerfile, an optional token (sealed with the master key), auto-deploy, and a poll interval of at least 15s. Connecting runs a smart-HTTP `ls-remote` (no git binary on the controller) to fail early on a wrong URL, branch or token.
   - **Polling with backoff**: errors double the interval, up to 1h. **Webhooks**: `POST /api/v1/hooks/git/{id}` accepts GitHub `X-Hub-Signature-256`, Gitea/Forgejo `X-Gitea-Signature` (HMAC-SHA256) and the GitLab `X-Gitlab-Token`. A webhook only triggers a check, so the payload is never trusted. Each commit is built once (unique on service plus SHA).

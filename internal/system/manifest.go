@@ -4,6 +4,7 @@
 package system
 
 import (
+	"encoding/json"
 	"fmt"
 
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
@@ -118,11 +119,20 @@ func traefikSpec(c Config) *agentv1.TaskSpec {
 	}
 }
 
+// registrySpec runs the registry in host networking on loopback, like
+// Traefik, so its notification webhook reaches the controller's loopback API.
 func registrySpec(c Config) *agentv1.TaskSpec {
+	notify, _ := json.Marshal([]map[string]any{{
+		"name": "syncloud", "url": c.ControllerURL + RegistryEventsPath,
+		"headers": map[string][]string{TraefikTokenHeader: {c.TraefikToken}},
+		"timeout": "3s", "threshold": 5, "backoff": "10s",
+	}})
 	spec := &agentv1.TaskSpec{
 		TaskId: "sys-registry", Name: "syncloud-registry", Image: ImageRegistry,
 		Env: map[string]string{
-			"REGISTRY_HTTP_ADDR":                 ":5000",
+			"REGISTRY_HTTP_ADDR":                 RegistryAddr,
+			"REGISTRY_HTTP_DEBUG_ADDR":           "127.0.0.1:5001",
+			"REGISTRY_NOTIFICATIONS_ENDPOINTS":   string(notify),
 			"REGISTRY_STORAGE_DELETE_ENABLED":    "true",
 			"REGISTRY_AUTH_TOKEN_REALM":          c.RegistryRealm,
 			"REGISTRY_AUTH_TOKEN_SERVICE":        "syncloud-registry",
@@ -131,18 +141,21 @@ func registrySpec(c Config) *agentv1.TaskSpec {
 			"REGISTRY_LOG_LEVEL":                 "info",
 			"OTEL_TRACES_EXPORTER":               "none",
 		},
-		Ports: []*agentv1.PortBinding{{HostIp: "127.0.0.1", HostPort: 5000, ContainerPort: 5000}},
 		Mounts: []*agentv1.Mount{
 			{Type: agentv1.Mount_TYPE_VOLUME, Source: "syncloud-registry", Target: "/var/lib/registry"},
 			{Type: agentv1.Mount_TYPE_BIND, Source: c.RegistryTokenCert, Target: "/etc/syncloud/registry-token.crt", ReadOnly: true},
 		},
-		NetworkMode: Network, System: true,
+		NetworkMode: "host", System: true,
 	}
 	if c.RegistryReadOnly {
 		spec.Env["REGISTRY_STORAGE_MAINTENANCE_READONLY"] = `{"enabled": true}`
 	}
 	return spec
 }
+
+// RegistryEventsPath receives the registry's notifications (authenticated
+// with TraefikToken in TraefikTokenHeader).
+const RegistryEventsPath = "/internal/registry/events"
 
 // TraefikTokenHeader carries Config.TraefikToken on config polls.
 const TraefikTokenHeader = "X-Syncloud-Token"
