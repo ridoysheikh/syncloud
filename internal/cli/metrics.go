@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -72,6 +74,63 @@ func (a *app) metricsCmd() *cobra.Command {
 	}
 	a.scopeFlags(cmd, &s)
 	cmd.Flags().StringVar(&rng, "range", "1h", "time range: 15m, 1h, 6h, 24h or 7d")
+	var qrng string
+	query := &cobra.Command{
+		Use: "query PROMQL", Short: "Run a PromQL query over all stored metrics; prints each series' latest value", Args: cobra.ExactArgs(1),
+		Annotations: op("exploreMetrics"),
+		Example:     `  synctl metrics query 'sum by (service) (rate(syncloud_task_cpu_seconds_total[5m]))'`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var out struct {
+				Series []struct {
+					Labels map[string]string `json:"labels"`
+					Points [][2]float64      `json:"points"`
+				} `json:"series"`
+				Truncated bool `json:"truncated"`
+			}
+			if err := a.do(cmd, "GET", "/api/v1/metrics/query?range="+url.QueryEscape(qrng)+"&query="+url.QueryEscape(args[0]), nil, &out); err != nil {
+				return err
+			}
+			rows := [][]string{}
+			for _, sr := range out.Series {
+				keys := make([]string, 0, len(sr.Labels))
+				for k := range sr.Labels {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				var lbl []string
+				for _, k := range keys {
+					lbl = append(lbl, k+"="+sr.Labels[k])
+				}
+				last := "-"
+				if n := len(sr.Points); n > 0 {
+					last = fmt.Sprintf("%g", sr.Points[n-1][1])
+				}
+				rows = append(rows, []string{"{" + strings.Join(lbl, ", ") + "}", last, fmt.Sprint(len(sr.Points))})
+			}
+			if err := a.printer().table(out, []string{"SERIES", "LATEST", "POINTS"}, rows); err != nil {
+				return err
+			}
+			if out.Truncated {
+				fmt.Fprintln(a.out, "(only the first 200 series)")
+			}
+			return nil
+		},
+	}
+	query.Flags().StringVar(&qrng, "range", "1h", "time range: 15m, 1h, 6h, 24h or 7d")
+	cmd.AddCommand(query, &cobra.Command{
+		Use: "names", Short: "Metric names stored in the last 24 hours", Args: cobra.NoArgs, Annotations: op("listMetricNames"),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			names, err := listOf[string](a, cmd, "/api/v1/metrics/names")
+			if err != nil {
+				return err
+			}
+			if a.output == "json" {
+				return a.printer().json(names)
+			}
+			fmt.Fprintln(a.out, strings.Join(names, "\n"))
+			return nil
+		},
+	})
 	return cmd
 }
 

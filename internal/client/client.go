@@ -200,3 +200,41 @@ func (c *Client) ExecDial(ctx context.Context, taskID string, command []string, 
 	conn.SetReadLimit(4 << 20)
 	return conn, nil
 }
+
+// Send sends a signed request with a raw body (any content type) and returns
+// the response for the caller to read and close; non-2xx statuses become
+// errors. For uploads and downloads of files.
+func (c *Client) Send(ctx context.Context, method, path string, body []byte, contentType string) (*http.Response, error) {
+	ref, err := url.Parse(path)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.endpoint.ResolveReference(ref).String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	switch {
+	case c.creds.AccessKeyID != "":
+		if c.creds.SessionToken != "" {
+			req.Header.Set(HeaderSessionToken, c.creds.SessionToken)
+		}
+		sigv.Sign(req, c.creds.AccessKeyID, c.creds.SecretAccessKey, body, c.now())
+	case c.creds.Token != "":
+		req.Header.Set("Authorization", "Bearer "+c.creds.Token)
+	}
+	hc := *c.http
+	hc.Timeout = 0 // large files
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, decodeError(resp.StatusCode, b)
+	}
+	return resp, nil
+}

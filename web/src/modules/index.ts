@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import type { DashboardModule } from "./types";
 import { OverviewPage } from "./overview/OverviewPage";
-import { planned } from "./planned";
 import { CredentialsPage } from "./iam/CredentialsPage";
 import {
   AuditPage,
@@ -48,6 +47,7 @@ import { PlatformPage } from "./settings/PlatformPage";
 import { DomainsPage } from "./settings/DomainsPage";
 import { BackupsPage } from "./settings/BackupsPage";
 import { UpdatesPage } from "./settings/UpdatesPage";
+import { BucketPage, EndpointFormPage, EndpointPage, StoragePage } from "./storage/StoragePages";
 import { TopologyPage } from "./network/TopologyPage";
 import { FirewallPage, FirewallPolicyPage } from "./network/FirewallPage";
 import { SecurityGroupPage, SecurityGroupsPage } from "./network/SecurityGroups";
@@ -56,6 +56,7 @@ import { MiddlewarePage, RoutingPage } from "./network/RoutingPage";
 import { LogsPage } from "./logs/LogsPage";
 import { TrafficPage } from "./traffic/Traffic";
 import { AlertsPage } from "./monitoring/AlertsPage";
+import { MetricsExplorerPage } from "./monitoring/MetricsExplorer";
 import { AlertRulePage } from "./monitoring/AlertRulePage";
 import { BuildsPage, GitSourcesPage } from "./git/GitPages";
 
@@ -134,7 +135,13 @@ export const modules: DashboardModule[] = [
     label: "Storage",
     icon: HardDrive,
     order: 40,
-    pages: [{ path: "/storage", label: "S3", component: planned([], "Storage (S3)", "Phase 4–7", "§16", "S3 endpoints, bindings and the bucket browser.") }],
+    pages: [
+      { path: "/storage", label: "S3", component: StoragePage },
+      { path: "/storage/endpoints/new", label: "Add S3 endpoint", component: EndpointFormPage, hidden: true },
+      { path: "/storage/endpoints/$endpoint/edit", label: "Edit S3 endpoint", component: EndpointFormPage, hidden: true },
+      { path: "/storage/$endpoint", label: "S3 endpoint", component: EndpointPage, hidden: true },
+      { path: "/storage/$endpoint/$bucket", label: "Bucket", component: BucketPage, hidden: true },
+    ],
   },
   {
     id: "registry",
@@ -174,7 +181,7 @@ export const modules: DashboardModule[] = [
     icon: Activity,
     order: 80,
     pages: [
-      { path: "/monitoring/metrics", label: "Metrics", component: planned(["Monitoring"], "Metrics explorer", "Phase 1", "§9.1", "PromQL explorer over VictoriaMetrics.") },
+      { path: "/monitoring/metrics", label: "Metrics", component: MetricsExplorerPage },
       { path: "/monitoring/alerts", label: "Alerts", component: AlertsPage },
       { path: "/monitoring/alerts/rules/new", label: "New alert rule", component: AlertRulePage, hidden: true },
       { path: "/monitoring/alerts/rules/$id", label: "Alert rule", component: AlertRulePage, hidden: true },

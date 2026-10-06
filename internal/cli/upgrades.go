@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -173,7 +174,19 @@ func (a *app) agentUpgradeCmds() []*cobra.Command {
 	}
 	up.Flags().BoolVar(&force, "force", false, "also re-send to nodes already at the target version")
 	up.Flags().BoolVar(&wait, "wait", true, "wait for the rollout to finish")
-	return []*cobra.Command{agents, up}
+	rejoin := &cobra.Command{
+		Use: "rejoin-command NODE", Short: "A single-use command that re-joins a reinstalled or restored node (keeps its ID and tasks)", Args: cobra.ExactArgs(1),
+		Annotations: op("createRejoinToken"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var out map[string]any
+			if err := a.do(cmd, "POST", "/api/v1/nodes/"+url.PathEscape(args[0])+"/rejoin-token", nil, &out); err != nil {
+				return err
+			}
+			fmt.Fprintln(a.out, out["command"])
+			return nil
+		},
+	}
+	return []*cobra.Command{agents, up, rejoin}
 }
 
 func (a *app) printAgents(v agentUpgradeView) error {

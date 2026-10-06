@@ -128,6 +128,15 @@ func (s *Store) JoinNode(ctx context.Context, tokenHash string, n Node, now time
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM nodes WHERE name = ?`, n.Name).Scan(&exists); err != nil {
 		return err
 	}
+	if exists > 0 && forced == n.Name {
+		// A token bound to an existing node re-joins it (a reinstalled or
+		// restored host): same ID, pool and tasks, new certificate.
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET cert_serial = ?, prev_cert_serial = '', status = ?, status_at = ? WHERE id = ? AND name = ?`,
+			n.CertSerial, NodePending, now.Unix(), n.ID, n.Name); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	if exists > 0 {
 		return ErrNameTaken
 	}
@@ -137,6 +146,24 @@ func (s *Store) JoinNode(ctx context.Context, tokenHash string, n Node, now time
 		return err
 	}
 	return tx.Commit()
+}
+
+// RejoinTarget is the existing node a join token re-joins, if any: the token
+// is bound to a node name that exists.
+func (s *Store) RejoinTarget(ctx context.Context, tokenHash string, now time.Time) (Node, bool, error) {
+	var name string
+	err := s.R.QueryRowContext(ctx, `SELECT node_name FROM join_tokens WHERE token_hash = ? AND expires_at > ? AND NOT (single_use AND uses > 0)`,
+		tokenHash, now.Unix()).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) || name == "" {
+		return Node{}, false, nil
+	} else if err != nil {
+		return Node{}, false, err
+	}
+	n, err := s.NodeByName(ctx, name)
+	if errors.Is(err, ErrNotFound) {
+		return Node{}, false, nil
+	}
+	return n, err == nil, err
 }
 
 func (s *Store) NodeByID(ctx context.Context, id string) (Node, error) {

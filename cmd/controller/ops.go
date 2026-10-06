@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"syncloud/internal/agent/docker"
+	"syncloud/internal/auth"
 	"syncloud/internal/backup"
 	"syncloud/internal/config"
 	"syncloud/internal/domain"
@@ -79,6 +80,13 @@ func restore(args []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "Restored %d files into %s.\n", len(files), abs)
+	if err := writeLocalRejoinToken(abs); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: no re-join token for the local agent:", err)
+	} else {
+		fmt.Fprintf(os.Stderr, "Re-join this host's agent as %s with the token in %s:\n", LocalNodeName, filepath.Join(abs, localRejoinFile))
+		fmt.Fprintf(os.Stderr, "  syncloud-agent join --controller http://127.0.0.1:7070 --token-file %s --name %s\n", filepath.Join(abs, localRejoinFile), LocalNodeName)
+	}
+	fmt.Fprintln(os.Stderr, "If this host has a new address, point every worker at it: syncloud-agent set-controller --gateway NEW-IP:7443, then restart the agent.")
 	fmt.Fprintln(os.Stderr, "Start the controller. A sslip.io/nip.io base domain follows the new public IP automatically;")
 	fmt.Fprintln(os.Stderr, "with your own domain, point its DNS records at this host.")
 	return nil
@@ -229,4 +237,29 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// localRejoinFile holds a single-use token that re-joins the controller's own
+// agent after a restore on a new host.
+const localRejoinFile = "local-rejoin.token"
+
+func writeLocalRejoinToken(dataDir string) error {
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(dataDir, "syncloud.db"))
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	if _, err := st.NodeByName(ctx, LocalNodeName); err != nil {
+		return nil // no local node yet: the controller writes a join token on start
+	}
+	tok := auth.NewToken("SYN-JOIN-")
+	now := time.Now()
+	if err := st.CreateJoinToken(ctx, store.JoinToken{
+		ID: auth.NewID("jt_"), TokenHash: auth.HashToken(tok), Description: "re-join " + LocalNodeName + " after a restore",
+		CreatedAt: now, ExpiresAt: now.Add(7 * 24 * time.Hour), SingleUse: true, NodeName: LocalNodeName,
+	}); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dataDir, localRejoinFile), []byte(tok+"\n"), 0o600)
 }

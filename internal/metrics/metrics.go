@@ -220,6 +220,20 @@ func (s *Store) queryRange(ctx context.Context, q string, start, end time.Time, 
 
 // queryRangeKey runs a range query, naming each series with key(labels).
 func (s *Store) queryRangeKey(ctx context.Context, q string, start, end time.Time, step int, key func(map[string]string) string) ([]Series, error) {
+	raw, err := s.queryRangeRaw(ctx, q, start, end, step)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Series, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, Series{Key: key(r.Labels), Node: r.Labels["node"], Points: r.Points})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, nil
+}
+
+// queryRangeRaw runs a range query and returns every series with its labels.
+func (s *Store) queryRangeRaw(ctx context.Context, q string, start, end time.Time, step int) ([]Labeled, error) {
 	v := url.Values{"query": {q}, "start": {strconv.FormatInt(start.Unix(), 10)}, "end": {strconv.FormatInt(end.Unix(), 10)}, "step": {strconv.Itoa(step) + "s"}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.url+"/api/v1/query_range?"+v.Encode(), nil)
 	if err != nil {
@@ -246,9 +260,9 @@ func (s *Store) queryRangeKey(ctx context.Context, q string, start, end time.Tim
 	if body.Status != "success" {
 		return nil, fmt.Errorf("metrics query: %s", body.Error)
 	}
-	out := make([]Series, 0, len(body.Data.Result))
+	out := make([]Labeled, 0, len(body.Data.Result))
 	for _, r := range body.Data.Result {
-		sr := Series{Key: key(r.Metric), Node: r.Metric["node"], Points: make([][2]float64, 0, len(r.Values))}
+		l := Labeled{Labels: r.Metric, Points: make([][2]float64, 0, len(r.Values))}
 		for _, p := range r.Values {
 			ts, _ := p[0].(float64)
 			str, _ := p[1].(string)
@@ -256,10 +270,9 @@ func (s *Store) queryRangeKey(ctx context.Context, q string, start, end time.Tim
 			if err != nil || math.IsNaN(val) || math.IsInf(val, 0) {
 				continue
 			}
-			sr.Points = append(sr.Points, [2]float64{ts * 1000, val})
+			l.Points = append(l.Points, [2]float64{ts * 1000, val})
 		}
-		out = append(out, sr)
+		out = append(out, l)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
 }

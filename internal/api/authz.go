@@ -23,7 +23,7 @@ var tagPrefix = map[string]string{
 	"health": "health", "iam": "iam", "jobs": "job", "logs": "logs", "metrics": "metrics", "network": "network", "nodes": "node",
 	"projects": "project", "registry": "registry", "services": "service", "settings": "settings", "system": "system", "tasks": "task",
 	"traefik": "traefik", "traffic": "traffic", "quotas": "quota", "usage": "usage", "audit": "audit", "sts": "sts", "shell": "shell",
-	"docs": "docs", "nodepools": "nodepool",
+	"docs": "docs", "nodepools": "nodepool", "storage": "s3",
 }
 
 type opInfo struct{ id, tag string }
@@ -155,6 +155,12 @@ func (s *Server) resourceOf(r *http.Request, action string) string {
 		return "srn:syncloud:build/" + id
 	case strings.HasPrefix(path, "/api/v1/nodes/") && id != "", strings.HasPrefix(path, "/api/v1/firewall/nodes/") && id != "":
 		return "srn:syncloud:node/" + id
+	case strings.HasPrefix(path, "/api/v1/s3/endpoints/") && pv("endpoint") != "":
+		res := "srn:syncloud:s3/" + pv("endpoint")
+		if b := pv("bucket"); b != "" {
+			res += "/bucket/" + b
+		}
+		return res
 	case strings.HasPrefix(path, "/api/v1/registry/"):
 		if repo := r.URL.Query().Get("repository"); repo != "" {
 			return "srn:syncloud:registry/" + repo

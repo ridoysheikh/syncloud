@@ -233,6 +233,15 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 	now := m.now().UTC().Truncate(time.Second)
 	sv, err := m.st.ServiceByName(ctx, env.ID, name)
 	created := false
+	// ...and its S3 bindings (a new service has none yet).
+	spec.S3 = nil
+	if err == nil && m.S3Bindings != nil {
+		refs, berr := m.S3Bindings(ctx, sv.ID)
+		if berr != nil {
+			return ServiceView{}, false, berr
+		}
+		spec.S3 = refs
+	}
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		if desired < 0 {

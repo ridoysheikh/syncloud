@@ -39,6 +39,7 @@ import (
 	"syncloud/internal/system"
 	"syncloud/internal/traefik"
 	"syncloud/internal/upstream"
+	"syncloud/internal/s3"
 	"syncloud/internal/upgrade"
 	"syncloud/internal/upgrade/rollout"
 	"syncloud/internal/workload"
@@ -88,6 +89,7 @@ type Server struct {
 	pools                 *nodepool.Manager
 	edges                 *edge.Manager
 	upgrades              *upgrade.Service
+	s3                    *s3.Manager
 	agentRollout          *rollout.Manager
 	discovery             *discovery.Manager
 	traefik               *traefik.Provider
@@ -170,6 +172,7 @@ type Options struct {
 	Pools            *nodepool.Manager
 	Edges            *edge.Manager
 	Upgrades         *upgrade.Service
+	S3               *s3.Manager
 	AgentRollout     *rollout.Manager
 	Discovery        *discovery.Manager
 	Traefik          *traefik.Provider
@@ -225,6 +228,7 @@ func New(o Options) *Server {
 		pools:                 o.Pools,
 		edges:                 o.Edges,
 		upgrades:              o.Upgrades,
+		s3:                    o.S3,
 		startedAt:             time.Now(),
 		agentRollout:          o.AgentRollout,
 		discovery:             o.Discovery,
@@ -329,8 +333,25 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/node-pools/{pool}/events", h: s.handleNodePoolEvents},
 		{Method: "POST", Path: "/api/v1/node-pools/{pool}/join-command", h: s.handlePoolJoinCommand},
 		{Method: "PUT", Path: "/api/v1/nodes/{id}/pool", h: s.handleSetNodePool},
+		{Method: "POST", Path: "/api/v1/nodes/{id}/rejoin-token", h: s.handleRejoinToken},
 		{Method: "GET", Path: "/api/v1/edges", h: s.handleListEdges},
 		{Method: "GET", Path: "/api/v1/system/health", Public: true, h: s.handleHealth},
+		{Method: "GET", Path: "/api/v1/metrics/query", h: s.handleExploreMetrics},
+		{Method: "GET", Path: "/api/v1/metrics/names", h: s.handleMetricNames},
+		{Method: "GET", Path: "/api/v1/s3/endpoints", h: s.handleListS3Endpoints},
+		{Method: "POST", Path: "/api/v1/s3/endpoints", h: s.handleCreateS3Endpoint},
+		{Method: "GET", Path: "/api/v1/s3/endpoints/{endpoint}", h: s.handleGetS3Endpoint},
+		{Method: "PUT", Path: "/api/v1/s3/endpoints/{endpoint}", h: s.handleUpdateS3Endpoint},
+		{Method: "DELETE", Path: "/api/v1/s3/endpoints/{endpoint}", h: s.handleDeleteS3Endpoint},
+		{Method: "GET", Path: "/api/v1/s3/endpoints/{endpoint}/buckets", h: s.handleListS3Buckets},
+		{Method: "POST", Path: "/api/v1/s3/endpoints/{endpoint}/buckets", h: s.handleCreateS3Bucket},
+		{Method: "GET", Path: "/api/v1/s3/endpoints/{endpoint}/buckets/{bucket}/objects", h: s.handleListS3Objects},
+		{Method: "GET", Path: "/api/v1/s3/endpoints/{endpoint}/buckets/{bucket}/usage", h: s.handleGetS3Usage},
+		{Method: "GET", Path: "/api/v1/s3/endpoints/{endpoint}/buckets/{bucket}/object", h: s.handleDownloadS3Object},
+		{Method: "PUT", Path: "/api/v1/s3/endpoints/{endpoint}/buckets/{bucket}/object", h: s.handleUploadS3Object},
+		{Method: "DELETE", Path: "/api/v1/s3/endpoints/{endpoint}/buckets/{bucket}/object", h: s.handleDeleteS3Object},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/s3", h: s.handleGetServiceS3},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/s3", h: s.handleSetServiceS3},
 		{Method: "GET", Path: "/api/v1/system/upgrade", h: s.handleGetUpgrade},
 		{Method: "POST", Path: "/api/v1/system/upgrade", h: s.handleStartUpgrade},
 		{Method: "GET", Path: "/api/v1/nodes/agent-upgrade", h: s.handleGetAgentUpgrade},

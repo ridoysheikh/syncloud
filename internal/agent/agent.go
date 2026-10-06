@@ -367,3 +367,27 @@ func backoff(attempt int) time.Duration {
 	d = min(d, 30*time.Second)
 	return time.Duration(float64(d) * (0.75 + rand.Float64()*0.5))
 }
+
+// SetController points a joined agent at a controller that moved (restored
+// on a new host): the gateway address and, optionally, the controller URL.
+// The node keeps its identity; the restored CA still trusts it.
+func SetController(dataDir, gateway, controllerURL string) (State, error) {
+	path := filepath.Join(dataDir, stateFile)
+	var st State
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return st, fmt.Errorf("not joined: %w", err)
+	}
+	if err := json.Unmarshal(b, &st); err != nil {
+		return st, err
+	}
+	if _, _, err := net.SplitHostPort(gateway); err != nil {
+		return st, fmt.Errorf("--gateway must be HOST:PORT: %w", err)
+	}
+	st.Gateway = gateway
+	if controllerURL != "" {
+		st.Controller = controllerURL
+	}
+	out, _ := json.MarshalIndent(st, "", "  ")
+	return st, os.WriteFile(path, append(out, '\n'), 0o644)
+}

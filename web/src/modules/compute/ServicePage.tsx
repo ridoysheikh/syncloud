@@ -31,6 +31,7 @@ import {
 } from "@/modules/projects/VarsEditor";
 import { BuildsPanel } from "./BuildsPanel";
 import { TasksTable } from "./TasksPage";
+import { ServiceS3Panel } from "@/modules/storage/StoragePages";
 import { useTasks } from "@/lib/workloads";
 import { LogsView } from "@/modules/logs/LogsView";
 import { RequestsTail, TrafficPanel } from "@/modules/traffic/Traffic";
@@ -55,6 +56,7 @@ type Tab =
   | "deployments"
   | "builds"
   | "variables"
+  | "s3"
   | "revisions"
   | "spec";
 
@@ -253,6 +255,7 @@ export function ServicePage() {
             "deployments",
             "builds",
             "variables",
+            "s3",
             "revisions",
             "spec",
           ] as Tab[]
@@ -313,6 +316,7 @@ export function ServicePage() {
           spec={svc.spec}
         />
       )}
+      {tab === "s3" && <ServiceS3Panel path={path} />}
       {tab === "revisions" && <Revisions path={path} />}
       {tab === "spec" && <SpecEditor path={path} spec={svc.spec} />}
     </div>
@@ -449,7 +453,7 @@ function Revisions({ path }: { path: string }) {
 function SpecEditor({ path, spec }: { path: string; spec: Spec }) {
   const qc = useQueryClient();
   const [text, setText] = useState(() => {
-    const { sharedEnv: _, ...own } = spec; // set by the platform, not editable
+    const { sharedEnv: _, s3: _s3, ...own } = spec as Spec & { s3?: unknown }; // set by the platform, not editable
     return JSON.stringify(own, null, 2);
   });
   const [parseErr, setParseErr] = useState("");

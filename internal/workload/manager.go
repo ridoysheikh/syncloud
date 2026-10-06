@@ -72,6 +72,10 @@ type Manager struct {
 	// ResolveImage turns "@registry/…" into the private registry's reference
 	// and returns pull credentials for the node (§5.9); may be nil.
 	ResolveImage func(image string) (ref, registryAuth string)
+	// S3Bindings lists a service's S3 bindings for a new revision; S3Env
+	// turns one into environment variables with credentials (§16).
+	S3Bindings func(ctx context.Context, serviceID string) ([]S3Ref, error)
+	S3Env      func(ctx context.Context, ref S3Ref) (map[string]string, error)
 
 	queue    chan string
 	mu       sync.Mutex
@@ -671,6 +675,20 @@ func (m *Manager) RunSpec(sv store.Service, spec Spec, t store.Task) *agentv1.Ta
 	if m.ResolveImage != nil {
 		ts.Image, ts.RegistryAuth = m.ResolveImage(ts.Image)
 	}
+	if m.S3Env != nil {
+		for _, ref := range spec.S3 {
+			env, err := m.S3Env(context.Background(), ref)
+			if err != nil {
+				m.log.Warn("S3 binding", "service", sv.Name, "endpoint", ref.Endpoint, "err", err)
+				continue
+			}
+			for k, v := range env {
+				if _, set := spec.Env[k]; !set { // the service's own env wins
+					ts.Env[k] = v
+				}
+			}
+		}
+	}
 	return ts
 }
 
@@ -782,6 +800,13 @@ func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
 	}
 	if t.Desired == "stopped" && state == store.TaskStopped && (t.State == store.TaskExited || t.State == store.TaskFailed) {
 		return // removing a dead container: keep why the task failed
+	}
+	if t.Desired == "stopped" && t.State == store.TaskLost && state != store.TaskStopped {
+		// The node was given up and came back with the container still
+		// there; a replacement already runs elsewhere. Remove it, keep "lost".
+		t.NodeID = node.ID
+		m.sendStop(t)
+		return
 	}
 	prevIP := t.IP
 	t.State, t.IP, t.Health, t.ExitCode, t.Error, t.UpdatedAt = state, s.GetIp(), s.GetHealth(), int(s.GetExitCode()), s.GetError(), now

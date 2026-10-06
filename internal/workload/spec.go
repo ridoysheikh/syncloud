@@ -20,12 +20,24 @@ type Spec struct {
 	// SharedEnv is a snapshot of the environment's shared variables, taken
 	// by the platform for every revision (never user-set). Env wins over it.
 	SharedEnv map[string]string `json:"sharedEnv,omitempty"`
+	// S3 snapshots the service's S3 bindings (§16) for every revision, set
+	// by the platform; credentials are added when a task starts.
+	S3 []S3Ref `json:"s3,omitempty"`
 	Ports     []Port            `json:"ports,omitempty"`
 	Resources Resources         `json:"resources"`
 	Placement Placement         `json:"placement"`
 	// Health is probed by the agent (§5.6); traffic only reaches healthy tasks.
 	Health     *HealthCheck `json:"health,omitempty"`
 	Deployment Deployment   `json:"deployment"`
+}
+
+// S3Ref is a bucket bound to the service: its tasks get <EnvPrefix>S3_BUCKET,
+// <EnvPrefix>AWS_ACCESS_KEY_ID and so on.
+type S3Ref struct {
+	Endpoint  string `json:"endpoint"` // name
+	Bucket    string `json:"bucket"`
+	Prefix    string `json:"prefix,omitempty"`
+	EnvPrefix string `json:"envPrefix,omitempty"`
 }
 
 // HealthCheck defines how a task's health is probed.

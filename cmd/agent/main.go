@@ -25,6 +25,7 @@ import (
 const usage = `usage:
   syncloud-agent join --controller URL --token TOKEN [--name NAME] [--data-dir DIR]
   syncloud-agent run [--data-dir DIR]
+  syncloud-agent set-controller --gateway HOST:PORT [--controller URL] [--data-dir DIR]
   syncloud-agent uninstall [--purge] [--data-dir DIR]
   syncloud-agent version
 `
@@ -94,6 +95,19 @@ func run(args []string) error {
 		}
 		log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 		return agent.Run(ctx, *dataDir, log, opts)
+
+	case "set-controller":
+		gateway := fs.String("gateway", "", "the controller's agent gateway, e.g. 203.0.113.20:7443")
+		controller := fs.String("controller", "", "the controller URL (optional)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		st, err := agent.SetController(*dataDir, *gateway, *controller)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Node %s now connects to %s. Restart the agent (systemctl restart syncloud-agent).\n", st.Name, st.Gateway)
+		return nil
 
 	case "upgrade-guard":
 		// Started by the agent itself before it replaces its binary (§5.0.1).

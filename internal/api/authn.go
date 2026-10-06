@@ -173,7 +173,7 @@ func (s *Server) authAccessKey(w http.ResponseWriter, r *http.Request, authz str
 		return Principal{}, err
 	}
 	// The signature covers the body, so read it here and hand handlers a fresh reader.
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, signedBodyLimit(r)))
 	if err != nil {
 		return Principal{}, authFailure{"request body too large or unreadable"}
 	}
@@ -214,7 +214,7 @@ func (s *Server) authTemporary(w http.ResponseWriter, r *http.Request, keyID, si
 	if err != nil {
 		return Principal{}, err
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, signedBodyLimit(r)))
 	if err != nil {
 		return Principal{}, authFailure{"request body too large or unreadable"}
 	}
@@ -270,4 +270,16 @@ func ipAllowed(allowed []string, ip string) bool {
 		}
 	}
 	return false
+}
+
+// maxSignedUpload bounds S3 object uploads with signed requests (synctl): the
+// signature covers the body, which is read into memory to check it. The
+// dashboard streams larger uploads.
+const maxSignedUpload = 256 << 20
+
+func signedBodyLimit(r *http.Request) int64 {
+	if r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/v1/s3/endpoints/") && strings.HasSuffix(r.URL.Path, "/object") {
+		return maxSignedUpload
+	}
+	return maxBodyBytes
 }

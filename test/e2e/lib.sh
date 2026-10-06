@@ -73,6 +73,7 @@ x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-agent run --data-dir /agent --network on
 # Root account and a join token for the workers.
 TOK=$(x sc-e2e-ctl cat /data/setup-token)
 SUF=$(x sc-e2e-ctl cat /data/recovery-key | tr -d '-' | tail -c 7 | tr -d '\n')
+x sc-e2e-ctl cp /data/recovery-key /root/recovery-key # setup deletes it; restore drills need it
 x sc-e2e-ctl curl -fs -c /tmp/jar -H 'content-type: application/json' localhost:7070/api/v1/setup \
   -d "{\"setupToken\":\"$TOK\",\"email\":\"e2e@example.com\",\"name\":\"E2E\",\"password\":\"e2e-password-123\",\"recoveryKeySuffix\":\"$SUF\"}" >/dev/null
 JOIN=$(x sc-e2e-ctl curl -fs -b /tmp/jar -H 'content-type: application/json' localhost:7070/api/v1/nodes/join-tokens -d '{"singleUse":false,"ttlMinutes":30}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')

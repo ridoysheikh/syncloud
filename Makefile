@@ -55,6 +55,9 @@ e2e:
 	test/e2e/iam.sh
 	test/e2e/pools.sh
 	test/e2e/upgrade.sh
+	test/e2e/storage.sh
+	test/e2e/restore.sh
+	test/e2e/chaos.sh
 
 ## proto: regenerate gRPC code (tools are installed into .tools/ on first use)
 proto: .tools/buf .tools/protoc-gen-go .tools/protoc-gen-go-grpc

@@ -45,3 +45,14 @@ func (l *attemptLimiter) sweep(now time.Time) {
 		}
 	}
 }
+
+// Blocked reports whether key has used up its attempts, without counting one.
+func (l *attemptLimiter) Blocked(key string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	a, ok := l.hits[key]
+	return ok && now.Sub(a.start) < l.window && a.n >= l.max
+}
+
+// Fail counts a failed attempt (for limits on failures only).
+func (l *attemptLimiter) Fail(key string, now time.Time) { l.Allow(key, now) }

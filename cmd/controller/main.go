@@ -58,6 +58,7 @@ import (
 	"syncloud/internal/upstream"
 	"syncloud/internal/version"
 	"syncloud/internal/gc"
+	"syncloud/internal/s3"
 	"syncloud/internal/upgrade"
 	"syncloud/internal/upgrade/rollout"
 	"syncloud/internal/web"
@@ -331,6 +332,25 @@ func serve(args []string) error {
 	}
 	pools.ControllerURL = func() string { return domains.Endpoints().DashboardURL }
 	workloads.NodePool = pools.PoolOf
+	s3Mgr := s3.New(st, box)
+	workloads.S3Bindings = func(ctx context.Context, serviceID string) ([]workload.S3Ref, error) {
+		bs, err := st.ServiceS3Bindings(ctx, serviceID)
+		if err != nil {
+			return nil, err
+		}
+		var refs []workload.S3Ref
+		for _, b := range bs {
+			refs = append(refs, workload.S3Ref{Endpoint: b.Endpoint, Bucket: b.Bucket, Prefix: b.Prefix, EnvPrefix: b.EnvPrefix})
+		}
+		return refs, nil
+	}
+	workloads.S3Env = func(ctx context.Context, ref workload.S3Ref) (map[string]string, error) {
+		c, err := s3Mgr.Credentials(ctx, ref.Endpoint)
+		if err != nil {
+			return nil, err
+		}
+		return s3.Env(ref.EnvPrefix, ref.Bucket, ref.Prefix, c), nil
+	}
 	edgeFn := func(id string) bool { _, role := pools.PoolOf(id); return role == "edge" }
 	edgeCheck.Store(&edgeFn)
 	go pools.Run(ctx)
@@ -506,6 +526,7 @@ func serve(args []string) error {
 		Pools:                 pools,
 		Edges:                 edges,
 		Upgrades:              upgrades,
+		S3:                    s3Mgr,
 		AgentRollout:          agentRollout,
 		Discovery:             disco,
 		Traefik:               traefikProvider,
@@ -693,7 +714,7 @@ func loopbackURLHost(listen string) string {
 func initBaseDomain(ctx context.Context, cfg config.Controller, domains *domain.Service, det *domain.Detector, log *slog.Logger) error {
 	if cur := domains.Base(); cur != "" {
 		// After a restore on a new host, an sslip.io/nip.io domain still names the old IP.
-		if svc, ok := domain.WildcardService(cur); ok && !cfg.Dev {
+		if svc, ok := domain.WildcardService(cur); ok && (!cfg.Dev || cfg.PublicIP != "") {
 			dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			ip, err := det.PublicIP(dctx)
 			cancel()

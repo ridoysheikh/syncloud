@@ -437,3 +437,42 @@ func (s *Server) handleListEdges(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": s.edges.List()})
 }
+
+// handleRejoinToken issues a single-use token that re-joins an existing node
+// (a reinstalled or restored host keeps the node's ID, pool and tasks).
+func (s *Server) handleRejoinToken(w http.ResponseWriter, r *http.Request) {
+	n, err := s.store.NodeByID(r.Context(), r.PathValue("id"))
+	if errors.Is(err, store.ErrNotFound) {
+		n, err = s.store.NodeByName(r.Context(), r.PathValue("id"))
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, CodeNotFound, "no such node")
+		return
+	} else if err != nil {
+		s.internalError(w, "node", err)
+		return
+	}
+	tok := auth.NewToken("SYN-JOIN-")
+	now := s.now()
+	u, _ := currentUser(r.Context())
+	if err := s.store.CreateJoinToken(r.Context(), store.JoinToken{
+		ID: auth.NewID("jt_"), TokenHash: auth.HashToken(tok), Description: "re-join " + n.Name, CreatedBy: u.ID,
+		CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour), SingleUse: true, NodeName: n.Name, PoolID: n.PoolID,
+	}); err != nil {
+		s.internalError(w, "join token", err)
+		return
+	}
+	base := ""
+	if s.domains != nil {
+		base = s.domains.Endpoints().DashboardURL
+	}
+	if base == "" {
+		scheme := "http"
+		if isHTTPS(r) {
+			scheme = "https"
+		}
+		base = scheme + "://" + r.Host
+	}
+	s.audit(r, u.ID, "node:CreateRejoinToken", "srn:syncloud:node/"+n.ID, nil)
+	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "command": "curl -fsSL " + base + "/join.sh | sudo bash -s -- --token " + tok + " --name " + n.Name, "expiresIn": 86400})
+}

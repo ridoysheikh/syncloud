@@ -32,7 +32,9 @@ type joinResponse struct {
 // the body. The node's key stays on the node: we only sign its CSR.
 func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	now := s.now()
-	if !s.joinLimiter.Allow(clientIP(r), now) {
+	// Only invalid tokens count: many servers of a pool may join from one
+	// NAT address at once.
+	if s.joinLimiter.Blocked(clientIP(r), now) {
 		writeError(w, http.StatusTooManyRequests, CodeRateLimited, "too many attempts, try again later")
 		return
 	}
@@ -46,6 +48,14 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nodeID := auth.NewID("node_")
+	rejoin, isRejoin, err := s.store.RejoinTarget(r.Context(), auth.HashToken(strings.TrimSpace(req.Token)), now)
+	if err != nil {
+		s.internalError(w, "join node", err)
+		return
+	}
+	if isRejoin {
+		nodeID = rejoin.ID
+	}
 	certPEM, serial, err := s.ca.SignNodeCSR([]byte(req.CSR), nodeID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
@@ -56,6 +66,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	n.StatusAt = n.CreatedAt
 	switch err := s.store.JoinNode(r.Context(), auth.HashToken(strings.TrimSpace(req.Token)), n, now); {
 	case errors.Is(err, store.ErrNotFound):
+		s.joinLimiter.Fail(clientIP(r), now)
 		s.audit(r, "", "node:Join", "srn:syncloud:node/"+req.Name, map[string]any{"result": "invalid_token"})
 		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "invalid, expired or already used join token")
 		return
@@ -70,7 +81,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		n = stored // the join token may have put it in a pool
 	}
 	s.nodes.Added(n)
-	s.audit(r, "", "node:Join", "srn:syncloud:node/"+nodeID, map[string]any{"name": req.Name})
+	s.audit(r, "", "node:Join", "srn:syncloud:node/"+nodeID, map[string]any{"name": req.Name, "rejoin": isRejoin})
 	s.log.Info("node joined", "node", req.Name, "id", nodeID)
 	writeJSON(w, http.StatusCreated, joinResponse{
 		NodeID: nodeID, Name: req.Name, Certificate: string(certPEM), CACertificate: string(s.ca.CertPEM), GatewayAddress: s.gatewayAddr,
