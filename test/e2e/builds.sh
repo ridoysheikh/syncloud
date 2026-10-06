@@ -57,7 +57,7 @@ wait_build() {
   for _ in $(seq 1 150); do
     b=$(api "$SVC/builds" | grep -o "{[^{}]*\"sha\":\"$1\"[^{}]*}" || true)
     echo "$b" | grep -q "\"status\":\"$2\"" && { echo "$b"; return; }
-    echo "$b" | grep -q '"status":"\(succeeded\|failed\)"' && break
+    echo "$b" | grep -q '"status":"\(succeeded\|failed\|skipped\)"' && break
     sleep 2
   done
   echo "$b" >&2
@@ -93,7 +93,7 @@ RUN1=$(echo "$b" | grep -o '"runId":"[^"]*"' | cut -d'"' -f4)
 BUILD1=$(echo "$b" | grep -o '"id":"bld_[^"]*"' | cut -d'"' -f4)
 api "localhost:7070/api/v1/runs/$RUN1" | grep -q '"trigger":"build"' || fail "build did not run as a build job"
 echo "  ✓ BuildKit built ${SHA1:0:12} on ctl-0 and pushed it to the private registry"
-api localhost:7070/api/v1/registry/repositories | grep -q '"name":"shop/web","tags":2' || fail "image tags missing in the registry"
+api localhost:7070/api/v1/registry/repositories | grep -q '"name":"shop/web","tags":3' || fail "image tags (sha, latest-main, buildcache) missing in the registry"
 wait_serving "@registry/shop/web:${SHA1:0:12}" one
 echo "  ✓ auto-deployed: the service serves version one"
 cid=$(api "$SVC/tasks" | grep -o '"desired":"running","state":"running","ip":"[^"]*","containerId":"[^"]*"' | cut -d'"' -f16 | head -1)
@@ -130,6 +130,86 @@ api -X POST "$SVC/builds" -d "{\"sha\":\"$SHA1\"}" >/dev/null 2>&1 && fail "the 
 api -X POST "localhost:7070/api/v1/builds/$BUILD1/deploy" >/dev/null
 wait_serving "@registry/shop/web:${SHA1:0:12}" one
 echo "  ✓ an earlier build redeployed by hand; a commit is never built twice"
+
+echo "== watch paths"
+# hook: a signed push webhook, which makes the controller check the repository now.
+hook() {
+  local body='{"ref":"refs/heads/main"}' sig
+  sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')
+  x sc-e2e-ctl curl -fs -o /dev/null -H "X-Hub-Signature-256: sha256=$sig" -H 'X-GitHub-Event: push' "localhost:7070$HOOK" -d "$body" || fail "webhook refused"
+}
+src=$(api -X PUT "$SVC/git" -d '{"url":"http://127.0.0.1:3000/web.git","branch":"main","tags":"v*","context":"app","paths":["app/**","!app/docs/**"],"pollSeconds":15}')
+echo "$src" | grep -q '"paths":\["app/\*\*","!app/docs/\*\*"\]' || fail "paths not saved: $src"
+api -X PUT "$SVC/git" -d '{"url":"http://127.0.0.1:3000/web.git","paths":["a b"]}' >/dev/null 2>&1 && fail "an invalid path filter was accepted"
+x sc-e2e-ctl sh -c 'cd /src/web && mkdir -p app/docs && echo notes > app/docs/notes.md && echo readme > README.md && git add -A && git commit -qm docs && git push -q origin main'
+SHA4=$(x sc-e2e-ctl git -C /src/web rev-parse HEAD)
+hook
+b=$(wait_build "$SHA4" skipped)
+echo "$b" | grep -q '"deployed":false' || fail "a skipped build was deployed"
+x sc-e2e-ctl sh -c 'cd /src/web && sed -i "/RUN exit 3/d" app/Dockerfile && echo three > app/version && git commit -qam three && git push -q origin main'
+SHA5=$(x sc-e2e-ctl git -C /src/web rev-parse HEAD)
+hook
+b=$(wait_build "$SHA5" succeeded)
+echo "$b" | grep -q "\"baseSha\":\"$SHA4\"" || fail "not compared with the previous commit: $b"
+wait_serving "@registry/shop/web:${SHA5:0:12}" three
+echo "  ✓ a commit changing only excluded or unwatched paths is skipped; one changing app/ builds and deploys"
+
+echo "== tags"
+x sc-e2e-ctl sh -c 'cd /src/web && git checkout -qb release && echo four > app/version && git commit -qam four && git tag -a v1.0.0 -m "release one" && git push -q origin v1.0.0 && git checkout -q main'
+SHA6=$(x sc-e2e-ctl git -C /src/web rev-parse 'v1.0.0^{commit}')
+hook
+b=$(wait_build "$SHA6" succeeded)
+echo "$b" | grep -q '"ref":"refs/tags/v1.0.0"' || fail "not built from the tag: $b"
+api "localhost:7070/api/v1/registry/images?repository=shop/web" | grep -q '"tag":"v1.0.0"' || fail "image not tagged v1.0.0"
+wait_serving "@registry/shop/web:${SHA6:0:12}" four
+api "$SVC/git" | grep -q "\"v1.0.0\":\"$SHA6\"" || fail "watched refs not listed"
+echo "  ✓ a new tag matching v* is built (annotated tag peeled to its commit) and pushed as :v1.0.0"
+
+echo "== static site (no Dockerfile)"
+x sc-e2e-ctl sh -c '
+  set -e
+  git init -q --bare /srv/git/site.git && git clone -q /srv/git/site.git /src/site 2>/dev/null
+  cd /src/site && echo "<h1>static ok</h1>" > index.html && git add -A && git commit -qm site && git push -q origin main'
+SITE=localhost:7070/api/v1/projects/shop/environments/production/services/site
+api -X PUT "$SITE" -d '{"image":"@build","ports":[{"container":80}],"resources":{"cpu":0.05,"memory":32}}' >/dev/null
+api -X PUT "$SITE/git" -d '{"url":"http://127.0.0.1:3000/site.git","branch":"main"}' >/dev/null
+SSHA=$(x sc-e2e-ctl git -C /src/site rev-parse HEAD)
+for _ in $(seq 1 200); do api "$SITE/builds" | grep -q '"status":"\(succeeded\|failed\)"' && break; sleep 2; done
+api "$SITE/builds" | grep -q "\"sha\":\"$SSHA\"[^}]*\"status\":\"succeeded\"" || { api "$SITE/builds"; fail "static site build failed"; }
+ok=0
+for _ in $(seq 1 60); do
+  cid=$(api "$SITE/tasks" | grep -o '"desired":"running","state":"running","ip":"[^"]*","containerId":"[^"]*"' | cut -d'"' -f16 | head -1 || true)
+  [ -n "$cid" ] && x sc-e2e-ctl docker exec "$cid" wget -qO- localhost:80/ 2>/dev/null | grep -q "static ok" && { ok=1; break; }
+  sleep 2
+done
+[ $ok = 1 ] || fail "the static site is not served"
+api -X DELETE "$SITE" >/dev/null
+echo "  ✓ a repository with only index.html is built as a static site and served on port 80"
+
+if [ "${WITH_NIXPACKS:-0}" = 1 ]; then # downloads Nixpacks and a Nix base image: slow
+  echo "== nixpacks (Node, no Dockerfile)"
+  x sc-e2e-ctl sh -c '
+    set -e
+    git init -q --bare /srv/git/node.git && git clone -q /srv/git/node.git /src/node 2>/dev/null
+    cd /src/node
+    printf "{\"name\":\"n\",\"version\":\"1.0.0\",\"scripts\":{\"start\":\"node index.js\"}}\n" > package.json
+    echo "require(\"http\").createServer((q, s) => s.end(\"node ok\")).listen(3000)" > index.js
+    git add -A && git commit -qm node && git push -q origin main'
+  NODE=localhost:7070/api/v1/projects/shop/environments/production/services/node
+  api -X PUT "$NODE" -d '{"image":"@build","ports":[{"container":3000}],"resources":{"cpu":0.1,"memory":64}}' >/dev/null
+  api -X PUT "$NODE/git" -d '{"url":"http://127.0.0.1:3000/node.git","branch":"main"}' >/dev/null
+  for _ in $(seq 1 450); do api "$NODE/builds" | grep -q '"status":"\(succeeded\|failed\)"' && break; sleep 2; done
+  api "$NODE/builds" | grep -q '"status":"succeeded"' || { api "$NODE/builds"; fail "nixpacks build failed"; }
+  ok=0
+  for _ in $(seq 1 60); do
+    cid=$(api "$NODE/tasks" | grep -o '"desired":"running","state":"running","ip":"[^"]*","containerId":"[^"]*"' | cut -d'"' -f16 | head -1 || true)
+    [ -n "$cid" ] && x sc-e2e-ctl docker exec "$cid" sh -c 'wget -qO- localhost:3000 || curl -fs localhost:3000' 2>/dev/null | grep -q "node ok" && { ok=1; break; }
+    sleep 2
+  done
+  [ $ok = 1 ] || fail "the Nixpacks-built app is not served"
+  api -X DELETE "$NODE" >/dev/null
+  echo "  ✓ a Node app without a Dockerfile is built with Nixpacks and served"
+fi
 
 echo "== disconnect"
 api -X DELETE "$SVC/git" >/dev/null

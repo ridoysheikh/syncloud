@@ -1321,7 +1321,6 @@ Because there is only one controller:
     - `synctl registry gc run --wait` expires v2 and reclaims space (untagged layers included).
     - Pushes work again afterwards, and the service kept running.
     - Screenshots checked.
-  - Still to do in Phase 4: watch rules and path filters, Nixpacks.
 - ✅ Slice 4d (2026-10-06), upstream credentials and pre-pull:
   - **Upstream credentials (§5.9)**:
     - One credential per registry host (Docker Hub aliases normalized to `docker.io`). The password is sealed with the master key and never returned.
@@ -1334,6 +1333,15 @@ Because there is only one controller:
     - A new revision's image is pre-pulled.
     - An image from the same registry by host name (no `@registry`, no docker login) is refused, then pulls once a credential is stored, and the API never returns the password.
     - `deploy.sh` and `services.sh` still pass.
+- ✅ Slice 4f (2026-10-06), watch rules, path filters and builds without a Dockerfile (§5.8):
+  - **Watch rules**: the branch can be a pattern (`release/*`, every matching branch is built) and an optional tag pattern (`v*`) builds new tags (annotated tags peeled to their commit) and pushes them as `:<tag>` too. The last seen commit of every matching ref is kept (`ref_shas`). A changed ref builds against its previous commit; a new branch or tag builds in full; the first check builds only a literal branch. Manual builds take a `ref` (required when the branch is a pattern).
+  - **Path filters** for monorepos (`services/api/**`, `!docs/**`; `*` crosses directories). The build job fetches both commits (depth 1, by hash, falling back to the ref) and diffs them; when nothing matches it exits 78 and the build is **skipped** (status `skipped`, never deployed). Manual builds and new refs ignore filters.
+  - **Webhooks slow polling** to a 10-minute safety net while they arrive (last webhook within 24h).
+  - **Builders**: `auto` (default) uses the Dockerfile, else **Nixpacks** (v1.41.0, downloaded per build and checked against pinned SHA-256 digests, x86_64 and aarch64) generates one, else a folder with `index.html` (or only Nixpacks' staticfile provider) becomes a **static site** on `nginx:1.29-alpine`, port 80. `dockerfile`, `nixpacks` and `static` force one.
+  - The build is now a script (`internal/builds/build.sh`, embedded) in the BuildKit image: it fetches the commit with git (token as an HTTP header) instead of BuildKit's Git context, then builds from local directories. **Layer cache** in the registry (`<repo>:buildcache`, `mode=max`), so repeat builds and Nix layers are fast on any node.
+  - API, synctl (`--tags`, `--path` (repeatable), `--builder`, `builds run --ref`) and dashboard (Builder select, Tags, Watch paths, watched refs, a ref picker for Build now, skipped builds, the ref on each build; Builder and Watch paths in the wizard).
+  - Verified with `test/e2e/builds.sh`: a docs-only commit is skipped and the next commit builds against it, a pushed tag `v1.0.0` on a branch that is not watched builds and is pushed as `:v1.0.0`, a repository with only `index.html` is served by nginx. With `WITH_NIXPACKS=1`, a Node app without a Dockerfile is built with Nixpacks and served. Unit tests for ref matching, the build decision and the build spec.
+  - Not done: target environment per branch, GitHub App, commit statuses, SSH deploy keys, cancelling a build from the UI.
 - ✅ Slice 4e (2026-10-06), registry event tracking (§5.9):
   - The registry system task posts its **notifications** to the controller (`/internal/registry/events`, authenticated with the internal token). To reach the controller's loopback API it now runs in host networking on `127.0.0.1:5000` (debug server on `127.0.0.1:5001`), like Traefik.
   - Only manifest events are kept (layers and configs are noise), including HEAD requests: Docker resolves a tag with HEAD, often the only manifest request on a warm node. The manifest requests of one pull (HEAD by tag, index, platform manifest) are merged per repository, actor and address within 30s. The dashboard reading manifests is not a pull. Redelivered events are ignored (unique event ID).

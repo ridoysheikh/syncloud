@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -120,4 +121,50 @@ func parseDumb(r *bufio.Reader) (map[string]string, error) {
 func BranchSHA(refs map[string]string, branch string) (string, bool) {
 	sha, ok := refs["refs/heads/"+branch]
 	return sha, ok
+}
+
+// ValidatePattern checks a branch or tag pattern: a name, optionally with
+// globs ("release/*", "v*").
+func ValidatePattern(p string) error {
+	if p == "" || strings.ContainsAny(p, " \\'\"`$;&|\n#:~^") || strings.Contains(p, "..") || strings.HasPrefix(p, "/") || strings.HasSuffix(p, "/") {
+		return fmt.Errorf("invalid branch or tag pattern %q", p)
+	}
+	if _, err := path.Match(p, ""); err != nil {
+		return fmt.Errorf("invalid pattern %q: %w", p, err)
+	}
+	return nil
+}
+
+// IsPattern reports whether p has glob characters.
+func IsPattern(p string) bool { return strings.ContainsAny(p, "*?[") }
+
+// Match returns the refs whose branch matches branches or whose tag matches
+// tags ("" = none), as full ref name -> commit. Annotated tags resolve to
+// the commit they point at.
+func Match(refs map[string]string, branches, tags string) map[string]string {
+	out := map[string]string{}
+	for ref, sha := range refs {
+		if name, ok := strings.CutPrefix(ref, "refs/heads/"); ok && branches != "" {
+			if m, _ := path.Match(branches, name); m {
+				out[ref] = sha
+			}
+		}
+		if name, ok := strings.CutPrefix(ref, "refs/tags/"); ok && tags != "" && !strings.HasSuffix(name, "^{}") {
+			if m, _ := path.Match(tags, name); m {
+				if peeled, ok := refs[ref+"^{}"]; ok {
+					sha = peeled
+				}
+				out[ref] = sha
+			}
+		}
+	}
+	return out
+}
+
+// ShortRef turns refs/heads/main into main and refs/tags/v1 into v1.
+func ShortRef(ref string) string {
+	if s, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+		return s
+	}
+	return strings.TrimPrefix(ref, "refs/tags/")
 }

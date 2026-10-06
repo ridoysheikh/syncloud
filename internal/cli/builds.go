@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -54,7 +56,16 @@ func (a *app) buildsCmd() *cobra.Command {
 		if a.output == "json" {
 			return a.printer().json(src)
 		}
-		fmt.Fprintf(a.out, "%s (branch %s, %s", src.URL, src.Branch, src.Dockerfile)
+		fmt.Fprintf(a.out, "%s (branch %s", src.URL, src.Branch)
+		if src.Tags != "" {
+			fmt.Fprintf(a.out, ", tags %s", src.Tags)
+		}
+		if src.Builder != "" && src.Builder != "auto" {
+			fmt.Fprintf(a.out, ", %s", src.Builder)
+		}
+		if src.Builder != "nixpacks" && src.Builder != "static" {
+			fmt.Fprintf(a.out, ", %s", src.Dockerfile)
+		}
 		if src.Context != "" {
 			fmt.Fprintf(a.out, " in %s", src.Context)
 		}
@@ -63,7 +74,18 @@ func (a *app) buildsCmd() *cobra.Command {
 			fmt.Fprint(a.out, ", auto-deploy")
 		}
 		fmt.Fprintln(a.out)
-		if src.LastSHA != "" {
+		if len(src.Paths) > 0 {
+			fmt.Fprintf(a.out, "  paths:   %s\n", strings.Join(src.Paths, " "))
+		}
+		refs := make([]string, 0, len(src.Refs))
+		for r := range src.Refs {
+			refs = append(refs, r)
+		}
+		sort.Strings(refs)
+		for _, r := range refs {
+			fmt.Fprintf(a.out, "  %-8s %s\n", r+":", src.Refs[r][:min(12, len(src.Refs[r]))])
+		}
+		if len(refs) == 0 && src.LastSHA != "" {
 			fmt.Fprintf(a.out, "  head:    %s\n", src.LastSHA)
 		}
 		if src.LastError != "" {
@@ -94,7 +116,10 @@ func (a *app) buildsCmd() *cobra.Command {
 		}),
 	}
 	set.Flags().StringVar(&in.URL, "url", "", "https:// clone URL")
-	set.Flags().StringVar(&in.Branch, "branch", "main", "branch to build")
+	set.Flags().StringVar(&in.Branch, "branch", "main", `branch to build, or a pattern such as "release/*"`)
+	set.Flags().StringVar(&in.Tags, "tags", "", `also build new tags matching this pattern, e.g. "v*"`)
+	set.Flags().StringArrayVar(&in.Paths, "path", nil, `only build commits changing these paths (repeatable; "!" excludes), e.g. "services/api/**"`)
+	set.Flags().StringVar(&in.Builder, "builder", "auto", "auto (Dockerfile, then Nixpacks, then static), dockerfile, nixpacks or static")
 	set.Flags().StringVar(&in.Dockerfile, "dockerfile", "Dockerfile", "Dockerfile path, relative to the context")
 	set.Flags().StringVar(&in.Context, "context", "", "build context directory in the repository")
 	set.Flags().StringVar(&in.Token, "token", "", "access token for a private repository (default $SYNCLOUD_GIT_TOKEN)")
@@ -129,13 +154,13 @@ func (a *app) buildsCmd() *cobra.Command {
 	}
 	list.Flags().BoolVarP(&all, "all-projects", "A", false, "recent builds of every service")
 
-	var sha string
+	var sha, ref string
 	var wait bool
 	run := &cobra.Command{
 		Use: "run SERVICE", Short: "Build the branch head (or --sha) now", Args: cobra.ExactArgs(1),
 		Annotations: op("startBuild"),
 		RunE: with(func(cmd *cobra.Command, c *client.Client, args []string) error {
-			x, err := c.StartBuild(ctx(cmd), s.project, s.env, args[0], sha)
+			x, err := c.StartBuild(ctx(cmd), s.project, s.env, args[0], ref, sha)
 			if err != nil {
 				return err
 			}
@@ -146,7 +171,8 @@ func (a *app) buildsCmd() *cobra.Command {
 			return a.followBuild(cmd, c, x)
 		}),
 	}
-	run.Flags().StringVar(&sha, "sha", "", "full commit hash to build (default: branch head)")
+	run.Flags().StringVar(&sha, "sha", "", "full commit hash to build (default: the branch head)")
+	run.Flags().StringVar(&ref, "ref", "", "branch or tag whose head to build (default: the source's branch)")
 	run.Flags().BoolVarP(&wait, "wait", "w", false, "stream the build log and fail if the build fails")
 
 	b.AddCommand(set, list, run,
@@ -229,6 +255,10 @@ func (a *app) followBuild(cmd *cobra.Command, c *client.Client, x client.Build) 
 				if b.Message != "" {
 					return errors.New(b.Message)
 				}
+				return nil
+			case "skipped":
+				time.Sleep(time.Second)
+				fmt.Fprintf(a.errOut, "Build %s skipped: %s\n", b.ID, b.Message)
 				return nil
 			case "failed":
 				time.Sleep(time.Second)

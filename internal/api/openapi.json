@@ -3388,8 +3388,13 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "ref": {
+                    "type": "string",
+                    "description": "branch or tag whose head to build (default: the source's branch)"
+                  },
                   "sha": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "full commit hash to build instead of a head"
                   }
                 }
               }
@@ -6153,7 +6158,9 @@
             "description": "https:// clone URL"
           },
           "branch": {
-            "type": "string"
+            "type": "string",
+            "default": "main",
+            "description": "branch to build, or a pattern such as release/* (every matching branch is built)"
           },
           "dockerfile": {
             "type": "string"
@@ -6188,6 +6195,40 @@
           },
           "lastError": {
             "type": "string"
+          },
+          "tags": {
+            "type": "string",
+            "description": "also build new tags matching this pattern, e.g. v* (empty: tags are ignored)"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "only build commits that change a matching file (\"!\" excludes; * matches across directories), e.g. services/api/**"
+          },
+          "builder": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "dockerfile",
+              "nixpacks",
+              "static"
+            ],
+            "default": "auto",
+            "description": "auto: the Dockerfile, else Nixpacks, else a static site (index.html served by nginx on port 80)"
+          },
+          "refs": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "watched branches and tags with their last seen commit"
+          },
+          "lastWebhookAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           }
         }
       },
@@ -6202,7 +6243,8 @@
           },
           "branch": {
             "type": "string",
-            "default": "main"
+            "default": "main",
+            "description": "branch to build, or a pattern such as release/* (every matching branch is built)"
           },
           "dockerfile": {
             "type": "string",
@@ -6223,6 +6265,28 @@
             "type": "integer",
             "default": 60,
             "minimum": 15
+          },
+          "tags": {
+            "type": "string",
+            "description": "also build new tags matching this pattern, e.g. v* (empty: tags are ignored)"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "only build commits that change a matching file (\"!\" excludes; * matches across directories), e.g. services/api/**"
+          },
+          "builder": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "dockerfile",
+              "nixpacks",
+              "static"
+            ],
+            "default": "auto",
+            "description": "auto: the Dockerfile, else Nixpacks, else a static site (index.html served by nginx on port 80)"
           }
         }
       },
@@ -6264,8 +6328,10 @@
               "queued",
               "building",
               "succeeded",
-              "failed"
-            ]
+              "failed",
+              "skipped"
+            ],
+            "description": "skipped: no changed file matched the path filters"
           },
           "image": {
             "type": "string"
@@ -6293,6 +6359,10 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "baseSha": {
+            "type": "string",
+            "description": "the previous commit of the ref, which path filters compare with"
           }
         }
       },

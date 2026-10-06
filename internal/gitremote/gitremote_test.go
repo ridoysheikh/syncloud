@@ -47,3 +47,34 @@ func TestLsRemoteSmartAndDumb(t *testing.T) {
 		}
 	}
 }
+
+func TestMatch(t *testing.T) {
+	a, b, c, d := "aaaa", "bbbb", "cccc", "dddd"
+	refs := map[string]string{
+		"HEAD": a, "refs/heads/main": a, "refs/heads/release/1.0": b, "refs/heads/release/2.0/hotfix": c,
+		"refs/tags/v1.0": d, "refs/tags/v1.0^{}": b, "refs/tags/v2.0": c, "refs/tags/other": a,
+	}
+	got := Match(refs, "release/*", "v*")
+	want := map[string]string{"refs/heads/release/1.0": b, "refs/tags/v1.0": b, "refs/tags/v2.0": c}
+	if len(got) != len(want) {
+		t.Fatalf("got %v", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+	if got := Match(refs, "main", ""); len(got) != 1 || got["refs/heads/main"] != a {
+		t.Errorf("main: %v", got)
+	}
+	for _, p := range []string{"main", "release/*", "v*", "feat-[0-9]*"} {
+		if err := ValidatePattern(p); err != nil {
+			t.Errorf("%s: %v", p, err)
+		}
+	}
+	for _, p := range []string{"", "a b", "../x", "x:y", "[", "a/"} {
+		if ValidatePattern(p) == nil {
+			t.Errorf("%q accepted", p)
+		}
+	}
+}

@@ -32,6 +32,8 @@ interface Form {
   branch: string;
   context: string;
   dockerfile: string;
+  builder: "auto" | "dockerfile" | "nixpacks" | "static";
+  paths: string;
   token: string;
   autoDeploy: boolean;
   project: string;
@@ -64,6 +66,8 @@ export function NewServiceWizard() {
     branch: "main",
     context: "",
     dockerfile: "Dockerfile",
+    builder: "auto",
+    paths: "",
     token: "",
     autoDeploy: true,
     project: params.project ?? "",
@@ -154,6 +158,8 @@ export function NewServiceWizard() {
             branch: f.branch.trim(),
             context: f.context.trim(),
             dockerfile: f.dockerfile.trim() || "Dockerfile",
+            builder: f.builder,
+            paths: f.paths.split(/\s+/).filter(Boolean),
             token: f.token || undefined,
             autoDeploy: f.autoDeploy,
           });
@@ -359,8 +365,8 @@ function SourceStep({ f, set }: { f: Form; set: SetFn }) {
           icon={<GitBranch className="size-4" />}
           title="Git repository"
         >
-          Build a Dockerfile from a branch with BuildKit; new commits are built
-          and deployed.
+          Build a branch with BuildKit (a Dockerfile, or Nixpacks without one);
+          new commits are built and deployed.
         </Choice>
       </div>
       {f.source === "image" ? (
@@ -407,10 +413,47 @@ function SourceStep({ f, set }: { f: Form; set: SetFn }) {
               <Input
                 value={f.dockerfile}
                 onChange={(e) => set("dockerfile", e.target.value)}
+                disabled={f.builder === "nixpacks" || f.builder === "static"}
                 className="font-mono"
               />
             </Field>
           </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <Field label="Builder">
+              <select
+                value={f.builder}
+                onChange={(e) =>
+                  set("builder", e.target.value as Form["builder"])
+                }
+                className={select}
+              >
+                <option value="auto">Automatic</option>
+                <option value="dockerfile">Dockerfile</option>
+                <option value="nixpacks">Nixpacks</option>
+                <option value="static">Static site (port 80)</option>
+              </select>
+            </Field>
+            <div className="sm:col-span-2">
+              <Field
+                label="Watch paths"
+                hint="Optional, for monorepos: only commits changing these build."
+              >
+                <Input
+                  value={f.paths}
+                  onChange={(e) => set("paths", e.target.value)}
+                  placeholder="services/api/** !services/api/docs/**"
+                  className="font-mono"
+                />
+              </Field>
+            </div>
+          </div>
+          {f.builder === "auto" && (
+            <p className="text-muted text-xs">
+              Automatic uses the Dockerfile when the repository has one, else
+              Nixpacks detects the language (Node, Python, Go, …), else a folder
+              with an index.html is served as a static site on port 80.
+            </p>
+          )}
           <Field
             label="Access token"
             hint="Only for private repositories. Stored encrypted."
@@ -621,11 +664,21 @@ function Review({
               {f.gitUrl} @ {f.branch}
             </span>
           </Row>
-          <Row k="Dockerfile">
+          <Row k="Build">
             <span className="font-mono">
-              {f.context ? `${f.context}/${f.dockerfile}` : f.dockerfile}
+              {f.builder === "nixpacks" || f.builder === "static"
+                ? `${f.builder}${f.context ? ` in ${f.context}` : ""}`
+                : f.context
+                  ? `${f.context}/${f.dockerfile}`
+                  : f.dockerfile}
+              {f.builder === "auto" && " (else Nixpacks or static)"}
             </span>
           </Row>
+          {f.paths.trim() && (
+            <Row k="Watch paths">
+              <span className="font-mono">{f.paths}</span>
+            </Row>
+          )}
           <Row k="Deploys">
             {f.autoDeploy ? "every successful build" : "by hand"}; tasks start
             after the first build

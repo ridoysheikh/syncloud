@@ -143,12 +143,13 @@ func (s *Server) handleStartBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
+		Ref string `json:"ref"`
 		SHA string `json:"sha"`
 	}
 	if r.ContentLength != 0 && !decodeJSON(w, r, &in) {
 		return
 	}
-	b, err := s.builds.BuildNow(r.Context(), sv, in.SHA)
+	b, err := s.builds.BuildNow(r.Context(), sv, in.Ref, in.SHA)
 	if err != nil {
 		s.buildError(w, "start build", err)
 		return

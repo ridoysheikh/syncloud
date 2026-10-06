@@ -7,12 +7,14 @@ package builds
 import (
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +32,13 @@ import (
 const (
 	// BuildKitImage is pinned per release (§5.0 release manifest).
 	BuildKitImage = "moby/buildkit:v0.25.1"
+	// StaticImage serves static sites (index.html, no Dockerfile).
+	StaticImage = "nginx:1.29-alpine"
+	// Nixpacks builds apps without a Dockerfile; the download is checked
+	// against these digests.
+	NixpacksVersion       = "1.41.0"
+	nixpacksSHA256X86_64  = "0f55de7874507b9cf7502113120bd96f2ab6979f78d10eaf2eb2ade9207b3af6"
+	nixpacksSHA256Aarch64 = "912bd02dd2bb6f9c3a9ed965fe8a68b4aa318dc7a2546e2eca6f2806a894ba39"
 	// TopicBuild carries a store.Build whenever a build changes.
 	TopicBuild = "build.updated"
 
@@ -37,6 +46,13 @@ const (
 	BuildBuilding  = "building"
 	BuildSucceeded = "succeeded"
 	BuildFailed    = "failed"
+	// BuildSkipped means no changed file matched the path filters.
+	BuildSkipped = "skipped"
+
+	// exitSkipped is build.sh's exit code for a skipped commit.
+	exitSkipped = 78
+	// webhookSafetyNet is the poll interval while webhooks arrive.
+	webhookSafetyNet = 10 * time.Minute
 
 	maxConcurrent = 2
 	minPoll       = 15
@@ -77,10 +93,21 @@ func New(st *store.Store, box *secrets.Box, jm *jobs.Manager, wl *workload.Manag
 	return m
 }
 
+//go:embed build.sh
+var buildScript string
+
+// Builders: auto tries a Dockerfile, then Nixpacks, then a static site.
+var builders = map[string]bool{"auto": true, "dockerfile": true, "nixpacks": true, "static": true}
+
+var pathRE = regexp.MustCompile(`^!?[A-Za-z0-9._/*?\[\]-]+$`)
+
 // Source is a Git source as the API shows and accepts it.
 type Source struct {
 	URL         string     `json:"url"`
 	Branch      string     `json:"branch"`
+	Tags        string     `json:"tags"`
+	Paths       []string   `json:"paths"`
+	Builder     string     `json:"builder"`
 	Dockerfile  string     `json:"dockerfile"`
 	Context     string     `json:"context"`
 	Token       string     `json:"token,omitempty"` // write-only
@@ -92,13 +119,24 @@ type Source struct {
 	LastSHA     string     `json:"lastSha"`
 	LastChecked *time.Time `json:"lastCheckedAt"`
 	LastError   string     `json:"lastError"`
+	// Refs are the watched branches and tags with their last seen commit.
+	Refs        map[string]string `json:"refs"`
+	LastWebhook *time.Time        `json:"lastWebhookAt"`
 }
 
 func (m *Manager) view(g store.GitSource) Source {
 	auto := g.AutoDeploy
-	return Source{URL: g.URL, Branch: g.Branch, Dockerfile: g.Dockerfile, Context: g.Context, HasToken: len(g.TokenEnc) > 0, AutoDeploy: &auto,
-		PollSeconds: g.PollSeconds, WebhookPath: "/api/v1/hooks/git/" + g.ID, Secret: g.WebhookSecret, LastSHA: g.LastSHA,
-		LastChecked: g.LastCheckedAt, LastError: g.LastError}
+	refs := map[string]string{}
+	for ref, sha := range g.RefSHAs {
+		refs[gitremote.ShortRef(ref)] = sha
+	}
+	paths := g.Paths
+	if paths == nil {
+		paths = []string{}
+	}
+	return Source{URL: g.URL, Branch: g.Branch, Tags: g.Tags, Paths: paths, Builder: g.Builder, Dockerfile: g.Dockerfile, Context: g.Context,
+		HasToken: len(g.TokenEnc) > 0, AutoDeploy: &auto, PollSeconds: g.PollSeconds, WebhookPath: "/api/v1/hooks/git/" + g.ID,
+		Secret: g.WebhookSecret, LastSHA: g.LastSHA, LastChecked: g.LastCheckedAt, LastError: g.LastError, Refs: refs, LastWebhook: g.LastWebhookAt}
 }
 
 // ErrInvalid wraps validation errors.
@@ -118,10 +156,32 @@ func (m *Manager) SetSource(ctx context.Context, sv store.Service, in Source) (S
 		in.Dockerfile = "Dockerfile"
 	}
 	in.Context = strings.Trim(in.Context, "/")
-	for _, p := range []string{in.Branch, in.Dockerfile, in.Context} {
-		if strings.ContainsAny(p, " \\'\"`$;&|\n#:") || strings.Contains(p, "..") {
-			return Source{}, ErrInvalid{fmt.Errorf("invalid branch or path %q", p)}
+	for _, p := range []string{in.Dockerfile, in.Context} {
+		if strings.ContainsAny(p, " \\'\"`$;&|\n#:*?[") || strings.Contains(p, "..") {
+			return Source{}, ErrInvalid{fmt.Errorf("invalid path %q", p)}
 		}
+	}
+	if err := gitremote.ValidatePattern(in.Branch); err != nil {
+		return Source{}, ErrInvalid{err}
+	}
+	if in.Tags != "" {
+		if err := gitremote.ValidatePattern(in.Tags); err != nil {
+			return Source{}, ErrInvalid{err}
+		}
+	}
+	if len(in.Paths) > 20 {
+		return Source{}, ErrInvalid{errors.New("at most 20 path filters")}
+	}
+	for _, p := range in.Paths {
+		if !pathRE.MatchString(p) || strings.Contains(p, "..") || strings.HasPrefix(strings.TrimPrefix(p, "!"), "/") {
+			return Source{}, ErrInvalid{fmt.Errorf("invalid path filter %q: use repository paths like services/api/** or !docs/**", p)}
+		}
+	}
+	if in.Builder == "" {
+		in.Builder = "auto"
+	}
+	if !builders[in.Builder] {
+		return Source{}, ErrInvalid{errors.New("builder must be auto, dockerfile, nixpacks or static")}
 	}
 	if in.PollSeconds == 0 {
 		in.PollSeconds = 60
@@ -133,7 +193,8 @@ func (m *Manager) SetSource(ctx context.Context, sv store.Service, in Source) (S
 	secret := make([]byte, 20)
 	_, _ = rand.Read(secret)
 	g := store.GitSource{ID: auth.NewID("git_"), ServiceID: sv.ID, URL: in.URL, Branch: in.Branch, Dockerfile: in.Dockerfile, Context: in.Context,
-		AutoDeploy: auto, PollSeconds: in.PollSeconds, WebhookSecret: hex.EncodeToString(secret), CreatedAt: m.now().UTC()}
+		AutoDeploy: auto, PollSeconds: in.PollSeconds, WebhookSecret: hex.EncodeToString(secret), CreatedAt: m.now().UTC(),
+		Tags: in.Tags, Paths: in.Paths, Builder: in.Builder}
 	if in.Token != "" {
 		g.TokenEnc = m.box.Seal([]byte(in.Token), []byte("git:"+sv.ID))
 	}
@@ -142,8 +203,8 @@ func (m *Manager) SetSource(ctx context.Context, sv store.Service, in Source) (S
 	if err != nil {
 		return Source{}, ErrInvalid{fmt.Errorf("cannot read the repository (check the URL and token): %w", err)}
 	}
-	if _, ok := gitremote.BranchSHA(refs, g.Branch); !ok {
-		return Source{}, ErrInvalid{fmt.Errorf("branch %s not found in the repository", g.Branch)}
+	if err := branchFound(refs, g); err != nil {
+		return Source{}, ErrInvalid{err}
 	}
 	if err := m.st.PutGitSource(ctx, g); err != nil {
 		return Source{}, err
@@ -164,8 +225,22 @@ func (m *Manager) GetSource(ctx context.Context, serviceID string) (Source, erro
 	return m.view(g), nil
 }
 
+// branchFound fails when no branch matches the source's branch pattern.
+func branchFound(refs map[string]string, g store.GitSource) error {
+	if len(gitremote.Match(refs, g.Branch, "")) > 0 {
+		return nil
+	}
+	if gitremote.IsPattern(g.Branch) {
+		return fmt.Errorf("no branch matches %s", g.Branch)
+	}
+	return fmt.Errorf("branch %s not found in the repository", g.Branch)
+}
+
 // Check asks for an immediate poll of a source after a push webhook.
-func (m *Manager) Check(sourceID string) { m.check(sourceID, "webhook") }
+func (m *Manager) Check(sourceID string) {
+	_ = m.st.RecordGitWebhook(context.Background(), sourceID, m.now())
+	m.check(sourceID, "webhook")
+}
 
 func (m *Manager) check(sourceID, trigger string) {
 	m.mu.Lock()
@@ -211,36 +286,94 @@ func (m *Manager) poll(ctx context.Context) {
 		delete(m.due, g.ID)
 		m.mu.Unlock()
 		interval := time.Duration(g.PollSeconds) * time.Second
+		if g.LastWebhookAt != nil && now.Sub(*g.LastWebhookAt) < 24*time.Hour {
+			interval = max(interval, webhookSafetyNet) // webhooks work: polling only catches missed ones
+		}
 		if g.Failures > 0 { // back off on errors, up to an hour
 			interval = min(interval<<min(g.Failures, 6), time.Hour)
 		}
 		if !forced && g.LastCheckedAt != nil && now.Sub(*g.LastCheckedAt) < interval {
 			continue
 		}
-		token := m.token(g)
 		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		refs, err := gitremote.LsRemote(cctx, g.URL, token)
+		refs, err := gitremote.LsRemote(cctx, g.URL, m.token(g))
 		cancel()
-		sha, ok := "", false
 		if err == nil {
-			if sha, ok = gitremote.BranchSHA(refs, g.Branch); !ok {
-				err = fmt.Errorf("branch %s not found", g.Branch)
-			}
+			err = branchFound(refs, g)
 		}
 		if err != nil {
 			_ = m.st.RecordGitCheck(ctx, g.ID, "", err.Error(), now)
 			m.log.Warn("git poll failed", "source", g.URL, "err", err)
 			continue
 		}
-		_ = m.st.RecordGitCheck(ctx, g.ID, sha, "", now)
 		trigger := "poll"
 		if forced {
 			trigger = forcedBy
 		}
-		if sha != g.LastSHA || forced {
-			m.enqueue(ctx, g, sha, trigger)
+		last := m.watch(ctx, g, refs, forced, trigger)
+		_ = m.st.RecordGitCheck(ctx, g.ID, last, "", now)
+	}
+}
+
+// candidate is a commit to build; base is the commit path filters compare
+// with ("" = build in any case).
+type candidate struct{ ref, sha, base string }
+
+// decide compares the matching refs with the last seen commits: a changed
+// ref is built against its previous commit (path filters), a new branch or
+// tag is built in full. The first check only builds the branch, and only
+// when it is not a pattern.
+func decide(g store.GitSource, matched map[string]string, forced bool) []candidate {
+	branchRef := "refs/heads/" + g.Branch
+	literal := !gitremote.IsPattern(g.Branch)
+	prev := g.RefSHAs
+	first := len(prev) == 0
+	if first && g.LastSHA != "" && literal { // sources from before watch rules
+		prev, first = map[string]string{branchRef: g.LastSHA}, false
+	}
+	names := make([]string, 0, len(matched))
+	for ref := range matched {
+		names = append(names, ref)
+	}
+	sort.Strings(names)
+	var out []candidate
+	for _, ref := range names {
+		sha := matched[ref]
+		old, seen := prev[ref]
+		switch {
+		case first:
+			if literal && ref == branchRef {
+				out = append(out, candidate{ref, sha, ""})
+			}
+		case !seen:
+			out = append(out, candidate{ref, sha, ""})
+		case old != sha:
+			out = append(out, candidate{ref, sha, old})
+		case forced && literal && ref == branchRef:
+			// A webhook for a commit not built yet; built commits are skipped.
+			out = append(out, candidate{ref, sha, ""})
 		}
 	}
+	return out
+}
+
+// watch queues the builds decide picks and remembers the refs. It returns
+// the newest queued (or the branch's) commit.
+func (m *Manager) watch(ctx context.Context, g store.GitSource, refs map[string]string, forced bool, trigger string) string {
+	matched := gitremote.Match(refs, g.Branch, g.Tags)
+	last := g.LastSHA
+	if sha, ok := matched["refs/heads/"+g.Branch]; ok {
+		last = sha
+	}
+	for _, c := range decide(g, matched, forced) {
+		if _, err := m.enqueue(ctx, g, c.ref, c.sha, c.base, trigger); err == nil {
+			last = c.sha
+		}
+	}
+	if err := m.st.SetGitRefs(ctx, g.ID, matched); err != nil {
+		m.log.Warn("save watched refs", "source", g.ID, "err", err)
+	}
+	return last
 }
 
 func (m *Manager) token(g store.GitSource) string {
@@ -255,12 +388,12 @@ func (m *Manager) token(g store.GitSource) string {
 }
 
 // enqueue records a build of sha; a commit is never built twice.
-func (m *Manager) enqueue(ctx context.Context, g store.GitSource, sha, trigger string) (store.Build, error) {
+func (m *Manager) enqueue(ctx context.Context, g store.GitSource, ref, sha, base, trigger string) (store.Build, error) {
 	sv, err := m.st.ServiceByID(ctx, g.ServiceID)
 	if err != nil {
 		return store.Build{}, err
 	}
-	b := store.Build{ID: auth.NewID("bld_"), ServiceID: sv.ID, SHA: sha, Ref: "refs/heads/" + g.Branch, Trigger: trigger, Status: BuildQueued,
+	b := store.Build{ID: auth.NewID("bld_"), ServiceID: sv.ID, SHA: sha, Ref: ref, BaseSHA: base, Trigger: trigger, Status: BuildQueued,
 		Image: "@registry/" + Repository(sv) + ":" + sha[:12], CreatedAt: m.now().UTC().Truncate(time.Second)}
 	if err := m.st.CreateBuild(ctx, b); errors.Is(err, store.ErrNameTaken) {
 		return store.Build{}, err
@@ -276,26 +409,40 @@ func (m *Manager) enqueue(ctx context.Context, g store.GitSource, sha, trigger s
 	return b, nil
 }
 
-// BuildNow queues the branch head (or a given commit) for a service.
-func (m *Manager) BuildNow(ctx context.Context, sv store.Service, sha string) (store.Build, error) {
+// BuildNow queues a commit: the head of ref (a branch or tag name; ""
+// means the source's branch) or the given sha. Path filters do not apply.
+func (m *Manager) BuildNow(ctx context.Context, sv store.Service, ref, sha string) (store.Build, error) {
 	g, err := m.st.GitSourceByService(ctx, sv.ID)
 	if err != nil {
 		return store.Build{}, ErrInvalid{errors.New("the service has no Git source")}
 	}
+	if ref == "" {
+		if gitremote.IsPattern(g.Branch) {
+			return store.Build{}, ErrInvalid{fmt.Errorf("the source watches %s: choose a branch or tag to build", g.Branch)}
+		}
+		ref = g.Branch
+	}
+	if err := gitremote.ValidatePattern(ref); err != nil || gitremote.IsPattern(ref) {
+		return store.Build{}, ErrInvalid{fmt.Errorf("invalid branch or tag %q", ref)}
+	}
+	fullRef := "refs/heads/" + ref
 	if sha == "" {
 		refs, err := gitremote.LsRemote(ctx, g.URL, m.token(g))
 		if err != nil {
 			return store.Build{}, ErrInvalid{err}
 		}
 		var ok bool
-		if sha, ok = gitremote.BranchSHA(refs, g.Branch); !ok {
-			return store.Build{}, ErrInvalid{fmt.Errorf("branch %s not found", g.Branch)}
+		if sha, ok = refs[fullRef]; !ok {
+			fullRef = "refs/tags/" + ref
+			if sha, ok = gitremote.Match(refs, "", ref)[fullRef]; !ok {
+				return store.Build{}, ErrInvalid{fmt.Errorf("no branch or tag %s in the repository", ref)}
+			}
 		}
 	}
 	if len(sha) != 40 || strings.Trim(sha, "0123456789abcdef") != "" {
 		return store.Build{}, ErrInvalid{errors.New("sha must be a full 40-character commit hash")}
 	}
-	b, err := m.enqueue(ctx, g, sha, "manual")
+	b, err := m.enqueue(ctx, g, fullRef, sha, "", "manual")
 	if errors.Is(err, store.ErrNameTaken) {
 		return store.Build{}, ErrInvalid{fmt.Errorf("commit %s was already built; redeploy that build instead", sha[:12])}
 	}
@@ -373,30 +520,36 @@ func (m *Manager) buildSpec(sv store.Service, g store.GitSource, b store.Build) 
 	}
 	auths[host] = map[string]string{"registrytoken": tok}
 	dockerCfg, _ := json.Marshal(map[string]any{"auths": auths})
-	gitContext := g.URL + "#" + b.SHA
-	if g.Context != "" {
-		gitContext += ":" + g.Context
+	image := host + "/" + repo
+	names := image + ":" + b.SHA[:12]
+	if name, ok := strings.CutPrefix(b.Ref, "refs/tags/"); ok {
+		names += "," + image + ":" + dockerTag(name)
+	} else {
+		names += "," + image + ":latest-" + dockerTag(gitremote.ShortRef(b.Ref))
 	}
 	// --output is CSV: the field holding two image names must be quoted.
-	output := `type=image,"name=` + host + "/" + repo + ":" + b.SHA[:12] + "," + host + "/" + repo + ":latest-" + strings.ReplaceAll(g.Branch, "/", "-") + `",push=true`
+	output := `type=image,"name=` + names + `",push=true`
+	cache := "type=registry,ref=" + image + ":buildcache"
 	if m.cfg.RegistryInsecure {
 		output += ",registry.insecure=true"
+		cache += ",registry.insecure=true"
 	}
-	args := []string{
-		"buildctl-daemonless.sh", "build", "--progress=plain", "--frontend", "dockerfile.v0",
-		"--opt", "context=" + gitContext, "--opt", "filename=" + g.Dockerfile, "--output", output,
+	env := map[string]string{
+		"BUILD_REGISTRY_AUTH": string(dockerCfg), "DOCKER_CONFIG": "/tmp/syncloud-docker",
+		"GIT_URL": g.URL, "GIT_SHA": b.SHA, "GIT_REF": b.Ref, "BASE_SHA": b.BaseSHA,
+		"WATCH_PATHS": strings.Join(g.Paths, "\n"), "CONTEXT_DIR": g.Context, "DOCKERFILE": g.Dockerfile, "BUILDER": g.Builder,
+		"OUTPUT": output, "CACHE": cache, "STATIC_IMAGE": StaticImage,
+		"NIXPACKS_VERSION": NixpacksVersion, "NIXPACKS_SHA256_X86_64": nixpacksSHA256X86_64, "NIXPACKS_SHA256_AARCH64": nixpacksSHA256Aarch64,
 	}
-	env := map[string]string{"BUILD_REGISTRY_AUTH": string(dockerCfg), "DOCKER_CONFIG": "/tmp/syncloud-docker"}
+	if env["BUILDER"] == "" {
+		env["BUILDER"] = "auto"
+	}
 	if t := m.token(g); t != "" {
-		u, _ := url.Parse(g.URL)
 		env["GIT_TOKEN"] = t
-		args = append(args, "--secret", "id=GIT_AUTH_TOKEN."+u.Hostname()+",env=GIT_TOKEN")
 	}
-	script := `mkdir -p "$DOCKER_CONFIG" && printf '%s' "$BUILD_REGISTRY_AUTH" > "$DOCKER_CONFIG/config.json" && exec "$@"`
 	spec := workload.Spec{
 		Image:      BuildKitImage,
-		Entrypoint: []string{"sh", "-c", script, "build"}, // the image's entrypoint is buildkitd
-		Command:    args,
+		Entrypoint: []string{"sh", "-c", buildScript, "build"}, // the image's entrypoint is buildkitd
 		Env:        env,
 		Resources:  workload.Resources{CPU: 1, Memory: 1024, MemoryLimit: 8192},
 		Placement:  workload.Placement{Node: m.cfg.Node},
@@ -405,6 +558,20 @@ func (m *Manager) buildSpec(sv store.Service, g store.GitSource, b store.Build) 
 		return workload.Spec{}, err
 	}
 	return spec, nil
+}
+
+var tagChars = regexp.MustCompile(`[^A-Za-z0-9_.-]`)
+
+// dockerTag makes a branch or tag name usable as an image tag.
+func dockerTag(name string) string {
+	t := strings.TrimLeft(tagChars.ReplaceAllString(name, "-"), ".-")
+	if len(t) > 100 {
+		t = t[:100]
+	}
+	if t == "" {
+		t = "ref"
+	}
+	return t
 }
 
 // onRunFinished completes a build and deploys it when auto-deploy is on.
@@ -418,6 +585,17 @@ func (m *Manager) onRunFinished(ctx context.Context, run store.JobRun) {
 	}
 	now := m.now().UTC()
 	b.FinishedAt = &now
+	if run.ExitCode != nil && *run.ExitCode == exitSkipped {
+		b.Status, b.Message = BuildSkipped, "no changed file matches the watch paths"
+		_ = m.st.UpdateBuild(ctx, b)
+		m.bus.Publish(TopicBuild, b)
+		m.log.Info("build skipped", "build", b.ID, "sha", b.SHA[:12])
+		select {
+		case m.kick <- struct{}{}:
+		default:
+		}
+		return
+	}
 	if run.Status != store.RunSucceeded {
 		b.Status, b.Message = BuildFailed, "build "+strings.ReplaceAll(run.Status, "_", " ")
 		if run.Message != "" {

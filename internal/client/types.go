@@ -897,19 +897,23 @@ func (c *Client) DeleteImage(ctx context.Context, repo, tag string) error {
 }
 
 type GitSource struct {
-	URL           string     `json:"url"`
-	Branch        string     `json:"branch"`
-	Dockerfile    string     `json:"dockerfile"`
-	Context       string     `json:"context"`
-	Token         string     `json:"token,omitempty"`
-	HasToken      bool       `json:"hasToken"`
-	AutoDeploy    *bool      `json:"autoDeploy,omitempty"`
-	PollSeconds   int        `json:"pollSeconds,omitempty"`
-	WebhookPath   string     `json:"webhookPath,omitempty"`
-	WebhookSecret string     `json:"webhookSecret,omitempty"`
-	LastSHA       string     `json:"lastSha,omitempty"`
-	LastCheckedAt *time.Time `json:"lastCheckedAt,omitempty"`
-	LastError     string     `json:"lastError,omitempty"`
+	URL           string            `json:"url"`
+	Branch        string            `json:"branch"`
+	Tags          string            `json:"tags,omitempty"`
+	Paths         []string          `json:"paths,omitempty"`
+	Builder       string            `json:"builder,omitempty"`
+	Dockerfile    string            `json:"dockerfile"`
+	Context       string            `json:"context"`
+	Token         string            `json:"token,omitempty"`
+	HasToken      bool              `json:"hasToken"`
+	AutoDeploy    *bool             `json:"autoDeploy,omitempty"`
+	PollSeconds   int               `json:"pollSeconds,omitempty"`
+	WebhookPath   string            `json:"webhookPath,omitempty"`
+	WebhookSecret string            `json:"webhookSecret,omitempty"`
+	LastSHA       string            `json:"lastSha,omitempty"`
+	LastCheckedAt *time.Time        `json:"lastCheckedAt,omitempty"`
+	LastError     string            `json:"lastError,omitempty"`
+	Refs          map[string]string `json:"refs,omitempty"`
 }
 
 type Build struct {
@@ -926,6 +930,7 @@ type Build struct {
 	RunID       string     `json:"runId"`
 	Message     string     `json:"message"`
 	Deployed    bool       `json:"deployed"`
+	BaseSHA     string     `json:"baseSha"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	StartedAt   *time.Time `json:"startedAt"`
 	FinishedAt  *time.Time `json:"finishedAt"`
@@ -955,9 +960,11 @@ func (c *Client) ListBuilds(ctx context.Context, project, env, service string) (
 }
 
 // StartBuild builds the branch head, or sha when given.
-func (c *Client) StartBuild(ctx context.Context, project, env, service, sha string) (Build, error) {
+// StartBuild builds the head of ref (a branch or tag; "" = the source's
+// branch) or sha.
+func (c *Client) StartBuild(ctx context.Context, project, env, service, ref, sha string) (Build, error) {
 	var out Build
-	return out, c.Do(ctx, "POST", svcPath(project, env, service)+"/builds", map[string]string{"sha": sha}, &out)
+	return out, c.Do(ctx, "POST", svcPath(project, env, service)+"/builds", map[string]string{"ref": ref, "sha": sha}, &out)
 }
 
 func (c *Client) DeployBuild(ctx context.Context, id string) (Build, error) {
