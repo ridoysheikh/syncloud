@@ -25,6 +25,7 @@ import (
 	"syncloud/internal/api"
 	"syncloud/internal/auth"
 	"syncloud/internal/backup"
+	"syncloud/internal/builds"
 	"syncloud/internal/certs"
 	"syncloud/internal/config"
 	"syncloud/internal/discovery"
@@ -218,6 +219,12 @@ func serve(args []string) error {
 	certMgr.SetHosts(certHosts(domains.Endpoints()))
 	gw.AddHooks(workloads.Hooks())
 	go workloads.Run(ctx)
+	registryHost := func() string {
+		if cfg.RegistryPullHost != "" {
+			return cfg.RegistryPullHost
+		}
+		return domains.Endpoints().RegistryHost
+	}
 	// "@registry/shop/api:tag" in a task definition means the private
 	// registry; nodes get a pull-only token for that repository (§5.9).
 	workloads.ResolveImage = func(image string) (string, string) {
@@ -225,10 +232,7 @@ func serve(args []string) error {
 		if !ok {
 			return image, ""
 		}
-		host := cfg.RegistryPullHost
-		if host == "" {
-			host = domains.Endpoints().RegistryHost
-		}
+		host := registryHost()
 		repo := path
 		if i := strings.IndexByte(repo, '@'); i >= 0 {
 			repo = repo[:i]
@@ -261,6 +265,10 @@ func serve(args []string) error {
 	gw.AddHooks(jobMgr.Hooks())
 	workloads.DeployHooks = jobMgr
 	go jobMgr.Run(ctx)
+	buildMgr := builds.New(st, box, jobMgr, workloads, regIssuer, bus, log, builds.Config{
+		RegistryHost: registryHost, RegistryInsecure: cfg.RegistryInsecure, Node: cfg.BuildNode,
+	})
+	go buildMgr.Run(ctx)
 	healthMon := health.New(st, workloads, bus, log, health.Config{
 		BaseDomain: domains.Base, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS, VictoriaMetricsURL: cfg.VictoriaMetricsURL,
 	})
@@ -331,6 +339,7 @@ func serve(args []string) error {
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
 		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon,
 		RegistryBrowser:       &dockerregistry.Browser{URL: "http://" + system.RegistryAddr, Issuer: regIssuer},
+		Builds:                buildMgr,
 		ControllerSchedulable: cfg.ControllerSchedulable,
 		ACME:                  api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {

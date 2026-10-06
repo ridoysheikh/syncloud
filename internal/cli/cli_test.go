@@ -32,6 +32,7 @@ var noCommand = map[string]string{
 	"getOpenAPI":       "reachable with `synctl api GET /api/v1/openapi.json`",
 	"joinNode":         "agent-only: `syncloud-agent join` (it generates the node key)",
 	"getRegistryToken": "used by `docker login` / the Docker registry token protocol",
+	"gitWebhook":       "called by Git hosts on push",
 }
 
 // Every API operation has a synctl command (§5.1 parity check).

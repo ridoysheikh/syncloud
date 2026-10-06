@@ -1301,6 +1301,23 @@ Because there is only one controller:
   - **Registry browser**: the controller reads the registry with tokens it issues to itself. It lists repositories (paginated catalog, empty ones hidden) and images (tag, digest, compressed size, platforms from the index or config, created time) and deletes tags (by manifest digest). API `/registry/info|repositories|images`; synctl `registry info|repos|images|delete`; the Registry dashboard (counts and copyable push commands) and Repositories pages.
   - Verified with `test/e2e/registry.sh`: `docker login` with an access key, push, browse, a service deployed from `@registry/…` pulled by the node with a minted token, and tag deletion.
   - Still to do in Phase 4: lifecycle policies, garbage collection, upstream credentials and per-project permissions (Phase 7 IAM).
+- ✅ Slice 4b (2026-10-06), Git builds:
+  - **Git source per service**: an https URL, branch, context directory, Dockerfile, an optional token (sealed with the master key), auto-deploy, and a poll interval of at least 15s. Connecting runs a smart-HTTP `ls-remote` (no git binary on the controller) to fail early on a wrong URL, branch or token.
+  - **Polling with backoff**: errors double the interval, up to 1h. **Webhooks**: `POST /api/v1/hooks/git/{id}` accepts GitHub `X-Hub-Signature-256`, Gitea/Forgejo `X-Gitea-Signature` (HMAC-SHA256) and the GitLab `X-Gitlab-Token`. A webhook only triggers a check, so the payload is never trusted. Each commit is built once (unique on service plus SHA).
+  - **Builds**: BuildKit (`moby/buildkit` via `buildctl-daemonless.sh`), run as a privileged, host-network **job run** (trigger `build`), so a build log is just that run's logs.
+    - Builds can be pinned with `--build-node`. At most 2 run at once.
+    - BuildKit fetches the commit itself (`context=<url>#<sha>:<dir>`, with the token as a `GIT_AUTH_TOKEN.<host>` secret).
+    - It pushes `<repo>:<sha12>` and `latest-<branch>` with a 2h push token (Docker config `registrytoken`). `--registry-insecure` (dev default) pushes over HTTP.
+  - **Deploy**: a successful build with auto-deploy rolls out a new revision with only the image changed (`@registry/<project>/<service>:<sha12>`). Any succeeded build can be redeployed by hand.
+  - Task definitions gain `entrypoint` (the BuildKit image's entrypoint is buildkitd). TaskSpec gains `privileged` (platform builds only, never user-settable) and `placement.node`.
+  - API `…/services/{s}/git`, `…/services/{s}/builds`, `/builds`, `/builds/{id}/deploy`, the webhook. synctl `builds connect|source|disconnect|list|run [--wait]|deploy`. A **Builds** tab on the service page: connect form, webhook URL and secret, Build now, build table with logs and Deploy.
+  - Verified with `test/e2e/builds.sh`:
+    - Smart-HTTP Git server → BuildKit on ctl-0 → private registry → auto-deploy serving the new content.
+    - Signed webhook (a bad signature gets 401) → the next commit deployed.
+    - A broken Dockerfile fails without deploying.
+    - The same commit is refused twice; an older build is redeployed by hand.
+    - Disconnect removes the webhook.
+  - Still to do: GitHub App installation flow, watch rules and path filters, Nixpacks (builds without a Dockerfile), build cache volume, cancelling a build from the UI.
 - ECR-style registry UI (§5.10): dashboard, repositories, images, push commands, lifecycle policies with preview, permissions, upstream credentials, registry tokens; registry event tracking; pre-pull before deploys.
 - (v1.1) Trivy scanning and the deploy gate.
 - GitHub App, GitLab, Gitea and generic Git; webhooks plus the polling scheduler (watch rules, path filters, SHA dedup, backoff) (§5.8).

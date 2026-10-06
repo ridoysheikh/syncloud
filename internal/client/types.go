@@ -848,3 +848,72 @@ func (c *Client) ListImages(ctx context.Context, repo string) ([]Image, error) {
 func (c *Client) DeleteImage(ctx context.Context, repo, tag string) error {
 	return c.Do(ctx, "DELETE", "/api/v1/registry/images?"+url.Values{"repository": {repo}, "tag": {tag}}.Encode(), nil, nil)
 }
+
+type GitSource struct {
+	URL           string     `json:"url"`
+	Branch        string     `json:"branch"`
+	Dockerfile    string     `json:"dockerfile"`
+	Context       string     `json:"context"`
+	Token         string     `json:"token,omitempty"`
+	HasToken      bool       `json:"hasToken"`
+	AutoDeploy    *bool      `json:"autoDeploy,omitempty"`
+	PollSeconds   int        `json:"pollSeconds,omitempty"`
+	WebhookPath   string     `json:"webhookPath,omitempty"`
+	WebhookSecret string     `json:"webhookSecret,omitempty"`
+	LastSHA       string     `json:"lastSha,omitempty"`
+	LastCheckedAt *time.Time `json:"lastCheckedAt,omitempty"`
+	LastError     string     `json:"lastError,omitempty"`
+}
+
+type Build struct {
+	ID          string     `json:"id"`
+	ServiceID   string     `json:"serviceId"`
+	Project     string     `json:"project"`
+	Environment string     `json:"environment"`
+	Service     string     `json:"service"`
+	SHA         string     `json:"sha"`
+	Ref         string     `json:"ref"`
+	Trigger     string     `json:"trigger"`
+	Status      string     `json:"status"`
+	Image       string     `json:"image"`
+	RunID       string     `json:"runId"`
+	Message     string     `json:"message"`
+	Deployed    bool       `json:"deployed"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	StartedAt   *time.Time `json:"startedAt"`
+	FinishedAt  *time.Time `json:"finishedAt"`
+}
+
+func (c *Client) GetGitSource(ctx context.Context, project, env, service string) (GitSource, error) {
+	var out GitSource
+	return out, c.Do(ctx, "GET", svcPath(project, env, service)+"/git", nil, &out)
+}
+
+func (c *Client) SetGitSource(ctx context.Context, project, env, service string, src GitSource) (GitSource, error) {
+	var out GitSource
+	return out, c.Do(ctx, "PUT", svcPath(project, env, service)+"/git", src, &out)
+}
+
+func (c *Client) DeleteGitSource(ctx context.Context, project, env, service string) error {
+	return c.Do(ctx, "DELETE", svcPath(project, env, service)+"/git", nil, nil)
+}
+
+// ListBuilds lists a service's builds, or recent builds everywhere when service is "".
+func (c *Client) ListBuilds(ctx context.Context, project, env, service string) ([]Build, error) {
+	var out list[Build]
+	if service == "" {
+		return out.Items, c.Do(ctx, "GET", "/api/v1/builds", nil, &out)
+	}
+	return out.Items, c.Do(ctx, "GET", svcPath(project, env, service)+"/builds", nil, &out)
+}
+
+// StartBuild builds the branch head, or sha when given.
+func (c *Client) StartBuild(ctx context.Context, project, env, service, sha string) (Build, error) {
+	var out Build
+	return out, c.Do(ctx, "POST", svcPath(project, env, service)+"/builds", map[string]string{"sha": sha}, &out)
+}
+
+func (c *Client) DeployBuild(ctx context.Context, id string) (Build, error) {
+	var out Build
+	return out, c.Do(ctx, "POST", "/api/v1/builds/"+url.PathEscape(id)+"/deploy", nil, &out)
+}

@@ -13,12 +13,13 @@ import (
 
 // Spec is one immutable task definition revision (one container per task).
 type Spec struct {
-	Image     string            `json:"image"`
-	Command   []string          `json:"command,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
-	Ports     []Port            `json:"ports,omitempty"`
-	Resources Resources         `json:"resources"`
-	Placement Placement         `json:"placement"`
+	Image      string            `json:"image"`
+	Entrypoint []string          `json:"entrypoint,omitempty"` // replaces the image ENTRYPOINT
+	Command    []string          `json:"command,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	Ports      []Port            `json:"ports,omitempty"`
+	Resources  Resources         `json:"resources"`
+	Placement  Placement         `json:"placement"`
 	// Health is probed by the agent (§5.6); traffic only reaches healthy tasks.
 	Health     *HealthCheck `json:"health,omitempty"`
 	Deployment Deployment   `json:"deployment"`
@@ -63,11 +64,14 @@ type Resources struct {
 
 type Placement struct {
 	Strategy string `json:"strategy"` // spread (default) | binpack
+	// Node pins tasks to one node by name (e.g. builds on the controller).
+	Node string `json:"node,omitempty"`
 }
 
 var (
-	nameRE   = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
-	envKeyRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	nameRE     = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
+	envKeyRE   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	nodeNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 )
 
 // ValidName checks project, environment, service and port names: DNS labels
@@ -185,6 +189,9 @@ func (s *Spec) Normalize() error {
 		if h.StartPeriod == 0 {
 			h.StartPeriod = 10
 		}
+	}
+	if s.Placement.Node != "" && !nodeNameRE.MatchString(s.Placement.Node) {
+		return errors.New("placement node must be a node name")
 	}
 	switch s.Placement.Strategy {
 	case "":

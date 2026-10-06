@@ -113,7 +113,9 @@ message TaskSpec {
   repeated string dns_servers = 15; // the node's discovery DNS (§8.1)
   repeated string dns_search = 16;  // e.g. production.shop.syncloud.internal
   HealthCheck health = 17;      // probed by the agent (§5.6); unset = no check
+  bool privileged = 19;         // only for platform builds (BuildKit, §5.8); never user-settable
   string registry_auth = 18;    // X-Registry-Auth for the pull (short-lived; not part of the spec hash)
+  repeated string entrypoint = 20; // overrides the image ENTRYPOINT when set
 }
 
 message PortBinding {

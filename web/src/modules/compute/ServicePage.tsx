@@ -19,6 +19,7 @@ import { cn, gap } from "@/ui/cn";
 import { since } from "@/lib/nodes";
 import { serviceState } from "./ServicesPage";
 import { DomainsPanel } from "./DomainsPanel";
+import { BuildsPanel } from "./BuildsPanel";
 import { TasksTable } from "./TasksPage";
 import { useTasks } from "@/lib/workloads";
 import { LogsView } from "@/modules/logs/LogsView";
@@ -31,7 +32,7 @@ interface Revision {
   createdBy: string;
 }
 
-type Tab = "tasks" | "logs" | "deployments" | "revisions" | "spec";
+type Tab = "tasks" | "logs" | "deployments" | "builds" | "revisions" | "spec";
 
 /** One service: scale, tasks, revisions and its spec (§4). */
 export function ServicePage() {
@@ -185,22 +186,29 @@ export function ServicePage() {
           .map((p) => p.name ?? String(p.container))}
       />
       <div className="border-line flex gap-3 border-b text-xs">
-        {(["tasks", "logs", "deployments", "revisions", "spec"] as Tab[]).map(
-          (t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={cn(
-                "-mb-px border-b-2 px-1 pb-1.5 capitalize",
-                tab === t
-                  ? "border-accent text-fg"
-                  : "text-muted hover:text-fg border-transparent",
-              )}
-            >
-              {t}
-            </button>
-          ),
-        )}
+        {(
+          [
+            "tasks",
+            "logs",
+            "deployments",
+            "builds",
+            "revisions",
+            "spec",
+          ] as Tab[]
+        ).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={cn(
+              "-mb-px border-b-2 px-1 pb-1.5 capitalize",
+              tab === t
+                ? "border-accent text-fg"
+                : "text-muted hover:text-fg border-transparent",
+            )}
+          >
+            {t}
+          </button>
+        ))}
       </div>
       {tab === "tasks" && <ServiceTasks id={svc.id} path={path} />}
       {tab === "logs" && (
@@ -210,6 +218,7 @@ export function ServicePage() {
         />
       )}
       {tab === "deployments" && <Deployments path={path} />}
+      {tab === "builds" && <BuildsPanel path={path} />}
       {tab === "revisions" && <Revisions path={path} />}
       {tab === "spec" && <SpecEditor path={path} spec={svc.spec} />}
     </div>

@@ -508,6 +508,8 @@ func (m *Manager) place(ctx context.Context, spec Spec, serviceID string) (strin
 			c.Eligible, c.Why = false, "without Docker"
 		case !m.netReady(n.ID):
 			c.Eligible, c.Why = false, "network not ready"
+		case spec.Placement.Node != "" && n.Name != spec.Placement.Node:
+			c.Eligible, c.Why = false, "not the pinned node"
 		}
 		cands = append(cands, c)
 	}
@@ -602,11 +604,12 @@ func TaskSpec(sv store.Service, spec Spec, t store.Task) *agentv1.TaskSpec {
 	env["SYNCLOUD_REVISION"] = fmt.Sprint(t.Revision)
 	short := strings.TrimPrefix(strings.TrimPrefix(t.ID, TaskIDPrefix), "run_")
 	ts := &agentv1.TaskSpec{
-		TaskId:  t.ID,
-		Name:    fmt.Sprintf("%s-%s-%s-%s", sv.Project, sv.Environment, sv.Name, short[:min(8, len(short))]),
-		Image:   spec.Image,
-		Command: spec.Command,
-		Env:     env,
+		TaskId:     t.ID,
+		Name:       fmt.Sprintf("%s-%s-%s-%s", sv.Project, sv.Environment, sv.Name, short[:min(8, len(short))]),
+		Image:      spec.Image,
+		Entrypoint: spec.Entrypoint,
+		Command:    spec.Command,
+		Env:        env,
 		Labels: map[string]string{
 			"syncloud.project": sv.Project, "syncloud.environment": sv.Environment, "syncloud.service": sv.Name,
 			"syncloud.service_id": sv.ID, "syncloud.revision": fmt.Sprint(t.Revision),

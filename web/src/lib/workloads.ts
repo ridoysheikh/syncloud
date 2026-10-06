@@ -11,6 +11,7 @@ export interface Port {
 
 export interface Spec {
   image: string;
+  entrypoint?: string[];
   command?: string[];
   env?: Record<string, string>;
   ports?: Port[];

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"syncloud/internal/backup"
+	"syncloud/internal/builds"
 	"syncloud/internal/certs"
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
@@ -56,6 +57,7 @@ type Server struct {
 	jobs                  *jobs.Manager
 	health                *health.Monitor
 	registryBrowser       *registry.Browser
+	builds                *builds.Manager
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -106,6 +108,8 @@ type Options struct {
 	Health *health.Monitor
 	// RegistryBrowser reads repositories and images (§5.10); may be nil.
 	RegistryBrowser *registry.Browser
+	// Builds builds Git commits into images (§5.8); may be nil.
+	Builds *builds.Manager
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -142,6 +146,7 @@ func New(o Options) *Server {
 		jobs:                  o.Jobs,
 		health:                o.Health,
 		registryBrowser:       o.RegistryBrowser,
+		builds:                o.Builds,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -223,6 +228,14 @@ func (s *Server) Routes() []Route {
 		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/domains/{host}", h: s.handleRemoveServiceDomain},
 		{Method: "GET", Path: "/api/v1/domains/check", h: s.handleCheckDomain},
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/run", h: s.handleRunService},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/git", h: s.handleGetGitSource},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/git", h: s.handleSetGitSource},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/git", h: s.handleDeleteGitSource},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/builds", h: s.handleServiceBuilds},
+		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/builds", h: s.handleStartBuild},
+		{Method: "GET", Path: "/api/v1/builds", h: s.handleRecentBuilds},
+		{Method: "POST", Path: "/api/v1/builds/{id}/deploy", h: s.handleDeployBuild},
+		{Method: "POST", Path: "/api/v1/hooks/git/{id}", Public: true, h: s.handleGitWebhook},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/jobs", h: s.handleListJobs},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/jobs/{job}", h: s.handleGetJob},
 		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/jobs/{job}", h: s.handleApplyJob},

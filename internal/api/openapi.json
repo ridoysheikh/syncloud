@@ -3123,6 +3123,381 @@
           }
         }
       }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/git": {
+      "get": {
+        "operationId": "getGitSource",
+        "tags": [
+          "builds"
+        ],
+        "summary": "A service's Git source",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitSource"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "setGitSource",
+        "tags": [
+          "builds"
+        ],
+        "summary": "Connect a service to a Git repository; new commits on the branch are built and, with autoDeploy, deployed",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitSourceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitSource"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteGitSource",
+        "tags": [
+          "builds"
+        ],
+        "summary": "Disconnect a service from Git",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/builds": {
+      "get": {
+        "operationId": "listServiceBuilds",
+        "tags": [
+          "builds"
+        ],
+        "summary": "A service's builds, newest first",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Build"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "startBuild",
+        "tags": [
+          "builds"
+        ],
+        "summary": "Build the branch head, or a given commit, now",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sha": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Build"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/builds": {
+      "get": {
+        "operationId": "listBuilds",
+        "tags": [
+          "builds"
+        ],
+        "summary": "Recent builds across the cluster",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Build"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/builds/{id}/deploy": {
+      "post": {
+        "operationId": "deployBuild",
+        "tags": [
+          "builds"
+        ],
+        "summary": "Deploy a succeeded build as a new revision",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Build"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/hooks/git/{id}": {
+      "post": {
+        "operationId": "gitWebhook",
+        "tags": [
+          "builds"
+        ],
+        "security": [],
+        "summary": "Push webhook for GitHub, Gitea/Forgejo (HMAC-SHA256 signature) and GitLab (secret token); triggers a check of the branch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ping answered"
+          },
+          "202": {
+            "description": "Check queued"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4241,6 +4616,13 @@
             "type": "string",
             "example": "nginx:1.27"
           },
+          "entrypoint": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "replaces the image ENTRYPOINT"
+          },
           "command": {
             "type": "array",
             "items": {
@@ -5045,6 +5427,157 @@
             }
           },
           "created": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "GitSource": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "https:// clone URL"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "dockerfile": {
+            "type": "string"
+          },
+          "context": {
+            "type": "string",
+            "description": "build context directory inside the repository"
+          },
+          "hasToken": {
+            "type": "boolean"
+          },
+          "autoDeploy": {
+            "type": "boolean"
+          },
+          "pollSeconds": {
+            "type": "integer"
+          },
+          "webhookPath": {
+            "type": "string",
+            "description": "push webhook path, relative to the dashboard URL"
+          },
+          "webhookSecret": {
+            "type": "string"
+          },
+          "lastSha": {
+            "type": "string"
+          },
+          "lastCheckedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lastError": {
+            "type": "string"
+          }
+        }
+      },
+      "GitSourceInput": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string",
+            "default": "main"
+          },
+          "dockerfile": {
+            "type": "string",
+            "default": "Dockerfile"
+          },
+          "context": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string",
+            "description": "access token for private repositories (write-only)"
+          },
+          "autoDeploy": {
+            "type": "boolean",
+            "default": true
+          },
+          "pollSeconds": {
+            "type": "integer",
+            "default": 60,
+            "minimum": 15
+          }
+        }
+      },
+      "Build": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "serviceId": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "sha": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "poll",
+              "webhook",
+              "manual"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "building",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "image": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string",
+            "description": "the job run that executes the build; its logs are the build log"
+          },
+          "message": {
+            "type": "string"
+          },
+          "deployed": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "finishedAt": {
             "type": "string",
             "format": "date-time",
             "nullable": true

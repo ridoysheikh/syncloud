@@ -187,9 +187,9 @@ func (s *Server) handleEffectiveFirewall(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func nonNil(s []string) []string {
+func nonNil[T any](s []T) []T {
 	if s == nil {
-		return []string{}
+		return []T{}
 	}
 	return s
 }

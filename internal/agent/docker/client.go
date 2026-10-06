@@ -171,6 +171,7 @@ func (c *Client) EnsureNetwork(ctx context.Context, name string, labels map[stri
 // CreateRequest is the subset of the container create body the agent uses.
 type CreateRequest struct {
 	Image        string              `json:"Image"`
+	Entrypoint   []string            `json:"Entrypoint,omitempty"`
 	Cmd          []string            `json:"Cmd,omitempty"`
 	Env          []string            `json:"Env,omitempty"`
 	Labels       map[string]string   `json:"Labels,omitempty"`
@@ -187,6 +188,7 @@ type HostConfig struct {
 	NanoCPUs      int64                    `json:"NanoCpus,omitempty"`
 	ExtraHosts    []string                 `json:"ExtraHosts,omitempty"`
 	DNS           []string                 `json:"Dns,omitempty"`
+	Privileged    bool                     `json:"Privileged,omitempty"`
 	DNSSearch     []string                 `json:"DnsSearch,omitempty"`
 	LogConfig     LogConfig                `json:"LogConfig"`
 }

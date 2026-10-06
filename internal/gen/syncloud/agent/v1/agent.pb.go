@@ -1021,7 +1021,9 @@ type TaskSpec struct {
 	DnsServers       []string               `protobuf:"bytes,15,rep,name=dns_servers,json=dnsServers,proto3" json:"dns_servers,omitempty"`                      // the node's discovery DNS (§8.1)
 	DnsSearch        []string               `protobuf:"bytes,16,rep,name=dns_search,json=dnsSearch,proto3" json:"dns_search,omitempty"`                         // e.g. production.shop.syncloud.internal
 	Health           *HealthCheck           `protobuf:"bytes,17,opt,name=health,proto3" json:"health,omitempty"`                                                // probed by the agent (§5.6); unset = no check
+	Privileged       bool                   `protobuf:"varint,19,opt,name=privileged,proto3" json:"privileged,omitempty"`                                       // only for platform builds (BuildKit, §5.8); never user-settable
 	RegistryAuth     string                 `protobuf:"bytes,18,opt,name=registry_auth,json=registryAuth,proto3" json:"registry_auth,omitempty"`                // X-Registry-Auth for the pull (short-lived; not part of the spec hash)
+	Entrypoint       []string               `protobuf:"bytes,20,rep,name=entrypoint,proto3" json:"entrypoint,omitempty"`                                        // overrides the image ENTRYPOINT when set
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1175,11 +1177,25 @@ func (x *TaskSpec) GetHealth() *HealthCheck {
 	return nil
 }
 
+func (x *TaskSpec) GetPrivileged() bool {
+	if x != nil {
+		return x.Privileged
+	}
+	return false
+}
+
 func (x *TaskSpec) GetRegistryAuth() string {
 	if x != nil {
 		return x.RegistryAuth
 	}
 	return ""
+}
+
+func (x *TaskSpec) GetEntrypoint() []string {
+	if x != nil {
+		return x.Entrypoint
+	}
+	return nil
 }
 
 type PortBinding struct {
@@ -3060,7 +3076,7 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xbb\x06\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xfb\x06\n" +
 	"\bTaskSpec\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -3082,8 +3098,14 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"dnsServers\x12\x1d\n" +
 	"\n" +
 	"dns_search\x18\x10 \x03(\tR\tdnsSearch\x126\n" +
-	"\x06health\x18\x11 \x01(\v2\x1e.syncloud.agent.v1.HealthCheckR\x06health\x12#\n" +
-	"\rregistry_auth\x18\x12 \x01(\tR\fregistryAuth\x1a6\n" +
+	"\x06health\x18\x11 \x01(\v2\x1e.syncloud.agent.v1.HealthCheckR\x06health\x12\x1e\n" +
+	"\n" +
+	"privileged\x18\x13 \x01(\bR\n" +
+	"privileged\x12#\n" +
+	"\rregistry_auth\x18\x12 \x01(\tR\fregistryAuth\x12\x1e\n" +
+	"\n" +
+	"entrypoint\x18\x14 \x03(\tR\n" +
+	"entrypoint\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a9\n" +

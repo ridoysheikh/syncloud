@@ -136,6 +136,19 @@ type Manager struct {
 
 	mu    sync.Mutex
 	hooks map[string]map[string]bool // deployment ID -> pending hook run IDs
+
+	// OnFinished runs after any run reaches its final status (builds use it).
+	OnFinished func(ctx context.Context, run store.JobRun)
+}
+
+// TriggerBuild marks BuildKit runs (§5.8): they run privileged on the host
+// network, which user jobs never can.
+const TriggerBuild = "build"
+
+// StartBuild runs a platform build task for a service.
+func (m *Manager) StartBuild(ctx context.Context, sv store.Service, spec workload.Spec) (store.JobRun, error) {
+	t := runTarget{envID: sv.EnvironmentID, project: sv.Project, environment: sv.Environment, service: &sv, revision: 0, spec: spec}
+	return m.start(ctx, t, TriggerBuild, 1, "")
 }
 
 func NewManager(st *store.Store, gw *agentgw.Gateway, wl *workload.Manager, reg *nodes.Registry, bus *events.Bus, log *slog.Logger) *Manager {
@@ -261,6 +274,11 @@ func (m *Manager) send(ctx context.Context, run store.JobRun) {
 	sv := m.svcFor(ctx, run)
 	ts := m.wl.RunSpec(sv, spec, store.Task{ID: run.ID, NodeID: run.NodeID, Revision: run.Revision})
 	ts.Labels["syncloud.job_run"] = run.ID
+	if run.Trigger == TriggerBuild {
+		ts.Privileged, ts.NetworkMode = true, "host"
+		ts.DnsServers, ts.DnsSearch = nil, nil
+		ts.Name = strings.Replace(ts.Name, "-run-", "-build-", 1)
+	}
 	err = m.gw.Send(run.NodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_RunTask{RunTask: &agentv1.RunTask{Spec: ts}}})
 	if err != nil && !errors.Is(err, agentgw.ErrNotConnected) {
 		m.log.Warn("send job run", "run", run.ID, "err", err)
@@ -425,6 +443,9 @@ func (m *Manager) finish(ctx context.Context, run store.JobRun, status string, c
 			spec, _ = parseSpec(j.Spec)
 			defer func() { _ = m.st.PruneRuns(ctx, run.JobID, spec.HistoryLimit) }()
 		}
+	}
+	if m.OnFinished != nil {
+		defer m.OnFinished(ctx, run)
 	}
 	if (status == store.RunFailed || status == store.RunTimedOut) && run.Attempt <= spec.Retries {
 		delay := time.Duration(10<<min(run.Attempt-1, 5)) * time.Second

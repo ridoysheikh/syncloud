@@ -92,6 +92,7 @@ func NewRoot(in io.Reader, out, errOut io.Writer) *cobra.Command {
 		a.runsCmd(),
 		a.healthCmd(),
 		a.registryCmd(),
+		a.buildsCmd(),
 	)
 	return root
 }

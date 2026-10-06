@@ -42,6 +42,10 @@ type Controller struct {
 	// RegistryPullHost overrides the registry host nodes pull "@registry/…"
 	// images from (default: registry.<base-domain>).
 	RegistryPullHost string
+	// RegistryInsecure makes builds push over plain HTTP (default: dev only).
+	RegistryInsecure bool
+	// BuildNode pins Git builds to one node by name (default: any node).
+	BuildNode string
 	// VictoriaLogsURL is where container logs are stored (the system task).
 	VictoriaLogsURL string
 	// VictoriaMetricsURL stores metrics such as uptime checks (the system task).
@@ -78,6 +82,8 @@ func LoadController(args []string) (Controller, error) {
 	fs.StringVar(&c.ACMECAFile, "acme-ca-file", env("SYNCLOUD_ACME_CA_FILE", ""), "extra CA bundle to trust for the ACME server")
 	ctlSched := fs.String("controller-schedulable", env("SYNCLOUD_CONTROLLER_SCHEDULABLE", ""), "run services on the controller node: 1 or 0 (default 0, dev 1)")
 	fs.StringVar(&c.RegistryPullHost, "registry-pull-host", env("SYNCLOUD_REGISTRY_PULL_HOST", ""), "registry host nodes pull @registry images from (default registry.<base-domain>)")
+	regInsecure := fs.String("registry-insecure", env("SYNCLOUD_REGISTRY_INSECURE", ""), "builds push to the registry over HTTP: 1 or 0 (default 0, dev 1)")
+	fs.StringVar(&c.BuildNode, "build-node", env("SYNCLOUD_BUILD_NODE", ""), "node name to run Git builds on (default: any node)")
 	fs.StringVar(&c.VictoriaMetricsURL, "victoriametrics-url", env("SYNCLOUD_VICTORIAMETRICS_URL", "http://127.0.0.1:8428"), "VictoriaMetrics for metrics")
 	fs.StringVar(&c.VictoriaLogsURL, "victorialogs-url", env("SYNCLOUD_VICTORIALOGS_URL", "http://127.0.0.1:9428"), "VictoriaLogs for container logs")
 	fs.BoolVar(&c.Firewall, "firewall", env("SYNCLOUD_FIREWALL", "1") == "1", "manage the host firewall on every node (default on)")
@@ -92,6 +98,7 @@ func LoadController(args []string) (Controller, error) {
 		c.PublicHTTPS = map[bool]string{true: "127.0.0.1:8443", false: ":443"}[c.Dev]
 	}
 	c.ControllerSchedulable = *ctlSched == "1" || (*ctlSched == "" && c.Dev)
+	c.RegistryInsecure = *regInsecure == "1" || (*regInsecure == "" && c.Dev)
 	switch *acme {
 	case "":
 		c.ACME = !c.Dev

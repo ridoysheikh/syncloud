@@ -300,10 +300,11 @@ func createRequest(spec *agentv1.TaskSpec, hash string) docker.CreateRequest {
 	sort.Strings(env)
 
 	req := docker.CreateRequest{
-		Image:  spec.Image,
-		Cmd:    spec.Command,
-		Env:    env,
-		Labels: labels,
+		Image:      spec.Image,
+		Entrypoint: spec.Entrypoint,
+		Cmd:        spec.Command,
+		Env:        env,
+		Labels:     labels,
 		HostConfig: docker.HostConfig{
 			NetworkMode:   spec.NetworkMode,
 			RestartPolicy: docker.RestartPolicy{Name: restartName(spec.Restart)},
@@ -311,6 +312,7 @@ func createRequest(spec *agentv1.TaskSpec, hash string) docker.CreateRequest {
 			NanoCPUs:      spec.NanoCpus,
 			ExtraHosts:    spec.ExtraHosts,
 			DNS:           spec.DnsServers,
+			Privileged:    spec.Privileged,
 			DNSSearch:     spec.DnsSearch,
 			// Bounded local logs until centralized logging ships (§9.2).
 			LogConfig: docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},

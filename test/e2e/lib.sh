@@ -33,6 +33,11 @@ if [ "${WITH_REGISTRY:-0}" = 1 ]; then
   docker image inspect registry:3.1.2 >/dev/null 2>&1 || docker pull -q registry:3.1.2 >/dev/null
   docker save registry:3.1.2 -o "$BIN/registry.tar"
 fi
+if [ "${WITH_BUILDS:-0}" = 1 ]; then
+  CGO_ENABLED=0 GOOS=linux go build -o "$BIN/gitserver" ./test/e2e/gitserver
+  docker image inspect moby/buildkit:v0.25.1 >/dev/null 2>&1 || docker pull -q moby/buildkit:v0.25.1 >/dev/null
+  docker save moby/buildkit:v0.25.1 -o "$BIN/buildkit.tar"
+fi
 if [ "${WITH_TRAEFIK:-0}" = 1 ]; then
   docker image inspect traefik:v3.7.13 >/dev/null 2>&1 || docker pull -q traefik:v3.7.13 >/dev/null
   docker save traefik:v3.7.13 -o "$BIN/traefik.tar"
