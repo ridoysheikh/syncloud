@@ -42,11 +42,17 @@ export function IconButton({
 }
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  // A width or height from the caller replaces the default (utilities of the
+  // same kind would otherwise fight over CSS order).
+  const width = /(^|\s)w-/.test(className ?? "") ? "" : "w-full";
+  const height = /(^|\s)h-/.test(className ?? "") ? "" : "h-8";
   return (
     <input
       {...props}
       className={cn(
-        "bg-bg border-line-strong placeholder:text-faint focus:border-accent h-8 w-full rounded-sm border px-2 text-sm outline-none",
+        "bg-bg border-line-strong placeholder:text-faint focus:border-accent rounded-sm border px-2 text-sm outline-none",
+        width,
+        height,
         className,
       )}
     />

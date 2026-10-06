@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -10,8 +11,45 @@ import (
 	"syncloud/internal/store"
 )
 
-// Credentials of the signed-in user (§7.1). Managing other users' credentials
-// comes with IAM users in Phase 7.
+// Credentials (§7.1): everyone manages their own; ?userId= manages another
+// user's (e.g. a service account), which needs the action on that user.
+
+// credentialOwner returns whose credentials a request manages.
+func (s *Server) credentialOwner(w http.ResponseWriter, r *http.Request) (string, bool) {
+	u, _ := currentUser(r.Context())
+	id := r.URL.Query().Get("userId")
+	if id == "" || id == u.ID {
+		return u.ID, true
+	}
+	_, path, _ := strings.Cut(r.Pattern, " ")
+	action := ActionFor(r.Method, path)
+	res := "srn:syncloud:user/" + id
+	if d := s.decide(r, action, res); !d.Allowed {
+		s.denied(w, r, action, res, d.Reason)
+		return "", false
+	}
+	if _, err := s.store.UserByID(r.Context(), id); err != nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "no such user")
+		return "", false
+	}
+	return id, true
+}
+
+// validIPs checks an allow-list of addresses or CIDRs.
+func validIPs(ips []string) error {
+	if len(ips) > 20 {
+		return errors.New("at most 20 allowed addresses")
+	}
+	for _, x := range ips {
+		if _, err := netip.ParsePrefix(x); err == nil {
+			continue
+		}
+		if _, err := netip.ParseAddr(x); err != nil {
+			return errors.New(x + " is not an IP address or CIDR")
+		}
+	}
+	return nil
+}
 
 type accessKeyResponse struct {
 	ID          string     `json:"id"`
@@ -19,17 +57,23 @@ type accessKeyResponse struct {
 	CreatedAt   time.Time  `json:"createdAt"`
 	LastUsedAt  *time.Time `json:"lastUsedAt"`
 	LastUsedIP  string     `json:"lastUsedIp"`
+	ExpiresAt   *time.Time `json:"expiresAt"`
+	AllowedIPs  []string   `json:"allowedIps"`
 	// Secret is only returned once, when the key is created.
 	Secret string `json:"secretAccessKey,omitempty"`
 }
 
 func toAccessKeyResponse(k store.AccessKey) accessKeyResponse {
-	return accessKeyResponse{ID: k.ID, Description: k.Description, CreatedAt: k.CreatedAt.UTC(), LastUsedAt: utcPtr(k.LastUsedAt), LastUsedIP: k.LastUsedIP}
+	return accessKeyResponse{ID: k.ID, Description: k.Description, CreatedAt: k.CreatedAt.UTC(), LastUsedAt: utcPtr(k.LastUsedAt), LastUsedIP: k.LastUsedIP,
+		ExpiresAt: utcPtr(k.ExpiresAt), AllowedIPs: nonNil(k.AllowedIPs)}
 }
 
 func (s *Server) handleListAccessKeys(w http.ResponseWriter, r *http.Request) {
-	u, _ := currentUser(r.Context())
-	keys, err := s.store.ListAccessKeys(r.Context(), u.ID)
+	owner, ok := s.credentialOwner(w, r)
+	if !ok {
+		return
+	}
+	keys, err := s.store.ListAccessKeys(r.Context(), owner)
 	if err != nil {
 		s.internalError(w, "list access keys", err)
 		return
@@ -43,7 +87,9 @@ func (s *Server) handleListAccessKeys(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateAccessKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Description string `json:"description"`
+		Description   string   `json:"description"`
+		ExpiresInDays int      `json:"expiresInDays"`
+		AllowedIPs    []string `json:"allowedIps"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -53,29 +99,50 @@ func (s *Server) handleCreateAccessKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "description must be at most 200 characters")
 		return
 	}
+	if req.ExpiresInDays < 0 || req.ExpiresInDays > maxTokenDays {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "expiresInDays must be between 0 (no expiry) and 365")
+		return
+	}
+	if err := validIPs(req.AllowedIPs); err != nil {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
+		return
+	}
+	owner, ok := s.credentialOwner(w, r)
+	if !ok {
+		return
+	}
 	u, _ := currentUser(r.Context())
 	id, secret := auth.NewAccessKey()
+	now := s.now().Truncate(time.Second)
 	k := store.AccessKey{
-		ID: id, UserID: u.ID, Description: req.Description, CreatedAt: s.now().Truncate(time.Second),
-		SecretEnc: s.secrets.Seal([]byte(secret), []byte(id)),
+		ID: id, UserID: owner, Description: req.Description, CreatedAt: now,
+		SecretEnc: s.secrets.Seal([]byte(secret), []byte(id)), AllowedIPs: req.AllowedIPs,
+	}
+	if req.ExpiresInDays > 0 {
+		exp := now.AddDate(0, 0, req.ExpiresInDays)
+		k.ExpiresAt = &exp
 	}
 	if err := s.store.CreateAccessKey(r.Context(), k); errors.Is(err, store.ErrLimitReached) {
-		writeError(w, http.StatusConflict, CodeConflict, "you already have 2 access keys; delete one before creating another")
+		writeError(w, http.StatusConflict, CodeConflict, "this user already has 2 access keys; delete one before creating another")
 		return
 	} else if err != nil {
 		s.internalError(w, "create access key", err)
 		return
 	}
-	s.audit(r, u.ID, "iam:CreateAccessKey", "srn:syncloud:access-key/"+id, nil)
+	s.audit(r, u.ID, "iam:CreateAccessKey", "srn:syncloud:access-key/"+id, map[string]any{"user": owner})
 	resp := toAccessKeyResponse(k)
 	resp.Secret = secret
 	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (s *Server) handleDeleteAccessKey(w http.ResponseWriter, r *http.Request) {
+	owner, ok := s.credentialOwner(w, r)
+	if !ok {
+		return
+	}
 	u, _ := currentUser(r.Context())
 	id := r.PathValue("id")
-	if err := s.store.DeleteAccessKey(r.Context(), u.ID, id); errors.Is(err, store.ErrNotFound) {
+	if err := s.store.DeleteAccessKey(r.Context(), owner, id); errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such access key")
 		return
 	} else if err != nil {
@@ -93,17 +160,21 @@ type tokenResponse struct {
 	ExpiresAt  *time.Time `json:"expiresAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt"`
 	LastUsedIP string     `json:"lastUsedIp"`
+	AllowedIPs []string   `json:"allowedIps"`
 	// Token is only returned once, when it is created.
 	Token string `json:"token,omitempty"`
 }
 
 func toTokenResponse(t store.APIToken) tokenResponse {
-	return tokenResponse{ID: t.ID, Name: t.Name, CreatedAt: t.CreatedAt.UTC(), ExpiresAt: utcPtr(t.ExpiresAt), LastUsedAt: utcPtr(t.LastUsedAt), LastUsedIP: t.LastUsedIP}
+	return tokenResponse{ID: t.ID, Name: t.Name, CreatedAt: t.CreatedAt.UTC(), ExpiresAt: utcPtr(t.ExpiresAt), LastUsedAt: utcPtr(t.LastUsedAt), LastUsedIP: t.LastUsedIP, AllowedIPs: nonNil(t.AllowedIPs)}
 }
 
 func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
-	u, _ := currentUser(r.Context())
-	toks, err := s.store.ListAPITokens(r.Context(), u.ID)
+	owner, ok := s.credentialOwner(w, r)
+	if !ok {
+		return
+	}
+	toks, err := s.store.ListAPITokens(r.Context(), owner)
 	if err != nil {
 		s.internalError(w, "list tokens", err)
 		return
@@ -120,8 +191,9 @@ const maxTokenDays = 365
 
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name          string `json:"name"`
-		ExpiresInDays int    `json:"expiresInDays"`
+		Name          string   `json:"name"`
+		ExpiresInDays int      `json:"expiresInDays"`
+		AllowedIPs    []string `json:"allowedIps"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -135,10 +207,18 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "expiresInDays must be between 0 (no expiry) and 365")
 		return
 	}
+	if err := validIPs(req.AllowedIPs); err != nil {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
+		return
+	}
+	owner, ok := s.credentialOwner(w, r)
+	if !ok {
+		return
+	}
 	u, _ := currentUser(r.Context())
 	now := s.now().Truncate(time.Second)
 	token := auth.NewToken("syn_pat_")
-	t := store.APIToken{ID: auth.NewID("tok_"), UserID: u.ID, Name: req.Name, TokenHash: auth.HashToken(token), CreatedAt: now}
+	t := store.APIToken{ID: auth.NewID("tok_"), UserID: owner, Name: req.Name, TokenHash: auth.HashToken(token), CreatedAt: now, AllowedIPs: req.AllowedIPs}
 	if req.ExpiresInDays > 0 {
 		exp := now.AddDate(0, 0, req.ExpiresInDays)
 		t.ExpiresAt = &exp
@@ -154,9 +234,13 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteToken(w http.ResponseWriter, r *http.Request) {
+	owner, ok := s.credentialOwner(w, r)
+	if !ok {
+		return
+	}
 	u, _ := currentUser(r.Context())
 	id := r.PathValue("id")
-	if err := s.store.DeleteAPIToken(r.Context(), u.ID, id); errors.Is(err, store.ErrNotFound) {
+	if err := s.store.DeleteAPIToken(r.Context(), owner, id); errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such token")
 		return
 	} else if err != nil {

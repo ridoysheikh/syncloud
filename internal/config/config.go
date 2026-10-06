@@ -58,6 +58,9 @@ type Controller struct {
 	CentralProbes bool
 	// DownloadsDir holds agent and CLI binaries served to joining nodes.
 	DownloadsDir string
+	// ShellImage and ShellSynctl configure Cloud Shell (§7.1).
+	ShellImage  string
+	ShellSynctl string
 	// Dev enables development behavior (verbose logs, relaxed origin checks for the Vite dev server).
 	Dev bool
 }
@@ -93,6 +96,8 @@ func LoadController(args []string) (Controller, error) {
 	fs.BoolVar(&c.Firewall, "firewall", env("SYNCLOUD_FIREWALL", "1") == "1", "manage the host firewall on every node (default on)")
 	fs.BoolVar(&c.CentralProbes, "central-probes", env("SYNCLOUD_CENTRAL_PROBES", "1") == "1", "probe every task from the controller and route around unreachable ones (default on)")
 	fs.BoolVar(&c.SecurityGroups, "security-groups", env("SYNCLOUD_SECURITY_GROUPS", "1") == "1", "isolate containers with security groups (default on)")
+	fs.StringVar(&c.ShellImage, "shell-image", env("SYNCLOUD_SHELL_IMAGE", "alpine:3.22"), "Cloud Shell container image")
+	fs.StringVar(&c.ShellSynctl, "shell-synctl", env("SYNCLOUD_SHELL_SYNCTL", ""), "synctl binary mounted into Cloud Shell (default: the one in --downloads-dir)")
 	fs.StringVar(&c.DownloadsDir, "downloads-dir", env("SYNCLOUD_DOWNLOADS_DIR", "/usr/local/lib/syncloud/downloads"), "agent/CLI binaries served at /downloads/")
 	if err := fs.Parse(args); err != nil {
 		return c, err

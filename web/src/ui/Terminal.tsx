@@ -9,7 +9,7 @@ const css = (name: string) => getComputedStyle(document.documentElement).getProp
  * An interactive shell in a task (§10, kubectl exec), over the exec WebSocket:
  * binary frames carry terminal I/O, text frames carry resize and exit.
  */
-export function Terminal({ taskId, command = ["sh"] }: { taskId: string; command?: string[] }) {
+export function Terminal({ taskId, command = ["sh"], url, height = "h-[60vh]" }: { taskId: string; command?: string[]; url?: string; height?: string }) {
   const el = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<"connecting" | "open" | "closed">("connecting");
 
@@ -28,7 +28,7 @@ export function Terminal({ taskId, command = ["sh"] }: { taskId: string; command
     const q = new URLSearchParams({ tty: "1", cols: String(term.cols), rows: String(term.rows) });
     command.forEach((c) => q.append("command", c));
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/api/v1/tasks/${taskId}/exec?${q}`);
+    const ws = new WebSocket(`${proto}://${location.host}${url ?? `/api/v1/tasks/${taskId}/exec`}?${q}`);
     ws.binaryType = "arraybuffer";
     const enc = new TextEncoder();
     ws.onopen = () => {
@@ -61,7 +61,7 @@ export function Terminal({ taskId, command = ["sh"] }: { taskId: string; command
 
   return (
     <div className="flex flex-col gap-1">
-      <div ref={el} className="bg-bg border-line h-[60vh] rounded-sm border p-1" />
+      <div ref={el} className={`bg-bg border-line ${height} rounded-sm border p-1`} />
       <span className="text-faint text-xs">{state === "connecting" ? "Connecting…" : state === "open" ? "Connected" : "Session ended"}</span>
     </div>
   );

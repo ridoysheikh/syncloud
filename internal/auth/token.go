@@ -53,3 +53,24 @@ func NewAccessKey() (id, secret string) {
 	}
 	return "SYNAK" + b32.EncodeToString(idb), b32.EncodeToString(sb)
 }
+
+// TempKeyPrefix starts the key IDs of temporary credentials (STS).
+const TempKeyPrefix = "SYNAS"
+
+// NewUserCode is a short code a person types to approve a device login:
+// two groups of four letters without ambiguous ones (XXXX-XXXX).
+func NewUserCode() string {
+	const alphabet = "BCDFGHJKLMNPQRSTVWXZ"
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	out := make([]byte, 0, 9)
+	for i, x := range b {
+		if i == 4 {
+			out = append(out, '-')
+		}
+		out = append(out, alphabet[int(x)%len(alphabet)])
+	}
+	return string(out)
+}

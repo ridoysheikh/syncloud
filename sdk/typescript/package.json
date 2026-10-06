@@ -1,0 +1,12 @@
+{
+  "name": "@syncloud/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the SynCloud API: access-key signing (SYN1-HMAC-SHA256), tokens and temporary credentials",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": { "build": "tsc" },
+  "devDependencies": { "typescript": "^5.6.0" },
+  "license": "UNLICENSED"
+}

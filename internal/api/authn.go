@@ -3,9 +3,11 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"errors"
 	"io"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -19,13 +21,24 @@ const (
 	CredSession   = "session"
 	CredToken     = "token"
 	CredAccessKey = "access_key"
+	// CredRole is an assumed role (sts); CredTemporary a device-login or
+	// Cloud Shell credential acting as the user.
+	CredRole      = "role_session"
+	CredTemporary = "temporary"
 )
+
+// HeaderSessionToken carries the session token of temporary credentials.
+const HeaderSessionToken = "X-Syncloud-Session-Token"
 
 // Principal is who is making a request and with which credential.
 type Principal struct {
-	User     store.User
-	CredType string
-	CredID   string // access key ID or token ID; empty for sessions
+	User       store.User
+	CredType   string
+	CredID     string // access key ID or token ID; empty for sessions
+	RoleID     string // set for role sessions: the role's policies apply
+	MFA        bool   // the credential was obtained with a TOTP code
+	MFAEnabled bool   // the user has MFA set up
+	Kind       string // user | service
 }
 
 type ctxKey int
@@ -107,7 +120,9 @@ func (s *Server) authSession(r *http.Request) (Principal, error) {
 			s.log.Warn("touch session", "err", err)
 		}
 	}
-	return Principal{User: u, CredType: CredSession}, nil
+	p := s.principalFor(u, CredSession, "")
+	p.MFA = sess.MFA
+	return p, nil
 }
 
 func (s *Server) authToken(r *http.Request, token string) (Principal, error) {
@@ -122,12 +137,15 @@ func (s *Server) authToken(r *http.Request, token string) (Principal, error) {
 	if err != nil {
 		return Principal{}, err
 	}
+	if !ipAllowed(t.AllowedIPs, clientIP(r)) {
+		return Principal{}, authFailure{"this token cannot be used from " + clientIP(r)}
+	}
 	if t.LastUsedAt == nil || now.Sub(*t.LastUsedAt) >= touchEvery {
 		if err := s.store.TouchAPIToken(r.Context(), t.ID, clientIP(r), now); err != nil {
 			s.log.Warn("touch token", "err", err)
 		}
 	}
-	return Principal{User: u, CredType: CredToken, CredID: t.ID}, nil
+	return s.principalFor(u, CredToken, t.ID), nil
 }
 
 func (s *Server) authAccessKey(w http.ResponseWriter, r *http.Request, authz string) (Principal, error) {
@@ -135,11 +153,20 @@ func (s *Server) authAccessKey(w http.ResponseWriter, r *http.Request, authz str
 	if err != nil {
 		return Principal{}, authFailure{err.Error()}
 	}
+	if strings.HasPrefix(keyID, auth.TempKeyPrefix) {
+		return s.authTemporary(w, r, keyID, sig)
+	}
 	k, err := s.store.AccessKeyByID(r.Context(), keyID)
 	if errors.Is(err, store.ErrNotFound) {
 		return Principal{}, authFailure{"unknown access key"}
 	} else if err != nil {
 		return Principal{}, err
+	}
+	if k.ExpiresAt != nil && !s.now().Before(*k.ExpiresAt) {
+		return Principal{}, authFailure{"access key expired"}
+	}
+	if !ipAllowed(k.AllowedIPs, clientIP(r)) {
+		return Principal{}, authFailure{"this access key cannot be used from " + clientIP(r)}
 	}
 	secret, err := s.secrets.Open(k.SecretEnc, []byte(k.ID))
 	if err != nil {
@@ -165,13 +192,82 @@ func (s *Server) authAccessKey(w http.ResponseWriter, r *http.Request, authz str
 			s.log.Warn("touch access key", "err", err)
 		}
 	}
-	return Principal{User: u, CredType: CredAccessKey, CredID: k.ID}, nil
+	return s.principalFor(u, CredAccessKey, k.ID), nil
 }
 
-func (s *Server) userFor(ctx context.Context, id string) (store.User, error) {
-	u, err := s.store.UserByID(ctx, id)
+// authTemporary verifies a request signed with temporary credentials (role
+// sessions, synctl login, Cloud Shell): the key must be live and the
+// request must carry its session token.
+func (s *Server) authTemporary(w http.ResponseWriter, r *http.Request, keyID, sig string) (Principal, error) {
+	now := s.now()
+	c, err := s.store.TempCredentialByID(r.Context(), keyID, now)
+	if errors.Is(err, store.ErrNotFound) {
+		return Principal{}, authFailure{"temporary credentials expired or unknown"}
+	} else if err != nil {
+		return Principal{}, err
+	}
+	tok := r.Header.Get(HeaderSessionToken)
+	if tok == "" || subtle.ConstantTimeCompare([]byte(auth.HashToken(tok)), []byte(c.TokenHash)) != 1 {
+		return Principal{}, authFailure{"missing or wrong " + HeaderSessionToken}
+	}
+	secret, err := s.secrets.Open(c.SecretEnc, []byte(c.ID))
+	if err != nil {
+		return Principal{}, err
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	if err != nil {
+		return Principal{}, authFailure{"request body too large or unreadable"}
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if err := sigv.Verify(r, string(secret), sig, body, now); err != nil {
+		return Principal{}, authFailure{err.Error()}
+	}
+	u, err := s.userFor(r.Context(), c.UserID)
+	if err != nil {
+		return Principal{}, err
+	}
+	if c.LastUsedAt == nil || now.Sub(*c.LastUsedAt) >= touchEvery {
+		_ = s.store.TouchTempCredential(r.Context(), c.ID, now)
+	}
+	p := s.principalFor(u, CredTemporary, c.ID)
+	if c.Kind == store.TempRole {
+		p.CredType, p.RoleID = CredRole, c.RoleID
+	}
+	p.MFA = c.MFA
+	return p, nil
+}
+
+func (s *Server) principalFor(u store.IAMUser, cred, id string) Principal {
+	return Principal{User: u.User, CredType: cred, CredID: id, MFAEnabled: u.MFAEnabled, Kind: u.Kind}
+}
+
+func (s *Server) userFor(ctx context.Context, id string) (store.IAMUser, error) {
+	u, err := s.store.IAMUser(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
 		return u, authFailure{"account no longer exists"}
 	}
+	if err == nil && u.Disabled {
+		return u, authFailure{"account disabled"}
+	}
 	return u, err
+}
+
+// ipAllowed checks a credential's IP allow-list (empty: anywhere).
+func ipAllowed(allowed []string, ip string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return false
+	}
+	for _, c := range allowed {
+		if p, err := netip.ParsePrefix(c); err == nil && p.Contains(a.Unmap()) {
+			return true
+		}
+		if x, err := netip.ParseAddr(c); err == nil && x == a.Unmap() {
+			return true
+		}
+	}
+	return false
 }

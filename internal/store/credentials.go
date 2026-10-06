@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -20,6 +21,8 @@ type AccessKey struct {
 	CreatedAt   time.Time
 	LastUsedAt  *time.Time
 	LastUsedIP  string
+	ExpiresAt   *time.Time
+	AllowedIPs  []string // CIDRs; empty: any
 }
 
 // CreateAccessKey enforces the per-user limit inside the write transaction.
@@ -37,8 +40,8 @@ func (s *Store) CreateAccessKey(ctx context.Context, k AccessKey) error {
 		return ErrLimitReached
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO access_keys (id, user_id, secret_enc, description, created_at) VALUES (?, ?, ?, ?, ?)`,
-		k.ID, k.UserID, k.SecretEnc, k.Description, k.CreatedAt.Unix()); err != nil {
+		`INSERT INTO access_keys (id, user_id, secret_enc, description, created_at, expires_at, allowed_ips) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		k.ID, k.UserID, k.SecretEnc, k.Description, k.CreatedAt.Unix(), unixPtr(k.ExpiresAt), jsonList(k.AllowedIPs)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -46,7 +49,7 @@ func (s *Store) CreateAccessKey(ctx context.Context, k AccessKey) error {
 
 func (s *Store) AccessKeyByID(ctx context.Context, id string) (AccessKey, error) {
 	row := s.R.QueryRowContext(ctx,
-		`SELECT id, user_id, secret_enc, description, created_at, last_used_at, coalesce(last_used_ip, '') FROM access_keys WHERE id = ?`, id)
+		`SELECT id, user_id, secret_enc, description, created_at, last_used_at, coalesce(last_used_ip, ''), expires_at, allowed_ips FROM access_keys WHERE id = ?`, id)
 	k, err := scanAccessKey(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return k, ErrNotFound
@@ -56,7 +59,7 @@ func (s *Store) AccessKeyByID(ctx context.Context, id string) (AccessKey, error)
 
 func (s *Store) ListAccessKeys(ctx context.Context, userID string) ([]AccessKey, error) {
 	rows, err := s.R.QueryContext(ctx,
-		`SELECT id, user_id, secret_enc, description, created_at, last_used_at, coalesce(last_used_ip, '')
+		`SELECT id, user_id, secret_enc, description, created_at, last_used_at, coalesce(last_used_ip, ''), expires_at, allowed_ips
 		 FROM access_keys WHERE user_id = ? ORDER BY created_at`, userID)
 	if err != nil {
 		return nil, err
@@ -88,11 +91,22 @@ type scanner interface{ Scan(dest ...any) error }
 func scanAccessKey(r scanner) (AccessKey, error) {
 	var k AccessKey
 	var created int64
-	var used sql.NullInt64
-	err := r.Scan(&k.ID, &k.UserID, &k.SecretEnc, &k.Description, &created, &used, &k.LastUsedIP)
+	var used, exp sql.NullInt64
+	var ips string
+	err := r.Scan(&k.ID, &k.UserID, &k.SecretEnc, &k.Description, &created, &used, &k.LastUsedIP, &exp, &ips)
 	k.CreatedAt = time.Unix(created, 0)
 	k.LastUsedAt = nullTime(used)
+	k.ExpiresAt = nullTime(exp)
+	_ = json.Unmarshal([]byte(ips), &k.AllowedIPs)
 	return k, err
+}
+
+func jsonList(xs []string) string {
+	if xs == nil {
+		xs = []string{}
+	}
+	b, _ := json.Marshal(xs)
+	return string(b)
 }
 
 type APIToken struct {
@@ -104,6 +118,7 @@ type APIToken struct {
 	ExpiresAt  *time.Time
 	LastUsedAt *time.Time
 	LastUsedIP string
+	AllowedIPs []string
 }
 
 func (s *Store) CreateAPIToken(ctx context.Context, t APIToken) error {
@@ -112,15 +127,15 @@ func (s *Store) CreateAPIToken(ctx context.Context, t APIToken) error {
 		exp = t.ExpiresAt.Unix()
 	}
 	_, err := s.W.ExecContext(ctx,
-		`INSERT INTO api_tokens (id, user_id, name, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		t.ID, t.UserID, t.Name, t.TokenHash, t.CreatedAt.Unix(), exp)
+		`INSERT INTO api_tokens (id, user_id, name, token_hash, created_at, expires_at, allowed_ips) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.UserID, t.Name, t.TokenHash, t.CreatedAt.Unix(), exp, jsonList(t.AllowedIPs))
 	return err
 }
 
 // APITokenByHash returns ErrNotFound for unknown or expired tokens.
 func (s *Store) APITokenByHash(ctx context.Context, hash string, now time.Time) (APIToken, error) {
 	row := s.R.QueryRowContext(ctx,
-		`SELECT id, user_id, name, token_hash, created_at, expires_at, last_used_at, coalesce(last_used_ip, '')
+		`SELECT id, user_id, name, token_hash, created_at, expires_at, last_used_at, coalesce(last_used_ip, ''), allowed_ips
 		 FROM api_tokens WHERE token_hash = ? AND (expires_at IS NULL OR expires_at > ?)`, hash, now.Unix())
 	t, err := scanAPIToken(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -131,7 +146,7 @@ func (s *Store) APITokenByHash(ctx context.Context, hash string, now time.Time) 
 
 func (s *Store) ListAPITokens(ctx context.Context, userID string) ([]APIToken, error) {
 	rows, err := s.R.QueryContext(ctx,
-		`SELECT id, user_id, name, token_hash, created_at, expires_at, last_used_at, coalesce(last_used_ip, '')
+		`SELECT id, user_id, name, token_hash, created_at, expires_at, last_used_at, coalesce(last_used_ip, ''), allowed_ips
 		 FROM api_tokens WHERE user_id = ? ORDER BY created_at`, userID)
 	if err != nil {
 		return nil, err
@@ -161,7 +176,9 @@ func scanAPIToken(r scanner) (APIToken, error) {
 	var t APIToken
 	var created int64
 	var exp, used sql.NullInt64
-	err := r.Scan(&t.ID, &t.UserID, &t.Name, &t.TokenHash, &created, &exp, &used, &t.LastUsedIP)
+	var ips string
+	err := r.Scan(&t.ID, &t.UserID, &t.Name, &t.TokenHash, &created, &exp, &used, &t.LastUsedIP, &ips)
+	_ = json.Unmarshal([]byte(ips), &t.AllowedIPs)
 	t.CreatedAt = time.Unix(created, 0)
 	t.ExpiresAt = nullTime(exp)
 	t.LastUsedAt = nullTime(used)

@@ -34,6 +34,12 @@ var noCommand = map[string]string{
 	"getRegistryToken": "used by `docker login` / the Docker registry token protocol",
 	"getScalingCharts": "charts for the dashboard; `synctl autoscale history` lists the changes",
 	"gitWebhook":       "called by Git hosts on push",
+	"approveDevice":    "browser-only: the person confirms synctl login in the dashboard",
+	"startShell":       "browser-only: Cloud Shell is a dashboard terminal",
+	"getShell":         "browser-only: Cloud Shell is a dashboard terminal",
+	"stopShell":        "browser-only: Cloud Shell is a dashboard terminal",
+	"execShell":        "browser-only: Cloud Shell is a dashboard terminal",
+	"listCommands":     "for the dashboard's API docs; synctl --help lists commands",
 }
 
 // Every API operation has a synctl command (§5.1 parity check).

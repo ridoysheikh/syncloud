@@ -48,6 +48,9 @@ func (s *Server) writeTraffic(w http.ResponseWriter, r *http.Request, sc metrics
 // handleTraffic charts every route: requests by status, latency, bandwidth
 // and requests per service, plus a table of the last 5 minutes (§5.7).
 func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
+	if !s.requireEverywhere(w, r) {
+		return
+	}
 	s.writeTraffic(w, r, metrics.TrafficScope{})
 }
 
@@ -86,6 +89,9 @@ type mapRoute struct {
 // handleTrafficMap is the live traffic map: each routed service with its
 // hostnames, its traffic over the last minutes and the tasks that answered.
 func (s *Server) handleTrafficMap(w http.ResponseWriter, r *http.Request) {
+	if !s.requireEverywhere(w, r) {
+		return
+	}
 	if s.metrics == nil || s.workloads == nil {
 		writeError(w, http.StatusNotFound, CodeNotFound, "metrics are not enabled")
 		return

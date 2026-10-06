@@ -52,6 +52,10 @@ type Manager struct {
 	OnChange func()
 	// OnTaskChange runs whenever a task's state changes (service directory).
 	OnTaskChange func()
+	// AdmitCount checks a count quota (domains) before adding one.
+	AdmitCount func(ctx context.Context, envID, what string) error
+	// Admit checks a change against quotas (§7.2); nil admits everything.
+	Admit func(ctx context.Context, req AdmitRequest) error
 	// Reachable reports whether the controller can reach a task over the
 	// private network (§5.6); routes leave out tasks it cannot.
 	Reachable func(taskID string) bool

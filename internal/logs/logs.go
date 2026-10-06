@@ -99,6 +99,9 @@ type Store struct {
 	queue  chan Line
 	failed atomic.Uint64
 
+	// OnIngest counts log volume per project and environment (metering).
+	OnIngest func(project, environment string, bytes int)
+
 	mu    sync.Mutex
 	cache map[string]labels // task ID -> labels
 	subs  map[*sub]struct{}
@@ -137,6 +140,9 @@ func (s *Store) OnLogs(node store.Node, b *agentv1.LogBatch) {
 			TaskID: l.GetTaskId(), Revision: lb.revision, Node: node.Name, Stream: l.GetStream(), Message: l.GetLine(),
 		}
 		line.Level = detectLevel(line.Message)
+		if s.OnIngest != nil {
+			s.OnIngest(line.Project, line.Environment, len(line.Message))
+		}
 		s.fanout(line)
 		select {
 		case s.queue <- line:

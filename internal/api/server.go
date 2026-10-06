@@ -3,10 +3,12 @@
 package api
 
 import (
+	"context"
 	_ "embed"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"syncloud/internal/alerts"
@@ -26,9 +28,11 @@ import (
 	"syncloud/internal/metrics"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
+	"syncloud/internal/quota"
 	"syncloud/internal/registry"
 	"syncloud/internal/regmaint"
 	"syncloud/internal/secrets"
+	"syncloud/internal/shell"
 	"syncloud/internal/store"
 	"syncloud/internal/system"
 	"syncloud/internal/traefik"
@@ -75,6 +79,8 @@ type Server struct {
 	securityGroups        bool
 	onSecurityChange      func()
 	fwStats               *fwstats.Stats
+	quotas                *quota.Manager
+	shell                 *shell.Manager
 	discovery             *discovery.Manager
 	traefik               *traefik.Provider
 	traefikExtras         *traefik.Extras
@@ -83,6 +89,9 @@ type Server struct {
 	log                   *slog.Logger
 	web                   fs.FS // built dashboard (may be empty in development)
 	now                   func() time.Time
+
+	iamCache   stmtCache
+	requireMFA atomic.Bool // every human must use MFA (§14)
 
 	loginLimiter *attemptLimiter
 	setupLimiter *attemptLimiter
@@ -147,6 +156,8 @@ type Options struct {
 	SecurityGroups   bool
 	OnSecurityChange func()
 	FirewallStats    *fwstats.Stats
+	Quotas           *quota.Manager
+	Shell            *shell.Manager
 	Discovery        *discovery.Manager
 	Traefik          *traefik.Provider
 	TraefikExtras    *traefik.Extras
@@ -163,7 +174,7 @@ func New(o Options) *Server {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	return &Server{
+	srv := &Server{
 		store:                 o.Store,
 		secrets:               o.Secrets,
 		ca:                    o.CA,
@@ -196,6 +207,8 @@ func New(o Options) *Server {
 		securityGroups:        o.SecurityGroups,
 		onSecurityChange:      o.OnSecurityChange,
 		fwStats:               o.FirewallStats,
+		quotas:                o.Quotas,
+		shell:                 o.Shell,
 		discovery:             o.Discovery,
 		traefik:               o.Traefik,
 		traefikExtras:         o.TraefikExtras,
@@ -208,6 +221,12 @@ func New(o Options) *Server {
 		setupLimiter:          newAttemptLimiter(10, 5*time.Minute),
 		joinLimiter:           newAttemptLimiter(20, 5*time.Minute),
 	}
+	if o.Store != nil {
+		v, _, _ := o.Store.GetSetting(context.Background(), SettingRequireMFA)
+		srv.requireMFA.Store(v == "1")
+	}
+	return srv
+
 }
 
 // Route is one API endpoint. Path uses OpenAPI-style {param} placeholders,
@@ -251,6 +270,53 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/iam/tokens", h: s.handleListTokens},
 		{Method: "POST", Path: "/api/v1/iam/tokens", h: s.handleCreateToken},
 		{Method: "DELETE", Path: "/api/v1/iam/tokens/{id}", h: s.handleDeleteToken},
+		{Method: "GET", Path: "/api/v1/iam/users", h: s.handleListUsers},
+		{Method: "POST", Path: "/api/v1/iam/users", h: s.handleCreateUser},
+		{Method: "PUT", Path: "/api/v1/iam/users/{id}", h: s.handleUpdateUser},
+		{Method: "DELETE", Path: "/api/v1/iam/users/{id}", h: s.handleDeleteUser},
+		{Method: "GET", Path: "/api/v1/iam/groups", h: s.handleListGroups},
+		{Method: "POST", Path: "/api/v1/iam/groups", h: s.handleCreateGroup},
+		{Method: "PUT", Path: "/api/v1/iam/groups/{id}", h: s.handleUpdateGroup},
+		{Method: "DELETE", Path: "/api/v1/iam/groups/{id}", h: s.handleDeleteGroup},
+		{Method: "GET", Path: "/api/v1/iam/policies", h: s.handleListPolicies},
+		{Method: "POST", Path: "/api/v1/iam/policies", h: s.handleCreatePolicy},
+		{Method: "PUT", Path: "/api/v1/iam/policies/{id}", h: s.handleUpdatePolicy},
+		{Method: "DELETE", Path: "/api/v1/iam/policies/{id}", h: s.handleDeletePolicy},
+		{Method: "GET", Path: "/api/v1/iam/attachments", h: s.handleListAttachments},
+		{Method: "POST", Path: "/api/v1/iam/attachments", h: s.handleAttachPolicy},
+		{Method: "DELETE", Path: "/api/v1/iam/attachments", h: s.handleDetachPolicy},
+		{Method: "GET", Path: "/api/v1/iam/roles", h: s.handleListRoles},
+		{Method: "POST", Path: "/api/v1/iam/roles", h: s.handleCreateRole},
+		{Method: "PUT", Path: "/api/v1/iam/roles/{id}", h: s.handleUpdateRole},
+		{Method: "DELETE", Path: "/api/v1/iam/roles/{id}", h: s.handleDeleteRole},
+		{Method: "POST", Path: "/api/v1/iam/mfa", h: s.handleBeginMFA},
+		{Method: "POST", Path: "/api/v1/iam/mfa/enable", h: s.handleEnableMFA},
+		{Method: "DELETE", Path: "/api/v1/iam/mfa", h: s.handleDisableMFA},
+		{Method: "POST", Path: "/api/v1/iam/password", h: s.handleChangePassword},
+		{Method: "GET", Path: "/api/v1/iam/settings", h: s.handleGetIAMSettings},
+		{Method: "PUT", Path: "/api/v1/iam/settings", h: s.handlePutIAMSettings},
+		{Method: "POST", Path: "/api/v1/iam/simulate", h: s.handleSimulate},
+		{Method: "GET", Path: "/api/v1/iam/actions", h: s.handleListActions},
+		{Method: "GET", Path: "/api/v1/iam/me/permissions", h: s.handleMyPermissions},
+		{Method: "POST", Path: "/api/v1/sts/assume-role", h: s.handleAssumeRole},
+		{Method: "GET", Path: "/api/v1/audit", h: s.handleListAudit},
+		{Method: "GET", Path: "/api/v1/quotas", h: s.handleListQuotas},
+		{Method: "GET", Path: "/api/v1/docs/cli", h: s.handleListCommands},
+		{Method: "POST", Path: "/api/v1/shell", h: s.handleStartShell},
+		{Method: "GET", Path: "/api/v1/shell", h: s.handleGetShell},
+		{Method: "DELETE", Path: "/api/v1/shell", h: s.handleStopShell},
+		{Method: "GET", Path: "/api/v1/shell/exec", h: s.handleExecShell},
+		{Method: "GET", Path: "/api/v1/projects/{project}/quota", h: s.handleGetQuota},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/quota", h: s.handlePutQuota},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}/quota", h: s.handleDeleteQuota},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/quota", h: s.handlePutEnvironmentQuota},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/quota", h: s.handleDeleteQuota},
+		{Method: "GET", Path: "/api/v1/usage", h: s.handleGetUsage},
+		{Method: "GET", Path: "/api/v1/usage/export", h: s.handleExportUsage},
+		{Method: "GET", Path: "/api/v1/audit/export", h: s.handleExportAudit},
+		{Method: "POST", Path: "/api/v1/auth/device", Public: true, h: s.handleStartDevice},
+		{Method: "POST", Path: "/api/v1/auth/device/token", Public: true, h: s.handleDeviceToken},
+		{Method: "POST", Path: "/api/v1/auth/device/approve", h: s.handleApproveDevice},
 		{Method: "POST", Path: "/api/v1/nodes/join", Public: true, h: s.handleJoin},
 		{Method: "GET", Path: "/api/v1/nodes", h: s.handleListNodes},
 		{Method: "DELETE", Path: "/api/v1/nodes/{id}", h: s.handleDeleteNode},
@@ -378,7 +444,7 @@ func (s *Server) Handler() http.Handler {
 	for _, rt := range s.Routes() {
 		h := rt.h
 		if !rt.Public {
-			h = s.requireAuth(h)
+			h = s.requireAuth(s.authorize(rt.Method, rt.Path, h))
 		}
 		mux.HandleFunc(rt.Method+" "+rt.Path, h)
 	}
@@ -443,7 +509,7 @@ func (s *Server) handleServiceHealth(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "service health", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, items, itemServiceField)})
 }
 
 func (s *Server) handleIncidents(w http.ResponseWriter, r *http.Request) {
@@ -466,5 +532,5 @@ func (s *Server) handleIncidents(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, v)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, out, itemServiceField)})
 }

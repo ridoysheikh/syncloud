@@ -4,6 +4,11 @@
 #
 #   test/e2e/mesh.sh          # run and clean up
 #   KEEP=1 test/e2e/mesh.sh   # leave the nodes running for inspection
+#
+# The containers here are plain docker run containers, not SynCloud tasks, so
+# security groups (which only admit known tasks) are off; secgroups.sh
+# covers them.
+CTL_FLAGS="--security-groups=false ${CTL_FLAGS:-}"
 . "$(dirname "$0")/lib.sh"
 trap cleanup EXIT
 setup_cluster

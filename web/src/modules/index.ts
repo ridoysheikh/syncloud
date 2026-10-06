@@ -17,6 +17,22 @@ import type { DashboardModule } from "./types";
 import { OverviewPage } from "./overview/OverviewPage";
 import { planned } from "./planned";
 import { CredentialsPage } from "./iam/CredentialsPage";
+import {
+  AuditPage,
+  DevicePage,
+  GroupPage,
+  GroupsPage,
+  NewUserPage,
+  PoliciesPage,
+  PolicyPage,
+  RolePage,
+  RolesPage,
+  SecurityPage,
+  UserPage,
+  UsersPage,
+} from "./iam/IamPages";
+import { QuotaPage, QuotasPage } from "./quota/QuotasPage";
+import { ApiPage } from "./api/ApiPage";
 import { NodesPage } from "./compute/NodesPage";
 import { NewProjectPage, ProjectsPage } from "./projects/ProjectsPage";
 import { ProjectPage } from "./projects/ProjectPage";
@@ -59,6 +75,9 @@ export const modules: DashboardModule[] = [
     order: 5,
     pages: [
       { path: "/projects", label: "Projects", component: ProjectsPage },
+      { path: "/projects/quotas", label: "Quotas & usage", component: QuotasPage },
+      { path: "/projects/quotas/$project", label: "Quota", component: QuotaPage, hidden: true },
+      { path: "/projects/quotas/$project/$env", label: "Quota", component: QuotaPage, hidden: true },
       { path: "/projects/new", label: "New project", component: NewProjectPage, hidden: true },
       { path: "/projects/$project", label: "Project", component: ProjectPage, hidden: true },
       { path: "/projects/$project/$env", label: "Project", component: ProjectPage, hidden: true },
@@ -162,7 +181,10 @@ export const modules: DashboardModule[] = [
     label: "API & CLI",
     icon: SquareTerminal,
     order: 90,
-    pages: [{ path: "/api", label: "API & CLI", component: planned([], "API & CLI", "Phase 7", "§7.1", "API docs, synctl download and Cloud Shell.") }],
+    pages: [
+      { path: "/developers", label: "API & CLI", component: ApiPage },
+      { path: "/device", label: "Sign in synctl", component: DevicePage, hidden: true },
+    ],
   },
   {
     id: "iam",
@@ -170,10 +192,21 @@ export const modules: DashboardModule[] = [
     icon: KeyRound,
     order: 100,
     pages: [
-      { path: "/iam/users", label: "Users", component: planned(["IAM"], "Users", "Phase 7", "§7", "Users, groups, roles and service accounts.") },
-      { path: "/iam/policies", label: "Policies", component: planned(["IAM"], "Policies", "Phase 7", "§7", "JSON policies and the policy simulator.") },
+      { path: "/iam/users", label: "Users", component: UsersPage },
+      { path: "/iam/users/new", label: "New user", component: NewUserPage, hidden: true },
+      { path: "/iam/users/$id", label: "User", component: UserPage, hidden: true },
+      { path: "/iam/groups", label: "Groups", component: GroupsPage },
+      { path: "/iam/groups/new", label: "New group", component: GroupPage, hidden: true },
+      { path: "/iam/groups/$id", label: "Group", component: GroupPage, hidden: true },
+      { path: "/iam/roles", label: "Roles", component: RolesPage },
+      { path: "/iam/roles/new", label: "New role", component: RolePage, hidden: true },
+      { path: "/iam/roles/$id", label: "Role", component: RolePage, hidden: true },
+      { path: "/iam/policies", label: "Policies", component: PoliciesPage },
+      { path: "/iam/policies/new", label: "New policy", component: PolicyPage, hidden: true },
+      { path: "/iam/policies/$id", label: "Policy", component: PolicyPage, hidden: true },
       { path: "/iam/keys", label: "Access keys", component: CredentialsPage },
-      { path: "/iam/audit", label: "Audit log", component: planned(["IAM"], "Audit log", "Phase 7", "§7", "Every action with who, what, where and when.") },
+      { path: "/iam/security", label: "My security", component: SecurityPage },
+      { path: "/iam/audit", label: "Audit log", component: AuditPage },
     ],
   },
   {

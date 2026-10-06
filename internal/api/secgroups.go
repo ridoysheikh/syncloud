@@ -127,7 +127,7 @@ func (s *Server) handleListAllSecurityGroups(w http.ResponseWriter, r *http.Requ
 		s.internalError(w, "list security groups", err)
 		return
 	}
-	resp := map[string]any{"items": items, "nodeErrors": map[string]string{}}
+	resp := map[string]any{"items": s.filterItems(r, items, itemSecGroup), "nodeErrors": map[string]string{}}
 	if s.fwStats != nil {
 		resp["nodeErrors"] = s.fwStats.SecurityErrors()
 	}

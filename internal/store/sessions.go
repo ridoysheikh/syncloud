@@ -15,13 +15,14 @@ type Session struct {
 	LastSeenAt time.Time
 	IP         string
 	UserAgent  string
+	MFA        bool // signed in with a TOTP code
 }
 
 func (s *Store) CreateSession(ctx context.Context, ss Session) error {
 	_, err := s.W.ExecContext(ctx,
-		`INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen_at, ip, user_agent)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		ss.TokenHash, ss.UserID, ss.CreatedAt.Unix(), ss.ExpiresAt.Unix(), ss.LastSeenAt.Unix(), ss.IP, ss.UserAgent)
+		`INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen_at, ip, user_agent, mfa)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		ss.TokenHash, ss.UserID, ss.CreatedAt.Unix(), ss.ExpiresAt.Unix(), ss.LastSeenAt.Unix(), ss.IP, ss.UserAgent, ss.MFA)
 	return err
 }
 
@@ -30,9 +31,9 @@ func (s *Store) SessionByHash(ctx context.Context, hash string, now time.Time) (
 	var ss Session
 	var created, expires, seen int64
 	err := s.R.QueryRowContext(ctx,
-		`SELECT token_hash, user_id, created_at, expires_at, last_seen_at, ip, user_agent
+		`SELECT token_hash, user_id, created_at, expires_at, last_seen_at, ip, user_agent, mfa
 		 FROM sessions WHERE token_hash = ? AND expires_at > ?`, hash, now.Unix()).
-		Scan(&ss.TokenHash, &ss.UserID, &created, &expires, &seen, &ss.IP, &ss.UserAgent)
+		Scan(&ss.TokenHash, &ss.UserID, &created, &expires, &seen, &ss.IP, &ss.UserAgent, &ss.MFA)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ss, ErrNotFound
 	}

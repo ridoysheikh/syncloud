@@ -18,6 +18,8 @@ const (
 	CodeRateLimited   = "rate_limited"
 	CodeInternal      = "internal"
 	CodeInvalidOrigin = "invalid_origin"
+	CodeMFARequired   = "mfa_required"
+	CodeQuotaExceeded = "quota_exceeded"
 )
 
 type apiError struct {

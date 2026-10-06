@@ -188,6 +188,20 @@ func (m *Manager) ActiveTasks(ctx context.Context) ([]TaskView, error) {
 
 // ── changes from the API ────────────────────────────────────────────────────
 
+// AdmitRequest is a change to a service's footprint, checked against quotas
+// (§7.2) before it is stored.
+type AdmitRequest struct {
+	EnvironmentID string
+	ServiceID     string // "" for a new service
+	Spec          *Spec  // nil: the current spec
+	Desired       int
+}
+
+// ErrQuota means a change would exceed a quota.
+type ErrQuota struct{ Msg string }
+
+func (e ErrQuota) Error() string { return e.Msg }
+
 // ErrInvalid wraps validation errors.
 type ErrInvalid struct{ Err error }
 
@@ -224,6 +238,11 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 		if desired < 0 {
 			desired = 1
 		}
+		if m.Admit != nil {
+			if err := m.Admit(ctx, AdmitRequest{EnvironmentID: env.ID, Spec: &spec, Desired: desired}); err != nil {
+				return ServiceView{}, false, err
+			}
+		}
 		sv = store.Service{ID: auth.NewID("svc_"), EnvironmentID: env.ID, Name: name, DesiredCount: desired, CreatedAt: now}
 		if err := m.st.CreateService(ctx, sv, spec.Canonical(), actor); err != nil {
 			if errors.Is(err, store.ErrNameTaken) {
@@ -241,6 +260,11 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 		}
 		if desired < 0 {
 			desired = sv.DesiredCount
+		}
+		if m.Admit != nil {
+			if err := m.Admit(ctx, AdmitRequest{EnvironmentID: env.ID, ServiceID: sv.ID, Spec: &spec, Desired: desired}); err != nil {
+				return ServiceView{}, false, err
+			}
 		}
 		if m.DeployHooks != nil && m.DeployHooks.HasPreDeploy(ctx, sv) {
 			// The new revision only becomes current after the pre-deploy
@@ -344,6 +368,11 @@ func (m *Manager) Scale(ctx context.Context, serviceID string, desired int, acto
 	}
 	if sv.Deleting {
 		return ServiceView{}, ErrInvalid{errors.New("the service is being deleted")}
+	}
+	if m.Admit != nil && desired > sv.DesiredCount {
+		if err := m.Admit(ctx, AdmitRequest{EnvironmentID: sv.EnvironmentID, ServiceID: sv.ID, Desired: desired}); err != nil {
+			return ServiceView{}, err
+		}
 	}
 	if _, err := m.st.UpdateService(ctx, sv.ID, "", desired, actor, m.now()); err != nil {
 		return ServiceView{}, err
@@ -459,6 +488,11 @@ func (m *Manager) AddDomain(ctx context.Context, serviceID, host, port string) (
 	}
 	if !found {
 		return store.Domain{}, ErrInvalid{fmt.Errorf("the service has no http port named %q", port)}
+	}
+	if m.AdmitCount != nil {
+		if err := m.AdmitCount(ctx, sv.EnvironmentID, "domain"); err != nil {
+			return store.Domain{}, err
+		}
 	}
 	d := store.Domain{ID: auth.NewID("dom_"), ServiceID: sv.ID, Host: host, PortName: port, CreatedAt: m.now().UTC().Truncate(time.Second)}
 	if err := m.st.AddDomain(ctx, d); errors.Is(err, store.ErrNameTaken) {

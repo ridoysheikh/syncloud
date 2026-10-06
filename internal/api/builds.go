@@ -168,7 +168,7 @@ func (s *Server) handleListGitSources(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "list git sources", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, out, itemServiceField)})
 }
 
 func (s *Server) handleRecentBuilds(w http.ResponseWriter, r *http.Request) {
@@ -180,7 +180,7 @@ func (s *Server) handleRecentBuilds(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "list builds", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": s.buildViews(r, bs)})
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, s.buildViews(r, bs), itemServiceField)})
 }
 
 func (s *Server) handleDeployBuild(w http.ResponseWriter, r *http.Request) {

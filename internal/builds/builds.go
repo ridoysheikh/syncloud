@@ -71,6 +71,10 @@ type Config struct {
 }
 
 type Manager struct {
+	// BuildSlots returns a service's project and its concurrent-builds
+	// quota (0: none).
+	BuildSlots func(ctx context.Context, serviceID string) (projectID string, limit int)
+
 	st     *store.Store
 	box    *secrets.Box
 	jobs   *jobs.Manager
@@ -488,8 +492,30 @@ func (m *Manager) startQueued(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	for i := 0; i < len(queued) && len(building)+i < maxConcurrent; i++ {
-		m.start(ctx, queued[i])
+	running := len(building)
+	perProject := map[string]int{}
+	if m.BuildSlots != nil {
+		for _, b := range building {
+			if p, _ := m.BuildSlots(ctx, b.ServiceID); p != "" {
+				perProject[p]++
+			}
+		}
+	}
+	for _, b := range queued {
+		if running >= maxConcurrent {
+			break
+		}
+		if m.BuildSlots != nil {
+			// A project at its concurrent-builds quota waits in the queue (§7.2).
+			if p, limit := m.BuildSlots(ctx, b.ServiceID); limit > 0 {
+				if perProject[p] >= limit {
+					continue
+				}
+				perProject[p]++
+			}
+		}
+		m.start(ctx, b)
+		running++
 	}
 }
 

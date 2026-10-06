@@ -14,8 +14,8 @@ import (
 const streamPingEvery = 20 * time.Second
 
 // handleStream is the live-update WebSocket (§5.1). It forwards bus events to
-// the dashboard. Subscription scoping per view and IAM filtering come with the
-// resources that need them.
+// the dashboard, filtered by IAM: events about a project's resources go to
+// those who may read that project, the rest to those who may read everything.
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	// websocket.Accept rejects cross-origin upgrades by default (Origin must match Host).
 	c, err := websocket.Accept(w, r, nil)
@@ -54,6 +54,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			if !s.mayReceive(r, e) {
+				continue
+			}
 			if err := writeEvent(ctx, c, e); err != nil {
 				return
 			}
@@ -69,4 +72,30 @@ func writeEvent(ctx context.Context, c *websocket.Conn, e events.Event) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	return c.Write(ctx, websocket.MessageText, b)
+}
+
+// mayReceive decides whether the stream's principal sees an event.
+func (s *Server) mayReceive(r *http.Request, e events.Event) bool {
+	p, _ := principal(r.Context())
+	if p.isRoot() || s.can(r, "system:Stream", "srn:syncloud:*") || s.can(r, "service:GetService", "srn:syncloud:*") {
+		return true
+	}
+	b, err := json.Marshal(e.Data)
+	if err != nil {
+		return false
+	}
+	var m map[string]any
+	if json.Unmarshal(b, &m) != nil {
+		return false
+	}
+	project, _ := m["project"].(string)
+	if project == "" {
+		return false
+	}
+	env, _ := m["environment"].(string)
+	res := projectSRN(project)
+	if env != "" {
+		res = envSRN(project, env)
+	}
+	return s.can(r, "service:ListServices", res) || s.can(r, "service:GetService", res+"/service/*")
 }

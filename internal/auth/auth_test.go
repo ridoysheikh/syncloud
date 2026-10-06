@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/base32"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -77,5 +78,26 @@ func TestSetupTokenLifecycle(t *testing.T) {
 	}
 	if ok, _ := CheckSetupToken(ctx, st, tok, now); ok {
 		t.Fatal("setup token still valid after setup completed")
+	}
+}
+
+func TestTOTP(t *testing.T) {
+	// RFC 6238 test vector (SHA1): key "12345678901234567890", T=59 → 94287082 (8 digits; we use the last 6).
+	secret := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString([]byte("12345678901234567890"))
+	code, err := TOTPCode(secret, time.Unix(59, 0))
+	if err != nil || code != "287082" {
+		t.Fatalf("code = %q, %v", code, err)
+	}
+	if !VerifyTOTP(secret, "287082", time.Unix(59+30, 0)) {
+		t.Error("a code from the previous step is rejected")
+	}
+	if VerifyTOTP(secret, "287082", time.Unix(59+90, 0)) {
+		t.Error("a code from three steps ago is accepted")
+	}
+	if VerifyTOTP(secret, "28708", time.Unix(59, 0)) || VerifyTOTP("!!", "287082", time.Unix(59, 0)) {
+		t.Error("malformed input accepted")
+	}
+	if !strings.HasPrefix(TOTPURI(NewTOTPSecret(), "SynCloud", "ann@example.com"), "otpauth://totp/SynCloud:ann@example.com?") {
+		t.Error("URI")
 	}
 }

@@ -137,6 +137,8 @@ type Manager struct {
 	mu    sync.Mutex
 	hooks map[string]map[string]bool // deployment ID -> pending hook run IDs
 
+	// AdmitCount checks a quota before a new job is stored (§7.2).
+	AdmitCount func(ctx context.Context, envID, what string) error
 	// OnRunAddress is called when a run's container address becomes known.
 	OnRunAddress func()
 	// OnFinished runs after any run reaches its final status (builds use it).
@@ -311,6 +313,11 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 	if spec.Service != "" {
 		if _, err := m.st.ServiceByName(ctx, env.ID, spec.Service); err != nil {
 			return store.Job{}, ErrInvalid{fmt.Errorf("no service %s in this environment", spec.Service)}
+		}
+	}
+	if _, err := m.st.JobByName(ctx, env.ID, name); errors.Is(err, store.ErrNotFound) && m.AdmitCount != nil {
+		if err := m.AdmitCount(ctx, env.ID, "job"); err != nil {
+			return store.Job{}, err
 		}
 	}
 	raw, _ := json.Marshal(spec)

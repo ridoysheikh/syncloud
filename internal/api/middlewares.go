@@ -93,7 +93,7 @@ func (s *Server) handleListAllMiddlewares(w http.ResponseWriter, r *http.Request
 	for _, t := range traefik.PresetTypes {
 		types = append(types, map[string]string{"type": t, "description": presetDescriptions[t]})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "types": types})
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, items, itemMiddleware), "types": types})
 }
 
 func (s *Server) handleListMiddlewares(w http.ResponseWriter, r *http.Request) {

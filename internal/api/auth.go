@@ -123,7 +123,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		s.onSetup()
 	}
 
-	if !s.startSession(w, r, u) {
+	if !s.startSession(w, r, u, false) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toUserResponse(u))
@@ -142,6 +142,8 @@ func validateAccount(email, name string) string {
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	// OTP is the authenticator code, required once MFA is enabled.
+	OTP string `json:"otp"`
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +164,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	valid := false
-	if err == nil {
+	if err == nil && u.PasswordHash == "!" { // service account: no password
+		_, _ = auth.VerifyPassword(req.Password, dummyHash())
+	} else if err == nil {
 		if valid, err = auth.VerifyPassword(req.Password, u.PasswordHash); err != nil {
 			s.internalError(w, "verify password", err)
 			return
@@ -176,10 +180,39 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "email or password is incorrect")
 		return
 	}
-	s.audit(r, u.ID, "auth:Login", "srn:syncloud:user/"+u.ID, nil)
-	if !s.startSession(w, r, u) {
+	iu, err := s.store.IAMUser(r.Context(), u.ID)
+	if err != nil {
+		s.internalError(w, "get user", err)
 		return
 	}
+	if iu.Disabled || iu.Kind == store.UserService {
+		s.audit(r, u.ID, "auth:Login", "srn:syncloud:user/"+u.ID, map[string]any{"result": "denied", "reason": "disabled or service account"})
+		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "this account cannot sign in")
+		return
+	}
+	mfa := false
+	if iu.MFAEnabled {
+		if req.OTP == "" {
+			writeError(w, http.StatusUnauthorized, CodeMFARequired, "enter the code from your authenticator app")
+			return
+		}
+		secret, err := s.secrets.Open(iu.MFASecret, []byte("mfa:"+u.ID))
+		if err != nil {
+			s.internalError(w, "open MFA secret", err)
+			return
+		}
+		if !auth.VerifyTOTP(string(secret), req.OTP, now) {
+			s.audit(r, u.ID, "auth:Login", "srn:syncloud:user/"+u.ID, map[string]any{"result": "denied", "reason": "wrong MFA code"})
+			writeError(w, http.StatusUnauthorized, CodeUnauthorized, "the authenticator code is incorrect")
+			return
+		}
+		mfa = true
+	}
+	s.audit(r, u.ID, "auth:Login", "srn:syncloud:user/"+u.ID, map[string]any{"mfa": mfa})
+	if !s.startSession(w, r, u, mfa) {
+		return
+	}
+	_ = s.store.TouchLogin(r.Context(), u.ID, now)
 	writeJSON(w, http.StatusOK, toUserResponse(u))
 }
 
@@ -210,12 +243,12 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toUserResponse(u))
 }
 
-func (s *Server) startSession(w http.ResponseWriter, r *http.Request, u store.User) bool {
+func (s *Server) startSession(w http.ResponseWriter, r *http.Request, u store.User, mfa bool) bool {
 	now := s.now()
 	token := auth.NewToken("syn_sess_")
 	err := s.store.CreateSession(r.Context(), store.Session{
 		TokenHash: auth.HashToken(token), UserID: u.ID, CreatedAt: now, ExpiresAt: now.Add(sessionTTL),
-		LastSeenAt: now, IP: clientIP(r), UserAgent: r.UserAgent(),
+		LastSeenAt: now, IP: clientIP(r), UserAgent: r.UserAgent(), MFA: mfa,
 	})
 	if err != nil {
 		s.internalError(w, "create session", err)

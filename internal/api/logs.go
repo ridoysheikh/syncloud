@@ -58,7 +58,7 @@ func (s *Server) handleQueryLogs(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	f, ok := logFilter(w, r)
-	if !ok {
+	if !ok || !s.logScope(w, r, f) {
 		return
 	}
 	lines, err := s.logs.Query(r.Context(), f, since, limit)
@@ -83,7 +83,7 @@ func (s *Server) handleTailLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f, ok := logFilter(w, r)
-	if !ok {
+	if !ok || !s.logScope(w, r, f) {
 		return
 	}
 	rc := http.NewResponseController(w) // unwraps middleware recorders
@@ -113,4 +113,31 @@ func (s *Server) handleTailLogs(w http.ResponseWriter, r *http.Request) {
 			_ = rc.Flush()
 		}
 	}
+}
+
+// logScope keeps log queries inside what the caller may read (§14): anyone
+// without the action everywhere must name a project they are allowed on
+// (and the environment and service narrow the check).
+func (s *Server) logScope(w http.ResponseWriter, r *http.Request, f logs.Filter) bool {
+	action, _ := r.Context().Value(authzActionKey).(string)
+	p, _ := principal(r.Context())
+	if action == "" || p.isRoot() || s.can(r, action, "srn:syncloud:*") {
+		return true
+	}
+	if f.Project == "" {
+		s.denied(w, r, action, "srn:syncloud:*", "choose a project you may read")
+		return false
+	}
+	res := projectSRN(f.Project)
+	if f.Environment != "" {
+		res = envSRN(f.Project, f.Environment)
+		if f.Service != "" {
+			res += "/service/" + f.Service
+		}
+	}
+	if d := s.decide(r, action, res); !d.Allowed {
+		s.denied(w, r, action, res, d.Reason)
+		return false
+	}
+	return true
 }

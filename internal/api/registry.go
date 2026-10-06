@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"net/http"
@@ -49,6 +50,16 @@ func (s *Server) handleRegistryToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cred := CredAccessKey
+	if strings.HasPrefix(pass, "syn_pat_") {
+		cred = CredToken
+	}
+	iu, err := s.userFor(r.Context(), u.ID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "invalid registry credentials")
+		return
+	}
+	r = r.WithContext(context.WithValue(r.Context(), principalKey, s.principalFor(iu, cred, credID)))
 	var access []registry.Access
 	for _, raw := range q["scope"] {
 		for _, sc := range strings.Fields(raw) { // several scopes may share one parameter
@@ -57,7 +68,7 @@ func (s *Server) handleRegistryToken(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
 				return
 			}
-			if granted := grantRegistry(u, a); len(granted.Actions) > 0 {
+			if granted := s.grantRegistry(r, a); len(granted.Actions) > 0 {
 				access = append(access, granted)
 			}
 		}
@@ -104,16 +115,32 @@ func (s *Server) registryUser(r *http.Request, user, pass string, now time.Time)
 
 var registryActions = map[string]bool{"pull": true, "push": true, "delete": true, "*": true}
 
-// grantRegistry decides which requested actions u gets. Until IAM policies
-// arrive (Phase 7, registry:Push/Pull per repository), the root account gets
-// everything and other accounts get nothing.
-func grantRegistry(u store.User, req registry.Access) registry.Access {
+// registryIAM maps registry token actions to IAM actions.
+var registryIAM = map[string]string{"pull": "registry:Pull", "push": "registry:Push", "delete": "registry:Delete"}
+
+// grantRegistry keeps the requested actions IAM allows on the repository
+// (srn:syncloud:registry/<name>); "*" needs all three.
+func (s *Server) grantRegistry(r *http.Request, req registry.Access) registry.Access {
 	out := registry.Access{Type: req.Type, Name: req.Name, Actions: []string{}}
-	if !u.IsRoot {
-		return out
+	res := "srn:syncloud:registry/" + req.Name
+	if req.Type == "registry" { // registry:catalog:*
+		res = "srn:syncloud:registry/*"
 	}
 	for _, a := range req.Actions {
-		if registryActions[a] {
+		if !registryActions[a] {
+			continue
+		}
+		ok := true
+		if a == "*" {
+			for _, x := range registryIAM {
+				ok = ok && s.can(r, x, res)
+			}
+		} else if req.Type == "registry" {
+			ok = s.can(r, "registry:ListRepositories", res)
+		} else {
+			ok = s.can(r, registryIAM[a], res)
+		}
+		if ok {
 			out.Actions = append(out.Actions, a)
 		}
 	}
@@ -199,7 +226,7 @@ func (s *Server) handleListRepositories(w http.ResponseWriter, r *http.Request) 
 			v.LastPulledAt = latest(v.LastPulledAt, st.LastPulledAt)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, out, itemRepo)})
 }
 
 func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {

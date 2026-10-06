@@ -8,6 +8,7 @@ import (
 
 func (a *app) iamCmd() *cobra.Command {
 	iam := &cobra.Command{Use: "iam", Short: "Identity and access management"}
+	iam.AddCommand(a.iamAdminCmds()...)
 
 	keys := &cobra.Command{Use: "access-keys", Aliases: []string{"keys"}, Short: "Your access keys (max 2, for rotation)"}
 	keys.AddCommand(

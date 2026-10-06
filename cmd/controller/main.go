@@ -29,6 +29,7 @@ import (
 	"syncloud/internal/backup"
 	"syncloud/internal/builds"
 	"syncloud/internal/certs"
+	"syncloud/internal/cli"
 	"syncloud/internal/config"
 	"syncloud/internal/discovery"
 	"syncloud/internal/domain"
@@ -43,9 +44,11 @@ import (
 	"syncloud/internal/metrics"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
+	"syncloud/internal/quota"
 	dockerregistry "syncloud/internal/registry"
 	"syncloud/internal/regmaint"
 	"syncloud/internal/secrets"
+	"syncloud/internal/shell"
 	"syncloud/internal/store"
 	"syncloud/internal/system"
 	"syncloud/internal/traefik"
@@ -300,6 +303,12 @@ func serve(args []string) error {
 		}
 		go metricStore.ScrapeTraefik(ctx, "http://"+cfg.TraefikAdmin+"/metrics", LocalNodeName, serviceNames, 10*time.Second)
 	}
+	quotas := quota.New(st, workloads, metricStore, log)
+	workloads.Admit = quotas.Admit
+	workloads.AdmitCount = quotas.AdmitCount
+	jobMgr.AdmitCount = quotas.AdmitCount
+	buildMgr.BuildSlots = quotas.BuildSlots
+	go quotas.Run(ctx)
 	autoscaler := autoscale.New(st, workloads, metricStore, bus, log)
 	go autoscaler.Run(ctx)
 	healthMon := health.New(st, workloads, bus, log, health.Config{
@@ -333,6 +342,7 @@ func serve(args []string) error {
 		go regMaint.Run(ctx)
 	}
 	logStore := logs.New(st, cfg.VictoriaLogsURL, log)
+	logStore.OnIngest = quotas.AddLogBytes
 	gw.AddHooks(agentgw.Hooks{OnLogs: logStore.OnLogs})
 	go logStore.Run(ctx)
 	fwStats := fwstats.New(st, metricStore, logStore, log)
@@ -398,6 +408,26 @@ func serve(args []string) error {
 	}
 	go backups.Run(ctx)
 
+	// Cloud Shell runs on the controller node and reaches the API over the
+	// private network (the listener below).
+	shellSynctl := cfg.ShellSynctl
+	if shellSynctl == "" {
+		if p := filepath.Join(cfg.DownloadsDir, "synctl-linux-"+runtime.GOARCH); fileExists(p) {
+			shellSynctl = p
+		}
+	}
+	shells := shell.New(gw, shell.Config{
+		Image: cfg.ShellImage, Synctl: shellSynctl,
+		Endpoint: func() string { return "http://" + net.JoinHostPort(mesh.MeshAddr(1).String(), portOf(cfg.Listen)) },
+		Node: func() (store.Node, bool) {
+			n, err := st.NodeByName(context.Background(), mesh.ControllerNode)
+			return n, err == nil
+		},
+	}, log)
+	gw.AddHooks(shells.Hooks())
+	go shells.Run(ctx)
+
+	api.CLICommands = cli.OperationCommands
 	srv := api.New(api.Options{
 		Store: st, Secrets: box, CA: ca, Nodes: registry, GatewayAddr: cfg.AgentAdvertise,
 		System: sysMgr, Registry: regIssuer,
@@ -419,6 +449,8 @@ func serve(args []string) error {
 		SecurityGroups:        cfg.SecurityGroups,
 		OnSecurityChange:      disco.Kick,
 		FirewallStats:         fwStats,
+		Quotas:                quotas,
+		Shell:                 shells,
 		Discovery:             disco,
 		Traefik:               traefikProvider,
 		TraefikExtras:         traefikExtras,
@@ -461,6 +493,7 @@ func serve(args []string) error {
 
 	errc := make(chan error, 1)
 	go func() { errc <- httpSrv.Serve(ln) }()
+	go serveOnMesh(ctx, cfg.Listen, httpSrv, log)
 
 	select {
 	case err := <-errc:
@@ -673,4 +706,35 @@ func devPort(p string) string {
 		return ""
 	}
 	return p
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// serveOnMesh also serves the API on the controller's private-network address
+// (10.90.0.1), for Cloud Shell and other nodes, once the local agent has
+// brought the mesh up. It is not needed when the API already listens on
+// every address.
+func serveOnMesh(ctx context.Context, listen string, srv *http.Server, log *slog.Logger) {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil || host == "" || host == "0.0.0.0" || host == "::" {
+		return
+	}
+	addr := net.JoinHostPort(mesh.MeshAddr(1).String(), port)
+	for {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			log.Info("API listening on the private network", "addr", addr)
+			go func() { <-ctx.Done(); ln.Close() }()
+			_ = srv.Serve(ln)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+	}
 }

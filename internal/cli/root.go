@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -36,7 +37,10 @@ func (a *app) client() (*client.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return client.New(p.Endpoint, client.Credentials{AccessKeyID: p.AccessKeyID, SecretAccessKey: p.SecretAccessKey, Token: p.Token})
+	if p.Expiration != nil && time.Now().After(*p.Expiration) {
+		return nil, fmt.Errorf("the credentials of this profile expired at %s: run `synctl login` again", p.Expiration.Local().Format(time.DateTime))
+	}
+	return client.New(p.Endpoint, client.Credentials{AccessKeyID: p.AccessKeyID, SecretAccessKey: p.SecretAccessKey, Token: p.Token, SessionToken: p.SessionToken})
 }
 
 // NewRoot returns the synctl root command.
@@ -82,6 +86,11 @@ func NewRoot(in io.Reader, out, errOut io.Writer) *cobra.Command {
 		a.networkCmd(),
 		a.firewallCmd(),
 		a.securityGroupsCmd(),
+		a.stsCmd(),
+		a.auditCmd(),
+		a.loginCmd(),
+		a.quotaCmd(),
+		a.usageCmd(),
 		a.middlewaresCmd(),
 		a.traefikCmd(),
 		a.projectsCmd(),
@@ -111,3 +120,28 @@ func op(ids ...string) map[string]string {
 }
 
 func ctx(cmd *cobra.Command) context.Context { return cmd.Context() }
+
+// OperationCommands maps each API operation to the synctl command that
+// wraps it ("synctl services scale NAME REPLICAS"), for the API docs.
+func OperationCommands() map[string]string {
+	out := map[string]string{}
+	var walk func(c *cobra.Command)
+	walk = func(c *cobra.Command) {
+		if ids := c.Annotations[opAnnotation]; ids != "" {
+			use := c.CommandPath()
+			if args := strings.TrimPrefix(c.Use, c.Name()); args != "" {
+				use += args
+			}
+			for _, id := range strings.Split(ids, ",") {
+				if _, ok := out[id]; !ok {
+					out[id] = use
+				}
+			}
+		}
+		for _, sub := range c.Commands() {
+			walk(sub)
+		}
+	}
+	walk(NewRoot(strings.NewReader(""), io.Discard, io.Discard))
+	return out
+}

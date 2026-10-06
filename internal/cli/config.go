@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Profile holds one named set of connection settings in ~/.syncloud/credentials
@@ -15,6 +16,9 @@ type Profile struct {
 	AccessKeyID     string `json:"accessKeyId,omitempty"`
 	SecretAccessKey string `json:"secretAccessKey,omitempty"`
 	Token           string `json:"token,omitempty"`
+	// SessionToken comes with temporary credentials (synctl login, sts).
+	SessionToken string     `json:"sessionToken,omitempty"`
+	Expiration   *time.Time `json:"expiration,omitempty"`
 }
 
 type credentialsFile struct {
@@ -23,12 +27,14 @@ type credentialsFile struct {
 
 // Environment variables override the profile (useful in CI).
 const (
-	EnvProfile   = "SYNCLOUD_PROFILE"
-	EnvEndpoint  = "SYNCLOUD_ENDPOINT"
-	EnvKeyID     = "SYNCLOUD_ACCESS_KEY_ID"
-	EnvSecret    = "SYNCLOUD_SECRET_ACCESS_KEY"
-	EnvToken     = "SYNCLOUD_TOKEN"
-	EnvConfigDir = "SYNCLOUD_CONFIG_DIR"
+	EnvProfile  = "SYNCLOUD_PROFILE"
+	EnvEndpoint = "SYNCLOUD_ENDPOINT"
+	EnvKeyID    = "SYNCLOUD_ACCESS_KEY_ID"
+	EnvSecret   = "SYNCLOUD_SECRET_ACCESS_KEY"
+	EnvToken    = "SYNCLOUD_TOKEN"
+	// EnvSessionToken goes with temporary credentials (Cloud Shell, sts).
+	EnvSessionToken = "SYNCLOUD_SESSION_TOKEN"
+	EnvConfigDir    = "SYNCLOUD_CONFIG_DIR"
 )
 
 func configDir() (string, error) {
@@ -109,7 +115,7 @@ func resolveProfile(name, endpointFlag string) (Profile, error) {
 		p.Endpoint = v
 	}
 	if v := os.Getenv(EnvKeyID); v != "" {
-		p.AccessKeyID, p.SecretAccessKey = v, os.Getenv(EnvSecret)
+		p.AccessKeyID, p.SecretAccessKey, p.SessionToken = v, os.Getenv(EnvSecret), os.Getenv(EnvSessionToken)
 	}
 	if v := os.Getenv(EnvToken); v != "" {
 		p.Token = v

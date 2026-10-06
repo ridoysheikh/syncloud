@@ -23,7 +23,12 @@ type Credentials struct {
 	SecretAccessKey string
 	// Token is a personal access token; used only when no access key is set.
 	Token string
+	// SessionToken accompanies temporary credentials (SYNAS… keys).
+	SessionToken string
 }
+
+// HeaderSessionToken carries the session token of temporary credentials.
+const HeaderSessionToken = "X-Syncloud-Session-Token"
 
 type Client struct {
 	endpoint *url.URL
@@ -68,6 +73,9 @@ func (c *Client) Raw(ctx context.Context, method, path string, body []byte) (int
 	req.Header.Set("Accept", "application/json")
 	switch {
 	case c.creds.AccessKeyID != "":
+		if c.creds.SessionToken != "" {
+			req.Header.Set(HeaderSessionToken, c.creds.SessionToken)
+		}
 		sigv.Sign(req, c.creds.AccessKeyID, c.creds.SecretAccessKey, body, c.now())
 	case c.creds.Token != "":
 		req.Header.Set("Authorization", "Bearer "+c.creds.Token)
@@ -130,6 +138,9 @@ func (c *Client) Stream(ctx context.Context, path string) (io.ReadCloser, error)
 	req.Header.Set("Accept", "text/event-stream")
 	switch {
 	case c.creds.AccessKeyID != "":
+		if c.creds.SessionToken != "" {
+			req.Header.Set(HeaderSessionToken, c.creds.SessionToken)
+		}
 		sigv.Sign(req, c.creds.AccessKeyID, c.creds.SecretAccessKey, nil, c.now())
 	case c.creds.Token != "":
 		req.Header.Set("Authorization", "Bearer "+c.creds.Token)
@@ -169,6 +180,9 @@ func (c *Client) ExecDial(ctx context.Context, taskID string, command []string, 
 	}
 	switch {
 	case c.creds.AccessKeyID != "":
+		if c.creds.SessionToken != "" {
+			req.Header.Set(HeaderSessionToken, c.creds.SessionToken)
+		}
 		sigv.Sign(req, c.creds.AccessKeyID, c.creds.SecretAccessKey, nil, c.now())
 	case c.creds.Token != "":
 		req.Header.Set("Authorization", "Bearer "+c.creds.Token)

@@ -35,7 +35,7 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, v)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, out, itemProject)})
 }
 
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +57,10 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := workload.ValidName(req.Environment); err != nil {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "environment name "+err.Error())
+		return
+	}
+	if d := s.decide(r, "project:CreateProject", projectSRN(req.Name)); !d.Allowed {
+		s.denied(w, r, "project:CreateProject", projectSRN(req.Name), d.Reason)
 		return
 	}
 	now := s.now().UTC().Truncate(1e9)
@@ -252,7 +256,10 @@ func (s *Server) service(w http.ResponseWriter, r *http.Request) (store.Service,
 
 func (s *Server) workloadError(w http.ResponseWriter, what string, err error) {
 	var inv workload.ErrInvalid
+	var quota workload.ErrQuota
 	switch {
+	case errors.As(err, &quota):
+		writeError(w, http.StatusForbidden, CodeQuotaExceeded, quota.Error())
 	case errors.As(err, &inv):
 		writeError(w, http.StatusBadRequest, CodeBadRequest, inv.Error())
 	case errors.Is(err, store.ErrNotFound):
@@ -271,7 +278,7 @@ func (s *Server) handleListAllServices(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "list services", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, items, itemService)})
 }
 
 func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
@@ -466,7 +473,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "list tasks", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, items, itemServiceField)})
 }
 
 func (s *Server) handleRestartTask(w http.ResponseWriter, r *http.Request) {

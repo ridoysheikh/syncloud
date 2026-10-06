@@ -52,6 +52,7 @@ e2e:
 	test/e2e/alerts.sh
 	test/e2e/secgroups.sh
 	test/e2e/routing.sh
+	test/e2e/iam.sh
 
 ## proto: regenerate gRPC code (tools are installed into .tools/ on first use)
 proto: .tools/buf .tools/protoc-gen-go .tools/protoc-gen-go-grpc

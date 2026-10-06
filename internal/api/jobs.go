@@ -61,7 +61,7 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	for _, j := range js {
 		out = append(out, s.jobs.JobView(r.Context(), j))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, out, itemJob)})
 }
 
 func (s *Server) handleListAllJobs(w http.ResponseWriter, r *http.Request) {

@@ -10,6 +10,8 @@ export function LoginPage() {
   const qc = useQueryClient();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [otp, setOtp] = useState("");
+  const [needOtp, setNeedOtp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -18,10 +20,15 @@ export function LoginPage() {
     setError(null);
     setBusy(true);
     try {
-      const user = await api<User>("POST", "/auth/login", { email, password });
+      const user = await api<User>("POST", "/auth/login", { email, password, otp });
       qc.setQueryData(["auth", "me"], user);
-      await navigate({ to: "/" });
+      const back = new URLSearchParams(window.location.search).get("next");
+      await navigate({ to: (back && back.startsWith("/") ? back : "/") as string });
     } catch (err) {
+      if (err instanceof ApiError && err.code === "mfa_required") {
+        setNeedOtp(true);
+        if (!otp) return;
+      }
       setError(err instanceof ApiError ? err.message : "Could not reach the controller.");
     } finally {
       setBusy(false);
@@ -43,6 +50,11 @@ export function LoginPage() {
             required
           />
         </Field>
+        {needOtp && (
+          <Field label="Authenticator code">
+            <Input value={otp} onChange={(e) => setOtp(e.target.value)} inputMode="numeric" autoComplete="one-time-code" placeholder="123456" autoFocus />
+          </Field>
+        )}
         {error && <Alert>{error}</Alert>}
         <Button type="submit" variant="primary" disabled={busy} className="mt-1 h-8">
           {busy ? "Signing in…" : "Sign in"}

@@ -46,7 +46,7 @@ const appRoute = createRoute({
     const status = await queryClient.ensureQueryData(statusQuery);
     if (status.setupRequired) throw redirect({ to: "/setup" });
     const me = await queryClient.ensureQueryData(meQuery);
-    if (!me) throw redirect({ to: "/login" });
+    if (!me) throw redirect({ to: "/login", search: { next: window.location.pathname + window.location.search } as never });
   },
 });
 

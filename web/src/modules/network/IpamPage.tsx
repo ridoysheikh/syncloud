@@ -87,12 +87,7 @@ export function IpamPage() {
               className: "w-full",
               cell: (n) => (
                 <div className="flex items-center gap-2">
-                  <div className="w-32">
-                    <Meter value={(100 * n.used) / n.capacity} />
-                  </div>
-                  <span className="text-muted">
-                    {n.used} / {n.capacity}
-                  </span>
+                  <Meter value={(100 * n.used) / n.capacity} label={`${n.used}/${n.capacity}`} className="w-48" />
                 </div>
               ),
             },
