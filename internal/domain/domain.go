@@ -40,6 +40,9 @@ func WildcardService(base string) (string, bool) {
 // RegistryHost is the registry's hostname for a base domain.
 func RegistryHost(base string) string { return "registry." + base }
 
+// GitHost is the built-in Git server's hostname (§5.8).
+func GitHost(base string) string { return "git." + base }
+
 var labelRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // Normalize lowercases d, strips a trailing dot and validates it as a DNS name

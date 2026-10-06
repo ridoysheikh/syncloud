@@ -23,6 +23,7 @@ import (
 	"syncloud/internal/execrelay"
 	"syncloud/internal/fwstats"
 	"syncloud/internal/gitconn"
+	"syncloud/internal/gitserver"
 	"syncloud/internal/health"
 	"syncloud/internal/jobs"
 	"syncloud/internal/logs"
@@ -96,6 +97,7 @@ type Server struct {
 	traefik               *traefik.Provider
 	traefikExtras         *traefik.Extras
 	gitConns              *gitconn.Manager
+	gitServer             *gitserver.Manager
 	onTraefikSettings     func()
 	controllerSchedulable bool
 	bus                   *events.Bus
@@ -181,6 +183,7 @@ type Options struct {
 	Traefik          *traefik.Provider
 	TraefikExtras    *traefik.Extras
 	GitConnections   *gitconn.Manager
+	GitServer        *gitserver.Manager
 	// OnTraefikSettings re-renders the Traefik replicas after the static
 	// settings changed.
 	OnTraefikSettings func()
@@ -242,6 +245,7 @@ func New(o Options) *Server {
 		traefik:               o.Traefik,
 		traefikExtras:         o.TraefikExtras,
 		gitConns:              o.GitConnections,
+		gitServer:             o.GitServer,
 		onTraefikSettings:     o.OnTraefikSettings,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
@@ -439,6 +443,9 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/builds/{id}/deploy", h: s.handleDeployBuild},
 		{Method: "POST", Path: "/api/v1/hooks/git/{id}", Public: true, h: s.handleGitWebhook},
 		{Method: "POST", Path: "/api/v1/hooks/github-app/{id}", Public: true, h: s.handleGitHubAppWebhook},
+		{Method: "GET", Path: "/api/v1/gitserver", h: s.handleGetGitServer},
+		{Method: "PUT", Path: "/api/v1/gitserver", h: s.handleSetGitServer},
+		{Method: "GET", Path: "/api/v1/gitserver/credentials", h: s.handleGitServerCredentials},
 		{Method: "GET", Path: "/api/v1/integrations/git", h: s.handleListGitConnections},
 		{Method: "POST", Path: "/api/v1/integrations/git", h: s.handleCreateGitConnection},
 		{Method: "GET", Path: "/api/v1/integrations/git/{connection}", h: s.handleGetGitConnection},

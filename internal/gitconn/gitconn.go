@@ -225,6 +225,27 @@ func (m *Manager) AddToken(ctx context.Context, in TokenInput) (View, error) {
 	return m.save(ctx, store.GitConnection{Kind: in.Kind, Name: in.Name, APIURL: apiURL, WebURL: webURL, Account: account}, sec)
 }
 
+// AddBuiltin saves a connection to a Git server SynCloud runs itself: the
+// API is reached at apiURL (loopback), browsers and clones use webURL.
+func (m *Manager) AddBuiltin(ctx context.Context, name, apiURL, webURL, token string) (View, error) {
+	sec := gitprovider.Secrets{Token: token}
+	p, err := gitprovider.New(gitprovider.Conn{Kind: gitprovider.KindGitea, APIURL: apiURL, Secrets: sec})
+	if err != nil {
+		return View{}, err
+	}
+	account, err := p.Account(ctx)
+	if err != nil {
+		return View{}, err
+	}
+	return m.save(ctx, store.GitConnection{Kind: gitprovider.KindGitea, Name: name, APIURL: apiURL, WebURL: strings.TrimRight(webURL, "/"), Account: account}, sec)
+}
+
+// SetWebURL updates where browsers reach a connection's server.
+func (m *Manager) SetWebURL(ctx context.Context, id, webURL string) error {
+	_, err := m.st.W.ExecContext(ctx, `UPDATE git_connections SET web_url = ? WHERE id = ?`, strings.TrimRight(webURL, "/"), id)
+	return err
+}
+
 func (m *Manager) save(ctx context.Context, c store.GitConnection, sec gitprovider.Secrets) (View, error) {
 	if c.ID == "" {
 		c.ID = auth.NewID("gc_")

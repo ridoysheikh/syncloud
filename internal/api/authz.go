@@ -24,7 +24,7 @@ var tagPrefix = map[string]string{
 	"projects": "project", "registry": "registry", "services": "service", "settings": "settings", "system": "system", "tasks": "task",
 	"traefik": "traefik", "traffic": "traffic", "quotas": "quota", "usage": "usage", "audit": "audit", "sts": "sts", "shell": "shell",
 	"docs": "docs", "nodepools": "nodepool", "storage": "s3",
-	"integrations": "integration",
+	"integrations": "integration", "gitserver": "gitserver",
 }
 
 type opInfo struct{ id, tag string }

@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"syncloud/internal/client"
 )
 
 func (a *app) integrationsCmd() *cobra.Command {
@@ -192,6 +194,75 @@ func (a *app) integrationsCmd() *cobra.Command {
 			return a.printer().table(bs, []string{"BRANCH"}, rows)
 		},
 	})
-	cmd.AddCommand(git)
+	cmd.AddCommand(git, a.gitServerCmd())
 	return cmd
+}
+
+func (a *app) gitServerCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "git-server", Short: "The built-in Git server (Forgejo) at git.<base-domain>", Args: cobra.NoArgs,
+		Annotations: op("getGitServer"),
+		Long: "When on, SynCloud runs Forgejo on the controller node, creates its administrator and connects it as \"git\":\n" +
+			"push code there and build services from it like from GitHub. Turning it off keeps its repositories for later.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			g, err := c.GetGitServer(ctx(cmd))
+			if err != nil {
+				return err
+			}
+			return a.printGitServer(g)
+		},
+	}
+	toggle := func(on bool) *cobra.Command {
+		use, short := "enable", "Run the built-in Git server and connect it as \"git\""
+		if !on {
+			use, short = "disable", "Stop the built-in Git server (repositories are kept)"
+		}
+		return &cobra.Command{Use: use, Short: short, Args: cobra.NoArgs, Annotations: op("setGitServer"),
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				c, err := a.client()
+				if err != nil {
+					return err
+				}
+				g, err := c.SetGitServer(ctx(cmd), on)
+				if err != nil {
+					return err
+				}
+				return a.printGitServer(g)
+			}}
+	}
+	cmd.AddCommand(toggle(true), toggle(false), &cobra.Command{
+		Use: "credentials", Short: "Print the Git server administrator's sign-in", Args: cobra.NoArgs,
+		Annotations: op("getGitServerCredentials"),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			cr, err := c.GitServerCredentials(ctx(cmd))
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "url:      %s\nusername: %s\npassword: %s\n", cr["url"], cr["username"], cr["password"])
+			return nil
+		},
+	})
+	return cmd
+}
+
+func (a *app) printGitServer(g client.GitServer) error {
+	if a.output == "json" {
+		return a.printer().json(g)
+	}
+	if !g.Enabled {
+		fmt.Fprintln(a.out, "The built-in Git server is off (synctl integrations git-server enable).")
+		return nil
+	}
+	fmt.Fprintf(a.out, "%s at %s (%s)\n  connection: %s, admin: %s\n", g.State, g.URL, g.Image, g.Connection, g.AdminUser)
+	if g.Problem != "" {
+		fmt.Fprintf(a.out, "  %s\n", g.Problem)
+	}
+	return nil
 }

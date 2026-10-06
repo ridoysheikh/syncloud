@@ -10,6 +10,20 @@
 - backups;
 - domains.
 
+## Built-in Git server
+
+You don't need GitHub at all: turn on the built-in **Forgejo** under **Settings → Platform** or **Integrations**, or with `synctl integrations git-server enable`. It's off by default.
+
+When you turn it on, SynCloud:
+
+- runs Forgejo as a system task on the controller node, at `https://git.<base-domain>` with its own certificate;
+- creates its administrator (shown with **Administrator sign-in**, or `synctl integrations git-server credentials`);
+- connects it as the Git connection **`git`**, so you can pick its repositories in the new-service wizard, with webhooks and commit statuses set up like any other host.
+
+Sign-up is closed: add people's accounts from Forgejo's Site administration. It needs about 100 MB of memory.
+
+You can't turn it off while services build from it. Turning it off removes the container and the `git` connection, but **keeps the repositories** in the `syncloud-git` volume, and they come back when you turn it on again.
+
 ## Git providers
 
 Connect a Git host once. After that, services pick a repository by name instead of a URL, and SynCloud handles the rest:

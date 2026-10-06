@@ -25,6 +25,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { GiteaIcon, GitHubIcon, GitLabIcon } from "@/ui/brands";
+import { GitServerPanel } from "./GitServerPanel";
 import { kindLabel, useGitConnections, useRepos, type GitConnection, type GitKind } from "./RepoPicker";
 
 const providers: { kind: GitKind; title: string; icon: typeof GitHubIcon; blurb: string; recommended?: boolean }[] = [
@@ -81,8 +82,9 @@ export function IntegrationsPage() {
         </Alert>
       )}
       {params.get("error") && <Alert>{params.get("error")}</Alert>}
+      <GitServerPanel />
 
-      <Panel title="Git providers">
+      <Panel title="Connect a Git provider">
         <div className="flex flex-col gap-3">
           <div className={cn("grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4", gap)}>
             {providers.map((p) => (

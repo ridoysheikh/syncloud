@@ -57,6 +57,7 @@ e2e:
 	test/e2e/upgrade.sh
 	test/e2e/storage.sh
 	test/e2e/integrations.sh
+	test/e2e/gitserver.sh
 	test/e2e/restore.sh
 	test/e2e/chaos.sh
 

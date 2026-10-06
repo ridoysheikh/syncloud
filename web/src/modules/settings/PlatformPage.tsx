@@ -10,6 +10,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { GitServerPanel } from "@/modules/integrations/GitServerPanel";
 
 interface SystemTask {
   taskId: string;
@@ -58,7 +59,8 @@ export function PlatformPage() {
           )
         }
       />
-      <Panel flush>
+      <GitServerPanel />
+      <Panel title="Components" flush>
         <DataTable
           rows={data}
           rowKey={(t) => t.taskId}

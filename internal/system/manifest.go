@@ -6,6 +6,8 @@ package system
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
 
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 	"syncloud/internal/traefik"
@@ -17,7 +19,15 @@ const (
 	ImageVictoriaMetrics = "victoriametrics/victoria-metrics:v1.153.0"
 	ImageVictoriaLogs    = "victoriametrics/victoria-logs:v1.53.0"
 	ImageRegistry        = "registry:3.1.2"
+	ImageForgejo         = "codeberg.org/forgejo/forgejo:13.0.5-rootless"
 )
+
+// GitServerAddr is where the built-in Git server listens (host network,
+// loopback): Traefik and the controller reach it there.
+const GitServerAddr = "127.0.0.1:3002"
+
+// GitServerTaskID is the built-in Git server's system task.
+const GitServerTaskID = "sys-git"
 
 // RegistryAddr is where Traefik (host network) reaches the registry.
 const RegistryAddr = "127.0.0.1:5000"
@@ -47,6 +57,18 @@ type Config struct {
 	RegistryReadOnly bool
 	// TraefikSettings adds the global static Traefik flags (§5.7).
 	TraefikSettings traefik.Settings
+	// GitServer runs the built-in Forgejo when set.
+	GitServer *GitServerConfig
+}
+
+// GitServerConfig is the built-in Git server (Forgejo).
+type GitServerConfig struct {
+	// RootURL is its public address (https://git.<base-domain>/, or the
+	// loopback address before a base domain exists).
+	RootURL string
+	// SecretKey and InternalToken are Forgejo's own secrets, generated once.
+	SecretKey     string
+	InternalToken string
 }
 
 // Component describes one system task for the dashboard.
@@ -54,7 +76,8 @@ type Component struct {
 	TaskID      string
 	Name        string
 	Description string
-	spec        func(Config) *agentv1.TaskSpec
+	// spec returns nil when the component is turned off.
+	spec func(Config) *agentv1.TaskSpec
 }
 
 var Components = []Component{
@@ -65,6 +88,10 @@ var Components = []Component{
 	{
 		TaskID: "sys-registry", Name: "Registry", Description: "Private Docker registry with token auth (§5.9)",
 		spec: registrySpec,
+	},
+	{
+		TaskID: GitServerTaskID, Name: "Git server", Description: "Built-in Forgejo: private Git repositories (§5.8), optional",
+		spec: gitServerSpec,
 	},
 	{
 		TaskID: "sys-victoriametrics", Name: "VictoriaMetrics", Description: "Metrics store (§9.1)",
@@ -171,7 +198,51 @@ const TraefikTokenHeader = "X-Syncloud-Token"
 func Specs(c Config) []*agentv1.TaskSpec {
 	out := make([]*agentv1.TaskSpec, 0, len(Components))
 	for _, comp := range Components {
-		out = append(out, comp.spec(c))
+		if s := comp.spec(c); s != nil {
+			out = append(out, s)
+		}
 	}
 	return out
+}
+
+// gitServerSpec runs Forgejo in host networking on loopback: Traefik serves
+// it at git.<base-domain>, the controller provisions it directly. Its
+// configuration is rewritten from the environment on every start, so a new
+// domain only needs a restart. Sign-up is closed: accounts are created by
+// its administrator (shown on Settings → Platform).
+func gitServerSpec(c Config) *agentv1.TaskSpec {
+	g := c.GitServer
+	if g == nil {
+		return nil
+	}
+	host, port, _ := strings.Cut(GitServerAddr, ":")
+	domain := "localhost"
+	if u, err := url.Parse(g.RootURL); err == nil && u.Hostname() != "" {
+		domain = u.Hostname()
+	}
+	return &agentv1.TaskSpec{
+		TaskId: GitServerTaskID, Name: "syncloud-git", Image: ImageForgejo,
+		Env: map[string]string{
+			"GITEA__server__HTTP_ADDR":             host,
+			"GITEA__server__HTTP_PORT":             port,
+			"GITEA__server__ROOT_URL":              g.RootURL,
+			"GITEA__server__DOMAIN":                domain,
+			"GITEA__server__DISABLE_SSH":           "true",
+			"GITEA__server__START_SSH_SERVER":      "false",
+			"GITEA__database__DB_TYPE":             "sqlite3",
+			"GITEA__security__INSTALL_LOCK":        "true",
+			"GITEA__security__SECRET_KEY":          g.SecretKey,
+			"GITEA__security__INTERNAL_TOKEN":      g.InternalToken,
+			"GITEA__service__DISABLE_REGISTRATION": "true",
+			"GITEA__service__REQUIRE_SIGNIN_VIEW":  "false",
+			"GITEA__webhook__ALLOWED_HOST_LIST":    "*",
+			"GITEA__repository__DEFAULT_BRANCH":    "main",
+			"GITEA__repository__DEFAULT_PRIVATE":   "private",
+			"GITEA__actions__ENABLED":              "false",
+			"GITEA__log__LEVEL":                    "Warn",
+			"GITEA__default__APP_NAME":             "SynCloud Git",
+		},
+		Mounts:      []*agentv1.Mount{{Type: agentv1.Mount_TYPE_VOLUME, Source: "syncloud-git", Target: "/var/lib/gitea"}},
+		NetworkMode: "host", System: true,
+	}
 }

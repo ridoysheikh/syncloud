@@ -95,3 +95,22 @@ func TestSettingsShapeRoutes(t *testing.T) {
 		t.Fatalf("tls options: %+v", o)
 	}
 }
+
+func TestGitServerRoute(t *testing.T) {
+	gh := ""
+	p := &Provider{ControllerURL: "http://c", BaseDomain: func() string { return "example.com" }, GitHost: func() string { return gh }, GitServerURL: "http://127.0.0.1:3002"}
+	if _, ok := p.Config().HTTP.Routers["syncloud-git"]; ok {
+		t.Fatal("git router while the server is off")
+	}
+	gh = "git.example.com"
+	d := p.Config()
+	if r := d.HTTP.Routers["syncloud-git"]; r.Rule != "Host(`git.example.com`)" || r.TLS == nil {
+		t.Fatalf("git router %+v", r)
+	}
+	if !strings.Contains(d.HTTP.Routers["syncloud-https-redirect"].Rule, "git.example.com") {
+		t.Fatal("plain HTTP to git.example.com is not redirected")
+	}
+	if _, ok := p.EdgeConfig()["http"].(map[string]any)["routers"].(map[string]any)["syncloud-git"]; ok {
+		t.Fatal("edges cannot reach the controller's loopback Git server")
+	}
+}

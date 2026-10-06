@@ -28,6 +28,7 @@ Run one script with `test/e2e/<name>.sh`. Add `KEEP=1` to leave the nodes runnin
 | `iam.sh` | IAM, quotas, Cloud Shell |
 | `pools.sh` | Node pools with a fake cloud (`test/e2e/cloudsim`), cluster autoscaling, edge nodes |
 | `integrations.sh` | A real Gitea connected with a token: repositories and branches listed, the push webhook created automatically, builds reported as commit statuses, pushes delivered through Traefik with the global Traefik settings |
+| `gitserver.sh` | The built-in Forgejo turned on with the real system tasks: provisioned and connected, a service built from it by webhook with commit statuses, turned off (data kept) and on again |
 | `storage.sh` | MinIO deployed as a service and registered as an S3 endpoint, the bucket browser, bindings, the metrics explorer |
 | `upgrade.sh` | Controller upgrade and rollback, agent rollout and rollback, uninstall |
 | `restore.sh` | Restore drill on a new host with a different IP |

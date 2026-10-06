@@ -13,6 +13,7 @@ import (
 
 	"syncloud/internal/gitconn"
 	"syncloud/internal/gitprovider"
+	"syncloud/internal/gitserver"
 	"syncloud/internal/store"
 )
 
@@ -241,4 +242,57 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 	n := s.builds.CheckRepo(r.Context(), r.PathValue("id"), ev.Repository.FullName)
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "checking", "sources": n})
+}
+
+func (s *Server) requireGitServer(w http.ResponseWriter) bool {
+	if s.gitServer == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "the built-in Git server is not available")
+		return false
+	}
+	return true
+}
+
+func (s *Server) handleGetGitServer(w http.ResponseWriter, r *http.Request) {
+	if !s.requireGitServer(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, s.gitServer.Status())
+}
+
+// handleSetGitServer turns the built-in Git server (Forgejo) on or off.
+func (s *Server) handleSetGitServer(w http.ResponseWriter, r *http.Request) {
+	if !s.requireGitServer(w) {
+		return
+	}
+	var in struct {
+		Enabled bool `json:"enabled"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if err := s.gitServer.SetEnabled(r.Context(), in.Enabled); errors.Is(err, gitserver.ErrInUse) {
+		writeError(w, http.StatusConflict, CodeConflict, err.Error())
+		return
+	} else if err != nil {
+		s.internalError(w, "git server", err)
+		return
+	}
+	u, _ := currentUser(r.Context())
+	s.audit(r, u.ID, "gitserver:SetGitServer", "srn:syncloud:gitserver", map[string]any{"enabled": in.Enabled})
+	writeJSON(w, http.StatusOK, s.gitServer.Status())
+}
+
+// handleGitServerCredentials reveals the Git server administrator's sign-in.
+func (s *Server) handleGitServerCredentials(w http.ResponseWriter, r *http.Request) {
+	if !s.requireGitServer(w) {
+		return
+	}
+	user, password, on := s.gitServer.Credentials()
+	if !on {
+		writeError(w, http.StatusNotFound, CodeNotFound, "the built-in Git server is off")
+		return
+	}
+	u, _ := currentUser(r.Context())
+	s.audit(r, u.ID, "gitserver:GetGitServerCredentials", "srn:syncloud:gitserver", nil)
+	writeJSON(w, http.StatusOK, map[string]string{"username": user, "password": password, "url": s.gitServer.RootURL()})
 }

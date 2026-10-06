@@ -126,11 +126,37 @@ func (m *Manager) SetConfig(cfg Config) {
 	m.mu.Lock()
 	cfg.RegistryReadOnly = m.cfg.RegistryReadOnly // owned by SetRegistryReadOnly
 	specs := Specs(cfg)
+	was := map[string]bool{}
+	for _, s := range m.specs {
+		was[s.TaskId] = true
+	}
+	on := map[string]bool{}
+	for _, s := range specs {
+		on[s.TaskId] = true
+		if t := m.tasks[s.TaskId]; t != nil {
+			t.Image = s.Image
+			if !was[s.TaskId] {
+				t.State, t.Error = "pending", "" // just turned on
+			}
+		}
+	}
+	var off []string // components turned off: stop and remove them
+	for _, s := range m.specs {
+		if !on[s.TaskId] {
+			off = append(off, s.TaskId)
+			if t := m.tasks[s.TaskId]; t != nil {
+				t.State = "removed"
+			}
+		}
+	}
 	m.cfg = cfg
 	m.specs = specs
 	id := m.nodeID
 	m.mu.Unlock()
 	if id != "" {
+		for _, t := range off {
+			m.send(id, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_StopTask{StopTask: &agentv1.StopTask{TaskId: t, TimeoutSeconds: 15, Remove: true}}})
+		}
 		m.applyAll(id)
 	}
 }
@@ -176,9 +202,15 @@ func (m *Manager) Run(ctx context.Context) {
 func (m *Manager) List() []TaskView {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	on := map[string]bool{}
+	for _, s := range m.specs {
+		on[s.TaskId] = true
+	}
 	out := make([]TaskView, 0, len(Components))
 	for _, c := range Components {
-		out = append(out, *m.tasks[c.TaskID])
+		if on[c.TaskID] { // optional components that are off are not listed
+			out = append(out, *m.tasks[c.TaskID])
+		}
 	}
 	return out
 }

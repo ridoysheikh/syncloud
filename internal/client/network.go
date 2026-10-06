@@ -392,3 +392,29 @@ func (c *Client) CreateGitHubAppManifest(ctx context.Context, name, org, githubU
 	var out GitHubAppManifest
 	return out, c.Do(ctx, "POST", "/api/v1/integrations/github/manifest", map[string]string{"name": name, "org": org, "githubUrl": githubURL}, &out)
 }
+
+// GitServer is the built-in Git server (Forgejo).
+type GitServer struct {
+	Enabled    bool   `json:"enabled"`
+	State      string `json:"state"`
+	URL        string `json:"url"`
+	Image      string `json:"image"`
+	AdminUser  string `json:"adminUser"`
+	Connection string `json:"connection"`
+	Problem    string `json:"problem,omitempty"`
+}
+
+func (c *Client) GetGitServer(ctx context.Context) (GitServer, error) {
+	var out GitServer
+	return out, c.Do(ctx, "GET", "/api/v1/gitserver", nil, &out)
+}
+
+func (c *Client) SetGitServer(ctx context.Context, enabled bool) (GitServer, error) {
+	var out GitServer
+	return out, c.Do(ctx, "PUT", "/api/v1/gitserver", map[string]bool{"enabled": enabled}, &out)
+}
+
+func (c *Client) GitServerCredentials(ctx context.Context) (map[string]string, error) {
+	var out map[string]string
+	return out, c.Do(ctx, "GET", "/api/v1/gitserver/credentials", nil, &out)
+}

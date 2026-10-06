@@ -41,6 +41,7 @@ import (
 	"syncloud/internal/gc"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 	"syncloud/internal/gitconn"
+	"syncloud/internal/gitserver"
 	"syncloud/internal/health"
 	"syncloud/internal/jobs"
 	"syncloud/internal/logs"
@@ -212,8 +213,13 @@ func serve(args []string) error {
 	if err := traefikExtras.Reload(ctx); err != nil {
 		return fmt.Errorf("load Traefik settings and middlewares: %w", err)
 	}
+	gitServer := gitserver.New(st, box, domains.Endpoints, log)
+	if err := gitServer.Load(ctx); err != nil {
+		return fmt.Errorf("load the built-in Git server settings: %w", err)
+	}
 	sysCfg := func(ep domain.Endpoints) system.Config {
 		return system.Config{
+			GitServer:       gitServer.Config(),
 			TraefikSettings: traefikExtras.Settings(),
 			ControllerURL:   controllerURL, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS,
 			AdminAddr: cfg.TraefikAdmin, TraefikToken: traefikToken,
@@ -246,6 +252,9 @@ func serve(args []string) error {
 			return nil
 		}
 		hosts := []string{ep.BaseDomain, domain.RegistryHost(ep.BaseDomain)}
+		if h := gitServer.Host(); h != "" {
+			hosts = append(hosts, h)
+		}
 		if workloads != nil {
 			for _, r := range workloads.Routes(context.Background(), ep.BaseDomain) {
 				hosts = append(hosts, r.Host)
@@ -386,6 +395,12 @@ func serve(args []string) error {
 		go healthMon.RunTaskProbes(ctx)
 	}
 	execs := execrelay.New(gw)
+	gitServer.Conns, gitServer.Exec, gitServer.Sys = gitConns, execs, sysMgr
+	gitServer.OnChange = func() {
+		sysMgr.SetConfig(sysCfg(domains.Endpoints()))
+		certMgr.SetHosts(certHosts(domains.Endpoints()))
+	}
+	go gitServer.Run(ctx)
 	gw.AddHooks(execs.Hooks())
 	regBrowser := &dockerregistry.Browser{URL: "http://" + system.RegistryAddr, Issuer: regIssuer}
 	// Push, pull and delete notifications from the registry (§5.9).
@@ -429,6 +444,7 @@ func serve(args []string) error {
 		log.Info("base domain changed", "domain", ep.BaseDomain, "dashboard", ep.DashboardURL)
 		sysMgr.SetConfig(sysCfg(ep)) // the registry's token realm follows the domain
 		certMgr.SetHosts(certHosts(ep))
+		gitServer.Kick() // its address follows the domain
 		bus.Publish("domain.updated", ep)
 	})
 	go certMgr.Run(ctx)
@@ -461,6 +477,8 @@ func serve(args []string) error {
 		},
 		Middlewares:       traefikExtras.Definitions,
 		Settings:          traefikExtras.Settings,
+		GitHost:           gitServer.Host,
+		GitServerURL:      "http://" + system.GitServerAddr,
 		MeshControllerURL: meshControllerURL,
 		Custom:            traefikExtras.Custom,
 		Certificates: func() []traefik.Certificate {
@@ -522,6 +540,7 @@ func serve(args []string) error {
 		RegistryHosts:    func() []string { return []string{registryHost(), domains.Endpoints().RegistryHost} },
 		Builds:           buildMgr,
 		GitConnections:   gitConns,
+		GitServer:        gitServer,
 		Metrics:          metricStore,
 		Autoscaler:       autoscaler,
 		Alerts:           alertMgr,

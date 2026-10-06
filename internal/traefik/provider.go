@@ -126,11 +126,16 @@ type Provider struct {
 	MeshControllerURL func() string
 	// Settings returns the global settings (nil: the defaults).
 	Settings func() Settings
+	// GitHost returns the built-in Git server's hostname ("" when it is
+	// off, §5.8); GitServerURL is where Traefik reaches it.
+	GitHost      func() string
+	GitServerURL string
 }
 
 const (
 	svcController = "syncloud-controller"
 	svcRegistry   = "syncloud-registry"
+	svcGit        = "syncloud-git"
 	// DevRegistryHost is the registry's hostname before a base domain exists.
 	DevRegistryHost = "registry.localhost"
 )
@@ -198,13 +203,21 @@ func (p *Provider) Config() Dynamic {
 	}
 
 	registryHost := "registry." + base
+	redirect := host(base) + " || " + host(registryHost)
+	if p.GitHost != nil {
+		if gh := p.GitHost(); gh != "" {
+			d.HTTP.Services[svcGit] = Service{LoadBalancer: LoadBalancer{Servers: []Server{{URL: p.GitServerURL}}, PassHostHeader: true}}
+			d.HTTP.Routers[svcGit] = Router{Rule: host(gh), EntryPoints: websecure, Service: svcGit, TLS: &RouterTLS{}}
+			redirect += " || " + host(gh)
+		}
+	}
 	// ACME HTTP-01 challenges must stay on plain HTTP, ahead of the redirects.
 	d.HTTP.Routers["syncloud-acme"] = Router{
 		Rule: "PathPrefix(`/.well-known/acme-challenge/`)", Priority: 100000, EntryPoints: web, Service: svcController,
 	}
 	d.HTTP.Middlewares["syncloud-https"] = Middleware{RedirectScheme: &RedirectScheme{Scheme: "https", Port: p.HTTPSPort, Permanent: true}}
 	d.HTTP.Routers["syncloud-https-redirect"] = Router{
-		Rule: host(base) + " || " + host(registryHost), EntryPoints: web, Middlewares: []string{"syncloud-https"}, Service: svcController,
+		Rule: redirect, EntryPoints: web, Middlewares: []string{"syncloud-https"}, Service: svcController,
 	}
 	// Anything else on HTTP (the bare IP, unknown hosts) goes to the dashboard.
 	target := "https://" + base
@@ -263,12 +276,14 @@ func (p *Provider) EdgeConfig() map[string]any {
 	}
 	if svcs, ok := h["services"].(map[string]any); ok {
 		delete(svcs, svcRegistry)
+		delete(svcs, svcGit)
 		if p.MeshControllerURL != nil {
 			svcs[svcController] = map[string]any{"loadBalancer": map[string]any{"servers": []any{map[string]any{"url": p.MeshControllerURL()}}, "passHostHeader": true}}
 		}
 	}
 	if routers, ok := h["routers"].(map[string]any); ok {
 		delete(routers, "syncloud-registry")
+		delete(routers, svcGit)
 	}
 	return out
 }
