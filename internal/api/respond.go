@@ -29,7 +29,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false) // JSON for clients, never inlined in HTML: keep "→" and ">" readable
+	_ = enc.Encode(v)
 }
 
 func writeError(w http.ResponseWriter, status int, code, msg string) {

@@ -24,6 +24,7 @@ import (
 	"syncloud/internal/agentgw"
 	"syncloud/internal/api"
 	"syncloud/internal/auth"
+	"syncloud/internal/autoscale"
 	"syncloud/internal/backup"
 	"syncloud/internal/builds"
 	"syncloud/internal/certs"
@@ -292,6 +293,8 @@ func serve(args []string) error {
 		}
 		go metricStore.ScrapeTraefik(ctx, "http://"+cfg.TraefikAdmin+"/metrics", LocalNodeName, serviceNames, 10*time.Second)
 	}
+	autoscaler := autoscale.New(st, workloads, metricStore, bus, log)
+	go autoscaler.Run(ctx)
 	healthMon := health.New(st, workloads, bus, log, health.Config{
 		BaseDomain: domains.Base, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS, VictoriaMetricsURL: cfg.VictoriaMetricsURL,
 	})
@@ -382,6 +385,7 @@ func serve(args []string) error {
 		RegistryHosts:         func() []string { return []string{registryHost(), domains.Endpoints().RegistryHost} },
 		Builds:                buildMgr,
 		Metrics:               metricStore,
+		Autoscaler:            autoscaler,
 		ControllerSchedulable: cfg.ControllerSchedulable,
 		ACME:                  api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {

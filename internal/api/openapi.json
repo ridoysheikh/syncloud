@@ -4528,6 +4528,298 @@
           }
         }
       }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/autoscaling": {
+      "get": {
+        "operationId": "getAutoscaling",
+        "tags": [
+          "autoscaling"
+        ],
+        "summary": "A service's target tracking policy and its latest measurement (\u00a75.5)",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Autoscaling"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putAutoscaling",
+        "tags": [
+          "autoscaling"
+        ],
+        "summary": "Autoscale a service: keep a metric near its target between min and max tasks, evaluated every 15s",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScalingPolicy"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Autoscaling"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteAutoscaling",
+        "tags": [
+          "autoscaling"
+        ],
+        "summary": "Stop autoscaling a service (the task count stays where it is)",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/autoscaling/charts": {
+      "get": {
+        "operationId": "getScalingCharts",
+        "tags": [
+          "autoscaling"
+        ],
+        "summary": "Desired and running tasks, and the policy's metric against its target",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h",
+                "6h",
+                "24h",
+                "7d"
+              ],
+              "default": "1h"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Metrics"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/scaling-events": {
+      "get": {
+        "operationId": "listScalingEvents",
+        "tags": [
+          "autoscaling"
+        ],
+        "summary": "The autoscaler's changes with their reasons, newest first",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "1-500, default 100"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ScalingEvent"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7079,6 +7371,133 @@
           "windowSeconds": {
             "type": "integer",
             "description": "window of routes"
+          }
+        }
+      },
+      "ScalingPolicy": {
+        "type": "object",
+        "required": [
+          "min",
+          "max",
+          "metric",
+          "target"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "min": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "metric": {
+            "type": "string",
+            "enum": [
+              "cpu",
+              "memory",
+              "rps",
+              "latency"
+            ],
+            "description": "cpu and memory: % of the reservation (average per task); rps: requests/s per task; latency: p95 in ms"
+          },
+          "target": {
+            "type": "number"
+          },
+          "scaleOutCooldown": {
+            "type": "integer",
+            "default": 60,
+            "description": "seconds after a change before scaling out again"
+          },
+          "scaleInCooldown": {
+            "type": "integer",
+            "default": 300,
+            "description": "seconds after a change before scaling in"
+          },
+          "scaleInChecks": {
+            "type": "integer",
+            "default": 4,
+            "description": "consecutive 15s evaluations below target before scaling in"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true
+          },
+          "updatedBy": {
+            "type": "string",
+            "readOnly": true
+          }
+        }
+      },
+      "Autoscaling": {
+        "type": "object",
+        "properties": {
+          "policy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ScalingPolicy"
+              }
+            ],
+            "nullable": true
+          },
+          "current": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "number",
+                "nullable": true,
+                "description": "the metric at the last evaluation (null: no data)"
+              },
+              "evaluatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              }
+            }
+          },
+          "units": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ScalingEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "from": {
+            "type": "integer"
+          },
+          "to": {
+            "type": "integer"
+          },
+          "metric": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number",
+            "nullable": true
+          },
+          "target": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "description": "e.g. cpu 82 > target 60 % of reserved CPU \u2192 3\u21925 tasks"
           }
         }
       }

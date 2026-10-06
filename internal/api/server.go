@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"syncloud/internal/autoscale"
 	"syncloud/internal/backup"
 	"syncloud/internal/builds"
 	"syncloud/internal/certs"
@@ -65,6 +66,7 @@ type Server struct {
 	regMaint              *regmaint.Manager
 	upstreams             *upstream.Manager
 	registryHosts         func() []string
+	autoscaler            *autoscale.Manager
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -125,6 +127,8 @@ type Options struct {
 	Upstreams *upstream.Manager
 	// RegistryHosts are the names images use for the private registry.
 	RegistryHosts func() []string
+	// Autoscaler runs target tracking policies (§5.5).
+	Autoscaler *autoscale.Manager
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -166,6 +170,7 @@ func New(o Options) *Server {
 		regMaint:              o.RegistryMaint,
 		upstreams:             o.Upstreams,
 		registryHosts:         o.RegistryHosts,
+		autoscaler:            o.Autoscaler,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -252,6 +257,11 @@ func (s *Server) Routes() []Route {
 		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}", h: s.handleApplyService},
 		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}", h: s.handleDeleteService},
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/scale", h: s.handleScaleService},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/autoscaling", h: s.handleGetAutoscaling},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/autoscaling", h: s.handlePutAutoscaling},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/autoscaling", h: s.handleDeleteAutoscaling},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/autoscaling/charts", h: s.handleScalingCharts},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/scaling-events", h: s.handleScalingEvents},
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/rollback", h: s.handleRollbackService},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/tasks", h: s.handleServiceTasks},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/revisions", h: s.handleServiceRevisions},

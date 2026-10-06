@@ -34,6 +34,7 @@ import { TasksTable } from "./TasksPage";
 import { useTasks } from "@/lib/workloads";
 import { LogsView } from "@/modules/logs/LogsView";
 import { RequestsTail, TrafficPanel } from "@/modules/traffic/Traffic";
+import { AutoscalingPanel } from "./AutoscalingPanel";
 
 interface Revision {
   revision: number;
@@ -46,6 +47,7 @@ interface Revision {
 type Tab =
   | "metrics"
   | "traffic"
+  | "autoscaling"
   | "tasks"
   | "logs"
   | "deployments"
@@ -242,6 +244,7 @@ export function ServicePage() {
           [
             "metrics",
             "traffic",
+            "autoscaling",
             "logs",
             "tasks",
             "deployments",
@@ -278,6 +281,13 @@ export function ServicePage() {
           <TrafficPanel path={`${path}/traffic`} scope="service" />
           <RequestsTail filter={{ project, environment: env, service: name }} />
         </div>
+      )}
+      {tab === "autoscaling" && (
+        <AutoscalingPanel
+          path={path}
+          desired={svc.desiredCount}
+          running={svc.running}
+        />
       )}
       {tab === "tasks" && <ServiceTasks id={svc.id} path={path} />}
       {tab === "logs" && (

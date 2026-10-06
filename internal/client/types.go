@@ -1072,6 +1072,58 @@ func (c *Client) TrafficMap(ctx context.Context) ([]TrafficMapRoute, error) {
 	return out.Routes, c.Do(ctx, "GET", "/api/v1/traffic/map", nil, &out)
 }
 
+// ScalingPolicy is a target tracking policy (§5.5).
+type ScalingPolicy struct {
+	Enabled          bool      `json:"enabled"`
+	Min              int       `json:"min"`
+	Max              int       `json:"max"`
+	Metric           string    `json:"metric"`
+	Target           float64   `json:"target"`
+	ScaleOutCooldown int       `json:"scaleOutCooldown,omitempty"`
+	ScaleInCooldown  int       `json:"scaleInCooldown,omitempty"`
+	ScaleInChecks    int       `json:"scaleInChecks,omitempty"`
+	UpdatedAt        time.Time `json:"updatedAt,omitempty"`
+	UpdatedBy        string    `json:"updatedBy,omitempty"`
+}
+
+type Autoscaling struct {
+	Policy  *ScalingPolicy `json:"policy"`
+	Current struct {
+		Value       *float64   `json:"value"`
+		EvaluatedAt *time.Time `json:"evaluatedAt"`
+	} `json:"current"`
+	Units map[string]string `json:"units"`
+}
+
+type ScalingEvent struct {
+	At     time.Time `json:"at"`
+	From   int       `json:"from"`
+	To     int       `json:"to"`
+	Metric string    `json:"metric"`
+	Value  *float64  `json:"value"`
+	Target float64   `json:"target"`
+	Reason string    `json:"reason"`
+}
+
+func (c *Client) GetAutoscaling(ctx context.Context, project, env, service string) (Autoscaling, error) {
+	var out Autoscaling
+	return out, c.Do(ctx, "GET", svcPath(project, env, service)+"/autoscaling", nil, &out)
+}
+
+func (c *Client) PutAutoscaling(ctx context.Context, project, env, service string, p ScalingPolicy) (Autoscaling, error) {
+	var out Autoscaling
+	return out, c.Do(ctx, "PUT", svcPath(project, env, service)+"/autoscaling", p, &out)
+}
+
+func (c *Client) DeleteAutoscaling(ctx context.Context, project, env, service string) error {
+	return c.Do(ctx, "DELETE", svcPath(project, env, service)+"/autoscaling", nil, nil)
+}
+
+func (c *Client) ScalingEvents(ctx context.Context, project, env, service string, limit int) ([]ScalingEvent, error) {
+	var out list[ScalingEvent]
+	return out.Items, c.Do(ctx, "GET", svcPath(project, env, service)+"/scaling-events?limit="+fmt.Sprint(limit), nil, &out)
+}
+
 type LifecycleRule struct {
 	Priority      int    `json:"priority"`
 	Description   string `json:"description,omitempty"`
