@@ -211,8 +211,8 @@ export function AutoscalingPanel({
             }
           >
             <p className="text-xs">
-              Keeps {metricLabel[p.metric].toLowerCase()} (
-              {data?.units[p.metric]}) near <b>{fmt(p.metric, p.target)}</b>{" "}
+              Keeps {metricLabel[p.metric].toLowerCase()} near{" "}
+              <b>{fmt(p.metric, p.target)}</b>{" "}
               with {p.min} to {p.max} tasks, checked every 15 seconds. Scales
               out at most every {p.scaleOutCooldown}s; scales in after{" "}
               {p.scaleInChecks} checks below target and {p.scaleInCooldown}s
