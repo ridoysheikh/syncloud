@@ -684,6 +684,9 @@ func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
 	if t.Desired == "stopped" && (state == store.TaskExited || state == store.TaskFailed) && t.State == store.TaskStopped {
 		return // late report for a task already finished
 	}
+	if t.Desired == "stopped" && state == store.TaskStopped && (t.State == store.TaskExited || t.State == store.TaskFailed) {
+		return // removing a dead container: keep why the task failed
+	}
 	t.State, t.IP, t.Health, t.ExitCode, t.Error, t.UpdatedAt = state, s.GetIp(), s.GetHealth(), int(s.GetExitCode()), s.GetError(), now
 	if s.GetContainerId() != "" {
 		t.ContainerID = s.GetContainerId()

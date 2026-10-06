@@ -34,6 +34,8 @@ type Runner struct {
 	out chan *agentv1.TaskStatus
 	// NetworkReady reports whether tasks may join TaskNetwork yet (nil: always).
 	NetworkReady func() error
+	// prePulls holds images being pulled ahead of deployments.
+	prePulls sync.Map
 
 	mu     sync.Mutex
 	locks  map[string]*sync.Mutex
@@ -353,4 +355,25 @@ func restartName(p agentv1.RestartPolicy) string {
 	default:
 		return "unless-stopped"
 	}
+}
+
+// PrePull downloads an image ahead of a deployment unless it is already
+// present or being pulled; failures are only logged (the task's own pull
+// reports them).
+func (r *Runner) PrePull(ctx context.Context, image, registryAuth string) {
+	if _, busy := r.prePulls.LoadOrStore(image, true); busy {
+		return
+	}
+	defer r.prePulls.Delete(image)
+	if ok, err := r.docker.ImageExists(ctx, image); err != nil || ok {
+		return
+	}
+	pctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	start := time.Now()
+	if err := r.docker.Pull(pctx, image, registryAuth); err != nil {
+		r.log.Warn("pre-pull failed", "image", image, "err", err)
+		return
+	}
+	r.log.Info("pre-pulled image for a deployment", "image", image, "took", time.Since(start).Round(time.Millisecond))
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 	"time"
 
 	"syncloud/internal/auth"
@@ -277,6 +278,48 @@ func (m *Manager) startDeployment(ctx context.Context, serviceID string, fromRev
 	if err != nil {
 		m.log.Error("record deployment", "service", serviceID, "err", err)
 	}
+	if fromRev > 0 {
+		go m.prePull(context.WithoutCancel(ctx), serviceID, fromRev, toRev)
+	}
+}
+
+// prePull asks the nodes likely to run the new revision to pull its image
+// now (§5.9): the nodes running the service, then other eligible nodes up
+// to the desired count.
+func (m *Manager) prePull(ctx context.Context, serviceID string, fromRev, toRev int) {
+	from, err1 := m.SpecFor(ctx, serviceID, fromRev)
+	to, err2 := m.SpecFor(ctx, serviceID, toRev)
+	if err1 != nil || err2 != nil || from.Image == to.Image || to.Image == AwaitingBuild || m.gw == nil {
+		return
+	}
+	sv, err := m.st.ServiceByID(ctx, serviceID)
+	if err != nil {
+		return
+	}
+	tasks, _ := m.st.ServiceTasks(ctx, serviceID, 0)
+	targets := map[string]bool{}
+	for _, t := range tasks {
+		if t.Desired == "running" && t.NodeID != "" {
+			targets[t.NodeID] = true
+		}
+	}
+	for _, n := range m.nodes.List() {
+		if len(targets) >= sv.DesiredCount {
+			break
+		}
+		if n.Status == store.NodeReady && n.Connected && n.Schedulable && n.Info.DockerVersion != "" && m.netReady(n.ID) &&
+			(to.Placement.Node == "" || n.Name == to.Placement.Node) {
+			targets[n.ID] = true
+		}
+	}
+	image, auth := to.Image, ""
+	if m.ResolveImage != nil {
+		image, auth = m.ResolveImage(image)
+	}
+	for id := range targets {
+		_ = m.gw.Send(id, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_PullImage{PullImage: &agentv1.PullImage{Image: image, RegistryAuth: auth}}})
+	}
+	m.log.Info("pre-pulling image", "service", sv.Name, "image", image, "nodes", len(targets))
 }
 
 // Scale sets the desired count.

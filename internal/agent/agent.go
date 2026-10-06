@@ -292,6 +292,8 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 				a.net.Confirm(m.ConfirmNetwork.GetGeneration())
 			case *agentv1.ConnectResponse_Certificate:
 				a.installCertificate(m.Certificate.GetCertificate())
+			case *agentv1.ConnectResponse_PullImage:
+				go runner.PrePull(ctx, m.PullImage.GetImage(), m.PullImage.GetRegistryAuth())
 			}
 		}
 	}()

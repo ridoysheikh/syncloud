@@ -1321,7 +1321,19 @@ Because there is only one controller:
     - `synctl registry gc run --wait` expires v2 and reclaims space (untagged layers included).
     - Pushes work again afterwards, and the service kept running.
     - Screenshots checked.
-  - Still to do in Phase 4: upstream credentials, pre-pull before deploys, registry event tracking (last pulled), watch rules and path filters, Nixpacks.
+  - Still to do in Phase 4: registry event tracking (last pulled), watch rules and path filters, Nixpacks.
+- ✅ Slice 4d (2026-10-06), upstream credentials and pre-pull:
+  - **Upstream credentials (§5.9)**:
+    - One credential per registry host (Docker Hub aliases normalized to `docker.io`). The password is sealed with the master key and never returned.
+    - Nodes resolve a non-`@registry` image's host the way Docker does (`nginx` → Docker Hub; the first part is a host only with a dot, a colon or `localhost`). A matching credential goes with the pull as `X-Registry-Auth`.
+    - Git builds get every credential in their Docker config for private `FROM` images.
+    - API `/registry/upstreams` (GET, PUT, DELETE `{id}`); synctl `registry upstreams set HOST -u USER` (password from stdin or `$SYNCLOUD_UPSTREAM_PASSWORD`) and `list|delete`; the Registry › Upstreams page.
+  - **Pre-pull**: when a deployment changes the image, the controller sends `PullImage` to the nodes running the service and other eligible nodes up to the desired count. Agents pull in the background (de-duplicated, failures only logged).
+  - **Fix:** removing a failed task's container no longer overwrites its failed state and error with "stopped", so a pull failure ("unauthorized") stays visible in the task list.
+  - Verified with `test/e2e/registry.sh`:
+    - A new revision's image is pre-pulled.
+    - An image from the same registry by host name (no `@registry`, no docker login) is refused, then pulls once a credential is stored, and the API never returns the password.
+    - `deploy.sh` and `services.sh` still pass.
 - ✅ Slice 4b (2026-10-06), Git builds:
   - **Git source per service**: an https URL, branch, context directory, Dockerfile, an optional token (sealed with the master key), auto-deploy, and a poll interval of at least 15s. Connecting runs a smart-HTTP `ls-remote` (no git binary on the controller) to fail early on a wrong URL, branch or token.
   - **Polling with backoff**: errors double the interval, up to 1h. **Webhooks**: `POST /api/v1/hooks/git/{id}` accepts GitHub `X-Hub-Signature-256`, Gitea/Forgejo `X-Gitea-Signature` (HMAC-SHA256) and the GitLab `X-Gitlab-Token`. A webhook only triggers a check, so the payload is never trusted. Each commit is built once (unique on service plus SHA).

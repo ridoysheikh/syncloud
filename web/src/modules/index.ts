@@ -26,6 +26,7 @@ import { TasksPage } from "./compute/TasksPage";
 import { JobsPage } from "./compute/JobsPage";
 import { IncidentsPage, ServiceHealthPage } from "./health/HealthPages";
 import { RegistryDashboard, RepositoriesPage } from "./registry/RegistryPages";
+import { UpstreamsPage } from "./registry/UpstreamsPage";
 import { PlatformPage } from "./settings/PlatformPage";
 import { DomainsPage } from "./settings/DomainsPage";
 import { BackupsPage } from "./settings/BackupsPage";
@@ -106,7 +107,7 @@ export const modules: DashboardModule[] = [
     pages: [
       { path: "/registry", label: "Dashboard", component: RegistryDashboard },
       { path: "/registry/repos", label: "Repositories", component: RepositoriesPage },
-      { path: "/registry/upstreams", label: "Upstreams", component: planned(["Registry"], "Upstream credentials", "Phase 4", "§5.9", "Credentials for pulling from Docker Hub, GHCR and others.") },
+      { path: "/registry/upstreams", label: "Upstreams", component: UpstreamsPage },
     ],
   },
   {

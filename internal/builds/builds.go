@@ -49,6 +49,9 @@ type Config struct {
 	RegistryInsecure bool
 	// Node pins builds to one node ("" = any schedulable node).
 	Node string
+	// UpstreamAuths are docker config.json "auths" for third-party
+	// registries (private FROM images); may be nil.
+	UpstreamAuths func() map[string]any
 }
 
 type Manager struct {
@@ -362,7 +365,14 @@ func (m *Manager) buildSpec(sv store.Service, g store.GitSource, b store.Build) 
 	if err != nil {
 		return workload.Spec{}, err
 	}
-	dockerCfg, _ := json.Marshal(map[string]any{"auths": map[string]any{host: map[string]string{"registrytoken": tok}}})
+	auths := map[string]any{}
+	if m.cfg.UpstreamAuths != nil {
+		for k, v := range m.cfg.UpstreamAuths() {
+			auths[k] = v
+		}
+	}
+	auths[host] = map[string]string{"registrytoken": tok}
+	dockerCfg, _ := json.Marshal(map[string]any{"auths": auths})
 	gitContext := g.URL + "#" + b.SHA
 	if g.Context != "" {
 		gitContext += ":" + g.Context

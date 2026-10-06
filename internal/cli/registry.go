@@ -100,6 +100,6 @@ func (a *app) registryCmd() *cobra.Command {
 			},
 		},
 	)
-	r.AddCommand(a.lifecycleCmd(), a.gcCmd())
+	r.AddCommand(a.lifecycleCmd(), a.gcCmd(), a.upstreamsCmd())
 	return r
 }

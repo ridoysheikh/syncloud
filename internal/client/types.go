@@ -1036,3 +1036,25 @@ func (c *Client) StartRegistryCleanup(ctx context.Context) (GCRun, error) {
 	var out GCRun
 	return out, c.Do(ctx, "POST", "/api/v1/registry/gc", nil, &out)
 }
+
+type UpstreamCredential struct {
+	ID        string    `json:"id"`
+	Host      string    `json:"host"`
+	Username  string    `json:"username"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+func (c *Client) ListUpstreamCredentials(ctx context.Context) ([]UpstreamCredential, error) {
+	var out list[UpstreamCredential]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/registry/upstreams", nil, &out)
+}
+
+func (c *Client) PutUpstreamCredential(ctx context.Context, host, username, password string) (UpstreamCredential, error) {
+	var out UpstreamCredential
+	return out, c.Do(ctx, "PUT", "/api/v1/registry/upstreams", map[string]string{"host": host, "username": username, "password": password}, &out)
+}
+
+func (c *Client) DeleteUpstreamCredential(ctx context.Context, id string) error {
+	return c.Do(ctx, "DELETE", "/api/v1/registry/upstreams/"+url.PathEscape(id), nil, nil)
+}

@@ -27,6 +27,7 @@ import (
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 	"syncloud/internal/system"
+	"syncloud/internal/upstream"
 	"syncloud/internal/workload"
 )
 
@@ -62,6 +63,7 @@ type Server struct {
 	builds                *builds.Manager
 	metrics               *metrics.Store
 	regMaint              *regmaint.Manager
+	upstreams             *upstream.Manager
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -118,6 +120,8 @@ type Options struct {
 	Metrics *metrics.Store
 	// RegistryMaint applies lifecycle policies and runs GC (§5.10); may be nil.
 	RegistryMaint *regmaint.Manager
+	// Upstreams stores third-party registry credentials (§5.9); may be nil.
+	Upstreams *upstream.Manager
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -157,6 +161,7 @@ func New(o Options) *Server {
 		builds:                o.Builds,
 		metrics:               o.Metrics,
 		regMaint:              o.RegistryMaint,
+		upstreams:             o.Upstreams,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -193,6 +198,9 @@ func (s *Server) Routes() []Route {
 		{Method: "DELETE", Path: "/api/v1/registry/lifecycle", h: s.handleDeleteLifecycle},
 		{Method: "POST", Path: "/api/v1/registry/lifecycle/preview", h: s.handlePreviewLifecycle},
 		{Method: "GET", Path: "/api/v1/registry/gc", h: s.handleGCRuns},
+		{Method: "GET", Path: "/api/v1/registry/upstreams", h: s.handleListUpstreams},
+		{Method: "PUT", Path: "/api/v1/registry/upstreams", h: s.handlePutUpstream},
+		{Method: "DELETE", Path: "/api/v1/registry/upstreams/{id}", h: s.handleDeleteUpstream},
 		{Method: "POST", Path: "/api/v1/registry/gc", h: s.handleStartGC},
 		{Method: "POST", Path: "/api/v1/setup", Public: true, h: s.handleSetup},
 		{Method: "POST", Path: "/api/v1/auth/login", Public: true, h: s.handleLogin},

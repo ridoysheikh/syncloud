@@ -46,6 +46,7 @@ import (
 	"syncloud/internal/store"
 	"syncloud/internal/system"
 	"syncloud/internal/traefik"
+	"syncloud/internal/upstream"
 	"syncloud/internal/version"
 	"syncloud/internal/web"
 	"syncloud/internal/workload"
@@ -230,10 +231,12 @@ func serve(args []string) error {
 	}
 	// "@registry/shop/api:tag" in a task definition means the private
 	// registry; nodes get a pull-only token for that repository (§5.9).
+	upstreams := upstream.New(st, box)
 	workloads.ResolveImage = func(image string) (string, string) {
 		path, ok := strings.CutPrefix(image, "@registry/")
 		if !ok {
-			return image, ""
+			// Third-party registries: stored upstream credentials, if any.
+			return image, upstreams.RegistryAuth(context.Background(), image)
 		}
 		host := registryHost()
 		repo := path
@@ -270,6 +273,7 @@ func serve(args []string) error {
 	go jobMgr.Run(ctx)
 	buildMgr := builds.New(st, box, jobMgr, workloads, regIssuer, bus, log, builds.Config{
 		RegistryHost: registryHost, RegistryInsecure: cfg.RegistryInsecure, Node: cfg.BuildNode,
+		UpstreamAuths: func() map[string]any { return upstreams.DockerConfigAuths(context.Background()) },
 	})
 	go buildMgr.Run(ctx)
 	// Task resource samples ride on agent heartbeats (§9.1).
@@ -355,6 +359,7 @@ func serve(args []string) error {
 		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon,
 		RegistryBrowser:       regBrowser,
 		RegistryMaint:         regMaint,
+		Upstreams:             upstreams,
 		Builds:                buildMgr,
 		Metrics:               metricStore,
 		ControllerSchedulable: cfg.ControllerSchedulable,

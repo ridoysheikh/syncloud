@@ -34,7 +34,15 @@ message ConnectResponse {
     ConfirmNetwork confirm_network = 6;
     Discovery discovery = 7;
     ExecInput exec_input = 8;
+    PullImage pull_image = 9;
   }
+}
+
+// PullImage asks a node to pull an image ahead of a deployment (§5.9
+// pre-pull), so new tasks start without waiting for the download.
+message PullImage {
+  string image = 1;
+  string registry_auth = 2; // X-Registry-Auth (short-lived)
 }
 
 message Hello {
