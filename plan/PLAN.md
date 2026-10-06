@@ -1409,7 +1409,7 @@ Because there is only one controller:
 - GitHub App, GitLab, Gitea and generic Git; webhooks plus the polling scheduler (watch rules, path filters, SHA dedup, backoff) (§5.8).
 - BuildKit system task (privileged; moved from Phase 0b), BuildKit/Nixpacks builds, build logs, auto-deploy.
 
-### Phase 5: Autoscaling and Traffic Insights (2–3 wks)
+### Phase 5: Autoscaling and Traffic Insights (2–3 wks) — ✅ done 2026-10-06 (middleware presets, the raw YAML editor and central per-task probes move to Phase 6 with network visibility)
 **Progress**
 - ✅ Slice 5c (2026-10-06), alerts and notification channels (§9):
   - **Channels**: webhook (JSON), Slack, Discord, Telegram and email (SMTP: STARTTLS on 587, implicit TLS on 465). URLs, tokens and passwords are sealed with the master key; the API only shows a summary (host, chat, recipients). A test notification per channel; a channel a rule uses cannot be deleted.
@@ -1428,6 +1428,7 @@ Because there is only one controller:
     - A log rule and a health rule fire, and a failed deployment notifies once.
     - A node whose agent was killed fires, then resolves when the agent comes back.
     - synctl works. Unit tests cover the state machine, payload formats and validation.
+  - Delivery errors never include the channel URL (Slack/Discord webhook paths and the Telegram bot token are secrets), only its host. Screenshots checked.
   - Not done: uptime and certificate-expiry rules, quota and firewall alerts (later phases), silences and routing by severity.
 - ✅ Slice 5b (2026-10-06), target tracking autoscaling (§5.5):
   - One policy per service: min/max tasks, a metric and its target — **CPU** or **memory** (average per task, % of the reservation, from the agents' samples), **requests per task** or **p95 latency** (from Traefik) — plus a scale-out cooldown (default 60s), a scale-in cooldown (300s) and scale-in checks (4 × 15s).

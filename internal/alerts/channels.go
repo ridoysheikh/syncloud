@@ -115,14 +115,14 @@ func (n Notification) Text() string {
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
-func postJSON(ctx context.Context, url string, body any) error {
+func postJSON(ctx context.Context, target string, body any) error {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false) // chat text, not HTML: keep ">" and "&" as they are
 	if err := enc.Encode(body); err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &b)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, &b)
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,13 @@ func postJSON(ctx context.Context, url string, body any) error {
 	req.Header.Set("User-Agent", "SynCloud-Alerts")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		// The URL is a secret (Slack and Discord webhooks, the Telegram bot
+		// token): keep it out of errors, which are stored and shown.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			return fmt.Errorf("request to %s failed: %w", req.URL.Host, ue.Err)
+		}
+		return errors.New("request failed")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {

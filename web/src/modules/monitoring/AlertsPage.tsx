@@ -627,7 +627,7 @@ function HistoryTab() {
             cell: (e) => (
               <span
                 className={cn(
-                  "whitespace-nowrap",
+                  "block max-w-72 truncate",
                   e.delivery.includes(": ") && !/: ok(;|$)/.test(e.delivery)
                     ? "text-bad"
                     : "text-faint",

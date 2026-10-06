@@ -175,3 +175,15 @@ func TestValidateRule(t *testing.T) {
 		}
 	}
 }
+
+func TestErrorsHideSecrets(t *testing.T) {
+	err := Send(context.Background(), "slack", ChannelConfig{URL: "http://127.0.0.1:1/services/T0/B0/topsecret"}, Notification{Kind: "test"})
+	if err == nil || strings.Contains(err.Error(), "topsecret") {
+		t.Fatalf("error %v", err)
+	}
+	TelegramAPI = "http://127.0.0.1:1"
+	err = Send(context.Background(), "telegram", ChannelConfig{BotToken: "123:SECRET", ChatID: "1"}, Notification{Kind: "test"})
+	if err == nil || strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("error %v", err)
+	}
+}
