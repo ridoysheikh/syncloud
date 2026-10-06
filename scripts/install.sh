@@ -54,23 +54,25 @@ command -v systemctl >/dev/null || die "systemd is required"
 
 uninstall() {
   bold "Uninstalling SynCloud"
-  systemctl disable --now syncloud-agent syncloud-controller 2>/dev/null || true
-  if command -v docker >/dev/null; then
-    ids=$(docker ps -aq --filter label=syncloud.managed=true || true)
-    [ -n "$ids" ] && docker rm -f $ids >/dev/null && ok "removed SynCloud containers"
-    docker network rm syncloud-system >/dev/null 2>&1 || true
+  flag=""; [ "$PURGE" -eq 1 ] && flag=--purge
+  # The binaries know everything they set up (containers, WireGuard, nftables).
+  if [ -x "$BIN_DIR/syncloud-controller" ]; then
+    "$BIN_DIR/syncloud-controller" uninstall --data-dir "$DATA_DIR" --agent-data-dir "$AGENT_DIR" $flag || warn "some steps failed (see above)"
+  elif [ -x "$BIN_DIR/syncloud-agent" ]; then
+    "$BIN_DIR/syncloud-agent" uninstall --data-dir "$AGENT_DIR" $flag || warn "some steps failed (see above)"
+  else
+    systemctl disable --now syncloud-agent syncloud-controller 2>/dev/null || true
+    if command -v docker >/dev/null; then
+      ids=$(docker ps -aq --filter label=syncloud.managed=true || true)
+      [ -n "$ids" ] && docker rm -f $ids >/dev/null && ok "removed SynCloud containers"
+    fi
+    rm -f /etc/systemd/system/syncloud-controller.service /etc/systemd/system/syncloud-agent.service
+    systemctl daemon-reload
+    [ "$PURGE" -eq 1 ] && rm -rf "$DATA_DIR" "$AGENT_DIR" /etc/syncloud
   fi
-  rm -f /etc/systemd/system/syncloud-controller.service /etc/systemd/system/syncloud-agent.service
-  systemctl daemon-reload
   rm -f "$BIN_DIR/syncloud-controller" "$BIN_DIR/syncloud-agent"
   rm -rf /usr/local/lib/syncloud
-  if [ "$PURGE" -eq 1 ]; then
-    rm -rf "$DATA_DIR" "$AGENT_DIR" /etc/syncloud
-    docker volume rm syncloud-registry syncloud-victoriametrics syncloud-victorialogs >/dev/null 2>&1 || true
-    ok "removed all data"
-  else
-    warn "kept $DATA_DIR and $AGENT_DIR (use --purge to delete them)"
-  fi
+  ok "removed the binaries"
   exit 0
 }
 [ "$UNINSTALL" -eq 1 ] && uninstall

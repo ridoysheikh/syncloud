@@ -31,6 +31,7 @@ import (
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
+	"syncloud/internal/upgrade"
 	"syncloud/internal/version"
 )
 
@@ -176,12 +177,17 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 	stats := NewTaskStats(d, log)
 	go stats.Run(ctx)
 	execs := newExecSessions(d, log)
+	go collectGarbage(ctx, d, dataDir, log)
 	renewBefore := opts.RenewBefore
 	if renewBefore == 0 {
 		renewBefore = 30 * 24 * time.Hour
 	}
 	a := &agentLink{info: info, runner: runner, net: net, logs: logs, stats: stats, execs: execs, advertise: opts.AdvertiseAddress, log: log,
-		dataDir: dataDir, certs: certs, renewBefore: renewBefore}
+		dataDir: dataDir, certs: certs, renewBefore: renewBefore, extra: make(chan *agentv1.ConnectRequest, 8)}
+	a.upgrade = &selfUpgrade{dataDir: dataDir, log: log, report: a.report}
+	if p, ok := upgrade.ReadAgentPending(dataDir); ok && p.Version == version.Version {
+		log.Info("upgraded agent starting; confirming once connected", "from", p.From)
+	}
 
 	log.Info("agent starting", "node", st.Name, "gateway", st.Gateway, "version", version.Version)
 	for attempt := 0; ; attempt++ {
@@ -222,6 +228,9 @@ type agentLink struct {
 
 	mu         sync.Mutex
 	pendingKey []byte // key for an in-flight renewal
+
+	extra   chan *agentv1.ConnectRequest // renewals and upgrade results, sent by the writer
+	upgrade *selfUpgrade
 }
 
 // session runs one stream. connected reports whether the controller accepted it.
@@ -265,11 +274,14 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 		interval = nodes.HeartbeatInterval
 	}
 	errc := make(chan error, 2)
-	renew := make(chan *agentv1.ConnectRequest, 1)
-	if req := a.renewalRequest(); req != nil {
-		renew <- req
+	if r := upgrade.AgentConnected(a.dataDir, version.Version); r != nil {
+		log.Warn("agent upgrade was rolled back", "version", r.Version, "err", r.Error)
+		a.report(&agentv1.ConnectRequest{Msg: &agentv1.ConnectRequest_UpgradeResult{UpgradeResult: &agentv1.UpgradeResult{Version: r.Version, Error: r.Error}}})
 	}
-	go func() { errc <- writer(ctx, stream, interval, runner, a.net, a.logs, a.stats, a.execs.out, renew) }()
+	if req := a.renewalRequest(); req != nil {
+		a.report(req)
+	}
+	go func() { errc <- writer(ctx, stream, interval, runner, a.net, a.logs, a.stats, a.execs.out, a.extra) }()
 	go func() {
 		for {
 			msg, err := stream.Recv()
@@ -295,10 +307,21 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 				a.installCertificate(m.Certificate.GetCertificate())
 			case *agentv1.ConnectResponse_PullImage:
 				go runner.PrePull(ctx, m.PullImage.GetImage(), m.PullImage.GetRegistryAuth())
+			case *agentv1.ConnectResponse_UpgradeAgent:
+				a.upgrade.chunk(m.UpgradeAgent)
 			}
 		}
 	}()
 	return true, <-errc
+}
+
+// report queues a message for the writer without blocking the caller.
+func (a *agentLink) report(m *agentv1.ConnectRequest) {
+	select {
+	case a.extra <- m:
+	default:
+		a.log.Warn("dropped a message to the controller: queue full")
+	}
 }
 
 // writer is the only goroutine that sends on the stream (gRPC streams are not

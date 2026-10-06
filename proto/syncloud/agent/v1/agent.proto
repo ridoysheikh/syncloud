@@ -21,6 +21,7 @@ message ConnectRequest {
     RenewCertificate renew_certificate = 5;
     LogBatch logs = 6;
     ExecOutput exec_output = 7;
+    UpgradeResult upgrade_result = 8;
   }
 }
 
@@ -35,7 +36,27 @@ message ConnectResponse {
     Discovery discovery = 7;
     ExecInput exec_input = 8;
     PullImage pull_image = 9;
+    UpgradeAgent upgrade_agent = 10;
   }
+}
+
+// UpgradeAgent streams a new agent binary in chunks (§5.0.1, §6.2). After
+// the last chunk checks out against sha256 the agent replaces itself; a guard
+// restores the old binary if the new one does not reconnect.
+message UpgradeAgent {
+  string version = 1;
+  string sha256 = 2;
+  int64 size = 3;
+  int64 offset = 4;
+  bytes data = 5;
+  bool last = 6;
+}
+
+// UpgradeResult reports an agent upgrade that failed before the restart, or
+// one rolled back by the guard (reported after reconnecting).
+message UpgradeResult {
+  string version = 1;
+  string error = 2;
 }
 
 // PullImage asks a node to pull an image ahead of a deployment (§5.9

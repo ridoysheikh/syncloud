@@ -17,12 +17,15 @@ import (
 	"syscall"
 
 	"syncloud/internal/agent"
+	"syncloud/internal/uninstall"
+	"syncloud/internal/upgrade"
 	"syncloud/internal/version"
 )
 
 const usage = `usage:
   syncloud-agent join --controller URL --token TOKEN [--name NAME] [--data-dir DIR]
   syncloud-agent run [--data-dir DIR]
+  syncloud-agent uninstall [--purge] [--data-dir DIR]
   syncloud-agent version
 `
 
@@ -92,8 +95,22 @@ func run(args []string) error {
 		log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 		return agent.Run(ctx, *dataDir, log, opts)
 
+	case "upgrade-guard":
+		// Started by the agent itself before it replaces its binary (§5.0.1).
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return upgrade.AgentGuard(ctx, *dataDir)
+
+	case "uninstall":
+		purge := fs.Bool("purge", false, "also delete the agent's data directory")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return uninstall.Run(ctx, uninstall.Options{Units: []string{"syncloud-agent.service"}, DataDirs: []string{*dataDir}, Purge: *purge, Out: os.Stdout})
+
 	case "version":
-		fmt.Printf("syncloud-agent %s (%s)\n", version.Version, version.Commit)
+		fmt.Printf("%s (%s)\n", version.Version, version.Commit)
 		return nil
 	}
 	fmt.Fprint(os.Stderr, usage)

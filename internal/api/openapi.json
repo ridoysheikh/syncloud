@@ -9717,6 +9717,188 @@
           }
         }
       }
+    },
+    "/api/v1/system/health": {
+      "get": {
+        "operationId": "getHealth",
+        "tags": [
+          "system"
+        ],
+        "summary": "Readiness: database and system tasks (503 when not ready)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/system/upgrade": {
+      "get": {
+        "operationId": "getUpgrade",
+        "tags": [
+          "system"
+        ],
+        "summary": "Running and available versions, and the last controller upgrade",
+        "parameters": [
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "1 to ask the release channel again"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Upgrade"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "upgradeController",
+        "tags": [
+          "system"
+        ],
+        "summary": "Upgrade the controller (rolls back automatically when unhealthy)",
+        "description": "Downloads and verifies the release, snapshots the database, and hands over to a guard that restarts the controller with the new binary. If it is not healthy within the timeout, or stops being healthy while settling, the previous binary and database are restored. version defaults to the newest on the release channel.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Upgrade"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/agent-upgrade": {
+      "get": {
+        "operationId": "getAgentUpgrade",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Agent versions per node and the last rollout",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentUpgrade"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "upgradeAgents",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Upgrade agents node by node to the controller's version",
+        "description": "Each node receives the agent binary over its stream, restarts into it (containers keep running) and must reconnect with the new version before the next node starts; a node whose new agent does not reconnect restores the old one. A failure stops the rollout. nodes (IDs or names) defaults to every node; force re-sends to nodes already at the target.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "nodes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "force": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentUpgrade"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -13312,6 +13494,235 @@
             }
           }
         }
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "version",
+          "ready",
+          "problems"
+        ]
+      },
+      "UpgradeStep": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "UpgradeState": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "preparing",
+              "stopping",
+              "starting",
+              "verifying",
+              "done",
+              "rolling-back",
+              "rolled-back",
+              "failed"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpgradeStep"
+            }
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "settleSeconds": {
+            "type": "integer"
+          },
+          "timeoutSeconds": {
+            "type": "integer"
+          }
+        }
+      },
+      "Upgrade": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "latest": {
+            "type": "string"
+          },
+          "latestError": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/UpgradeState"
+          }
+        },
+        "required": [
+          "current",
+          "channel",
+          "available"
+        ]
+      },
+      "AgentNode": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "arch": {
+            "type": "string"
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "outdated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AgentRolloutNode": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "sending",
+              "restarting",
+              "done",
+              "failed",
+              "skipped"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AgentRollout": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "done",
+              "failed"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRolloutNode"
+            }
+          }
+        }
+      },
+      "AgentUpgrade": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentNode"
+            }
+          },
+          "rollout": {
+            "$ref": "#/components/schemas/AgentRollout"
+          }
+        },
+        "required": [
+          "target",
+          "nodes"
+        ]
       }
     }
   }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type Controller struct {
@@ -61,6 +62,11 @@ type Controller struct {
 	// ShellImage and ShellSynctl configure Cloud Shell (§7.1).
 	ShellImage  string
 	ShellSynctl string
+	// ReleaseURL and ReleaseChannel are where upgrades come from (§5.0.1);
+	// UpgradeSettle is how long a new controller must stay healthy.
+	ReleaseURL     string
+	ReleaseChannel string
+	UpgradeSettle  time.Duration
 	// Dev enables development behavior (verbose logs, relaxed origin checks for the Vite dev server).
 	Dev bool
 }
@@ -98,6 +104,9 @@ func LoadController(args []string) (Controller, error) {
 	fs.BoolVar(&c.SecurityGroups, "security-groups", env("SYNCLOUD_SECURITY_GROUPS", "1") == "1", "isolate containers with security groups (default on)")
 	fs.StringVar(&c.ShellImage, "shell-image", env("SYNCLOUD_SHELL_IMAGE", "alpine:3.22"), "Cloud Shell container image")
 	fs.StringVar(&c.ShellSynctl, "shell-synctl", env("SYNCLOUD_SHELL_SYNCTL", ""), "synctl binary mounted into Cloud Shell (default: the one in --downloads-dir)")
+	fs.StringVar(&c.ReleaseURL, "release-url", env("SYNCLOUD_RELEASE_URL", "https://get.syncloud.dev/releases"), "where upgrades are downloaded from (https://, http:// or file://)")
+	fs.StringVar(&c.ReleaseChannel, "release-channel", env("SYNCLOUD_RELEASE_CHANNEL", "stable"), "release channel: stable or beta")
+	fs.DurationVar(&c.UpgradeSettle, "upgrade-settle", 2*time.Minute, "how long an upgraded controller must stay healthy before the upgrade counts")
 	fs.StringVar(&c.DownloadsDir, "downloads-dir", env("SYNCLOUD_DOWNLOADS_DIR", "/usr/local/lib/syncloud/downloads"), "agent/CLI binaries served at /downloads/")
 	if err := fs.Parse(args); err != nil {
 		return c, err

@@ -47,6 +47,7 @@ import { UpstreamsPage } from "./registry/UpstreamsPage";
 import { PlatformPage } from "./settings/PlatformPage";
 import { DomainsPage } from "./settings/DomainsPage";
 import { BackupsPage } from "./settings/BackupsPage";
+import { UpdatesPage } from "./settings/UpdatesPage";
 import { TopologyPage } from "./network/TopologyPage";
 import { FirewallPage, FirewallPolicyPage } from "./network/FirewallPage";
 import { SecurityGroupPage, SecurityGroupsPage } from "./network/SecurityGroups";
@@ -221,7 +222,7 @@ export const modules: DashboardModule[] = [
       { path: "/settings/platform", label: "Platform", component: PlatformPage },
       { path: "/settings/domains", label: "Domains", component: DomainsPage },
       { path: "/settings/backups", label: "Backups", component: BackupsPage },
-      { path: "/settings/updates", label: "Updates", component: planned(["Settings"], "Updates", "Phase 9", "§5.0.1", "Controller upgrades with automatic rollback.") },
+      { path: "/settings/updates", label: "Updates", component: UpdatesPage },
     ],
   },
 ].sort((a, b) => a.order - b.order);

@@ -39,6 +39,8 @@ import (
 	"syncloud/internal/system"
 	"syncloud/internal/traefik"
 	"syncloud/internal/upstream"
+	"syncloud/internal/upgrade"
+	"syncloud/internal/upgrade/rollout"
 	"syncloud/internal/workload"
 )
 
@@ -85,6 +87,8 @@ type Server struct {
 	shell                 *shell.Manager
 	pools                 *nodepool.Manager
 	edges                 *edge.Manager
+	upgrades              *upgrade.Service
+	agentRollout          *rollout.Manager
 	discovery             *discovery.Manager
 	traefik               *traefik.Provider
 	traefikExtras         *traefik.Extras
@@ -93,6 +97,7 @@ type Server struct {
 	log                   *slog.Logger
 	web                   fs.FS // built dashboard (may be empty in development)
 	now                   func() time.Time
+	startedAt             time.Time
 
 	iamCache   stmtCache
 	requireMFA atomic.Bool // every human must use MFA (§14)
@@ -164,6 +169,8 @@ type Options struct {
 	Shell            *shell.Manager
 	Pools            *nodepool.Manager
 	Edges            *edge.Manager
+	Upgrades         *upgrade.Service
+	AgentRollout     *rollout.Manager
 	Discovery        *discovery.Manager
 	Traefik          *traefik.Provider
 	TraefikExtras    *traefik.Extras
@@ -217,6 +224,9 @@ func New(o Options) *Server {
 		shell:                 o.Shell,
 		pools:                 o.Pools,
 		edges:                 o.Edges,
+		upgrades:              o.Upgrades,
+		startedAt:             time.Now(),
+		agentRollout:          o.AgentRollout,
 		discovery:             o.Discovery,
 		traefik:               o.Traefik,
 		traefikExtras:         o.TraefikExtras,
@@ -320,6 +330,11 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/node-pools/{pool}/join-command", h: s.handlePoolJoinCommand},
 		{Method: "PUT", Path: "/api/v1/nodes/{id}/pool", h: s.handleSetNodePool},
 		{Method: "GET", Path: "/api/v1/edges", h: s.handleListEdges},
+		{Method: "GET", Path: "/api/v1/system/health", Public: true, h: s.handleHealth},
+		{Method: "GET", Path: "/api/v1/system/upgrade", h: s.handleGetUpgrade},
+		{Method: "POST", Path: "/api/v1/system/upgrade", h: s.handleStartUpgrade},
+		{Method: "GET", Path: "/api/v1/nodes/agent-upgrade", h: s.handleGetAgentUpgrade},
+		{Method: "POST", Path: "/api/v1/nodes/agent-upgrade", h: s.handleStartAgentUpgrade},
 		{Method: "GET", Path: "/api/v1/docs/cli", h: s.handleListCommands},
 		{Method: "POST", Path: "/api/v1/shell", h: s.handleStartShell},
 		{Method: "GET", Path: "/api/v1/shell", h: s.handleGetShell},

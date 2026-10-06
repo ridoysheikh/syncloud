@@ -462,3 +462,53 @@ func (c *Client) Stats(ctx context.Context, id string) (Stats, error) {
 	var out Stats
 	return out, c.json(ctx, "GET", "/containers/"+id+"/stats", url.Values{"stream": {"false"}, "one-shot": {"true"}}, nil, &out)
 }
+
+// RemoveNetwork deletes a network (no error if it does not exist).
+func (c *Client) RemoveNetwork(ctx context.Context, name string) error {
+	err := c.json(ctx, "DELETE", "/networks/"+url.PathEscape(name), nil, nil, nil)
+	if IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+// RemoveVolumes deletes the volumes carrying label (key=value).
+func (c *Client) RemoveVolumes(ctx context.Context, label string) (int, error) {
+	var out struct {
+		Volumes []struct {
+			Name string `json:"Name"`
+		} `json:"Volumes"`
+	}
+	f, _ := json.Marshal(map[string][]string{"label": {label}})
+	if err := c.json(ctx, "GET", "/volumes", url.Values{"filters": {string(f)}}, nil, &out); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, v := range out.Volumes {
+		if err := c.json(ctx, "DELETE", "/volumes/"+url.PathEscape(v.Name), url.Values{"force": {"true"}}, nil, nil); err != nil && !IsNotFound(err) {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// RemoveVolume deletes a named volume (no error if it does not exist).
+func (c *Client) RemoveVolume(ctx context.Context, name string) error {
+	err := c.json(ctx, "DELETE", "/volumes/"+url.PathEscape(name), url.Values{"force": {"true"}}, nil, nil)
+	if IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+// PruneImages removes images no container uses that were created more than
+// olderThan ago, and returns the space reclaimed.
+func (c *Client) PruneImages(ctx context.Context, olderThan time.Duration) (uint64, error) {
+	f, _ := json.Marshal(map[string][]string{"dangling": {"false"}, "until": {olderThan.String()}})
+	var out struct {
+		SpaceReclaimed uint64 `json:"SpaceReclaimed"`
+	}
+	err := c.json(ctx, "POST", "/images/prune", url.Values{"filters": {string(f)}}, nil, &out)
+	return out.SpaceReclaimed, err
+}

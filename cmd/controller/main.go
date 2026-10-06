@@ -57,6 +57,9 @@ import (
 	"syncloud/internal/traefik"
 	"syncloud/internal/upstream"
 	"syncloud/internal/version"
+	"syncloud/internal/gc"
+	"syncloud/internal/upgrade"
+	"syncloud/internal/upgrade/rollout"
 	"syncloud/internal/web"
 	"syncloud/internal/workload"
 )
@@ -71,6 +74,8 @@ func main() {
 const usage = `Usage: syncloud-controller [serve] [flags]   run the controller (default)
        syncloud-controller doctor [flags]    check every component and print fixes
        syncloud-controller restore [flags]   restore a backup into the data directory
+       syncloud-controller upgrade [flags]   upgrade to a new release, rolling back if it is unhealthy
+       syncloud-controller uninstall [--purge]  remove SynCloud from this host
        syncloud-controller version`
 
 func run(args []string) error {
@@ -82,6 +87,12 @@ func run(args []string) error {
 			return doctor(args[1:])
 		case "restore":
 			return restore(args[1:])
+		case "upgrade":
+			return upgradeCmd(args[1:])
+		case "upgrade-guard":
+			return upgradeGuard(args[1:])
+		case "uninstall":
+			return uninstallCmd(args[1:])
 		case "version":
 			fmt.Println(version.Version)
 			return nil
@@ -460,6 +471,14 @@ func serve(args []string) error {
 	gw.AddHooks(shells.Hooks())
 	go shells.Run(ctx)
 
+	upgrades := &upgrade.Service{
+		DataDir: cfg.DataDir, DBPath: cfg.DBPath(), Downloads: cfg.DownloadsDir, Source: upgrade.Source{Base: cfg.ReleaseURL},
+		Channel: cfg.ReleaseChannel, Current: version.Version, Settle: cfg.UpgradeSettle, Snapshot: snapshotDB(cfg.DBPath()),
+	}
+	agentRollout := rollout.New(gw, registry, cfg.DownloadsDir, version.Version, log)
+	go gc.Run(ctx, st, cfg.DataDir, store.DefaultRetention, log)
+	gw.AddHooks(agentRollout.Hooks())
+
 	api.CLICommands = cli.OperationCommands
 	srv := api.New(api.Options{
 		Store: st, Secrets: box, CA: ca, Nodes: registry, GatewayAddr: cfg.AgentAdvertise,
@@ -486,6 +505,8 @@ func serve(args []string) error {
 		Shell:                 shells,
 		Pools:                 pools,
 		Edges:                 edges,
+		Upgrades:              upgrades,
+		AgentRollout:          agentRollout,
 		Discovery:             disco,
 		Traefik:               traefikProvider,
 		TraefikExtras:         traefikExtras,
@@ -515,6 +536,9 @@ func serve(args []string) error {
 		IdleTimeout:       120 * time.Second,
 	}
 
+	if err := upgrade.WriteRunInfo(filepath.Join(cfg.DataDir, upgrade.RunInfoFile), controllerURL+"/api/v1/system/health"); err != nil {
+		log.Warn("record run info (upgrades need it)", "err", err)
+	}
 	log.Info("controller started", "version", version.Version, "listen", ln.Addr().String(), "data", cfg.DataDir)
 	if token != "" {
 		printSetupBanner(domains.Endpoints().DashboardURL, token, recoveryKey)

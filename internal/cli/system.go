@@ -29,5 +29,6 @@ func (a *app) systemCmd() *cobra.Command {
 			return a.printer().table(ts, []string{"NAME", "STATE", "HEALTH", "IMAGE", "STARTED", "ERROR"}, rows)
 		},
 	})
+	sys.AddCommand(a.systemUpgradeCmds()...)
 	return sys
 }

@@ -71,6 +71,7 @@ func (a *app) nodesCmd() *cobra.Command {
 		},
 		a.joinTokensCmd(),
 	)
+	nodes.AddCommand(a.agentUpgradeCmds()...)
 	return nodes
 }
 
