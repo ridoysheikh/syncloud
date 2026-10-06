@@ -20,6 +20,7 @@ import { NodesPage } from "./compute/NodesPage";
 import { ServicesPage } from "./compute/ServicesPage";
 import { ServicePage } from "./compute/ServicePage";
 import { TasksPage } from "./compute/TasksPage";
+import { JobsPage } from "./compute/JobsPage";
 import { PlatformPage } from "./settings/PlatformPage";
 import { DomainsPage } from "./settings/DomainsPage";
 import { BackupsPage } from "./settings/BackupsPage";
@@ -45,7 +46,7 @@ export const modules: DashboardModule[] = [
       { path: "/compute/services", label: "Services", component: ServicesPage },
       { path: "/compute/services/$project/$env/$name", label: "Service", component: ServicePage, hidden: true },
       { path: "/compute/tasks", label: "Tasks", component: TasksPage },
-      { path: "/compute/jobs", label: "Jobs", component: planned(["Compute"], "Jobs", "Phase 3", "§5.11", "One-off tasks, cron jobs and deploy hooks.") },
+      { path: "/compute/jobs", label: "Jobs", component: JobsPage },
       { path: "/compute/deployments", label: "Deployments", component: planned(["Compute"], "Deployments", "Phase 3", "§5.4", "Rollout history, circuit breaker and rollback.") },
       { path: "/compute/nodes", label: "Nodes", component: NodesPage },
       { path: "/compute/node-pools", label: "Node Pools", component: planned(["Compute"], "Node Pools", "Phase 8", "§6.5", "Provider-backed pools and cluster autoscaling.") },

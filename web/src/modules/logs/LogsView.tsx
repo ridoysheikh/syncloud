@@ -23,6 +23,7 @@ export interface LogFilter {
   project?: string;
   environment?: string;
   service?: string;
+  task?: string;
 }
 
 const MAX_LINES = 3000;
@@ -48,9 +49,10 @@ export function LogsView({ filter, showSource = true }: { filter: LogFilter; sho
     if (filter.project) p.set("project", filter.project);
     if (filter.environment) p.set("environment", filter.environment);
     if (filter.service) p.set("service", filter.service);
+    if (filter.task) p.set("task", filter.task);
     if (applied) p.set("q", applied);
     return p;
-  }, [filter.project, filter.environment, filter.service, applied]);
+  }, [filter.project, filter.environment, filter.service, filter.task, applied]);
 
   const history = useQuery({
     queryKey: ["logs", params.toString(), since],

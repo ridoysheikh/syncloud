@@ -17,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // job schedules use IANA timezones even on hosts without tzdata
 
 	"syncloud/internal/agentgw"
 	"syncloud/internal/api"
@@ -28,6 +29,7 @@ import (
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
 	"syncloud/internal/execrelay"
+	"syncloud/internal/jobs"
 	"syncloud/internal/logs"
 	"syncloud/internal/mesh"
 	"syncloud/internal/nodes"
@@ -227,6 +229,10 @@ func serve(args []string) error {
 		return []string{mesh.Subnet(nn.SubnetIndex).Addr().Next().String()}, discovery.SearchDomains(sv)
 	}
 	workload.Discovery = func(sv store.Service) (string, string) { return disco.VIP(sv.ID), discovery.ServiceName(sv) }
+	jobMgr := jobs.NewManager(st, gw, workloads, registry, bus, log)
+	gw.AddHooks(jobMgr.Hooks())
+	workloads.DeployHooks = jobMgr
+	go jobMgr.Run(ctx)
 	execs := execrelay.New(gw)
 	gw.AddHooks(execs.Hooks())
 	logStore := logs.New(st, cfg.VictoriaLogsURL, log)
@@ -291,7 +297,7 @@ func serve(args []string) error {
 			"GET " + certs.ChallengePrefix: certMgr,
 		},
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
-		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, ControllerSchedulable: cfg.ControllerSchedulable,
+		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, Jobs: jobMgr, ControllerSchedulable: cfg.ControllerSchedulable,
 		ACME: api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {
 			_ = os.Remove(filepath.Join(cfg.DataDir, setupTokenFile))

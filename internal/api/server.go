@@ -14,6 +14,7 @@ import (
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
 	"syncloud/internal/execrelay"
+	"syncloud/internal/jobs"
 	"syncloud/internal/logs"
 	"syncloud/internal/mesh"
 	"syncloud/internal/nodes"
@@ -51,6 +52,7 @@ type Server struct {
 	workloads             *workload.Manager
 	logs                  *logs.Store
 	exec                  *execrelay.Relay
+	jobs                  *jobs.Manager
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -95,6 +97,8 @@ type Options struct {
 	Logs *logs.Store
 	// Exec relays interactive commands to tasks; may be nil.
 	Exec *execrelay.Relay
+	// Jobs runs one-off, scheduled and hook jobs (§5.11); may be nil.
+	Jobs *jobs.Manager
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -128,6 +132,7 @@ func New(o Options) *Server {
 		workloads:             o.Workloads,
 		logs:                  o.Logs,
 		exec:                  o.Exec,
+		jobs:                  o.Jobs,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -204,6 +209,16 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/domains", h: s.handleAddServiceDomain},
 		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/domains/{host}", h: s.handleRemoveServiceDomain},
 		{Method: "GET", Path: "/api/v1/domains/check", h: s.handleCheckDomain},
+		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/run", h: s.handleRunService},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/jobs", h: s.handleListJobs},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/jobs/{job}", h: s.handleGetJob},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/jobs/{job}", h: s.handleApplyJob},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/jobs/{job}", h: s.handleDeleteJob},
+		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/jobs/{job}/runs", h: s.handleRunJob},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/jobs/{job}/runs", h: s.handleJobRuns},
+		{Method: "GET", Path: "/api/v1/jobs", h: s.handleListAllJobs},
+		{Method: "GET", Path: "/api/v1/runs/{id}", h: s.handleGetRun},
+		{Method: "POST", Path: "/api/v1/runs/{id}/cancel", h: s.handleCancelRun},
 		{Method: "GET", Path: "/api/v1/services", h: s.handleListAllServices},
 		{Method: "GET", Path: "/api/v1/tasks", h: s.handleListTasks},
 		{Method: "GET", Path: "/api/v1/logs", h: s.handleQueryLogs},

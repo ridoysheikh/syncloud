@@ -1274,6 +1274,13 @@ Because there is only one controller:
   - API `…/deployments`, `synctl services deployments`, a Deployments tab, health badges on tasks, and the latest deployment shown in the service view.
 - ✅ Slice 3b (2026-10-06), drain: `POST /nodes/{id}/drain` (`synctl nodes drain`, Nodes page "drain") treats a node's tasks like an old revision, so replacements start elsewhere and the node's tasks stop once they serve. Uncordon ends a drain.
 - Verified with `test/e2e/deploy.sh`: a health-gated first rollout, replacement of a task made unhealthy, a bad revision tripping the breaker and rolling back while the old tasks kept serving, and a drain.
+- ✅ Slice 3c (2026-10-06), jobs (§5.11):
+  - A job runs a service's task definition (current revision, or the one being deployed for hooks) with a command and extra environment, or a standalone `task` spec. Kinds are `oneoff`, `scheduled` (5-field cron plus macros, IANA timezone, `concurrencyPolicy` allow/forbid/replace, `startingDeadline`), `pre-deploy` and `post-deploy`, with timeout, retries (exponential backoff) and history limit.
+  - Runs are tasks (`run_…`) placed by the same scheduler, with no health checks, ports or routes. Containers are removed 10s after exit so their last log lines are shipped. Reconnects resolve lost and pending runs. Missed cron slots beyond the deadline, and runs blocked by `forbid`, are recorded as **skipped**.
+  - **Pre-deploy hooks gate deployments**: the new revision is stored but not made current (deployment status `waiting_hook`). All hooks must succeed for it to switch and roll out; one failure fails the deployment and the old revision keeps running. Post-deploy jobs start when a deployment succeeds.
+  - API `…/jobs[/{job}[/runs]]`, `…/services/{s}/run`, `/runs/{id}[/cancel]`, `/jobs`. synctl `jobs list|apply -f|run [--wait]|runs|delete`, `run service/NAME -- CMD` (streams logs and exits with the run's code), `runs get|cancel`. The Compute → Jobs page shows next and last runs, Run now, history and per-run logs. Run logs are labelled `job-<name>` or `run-<service>`.
+  - Verified in e2e: `synctl run` output and exit codes, a retry, a cron run, a failing pre-deploy hook aborting a deployment, and a passing one letting it switch.
+  - Known gap: job runs are not yet counted in node reservations (they are short-lived); Phase 9.
 - Two-layer health (agent plus controller), service and task health model, uptime monitors, incidents (§5.6).
 - Rolling deploys, circuit breaker with rollback.
 - Node failure, rescheduling, cordon and drain.

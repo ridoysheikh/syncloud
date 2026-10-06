@@ -221,12 +221,32 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 		if desired < 0 {
 			desired = sv.DesiredCount
 		}
-		rev, err := m.st.UpdateService(ctx, sv.ID, spec.Canonical(), desired, actor, now)
-		if err != nil {
-			return ServiceView{}, false, err
-		}
-		if rev != sv.Revision {
-			m.startDeployment(ctx, sv.ID, sv.Revision, rev, "")
+		if m.DeployHooks != nil && m.DeployHooks.HasPreDeploy(ctx, sv) {
+			// The new revision only becomes current after the pre-deploy
+			// hooks succeed (§5.11); until then the old one keeps running.
+			rev, changed, err := m.st.AddRevision(ctx, sv.ID, spec.Canonical(), actor, now)
+			if err != nil {
+				return ServiceView{}, false, err
+			}
+			if _, err := m.st.UpdateService(ctx, sv.ID, "", desired, actor, now); err != nil {
+				return ServiceView{}, false, err
+			}
+			if changed {
+				depID := auth.NewID("dep_")
+				if err := m.st.StartDeployment(ctx, store.Deployment{ID: depID, ServiceID: sv.ID, FromRev: sv.Revision, ToRev: rev,
+					Status: store.DeployWaitingHook, Message: "waiting for pre-deploy jobs", StartedAt: now}); err != nil {
+					return ServiceView{}, false, err
+				}
+				m.DeployHooks.RunPreDeploy(ctx, sv, rev, depID)
+			}
+		} else {
+			rev, err := m.st.UpdateService(ctx, sv.ID, spec.Canonical(), desired, actor, now)
+			if err != nil {
+				return ServiceView{}, false, err
+			}
+			if rev != sv.Revision {
+				m.startDeployment(ctx, sv.ID, sv.Revision, rev, "")
+			}
 		}
 	}
 	m.routesDirty()
@@ -365,5 +385,31 @@ func (m *Manager) domainsChanged() {
 	m.routesDirty()
 	if m.OnChange != nil {
 		m.OnChange() // certificates for the new host set
+	}
+}
+
+// PreDeployDone finishes the pre-deploy phase of a deployment: on success the
+// new revision becomes current and rolls out; on failure the deployment
+// fails and the old revision keeps running.
+func (m *Manager) PreDeployDone(ctx context.Context, depID string, ok bool, msg string) {
+	dep, err := m.st.DeploymentByID(ctx, depID)
+	if err != nil || dep.Status != store.DeployWaitingHook {
+		return // superseded meanwhile
+	}
+	now := m.now().UTC()
+	if !ok {
+		_ = m.st.SetDeploymentStatus(ctx, depID, store.DeployFailed, "pre-deploy job failed: "+msg, &now)
+		m.log.Warn("deployment aborted by pre-deploy job", "service", dep.ServiceID, "revision", dep.ToRev, "reason", msg)
+	} else {
+		if err := m.st.SetServiceRevision(ctx, dep.ServiceID, dep.ToRev, now); err != nil {
+			m.log.Error("switch revision", "service", dep.ServiceID, "err", err)
+			return
+		}
+		_ = m.st.SetDeploymentStatus(ctx, depID, store.DeployInProgress, "pre-deploy jobs succeeded", nil)
+		m.routesDirty()
+	}
+	m.Enqueue(dep.ServiceID)
+	if v, err := m.ServiceView(ctx, dep.ServiceID); err == nil {
+		m.bus.Publish(TopicService, v)
 	}
 }

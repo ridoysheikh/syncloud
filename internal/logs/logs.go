@@ -109,6 +109,24 @@ func (s *Store) labelsFor(taskID string) labels {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if strings.HasPrefix(taskID, "run_") { // job runs (§5.11): service "job-<name>" or "run-<service>"
+		var project, env, job, svc string
+		err := s.st.R.QueryRowContext(ctx, `SELECT p.name, e.name, coalesce(j.name, ''), coalesce(sv.name, '') FROM job_runs r
+			JOIN environments e ON e.id = r.environment_id JOIN projects p ON p.id = e.project_id
+			LEFT JOIN jobs j ON j.id = r.job_id LEFT JOIN services sv ON sv.id = r.service_id WHERE r.id = ?`, taskID).Scan(&project, &env, &job, &svc)
+		if err != nil {
+			return labels{service: "unknown"}
+		}
+		name := "run-" + svc
+		if job != "" {
+			name = "job-" + job
+		}
+		lb = labels{project: project, environment: env, service: name}
+		s.mu.Lock()
+		s.cache[taskID] = lb
+		s.mu.Unlock()
+		return lb
+	}
 	t, err := s.st.TaskByID(ctx, taskID)
 	if err != nil {
 		return labels{service: "unknown"}

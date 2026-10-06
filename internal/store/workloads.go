@@ -610,12 +610,16 @@ func (s *Store) StartDeployment(ctx context.Context, d Deployment) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE deployments SET status = ?, finished_at = ? WHERE service_id = ? AND status = ?`,
-		DeploySuperseded, d.StartedAt.Unix(), d.ServiceID, DeployInProgress); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE deployments SET status = ?, finished_at = ? WHERE service_id = ? AND status IN (?, ?)`,
+		DeploySuperseded, d.StartedAt.Unix(), d.ServiceID, DeployInProgress, DeployWaitingHook); err != nil {
 		return err
 	}
+	status := d.Status
+	if status == "" {
+		status = DeployInProgress
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO deployments (id, service_id, from_rev, to_rev, status, message, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		d.ID, d.ServiceID, d.FromRev, d.ToRev, DeployInProgress, d.Message, d.StartedAt.Unix()); err != nil {
+		d.ID, d.ServiceID, d.FromRev, d.ToRev, status, d.Message, d.StartedAt.Unix()); err != nil {
 		return err
 	}
 	return tx.Commit()

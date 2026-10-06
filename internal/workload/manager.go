@@ -55,6 +55,8 @@ type Manager struct {
 	// DNS returns the resolver and search domains for a task on a node
 	// (nil before the node's private network exists).
 	DNS func(nodeID string, sv store.Service) (servers, search []string)
+	// Hooks runs pre- and post-deploy jobs (§5.11); may be nil.
+	DeployHooks DeployHooks
 
 	queue    chan string
 	mu       sync.Mutex
@@ -352,6 +354,9 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			changed = true
 		case servingNew >= desired && len(old) == 0:
 			_ = m.st.FinishDeployment(ctx, dep.ID, store.DeploySucceeded, "", now)
+			if m.DeployHooks != nil {
+				m.DeployHooks.RunPostDeploy(context.WithoutCancel(ctx), sv, dep)
+			}
 			changed = true
 		}
 	}
@@ -556,6 +561,31 @@ func (m *Manager) sendRun(ctx context.Context, sv store.Service, spec Spec, t st
 	}
 }
 
+// DeployHooks lets the jobs subsystem gate and follow deployments.
+type DeployHooks interface {
+	// HasPreDeploy reports whether the service has pre-deploy jobs.
+	HasPreDeploy(ctx context.Context, sv store.Service) bool
+	// RunPreDeploy starts them for revision toRev of deployment depID; the
+	// outcome comes back through Manager.PreDeployDone.
+	RunPreDeploy(ctx context.Context, sv store.Service, toRev int, depID string)
+	// RunPostDeploy starts post-deploy jobs after a deployment succeeded.
+	RunPostDeploy(ctx context.Context, sv store.Service, dep store.Deployment)
+}
+
+// PlaceSpec picks a node for a one-off task with spec's resources.
+func (m *Manager) PlaceSpec(ctx context.Context, spec Spec) (string, string) {
+	return m.place(ctx, spec, "")
+}
+
+// RunSpec builds the agent spec for a job run on a node, with the node's DNS.
+func (m *Manager) RunSpec(sv store.Service, spec Spec, t store.Task) *agentv1.TaskSpec {
+	ts := TaskSpec(sv, spec, t)
+	if m.DNS != nil {
+		ts.DnsServers, ts.DnsSearch = m.DNS(t.NodeID, sv)
+	}
+	return ts
+}
+
 // TaskSpec is what the agent runs for a task.
 func TaskSpec(sv store.Service, spec Spec, t store.Task) *agentv1.TaskSpec {
 	env := map[string]string{}
@@ -567,9 +597,10 @@ func TaskSpec(sv store.Service, spec Spec, t store.Task) *agentv1.TaskSpec {
 	env["SYNCLOUD_SERVICE"] = sv.Name
 	env["SYNCLOUD_TASK_ID"] = t.ID
 	env["SYNCLOUD_REVISION"] = fmt.Sprint(t.Revision)
+	short := strings.TrimPrefix(strings.TrimPrefix(t.ID, TaskIDPrefix), "run_")
 	ts := &agentv1.TaskSpec{
 		TaskId:  t.ID,
-		Name:    fmt.Sprintf("%s-%s-%s-%s", sv.Project, sv.Environment, sv.Name, strings.TrimPrefix(t.ID, TaskIDPrefix)[:8]),
+		Name:    fmt.Sprintf("%s-%s-%s-%s", sv.Project, sv.Environment, sv.Name, short[:min(8, len(short))]),
 		Image:   spec.Image,
 		Command: spec.Command,
 		Env:     env,

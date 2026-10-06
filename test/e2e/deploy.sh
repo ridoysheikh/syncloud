@@ -51,6 +51,41 @@ wait_for "rollback deployment → 3 succeeded" sh -c "docker exec sc-e2e-ctl cur
 api "$SVC/deployments" | grep -q 'automatic rollback' || fail "rollback deployment lacks its reason"
 api "$SVC" | grep -q '"path":"/ok"' || fail "revision 3 is not revision 1's spec"
 echo "  ✓ circuit breaker tripped and rolled back to revision 1's spec (revision 3)"
+echo "== jobs"
+key=$(api localhost:7070/api/v1/iam/access-keys -d '{"description":"e2e"}')
+KID=$(echo "$key" | grep -o '"id":"SYNAK[A-Z0-9]*"' | cut -d'"' -f4); KSEC=$(echo "$key" | grep -o '"secretAccessKey":"[^"]*"' | cut -d'"' -f4)
+synctl() { x -i -e SYNCLOUD_ENDPOINT=http://127.0.0.1:7070 -e SYNCLOUD_ACCESS_KEY_ID="$KID" -e SYNCLOUD_SECRET_ACCESS_KEY="$KSEC" sc-e2e-ctl /opt/sc/synctl "$@"; }
+out=$(synctl run service/api -p shop -- sh -c 'echo migrating; echo done' </dev/null 2>&1)
+echo "$out" | grep -q migrating || fail "synctl run did not stream the output: $out"
+set +e; synctl run service/api -p shop -- sh -c 'exit 4' </dev/null >/dev/null 2>&1; code=$?; set -e
+[ "$code" = 4 ] || fail "synctl run exit code $code, want 4"
+echo "  ✓ synctl run service/api: output streamed, exit code (4) propagated"
+
+JOBS=localhost:7070/api/v1/projects/shop/environments/production/jobs
+api -X PUT "$JOBS/flaky" -d '{"service":"api","command":["sh","-c","exit 2"],"retries":1}' >/dev/null
+api -X POST "$JOBS/flaky/runs" >/dev/null
+wait_for "flaky retried" sh -c "[ \$(docker exec sc-e2e-ctl curl -fs -b /tmp/jar $JOBS/flaky/runs | grep -o '\"status\":\"failed\"' | wc -l) -ge 2 ]"
+api "$JOBS/flaky/runs" | grep -q '"trigger":"retry","attempt":2' || fail "no retry attempt recorded"
+echo "  ✓ failed run retried once (attempt 2), then given up"
+
+api -X PUT "$JOBS/tick" -d '{"service":"api","command":["sh","-c","echo tick"],"schedule":"* * * * *","timezone":"Asia/Dhaka"}' | grep -q '"nextRunAt":"' || fail "scheduled job has no next run"
+wait_for "scheduled run succeeded" sh -c "docker exec sc-e2e-ctl curl -fs -b /tmp/jar $JOBS/tick/runs | grep -q '\"trigger\":\"schedule\",[^}]*\"status\":\"succeeded\"'"
+api -X DELETE "$JOBS/tick" >/dev/null
+echo "  ✓ cron job ran on schedule"
+
+rev=$(api "$SVC" | field revision)
+api -X PUT "$JOBS/migrate" -d '{"kind":"pre-deploy","service":"api","command":["sh","-c","echo checking; exit 1"]}' >/dev/null
+api -X PUT "$SVC" -d "$(spec /ok 2 | sed 's/"desiredCount"/"env":{"V":"2"},"desiredCount"/')" >/dev/null
+wait_for "deployment aborted by hook" sh -c "docker exec sc-e2e-ctl curl -fs -b /tmp/jar $SVC/deployments | grep -q 'pre-deploy job failed'"
+[ "$(api "$SVC" | field revision)" = "$rev" ] || fail "revision switched although the pre-deploy hook failed"
+echo "  ✓ failing pre-deploy hook aborted the deployment; revision $rev kept running"
+api -X PUT "$JOBS/migrate" -d '{"kind":"pre-deploy","service":"api","command":["sh","-c","echo migrated"]}' >/dev/null
+api -X PUT "$SVC" -d "$(spec /ok 2 | sed 's/"desiredCount"/"env":{"V":"3"},"desiredCount"/')" >/dev/null
+wait_for "hook passed, deployment succeeded" sh -c "docker exec sc-e2e-ctl curl -fs -b /tmp/jar $SVC/deployments | head -c 400 | grep -q '\"status\":\"succeeded\"'"
+[ "$(api "$SVC" | field revision)" != "$rev" ] || fail "revision did not switch after the hook passed"
+api -X DELETE "$JOBS/migrate" >/dev/null
+echo "  ✓ passing pre-deploy hook let the new revision roll out"
+
 echo "== drain"
 dnode=$(api "$SVC/tasks" | grep -o '"nodeId":"node_[a-z0-9]*","node":"[a-z0-9-]*","desired":"running","state":"running"' | head -1)
 did=$(echo "$dnode" | cut -d'"' -f4); dname=$(echo "$dnode" | cut -d'"' -f8)

@@ -691,3 +691,82 @@ func (c *Client) CheckDomain(ctx context.Context, host string) (DomainCheck, err
 	var out DomainCheck
 	return out, c.Do(ctx, "GET", "/api/v1/domains/check?host="+url.QueryEscape(host), nil, &out)
 }
+
+type JobRun struct {
+	ID          string     `json:"id"`
+	Job         string     `json:"job"`
+	Project     string     `json:"project"`
+	Environment string     `json:"environment"`
+	Service     string     `json:"service"`
+	Revision    int        `json:"revision"`
+	Trigger     string     `json:"trigger"`
+	Attempt     int        `json:"attempt"`
+	Status      string     `json:"status"`
+	Node        string     `json:"node"`
+	ExitCode    *int       `json:"exitCode"`
+	Message     string     `json:"message"`
+	Command     []string   `json:"command"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	StartedAt   *time.Time `json:"startedAt"`
+	FinishedAt  *time.Time `json:"finishedAt"`
+}
+
+type Job struct {
+	ID          string         `json:"id"`
+	Project     string         `json:"project"`
+	Environment string         `json:"environment"`
+	Name        string         `json:"name"`
+	Spec        map[string]any `json:"spec"`
+	NextRunAt   *time.Time     `json:"nextRunAt"`
+	LastRun     *JobRun        `json:"lastRun"`
+}
+
+func jobPath(project, env, name string) string {
+	return "/api/v1/projects/" + url.PathEscape(project) + "/environments/" + url.PathEscape(env) + "/jobs/" + url.PathEscape(name)
+}
+
+func (c *Client) ListJobs(ctx context.Context, project, env string) ([]Job, error) {
+	var out list[Job]
+	if project == "" {
+		return out.Items, c.Do(ctx, "GET", "/api/v1/jobs", nil, &out)
+	}
+	return out.Items, c.Do(ctx, "GET", "/api/v1/projects/"+url.PathEscape(project)+"/environments/"+url.PathEscape(env)+"/jobs", nil, &out)
+}
+
+func (c *Client) GetJob(ctx context.Context, project, env, name string) (Job, error) {
+	var out Job
+	return out, c.Do(ctx, "GET", jobPath(project, env, name), nil, &out)
+}
+
+func (c *Client) ApplyJob(ctx context.Context, project, env, name string, spec map[string]any) (Job, error) {
+	var out Job
+	return out, c.Do(ctx, "PUT", jobPath(project, env, name), spec, &out)
+}
+
+func (c *Client) DeleteJob(ctx context.Context, project, env, name string) error {
+	return c.Do(ctx, "DELETE", jobPath(project, env, name), nil, nil)
+}
+
+func (c *Client) RunJob(ctx context.Context, project, env, name string, command []string) (JobRun, error) {
+	var out JobRun
+	return out, c.Do(ctx, "POST", jobPath(project, env, name)+"/runs", map[string]any{"command": command}, &out)
+}
+
+func (c *Client) JobRuns(ctx context.Context, project, env, name string) ([]JobRun, error) {
+	var out list[JobRun]
+	return out.Items, c.Do(ctx, "GET", jobPath(project, env, name)+"/runs", nil, &out)
+}
+
+func (c *Client) RunService(ctx context.Context, project, env, service string, command []string) (JobRun, error) {
+	var out JobRun
+	return out, c.Do(ctx, "POST", svcPath(project, env, service)+"/run", map[string]any{"command": command}, &out)
+}
+
+func (c *Client) GetRun(ctx context.Context, id string) (JobRun, error) {
+	var out JobRun
+	return out, c.Do(ctx, "GET", "/api/v1/runs/"+url.PathEscape(id), nil, &out)
+}
+
+func (c *Client) CancelRun(ctx context.Context, id string) error {
+	return c.Do(ctx, "POST", "/api/v1/runs/"+url.PathEscape(id)+"/cancel", nil, nil)
+}
