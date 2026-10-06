@@ -60,6 +60,19 @@ api "$SVC/domains" -d '{"host":"shop.example.test"}' >/dev/null 2>&1 && fail "du
 api -X DELETE "$SVC/domains/shop.example.test" >/dev/null
 echo "  ✓ custom domain routed through Traefik, listed in endpoints, removable"
 
+# Central health (§5.6): end-to-end checks through Traefik, uptime, incidents.
+HEALTH=localhost:7070/api/v1/health/services
+wait_for "web healthy with uptime" sh -c "docker exec sc-e2e-ctl curl -fs -b /tmp/jar $HEALTH | grep -o '\"service\":\"web\",\"state\":\"healthy\"[^}]*\"uptime24h\":100' >/dev/null"
+echo "  ✓ web is healthy with 100% uptime from end-to-end checks"
+BROKEN=localhost:7070/api/v1/projects/shop/environments/production/services/broken
+api -X PUT "$BROKEN" -d '{"image":"busybox:1.37","command":["sh","-c","while true; do printf \"HTTP/1.1 503 Service Unavailable\\r\\nContent-Length: 0\\r\\n\\r\\n\" | nc -l -p 8080; done"],"ports":[{"container":8080}],"resources":{"cpu":0.05,"memory":16},"desiredCount":1}' >/dev/null
+wait_for "incident for broken" sh -c "docker exec sc-e2e-ctl curl -fs -b /tmp/jar 'localhost:7070/api/v1/health/incidents?open=1' | grep -q '\"state\":\"down\",\"cause\":\"public route check failed: HTTP 503[^}]*\"service\":\"broken\"'"
+echo "  ✓ a service answering 503 opened a 'down' incident with its cause"
+api -X PUT "$BROKEN" -d '{"image":"busybox:1.37","command":["httpd","-f","-p","8080","-h","/etc"],"ports":[{"container":8080}],"resources":{"cpu":0.05,"memory":16}}' >/dev/null
+wait_for "incident closed" sh -c "! docker exec sc-e2e-ctl curl -fs -b /tmp/jar 'localhost:7070/api/v1/health/incidents?open=1' | grep -q '\"service\":\"broken\"'"
+api -X DELETE "$BROKEN" >/dev/null
+echo "  ✓ the incident closed after the fix"
+
 # Service discovery from inside a task: DNS names, search domains and the VIP.
 VIP=$(api "$SVC" | field vip)
 [ -n "$VIP" ] || fail "service has no VIP"

@@ -1265,7 +1265,7 @@ Because there is only one controller:
 - Traefik HTTP provider: auto default domains, one-step custom domains plus DNS check, the Connect dialog, middleware presets (§5.7).
 - Service UI with a YAML view.
 
-### Phase 3: Deployments, Health and Jobs (3 wks)
+### Phase 3: Deployments, Health and Jobs (3 wks) — ✅ done 2026-10-06
 **Progress**
 - ✅ Slice 3a (2026-10-06), health checks and deployments:
   - Spec `health` (`http` path, `tcp` or `cmd`, with interval, timeout, retries and start period) is **probed by the agent** against the task IP, or by exec for `cmd`. Probes live for the agent's lifetime and resume after a restart because the controller re-sends running tasks on reconnect. States: starting → healthy, or unhealthy after N consecutive failures.
@@ -1281,6 +1281,13 @@ Because there is only one controller:
   - API `…/jobs[/{job}[/runs]]`, `…/services/{s}/run`, `/runs/{id}[/cancel]`, `/jobs`. synctl `jobs list|apply -f|run [--wait]|runs|delete`, `run service/NAME -- CMD` (streams logs and exits with the run's code), `runs get|cancel`. The Compute → Jobs page shows next and last runs, Run now, history and per-run logs. Run logs are labelled `job-<name>` or `run-<service>`.
   - Verified in e2e: `synctl run` output and exit codes, a retry, a cron run, a failing pre-deploy hook aborting a deployment, and a passing one letting it switch.
   - Known gap: job runs are not yet counted in node reservations (they are short-lived); Phase 9.
+- ✅ Slice 3d (2026-10-06), central health and incidents (§5.6):
+  - The controller checks every routed service **end to end through the local Traefik** every 15s (HTTPS with SNI for the default hostname, or plain HTTP in development). A 5xx or connection error counts as failed; a 4xx means the app answered.
+  - Service state: `healthy`, `degraded` (fewer serving than desired), `down` (none serving, or two failed checks in a row), `deploying` or `stopped`. The reason is derived from the probe, the service status, or the last failed task (exit code, 137/OOM hint, unhealthy, node lost).
+  - **Incidents** open after a bad state holds for 2 evaluations (flap protection), keep the worst state, and close on recovery. Only transitions are stored. Uptime for 24h comes from in-memory samples, and 7d/30d from VictoriaMetrics (`syncloud_uptime_up`, `syncloud_uptime_latency_seconds`, pushed per check).
+  - API `/health/services`, `/health/incidents`; `synctl health services|incidents`. Pages: Health → Services (uptime 24h/7d/30d and a 1h response-time sparkline) and Incidents.
+  - Verified in e2e: a healthy service reports 100%, a service answering 503 opens a `down` incident with the cause, and fixing it closes the incident.
+  - Deferred: central per-task probes over the mesh (the second half of layer 2) and alerts move to Phase 5.
 - Two-layer health (agent plus controller), service and task health model, uptime monitors, incidents (§5.6).
 - Rolling deploys, circuit breaker with rollback.
 - Node failure, rescheduling, cordon and drain.

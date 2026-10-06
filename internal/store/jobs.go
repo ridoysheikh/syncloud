@@ -285,3 +285,62 @@ func (s *Store) DeploymentByID(ctx context.Context, id string) (Deployment, erro
 	}
 	return d, err
 }
+
+// ── incidents ───────────────────────────────────────────────────────────────
+
+type Incident struct {
+	ID        string     `json:"id"`
+	ServiceID string     `json:"serviceId"`
+	State     string     `json:"state"`
+	Cause     string     `json:"cause"`
+	OpenedAt  time.Time  `json:"openedAt"`
+	ClosedAt  *time.Time `json:"closedAt"`
+}
+
+func (s *Store) OpenIncident(ctx context.Context, i Incident) error {
+	_, err := s.W.ExecContext(ctx, `INSERT INTO incidents (id, service_id, state, cause, opened_at) VALUES (?, ?, ?, ?, ?)`,
+		i.ID, i.ServiceID, i.State, i.Cause, i.OpenedAt.Unix())
+	return err
+}
+
+func (s *Store) UpdateIncident(ctx context.Context, id, state, cause string) error {
+	_, err := s.W.ExecContext(ctx, `UPDATE incidents SET state = ?, cause = ? WHERE id = ?`, state, cause, id)
+	return err
+}
+
+func (s *Store) CloseIncident(ctx context.Context, id string, at time.Time) error {
+	_, err := s.W.ExecContext(ctx, `UPDATE incidents SET closed_at = ? WHERE id = ? AND closed_at IS NULL`, at.Unix(), id)
+	return err
+}
+
+// ListIncidents returns incidents, newest first (open only when openOnly).
+func (s *Store) ListIncidents(ctx context.Context, serviceID string, openOnly bool, limit int) ([]Incident, error) {
+	q := `SELECT id, service_id, state, cause, opened_at, closed_at FROM incidents WHERE 1 = 1`
+	var args []any
+	if serviceID != "" {
+		q += ` AND service_id = ?`
+		args = append(args, serviceID)
+	}
+	if openOnly {
+		q += ` AND closed_at IS NULL`
+	}
+	q += ` ORDER BY opened_at DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.R.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Incident
+	for rows.Next() {
+		var i Incident
+		var opened int64
+		var closed sql.NullInt64
+		if err := rows.Scan(&i.ID, &i.ServiceID, &i.State, &i.Cause, &opened, &closed); err != nil {
+			return nil, err
+		}
+		i.OpenedAt, i.ClosedAt = time.Unix(opened, 0).UTC(), timePtr(closed)
+		out = append(out, i)
+	}
+	return out, rows.Err()
+}

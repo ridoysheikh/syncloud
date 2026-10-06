@@ -21,6 +21,7 @@ import { ServicesPage } from "./compute/ServicesPage";
 import { ServicePage } from "./compute/ServicePage";
 import { TasksPage } from "./compute/TasksPage";
 import { JobsPage } from "./compute/JobsPage";
+import { IncidentsPage, ServiceHealthPage } from "./health/HealthPages";
 import { PlatformPage } from "./settings/PlatformPage";
 import { DomainsPage } from "./settings/DomainsPage";
 import { BackupsPage } from "./settings/BackupsPage";
@@ -47,7 +48,6 @@ export const modules: DashboardModule[] = [
       { path: "/compute/services/$project/$env/$name", label: "Service", component: ServicePage, hidden: true },
       { path: "/compute/tasks", label: "Tasks", component: TasksPage },
       { path: "/compute/jobs", label: "Jobs", component: JobsPage },
-      { path: "/compute/deployments", label: "Deployments", component: planned(["Compute"], "Deployments", "Phase 3", "§5.4", "Rollout history, circuit breaker and rollback.") },
       { path: "/compute/nodes", label: "Nodes", component: NodesPage },
       { path: "/compute/node-pools", label: "Node Pools", component: planned(["Compute"], "Node Pools", "Phase 8", "§6.5", "Provider-backed pools and cluster autoscaling.") },
     ],
@@ -107,8 +107,8 @@ export const modules: DashboardModule[] = [
     icon: HeartPulse,
     order: 70,
     pages: [
-      { path: "/health", label: "Services", component: planned(["Health"], "Service health", "Phase 3", "§5.6", "Health, uptime % and response times for every service.") },
-      { path: "/health/incidents", label: "Incidents", component: planned(["Health"], "Incidents", "Phase 3", "§5.6", "Incident timeline with causes.") },
+      { path: "/health", label: "Services", component: ServiceHealthPage },
+      { path: "/health/incidents", label: "Incidents", component: IncidentsPage },
     ],
   },
   {

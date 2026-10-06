@@ -770,3 +770,49 @@ func (c *Client) GetRun(ctx context.Context, id string) (JobRun, error) {
 func (c *Client) CancelRun(ctx context.Context, id string) error {
 	return c.Do(ctx, "POST", "/api/v1/runs/"+url.PathEscape(id)+"/cancel", nil, nil)
 }
+
+type Incident struct {
+	ID          string     `json:"id"`
+	ServiceID   string     `json:"serviceId"`
+	Project     string     `json:"project"`
+	Environment string     `json:"environment"`
+	Service     string     `json:"service"`
+	State       string     `json:"state"`
+	Cause       string     `json:"cause"`
+	OpenedAt    time.Time  `json:"openedAt"`
+	ClosedAt    *time.Time `json:"closedAt"`
+}
+
+type ServiceHealth struct {
+	ServiceID   string   `json:"serviceId"`
+	Project     string   `json:"project"`
+	Environment string   `json:"environment"`
+	Service     string   `json:"service"`
+	State       string   `json:"state"`
+	Reason      string   `json:"reason"`
+	Serving     int      `json:"serving"`
+	Desired     int      `json:"desired"`
+	Uptime24h   *float64 `json:"uptime24h"`
+	Uptime7d    *float64 `json:"uptime7d"`
+	LastCheck   *struct {
+		OK        bool    `json:"ok"`
+		Status    int     `json:"status"`
+		LatencyMs float64 `json:"latencyMs"`
+		Error     string  `json:"error"`
+	} `json:"lastCheck"`
+	Incident *Incident `json:"incident"`
+}
+
+func (c *Client) ServiceHealth(ctx context.Context) ([]ServiceHealth, error) {
+	var out list[ServiceHealth]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/health/services", nil, &out)
+}
+
+func (c *Client) Incidents(ctx context.Context, openOnly bool) ([]Incident, error) {
+	var out list[Incident]
+	q := ""
+	if openOnly {
+		q = "?open=1"
+	}
+	return out.Items, c.Do(ctx, "GET", "/api/v1/health/incidents"+q, nil, &out)
+}

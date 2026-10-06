@@ -41,6 +41,8 @@ type Controller struct {
 	ControllerSchedulable bool
 	// VictoriaLogsURL is where container logs are stored (the system task).
 	VictoriaLogsURL string
+	// VictoriaMetricsURL stores metrics such as uptime checks (the system task).
+	VictoriaMetricsURL string
 	// Firewall manages each node's host firewall (§8.3).
 	Firewall bool
 	// DownloadsDir holds agent and CLI binaries served to joining nodes.
@@ -72,6 +74,7 @@ func LoadController(args []string) (Controller, error) {
 	fs.StringVar(&c.ACMEEmail, "acme-email", env("SYNCLOUD_ACME_EMAIL", ""), "ACME account contact email (optional)")
 	fs.StringVar(&c.ACMECAFile, "acme-ca-file", env("SYNCLOUD_ACME_CA_FILE", ""), "extra CA bundle to trust for the ACME server")
 	ctlSched := fs.String("controller-schedulable", env("SYNCLOUD_CONTROLLER_SCHEDULABLE", ""), "run services on the controller node: 1 or 0 (default 0, dev 1)")
+	fs.StringVar(&c.VictoriaMetricsURL, "victoriametrics-url", env("SYNCLOUD_VICTORIAMETRICS_URL", "http://127.0.0.1:8428"), "VictoriaMetrics for metrics")
 	fs.StringVar(&c.VictoriaLogsURL, "victorialogs-url", env("SYNCLOUD_VICTORIALOGS_URL", "http://127.0.0.1:9428"), "VictoriaLogs for container logs")
 	fs.BoolVar(&c.Firewall, "firewall", env("SYNCLOUD_FIREWALL", "1") == "1", "manage the host firewall on every node (default on)")
 	fs.StringVar(&c.DownloadsDir, "downloads-dir", env("SYNCLOUD_DOWNLOADS_DIR", "/usr/local/lib/syncloud/downloads"), "agent/CLI binaries served at /downloads/")

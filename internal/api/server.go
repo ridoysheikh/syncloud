@@ -14,6 +14,7 @@ import (
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
 	"syncloud/internal/execrelay"
+	"syncloud/internal/health"
 	"syncloud/internal/jobs"
 	"syncloud/internal/logs"
 	"syncloud/internal/mesh"
@@ -53,6 +54,7 @@ type Server struct {
 	logs                  *logs.Store
 	exec                  *execrelay.Relay
 	jobs                  *jobs.Manager
+	health                *health.Monitor
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -99,6 +101,8 @@ type Options struct {
 	Exec *execrelay.Relay
 	// Jobs runs one-off, scheduled and hook jobs (§5.11); may be nil.
 	Jobs *jobs.Manager
+	// Health is the central health monitor (§5.6); may be nil.
+	Health *health.Monitor
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -133,6 +137,7 @@ func New(o Options) *Server {
 		logs:                  o.Logs,
 		exec:                  o.Exec,
 		jobs:                  o.Jobs,
+		health:                o.Health,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -219,6 +224,8 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/jobs", h: s.handleListAllJobs},
 		{Method: "GET", Path: "/api/v1/runs/{id}", h: s.handleGetRun},
 		{Method: "POST", Path: "/api/v1/runs/{id}/cancel", h: s.handleCancelRun},
+		{Method: "GET", Path: "/api/v1/health/services", h: s.handleServiceHealth},
+		{Method: "GET", Path: "/api/v1/health/incidents", h: s.handleIncidents},
 		{Method: "GET", Path: "/api/v1/services", h: s.handleListAllServices},
 		{Method: "GET", Path: "/api/v1/tasks", h: s.handleListTasks},
 		{Method: "GET", Path: "/api/v1/logs", h: s.handleQueryLogs},
@@ -291,4 +298,40 @@ func (s *Server) handleMesh(w http.ResponseWriter, r *http.Request) {
 		"meshCidr": mesh.MeshCIDR.String(), "containerCidr": mesh.ContainerCIDR.String(), "serviceCidr": mesh.ServiceCIDR.String(),
 		"items": items,
 	})
+}
+
+func (s *Server) handleServiceHealth(w http.ResponseWriter, r *http.Request) {
+	if s.health == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}})
+		return
+	}
+	items, err := s.health.List(r.Context())
+	if err != nil {
+		s.internalError(w, "service health", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) handleIncidents(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.ListIncidents(r.Context(), r.URL.Query().Get("service"), r.URL.Query().Get("open") == "1", 200)
+	if err != nil {
+		s.internalError(w, "list incidents", err)
+		return
+	}
+	type view struct {
+		store.Incident
+		Project     string `json:"project"`
+		Environment string `json:"environment"`
+		Service     string `json:"service"`
+	}
+	out := make([]view, 0, len(items))
+	for _, i := range items {
+		v := view{Incident: i}
+		if sv, err := s.store.ServiceByID(r.Context(), i.ServiceID); err == nil {
+			v.Project, v.Environment, v.Service = sv.Project, sv.Environment, sv.Name
+		}
+		out = append(out, v)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }

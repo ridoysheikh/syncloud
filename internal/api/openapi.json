@@ -2889,6 +2889,84 @@
           }
         }
       }
+    },
+    "/api/v1/health/services": {
+      "get": {
+        "operationId": "listServiceHealth",
+        "tags": [
+          "health"
+        ],
+        "summary": "Health of every service: state, reason, uptime (24h/7d/30d), last end-to-end check, open incident",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceHealth"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/health/incidents": {
+      "get": {
+        "operationId": "listIncidents",
+        "tags": [
+          "health"
+        ],
+        "summary": "Incidents, newest first",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "service ID"
+          },
+          {
+            "name": "open",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Incident"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4649,6 +4727,143 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "Incident": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "serviceId": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "degraded",
+              "down"
+            ]
+          },
+          "cause": {
+            "type": "string"
+          },
+          "openedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "closedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "ServiceHealth": {
+        "type": "object",
+        "properties": {
+          "serviceId": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "degraded",
+              "down",
+              "deploying",
+              "stopped"
+            ]
+          },
+          "serving": {
+            "type": "integer"
+          },
+          "desired": {
+            "type": "integer"
+          },
+          "uptime24h": {
+            "type": "number",
+            "nullable": true
+          },
+          "uptime7d": {
+            "type": "number",
+            "nullable": true
+          },
+          "uptime30d": {
+            "type": "number",
+            "nullable": true
+          },
+          "lastCheck": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "integer"
+              },
+              "latencyMs": {
+                "type": "number"
+              },
+              "error": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            }
+          },
+          "latency": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "t": {
+                  "type": "integer"
+                },
+                "ms": {
+                  "type": "number"
+                },
+                "ok": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "incident": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Incident"
+              }
+            ],
+            "nullable": true
           }
         }
       }

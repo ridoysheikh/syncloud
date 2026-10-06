@@ -29,6 +29,7 @@ import (
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
 	"syncloud/internal/execrelay"
+	"syncloud/internal/health"
 	"syncloud/internal/jobs"
 	"syncloud/internal/logs"
 	"syncloud/internal/mesh"
@@ -233,6 +234,10 @@ func serve(args []string) error {
 	gw.AddHooks(jobMgr.Hooks())
 	workloads.DeployHooks = jobMgr
 	go jobMgr.Run(ctx)
+	healthMon := health.New(st, workloads, bus, log, health.Config{
+		BaseDomain: domains.Base, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS, VictoriaMetricsURL: cfg.VictoriaMetricsURL,
+	})
+	go healthMon.Run(ctx)
 	execs := execrelay.New(gw)
 	gw.AddHooks(execs.Hooks())
 	logStore := logs.New(st, cfg.VictoriaLogsURL, log)
@@ -297,7 +302,7 @@ func serve(args []string) error {
 			"GET " + certs.ChallengePrefix: certMgr,
 		},
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
-		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, Jobs: jobMgr, ControllerSchedulable: cfg.ControllerSchedulable,
+		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon, ControllerSchedulable: cfg.ControllerSchedulable,
 		ACME: api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {
 			_ = os.Remove(filepath.Join(cfg.DataDir, setupTokenFile))
