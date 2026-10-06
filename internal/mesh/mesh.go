@@ -104,6 +104,8 @@ type Options struct {
 	ControllerPorts []string
 	// Firewall turns the host firewall on.
 	Firewall bool
+	// IsEdge reports edge nodes, which open HTTP and HTTPS (§8.5).
+	IsEdge func(nodeID string) bool
 }
 
 type Manager struct {
@@ -265,6 +267,11 @@ func FirewallFor(self store.NodeNetwork, all []store.NodeNetwork, policies []sto
 	if self.NodeName == ControllerNode {
 		for _, p := range opts.ControllerPorts {
 			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:controller-" + p, Protocol: "tcp", Ports: p, Description: "controller (built-in)"})
+		}
+	}
+	if opts.IsEdge != nil && opts.IsEdge(self.NodeID) {
+		for _, p := range []string{"80", "443"} {
+			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:edge-" + p, Protocol: "tcp", Ports: p, Description: "edge node (built-in)"})
 		}
 	}
 	for _, p := range policies {

@@ -119,6 +119,9 @@ type Provider struct {
 	// Custom returns the validated raw configuration merged into the
 	// generated one ("Advanced", §5.7).
 	Custom func() map[string]any
+	// MeshControllerURL is the controller as edge nodes reach it over the
+	// private network (§8.5).
+	MeshControllerURL func() string
 }
 
 const (
@@ -228,7 +231,32 @@ func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
+	if r.URL.Query().Get("edge") != "" {
+		_ = json.NewEncoder(w).Encode(p.EdgeConfig())
+		return
+	}
 	_ = json.NewEncoder(w).Encode(p.Merged())
+}
+
+// EdgeConfig is the configuration for an edge node's Traefik (§8.5): the
+// same routes and certificates, with the controller reached over the
+// private network; the registry stays on the controller's own Traefik.
+func (p *Provider) EdgeConfig() map[string]any {
+	out := p.Merged()
+	h, _ := out["http"].(map[string]any)
+	if h == nil {
+		return out
+	}
+	if svcs, ok := h["services"].(map[string]any); ok {
+		delete(svcs, svcRegistry)
+		if p.MeshControllerURL != nil {
+			svcs[svcController] = map[string]any{"loadBalancer": map[string]any{"servers": []any{map[string]any{"url": p.MeshControllerURL()}}, "passHostHeader": true}}
+		}
+	}
+	if routers, ok := h["routers"].(map[string]any); ok {
+		delete(routers, "syncloud-registry")
+	}
+	return out
 }
 
 // Generated is the configuration without the custom part, as a map.

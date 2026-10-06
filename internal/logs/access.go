@@ -14,6 +14,10 @@ import (
 // request lines of the services it routes to (§5.7).
 const TraefikTaskID = "sys-traefik"
 
+// EdgeTraefikTaskID is the Traefik replica on edge nodes (§8.5); its access
+// lines carry the edge node.
+const EdgeTraefikTaskID = "sys-edge-traefik"
+
 var accessFields = []string{"method", "host", "path", "status", "duration_ms", "bytes", "client", "upstream", "service_id"}
 
 // Traefik names a service's routers and load balancers

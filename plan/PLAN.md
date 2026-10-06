@@ -1506,7 +1506,19 @@ Because there is only one controller:
 - Audit log UI and policy simulator.
 - **Quotas** with admission checks, and **usage metering** (§7.2).
 
-### Phase 8: Node Pools, Cluster Autoscaling and Edge Nodes (3–4 wks)
+### Phase 8: Node Pools, Cluster Autoscaling and Edge Nodes (3–4 wks) — ✅ done 2026-10-06
+**Progress**
+- ✅ Slice 8a (2026-10-06), node pools and cluster autoscaling (§6.5):
+  - **Pools** with a role (`worker` or `edge`), manual (nodes join with a pool join command; nodes move between pools with `PUT /nodes/{id}/pool`) or **provider-backed** (region, server type, image, SSH keys, min/max). Nodes outside any pool form `default`. Services can be placed on pools (`placement.pools`); edge nodes take no tasks unless a service names their pool.
+  - **Cloud providers**: Hetzner Cloud, DigitalOcean and a generic **webhook** (create/delete/list POSTed as JSON, for any other cloud). Tokens are sealed with the master key and never returned. Servers carry the label `syncloud-pool`; their **cloud-init** user data installs the agent and joins with a single-use token bound to the pool and the server's node name.
+  - **Cluster autoscaler** (every 15 s per autoscaled pool): scale out when tasks restricted to the pool (or able to use it) have waited unplaced for `pendingAfter`, sized from their CPU and memory against the server size, or when reservations pass `headroom`; up to `maxStep` servers at once, never above max. A server that does not join within `joinTimeout` is deleted. **Safe scale-in**: a node below `scaleInBelow` for `scaleInAfter` is removed only if its tasks fit on the pool's other nodes, never below min, never a protected node: it is drained, removed, and its server deleted. Every decision is in the pool's scaling history.
+  - Dashboard: Compute › Node pools (pools with their nodes, reservations, servers, scaling history, add-node join command, scale-in protection, cloud providers) and a full-page pool editor. synctl `pools list|apply|delete|history|join-command|move|providers|edges`.
+- ✅ Slice 8b (2026-10-06), edge nodes (§8.5):
+  - Nodes of an `edge` pool run a **Traefik replica** (system task `sys-edge-traefik`, host network, ports 80/443) fed by the controller over the private network (`/internal/traefik/config?edge=<node>`: the same routers, services and certificates, with task addresses on the mesh). Traefik keeps its last configuration, so **public traffic keeps flowing while the controller is down**.
+  - The edge's host firewall opens 80/443 (built-in rules). The controller pings each replica every 10 s and imports its Prometheus metrics, so traffic charts include edge requests (labelled `edge=<node>`); access logs come in like the controller Traefik's.
+  - Network › Edge nodes: health, public and mesh address, replica state. Leaving the edge pool removes the replica.
+- Verified with `test/e2e/pools.sh`: an edge pool on w2 takes no tasks, routes a service over the mesh with its firewall open, and keeps serving while the controller is killed (tasks survive its restart); a provider pool backed by a fake cloud (`test/e2e/cloudsim`, which starts Docker-in-Docker nodes from the cloud-init join command) creates a server when a task restricted to the pool cannot be placed, the node joins and runs it, and once idle the node is drained, removed and its server deleted; synctl; leaving the edge pool stops the replica. Unit tests for the providers (against fake APIs), the pool spec and the scale-out/in decisions. Screenshots checked.
+- Not done: provider-specific firewall/network setup (servers rely on the host firewall), spot/preemptible servers.
 - Node pools (manual and provider-backed), provider plugins, cloud-init join (§6.5).
 - Cluster autoscaler (scale out on pending tasks or headroom, safe scale in).
 - **Edge nodes**: Traefik replicas fed by the controller, per-edge metrics, edge health (§8.5).

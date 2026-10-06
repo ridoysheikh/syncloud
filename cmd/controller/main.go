@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	_ "time/tzdata" // job schedules use IANA timezones even on hosts without tzdata
@@ -33,6 +34,7 @@ import (
 	"syncloud/internal/config"
 	"syncloud/internal/discovery"
 	"syncloud/internal/domain"
+	"syncloud/internal/edge"
 	"syncloud/internal/events"
 	"syncloud/internal/execrelay"
 	"syncloud/internal/fwstats"
@@ -42,6 +44,7 @@ import (
 	"syncloud/internal/logs"
 	"syncloud/internal/mesh"
 	"syncloud/internal/metrics"
+	"syncloud/internal/nodepool"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
 	"syncloud/internal/quota"
@@ -208,7 +211,15 @@ func serve(args []string) error {
 	if host, _, _ := net.SplitHostPort(cfg.Listen); !isLoopback(host) {
 		ctlPorts = append(ctlPorts, portOf(cfg.Listen)) // the API was exposed on purpose
 	}
-	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts})
+	// Edge nodes open HTTP and HTTPS; node pools say which nodes are edges.
+	var edgeCheck atomic.Pointer[func(string) bool]
+	isEdge := func(id string) bool {
+		if f := edgeCheck.Load(); f != nil {
+			return (*f)(id)
+		}
+		return false
+	}
+	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts, IsEdge: isEdge})
 	gw.AddHooks(meshMgr.Hooks())
 	go meshMgr.Run(ctx)
 	var workloads *workload.Manager // set below; routes need certificates too
@@ -303,6 +314,15 @@ func serve(args []string) error {
 		}
 		go metricStore.ScrapeTraefik(ctx, "http://"+cfg.TraefikAdmin+"/metrics", LocalNodeName, serviceNames, 10*time.Second)
 	}
+	pools := nodepool.New(st, box, registry, workloads, bus, log)
+	if err := pools.Reload(ctx); err != nil {
+		return fmt.Errorf("load node pools: %w", err)
+	}
+	pools.ControllerURL = func() string { return domains.Endpoints().DashboardURL }
+	workloads.NodePool = pools.PoolOf
+	edgeFn := func(id string) bool { _, role := pools.PoolOf(id); return role == "edge" }
+	edgeCheck.Store(&edgeFn)
+	go pools.Run(ctx)
 	quotas := quota.New(st, workloads, metricStore, log)
 	workloads.Admit = quotas.Admit
 	workloads.AdmitCount = quotas.AdmitCount
@@ -376,6 +396,18 @@ func serve(args []string) error {
 	if httpsPort == "443" {
 		httpsPort = ""
 	}
+	meshControllerURL := func() string { return "http://" + net.JoinHostPort(mesh.MeshAddr(1).String(), portOf(cfg.Listen)) }
+	edges := edge.New(st, gw, metricStore, func(ctx context.Context) map[string][3]string {
+		out := map[string][3]string{}
+		svcs, _ := st.ListServices(ctx)
+		for _, sv := range svcs {
+			out[sv.ID] = [3]string{sv.Project, sv.Environment, sv.Name}
+		}
+		return out
+	}, edge.Config{Image: system.ImageTraefik, TraefikToken: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: meshControllerURL,
+		Edges: pools.EdgeNodes}, log)
+	gw.AddHooks(edges.Hooks())
+	go edges.Run(ctx)
 	traefikExtras := traefik.NewExtras(st, log)
 	if err := traefikExtras.Reload(ctx); err != nil {
 		return fmt.Errorf("load Traefik middlewares: %w", err)
@@ -391,8 +423,9 @@ func serve(args []string) error {
 			}
 			return out
 		},
-		Middlewares: traefikExtras.Definitions,
-		Custom:      traefikExtras.Custom,
+		Middlewares:       traefikExtras.Definitions,
+		MeshControllerURL: meshControllerURL,
+		Custom:            traefikExtras.Custom,
 		Certificates: func() []traefik.Certificate {
 			var out []traefik.Certificate
 			for _, p := range certMgr.Pairs() {
@@ -451,6 +484,8 @@ func serve(args []string) error {
 		FirewallStats:         fwStats,
 		Quotas:                quotas,
 		Shell:                 shells,
+		Pools:                 pools,
+		Edges:                 edges,
 		Discovery:             disco,
 		Traefik:               traefikProvider,
 		TraefikExtras:         traefikExtras,

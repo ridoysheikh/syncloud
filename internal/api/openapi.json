@@ -9038,6 +9038,685 @@
           }
         }
       }
+    },
+    "/api/v1/cloud-providers": {
+      "get": {
+        "operationId": "listCloudProviders",
+        "tags": [
+          "nodepools"
+        ],
+        "summary": "Cloud providers for node pools",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "hetzner",
+                              "digitalocean",
+                              "webhook"
+                            ]
+                          },
+                          "summary": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "types": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCloudProvider",
+        "tags": [
+          "nodepools"
+        ],
+        "summary": "Add a cloud provider (credentials are sealed and never returned)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "token": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "name",
+                  "type",
+                  "config"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "hetzner",
+                        "digitalocean",
+                        "webhook"
+                      ]
+                    },
+                    "summary": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/cloud-providers/{id}": {
+      "delete": {
+        "operationId": "deleteCloudProvider",
+        "tags": [
+          "nodepools"
+        ],
+        "summary": "Delete a provider no pool uses",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/node-pools": {
+      "get": {
+        "operationId": "listNodePools",
+        "tags": [
+          "nodepools"
+        ],
+        "summary": "Node pools (and the default pool) with their nodes, pending servers and capacity",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NodePool"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createNodePool",
+        "tags": [
+          "nodepools"
+        ],
+        "summary": "Create a node pool: manual, or provider-backed with cluster autoscaling",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "description": "provider name; empty for a manual pool"
+                  },
+                  "spec": {
+                    "type": "object",
+                    "properties": {
+                      "region": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "image": {
+                        "type": "string"
+                      },
+                      "sshKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "nodeCpu": {
+                        "type": "number"
+                      },
+                      "nodeMemoryMiB": {
+                        "type": "integer"
+                      },
+                      "autoscale": {
+                        "type": "boolean"
+                      },
+                      "headroom": {
+                        "type": "integer"
+                      },
+                      "scaleInBelow": {
+                        "type": "integer"
+                      },
+                      "scaleInAfter": {
+                        "type": "integer"
+                      },
+                      "pendingAfter": {
+                        "type": "integer"
+                      },
+                      "maxStep": {
+                        "type": "integer"
+                      },
+                      "joinTimeout": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "min": {
+                    "type": "integer"
+                  },
+                  "max": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodePool"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/node-pools/{pool}": {
+      "put": {
+        "operationId": "updateNodePool",
+        "tags": [
+          "nodepools"
+        ],
+        "summary": "Change a node pool",
+        "parameters": [
+          {
+            "name": "pool",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "description": "provider name; empty for a manual pool"
+                  },
+                  "spec": {
+                    "type": "object",
+                    "properties": {
+                      "region": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "image": {
+                        "type": "string"
+                      },
+                      "sshKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "nodeCpu": {
+                        "type": "number"
+                      },
+                      "nodeMemoryMiB": {
+                        "type": "integer"
+                      },
+                      "autoscale": {
+                        "type": "boolean"
+                      },
+                      "headroom": {
+                        "type": "integer"
+                      },
+                      "scaleInBelow": {
+                        "type": "integer"
+                      },
+                      "scaleInAfter": {
+                        "type": "integer"
+                      },
+                      "pendingAfter": {
+                        "type": "integer"
+                      },
+                      "maxStep": {
+                        "type": "integer"
+                      },
+                      "joinTimeout": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "min": {
+                    "type": "integer"
+                  },
+                  "max": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodePool"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteNodePool",
+        "tags": [
+          "nodepools"
+        ],
+        "summary": "Delete an empty node pool",
+        "parameters": [
+          {
+            "name": "pool",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/node-pools/{pool}/events": {
+      "get": {
+        "operationId": "listNodePoolEvents",
+        "tags": [
+          "nodepools"
+        ],
+        "summary": "Scaling history with reasons",
+        "parameters": [
+          {
+            "name": "pool",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "poolId": {
+                            "type": "string"
+                          },
+                          "at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/node-pools/{pool}/join-command": {
+      "post": {
+        "operationId": "createPoolJoinCommand",
+        "tags": [
+          "nodepools"
+        ],
+        "summary": "The one-line join for a manual pool (a 24-hour single-use token)",
+        "parameters": [
+          {
+            "name": "pool",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "command": {
+                      "type": "string"
+                    },
+                    "expiresIn": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/pool": {
+      "put": {
+        "operationId": "setNodePool",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Move a node into a pool, and protect it from scale-in",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pool": {
+                    "type": "string"
+                  },
+                  "scaleInProtected": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Node"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/edges": {
+      "get": {
+        "operationId": "listEdges",
+        "tags": [
+          "nodepools"
+        ],
+        "summary": "Edge nodes' Traefik replicas and their health; point public DNS at their addresses",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "nodeId": {
+                            "type": "string"
+                          },
+                          "node": {
+                            "type": "string"
+                          },
+                          "meshIp": {
+                            "type": "string"
+                          },
+                          "address": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "container": {
+                            "type": "string"
+                          },
+                          "checkedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -12475,6 +13154,161 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          }
+        }
+      },
+      "NodePool": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "worker",
+              "edge"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "spec": {
+            "type": "object",
+            "properties": {
+              "region": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "image": {
+                "type": "string"
+              },
+              "sshKeys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "nodeCpu": {
+                "type": "number"
+              },
+              "nodeMemoryMiB": {
+                "type": "integer"
+              },
+              "autoscale": {
+                "type": "boolean"
+              },
+              "headroom": {
+                "type": "integer"
+              },
+              "scaleInBelow": {
+                "type": "integer"
+              },
+              "scaleInAfter": {
+                "type": "integer"
+              },
+              "pendingAfter": {
+                "type": "integer"
+              },
+              "maxStep": {
+                "type": "integer"
+              },
+              "joinTimeout": {
+                "type": "integer"
+              }
+            }
+          },
+          "min": {
+            "type": "integer"
+          },
+          "max": {
+            "type": "integer"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "reservedPercent": {
+                  "type": "number"
+                },
+                "tasks": {
+                  "type": "integer"
+                },
+                "scaleInProtected": {
+                  "type": "boolean"
+                },
+                "draining": {
+                  "type": "boolean"
+                },
+                "address": {
+                  "type": "string"
+                },
+                "schedulable": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "poolId": {
+                  "type": "string"
+                },
+                "serverId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "nodeId": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "cpu": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "memory": {
+            "type": "array",
+            "items": {
+              "type": "integer"
             }
           }
         }

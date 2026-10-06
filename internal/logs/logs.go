@@ -123,7 +123,7 @@ func (s *Store) OnLogs(node store.Node, b *agentv1.LogBatch) {
 		s.log.Warn("node dropped log lines (buffer full)", "node", node.Name, "lines", n)
 	}
 	for _, l := range b.GetLines() {
-		if l.GetTaskId() == TraefikTaskID {
+		if l.GetTaskId() == TraefikTaskID || l.GetTaskId() == EdgeTraefikTaskID {
 			if line, ok := s.accessLine(node.Name, l.GetLine()); ok {
 				s.fanout(line)
 				select {

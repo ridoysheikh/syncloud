@@ -48,6 +48,14 @@ func (s *Store) ScrapeTraefik(ctx context.Context, metricsURL, edge string, name
 	}
 }
 
+// ScrapeTraefikOnce imports one scrape (edge nodes are scraped by their manager).
+func (s *Store) ScrapeTraefikOnce(ctx context.Context, metricsURL, edge string, names ServiceNames) error {
+	if s.url == "" {
+		return ErrDisabled
+	}
+	return s.scrapeOnce(ctx, metricsURL, edge, names)
+}
+
 func (s *Store) scrapeOnce(ctx context.Context, metricsURL, edge string, names ServiceNames) error {
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

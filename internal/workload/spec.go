@@ -69,6 +69,8 @@ type Placement struct {
 	Strategy string `json:"strategy"` // spread (default) | binpack
 	// Node pins tasks to one node by name (e.g. builds on the controller).
 	Node string `json:"node,omitempty"`
+	// Pools limits tasks to node pools ("default" is nodes outside any pool).
+	Pools []string `json:"pools,omitempty"`
 }
 
 var (

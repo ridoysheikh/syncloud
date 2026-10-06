@@ -11,7 +11,7 @@ export function Meter({ value, label, className }: { value: number; label?: stri
           style={{ width: `${v}%` }}
         />
       </div>
-      <span className="text-muted w-20 shrink-0 text-right font-mono tabular-nums">{label ?? `${v.toFixed(0)}%`}</span>
+      <span className="text-muted min-w-20 shrink-0 text-right font-mono whitespace-nowrap tabular-nums">{label ?? `${v.toFixed(0)}%`}</span>
     </div>
   );
 }

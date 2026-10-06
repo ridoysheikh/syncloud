@@ -28,6 +28,10 @@ type Node struct {
 	Schedulable bool
 	// Draining moves the node's tasks elsewhere.
 	Draining bool
+	// PoolID is the node pool ("" for none: the default pool).
+	PoolID string
+	// ScaleInProtected keeps the cluster autoscaler from removing the node.
+	ScaleInProtected bool
 }
 
 type JoinToken struct {
@@ -39,6 +43,10 @@ type JoinToken struct {
 	ExpiresAt   time.Time
 	SingleUse   bool
 	Uses        int
+	// PoolID puts nodes joining with the token in a pool; NodeName forces
+	// their name (servers created by a pool).
+	PoolID   string
+	NodeName string
 }
 
 var ErrNameTaken = errors.New("name already taken")
@@ -49,8 +57,8 @@ func (s *Store) CreateJoinToken(ctx context.Context, t JoinToken) error {
 		by = t.CreatedBy
 	}
 	_, err := s.W.ExecContext(ctx,
-		`INSERT INTO join_tokens (id, token_hash, description, created_by, created_at, expires_at, single_use) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.TokenHash, t.Description, by, t.CreatedAt.Unix(), t.ExpiresAt.Unix(), t.SingleUse)
+		`INSERT INTO join_tokens (id, token_hash, description, created_by, created_at, expires_at, single_use, pool_id, node_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.TokenHash, t.Description, by, t.CreatedAt.Unix(), t.ExpiresAt.Unix(), t.SingleUse, nullStr(t.PoolID), t.NodeName)
 	return err
 }
 
@@ -101,14 +109,20 @@ func (s *Store) JoinNode(ctx context.Context, tokenHash string, n Node, now time
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx,
-		`UPDATE join_tokens SET uses = uses + 1
-		 WHERE token_hash = ? AND expires_at > ? AND NOT (single_use AND uses > 0)`, tokenHash, now.Unix())
-	if err != nil {
+	var poolID sql.NullString
+	var forced string
+	err = tx.QueryRowContext(ctx, `SELECT pool_id, node_name FROM join_tokens WHERE token_hash = ? AND expires_at > ? AND NOT (single_use AND uses > 0)`,
+		tokenHash, now.Unix()).Scan(&poolID, &forced)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
 		return err
 	}
-	if c, _ := res.RowsAffected(); c == 0 {
-		return ErrNotFound
+	if forced != "" && forced != n.Name {
+		return ErrNameTaken
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE join_tokens SET uses = uses + 1 WHERE token_hash = ?`, tokenHash); err != nil {
+		return err
 	}
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM nodes WHERE name = ?`, n.Name).Scan(&exists); err != nil {
@@ -118,8 +132,8 @@ func (s *Store) JoinNode(ctx context.Context, tokenHash string, n Node, now time
 		return ErrNameTaken
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO nodes (id, name, status, info, cert_serial, created_at, status_at, schedulable) VALUES (?, ?, ?, '{}', ?, ?, ?, ?)`,
-		n.ID, n.Name, NodePending, n.CertSerial, n.CreatedAt.Unix(), n.CreatedAt.Unix(), n.Schedulable); err != nil {
+		`INSERT INTO nodes (id, name, status, info, cert_serial, created_at, status_at, schedulable, pool_id) VALUES (?, ?, ?, '{}', ?, ?, ?, ?, ?)`,
+		n.ID, n.Name, NodePending, n.CertSerial, n.CreatedAt.Unix(), n.CreatedAt.Unix(), n.Schedulable, poolID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -182,13 +196,13 @@ func (s *Store) DeleteNode(ctx context.Context, id string) error {
 	return nil
 }
 
-const nodeCols = `SELECT id, name, status, info, cert_serial, created_at, status_at, last_seen_at, schedulable, draining FROM nodes`
+const nodeCols = `SELECT id, name, status, info, cert_serial, created_at, status_at, last_seen_at, schedulable, draining, coalesce(pool_id, ''), scale_in_protected FROM nodes`
 
 func scanNode(r scanner) (Node, error) {
 	var n Node
 	var created, statusAt int64
 	var seen sql.NullInt64
-	err := r.Scan(&n.ID, &n.Name, &n.Status, &n.Info, &n.CertSerial, &created, &statusAt, &seen, &n.Schedulable, &n.Draining)
+	err := r.Scan(&n.ID, &n.Name, &n.Status, &n.Info, &n.CertSerial, &created, &statusAt, &seen, &n.Schedulable, &n.Draining, &n.PoolID, &n.ScaleInProtected)
 	n.CreatedAt, n.StatusAt, n.LastSeenAt = time.Unix(created, 0), time.Unix(statusAt, 0), nullTime(seen)
 	return n, err
 }
@@ -219,4 +233,16 @@ func (s *Store) NodeCertSerials(ctx context.Context, id string) (cur, prev strin
 func (s *Store) ConfirmNodeCert(ctx context.Context, id string) error {
 	_, err := s.W.ExecContext(ctx, `UPDATE nodes SET prev_cert_serial = '' WHERE id = ? AND prev_cert_serial != ''`, id)
 	return err
+}
+
+// SetNodePool moves a node into a pool ("" for none).
+func (s *Store) SetNodePool(ctx context.Context, id, poolID string, protected bool) error {
+	res, err := s.W.ExecContext(ctx, `UPDATE nodes SET pool_id = ?, scale_in_protected = ? WHERE id = ?`, nullStr(poolID), protected, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

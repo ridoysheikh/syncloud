@@ -18,6 +18,7 @@ import (
 	"syncloud/internal/certs"
 	"syncloud/internal/discovery"
 	"syncloud/internal/domain"
+	"syncloud/internal/edge"
 	"syncloud/internal/events"
 	"syncloud/internal/execrelay"
 	"syncloud/internal/fwstats"
@@ -26,6 +27,7 @@ import (
 	"syncloud/internal/logs"
 	"syncloud/internal/mesh"
 	"syncloud/internal/metrics"
+	"syncloud/internal/nodepool"
 	"syncloud/internal/nodes"
 	"syncloud/internal/pki"
 	"syncloud/internal/quota"
@@ -81,6 +83,8 @@ type Server struct {
 	fwStats               *fwstats.Stats
 	quotas                *quota.Manager
 	shell                 *shell.Manager
+	pools                 *nodepool.Manager
+	edges                 *edge.Manager
 	discovery             *discovery.Manager
 	traefik               *traefik.Provider
 	traefikExtras         *traefik.Extras
@@ -158,6 +162,8 @@ type Options struct {
 	FirewallStats    *fwstats.Stats
 	Quotas           *quota.Manager
 	Shell            *shell.Manager
+	Pools            *nodepool.Manager
+	Edges            *edge.Manager
 	Discovery        *discovery.Manager
 	Traefik          *traefik.Provider
 	TraefikExtras    *traefik.Extras
@@ -209,6 +215,8 @@ func New(o Options) *Server {
 		fwStats:               o.FirewallStats,
 		quotas:                o.Quotas,
 		shell:                 o.Shell,
+		pools:                 o.Pools,
+		edges:                 o.Edges,
 		discovery:             o.Discovery,
 		traefik:               o.Traefik,
 		traefikExtras:         o.TraefikExtras,
@@ -301,6 +309,17 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/sts/assume-role", h: s.handleAssumeRole},
 		{Method: "GET", Path: "/api/v1/audit", h: s.handleListAudit},
 		{Method: "GET", Path: "/api/v1/quotas", h: s.handleListQuotas},
+		{Method: "GET", Path: "/api/v1/cloud-providers", h: s.handleListProviders},
+		{Method: "POST", Path: "/api/v1/cloud-providers", h: s.handleCreateProvider},
+		{Method: "DELETE", Path: "/api/v1/cloud-providers/{id}", h: s.handleDeleteProvider},
+		{Method: "GET", Path: "/api/v1/node-pools", h: s.handleListNodePools},
+		{Method: "POST", Path: "/api/v1/node-pools", h: s.handleCreateNodePool},
+		{Method: "PUT", Path: "/api/v1/node-pools/{pool}", h: s.handleUpdateNodePool},
+		{Method: "DELETE", Path: "/api/v1/node-pools/{pool}", h: s.handleDeleteNodePool},
+		{Method: "GET", Path: "/api/v1/node-pools/{pool}/events", h: s.handleNodePoolEvents},
+		{Method: "POST", Path: "/api/v1/node-pools/{pool}/join-command", h: s.handlePoolJoinCommand},
+		{Method: "PUT", Path: "/api/v1/nodes/{id}/pool", h: s.handleSetNodePool},
+		{Method: "GET", Path: "/api/v1/edges", h: s.handleListEdges},
 		{Method: "GET", Path: "/api/v1/docs/cli", h: s.handleListCommands},
 		{Method: "POST", Path: "/api/v1/shell", h: s.handleStartShell},
 		{Method: "GET", Path: "/api/v1/shell", h: s.handleGetShell},

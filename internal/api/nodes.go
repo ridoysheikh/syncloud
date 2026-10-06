@@ -66,6 +66,9 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "join node", err)
 		return
 	}
+	if stored, err := s.store.NodeByID(r.Context(), n.ID); err == nil {
+		n = stored // the join token may have put it in a pool
+	}
 	s.nodes.Added(n)
 	s.audit(r, "", "node:Join", "srn:syncloud:node/"+nodeID, map[string]any{"name": req.Name})
 	s.log.Info("node joined", "node", req.Name, "id", nodeID)

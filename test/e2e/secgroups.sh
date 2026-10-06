@@ -150,12 +150,12 @@ synctl run service/worker -p billing -- wget -q -T 3 -O - "http://$(ips shop pro
 echo "  ✓ job runs get their service's groups (allowed to db, blocked from another project)"
 
 echo "== synctl"
-synctl sg list </dev/null | grep -q 'shop *db *2 *1 *production/db' || fail "synctl sg list: $(synctl sg list </dev/null)"
-synctl sg check billing/production/worker shop/production/db --port 5432 </dev/null | grep -q '^ALLOWED' || fail "synctl sg check"
-synctl sg service db -p shop </dev/null | grep -q 'in  tcp 5432 from service:billing/production/worker  (db)' || fail "synctl sg service"
-echo "$G" | synctl sg apply -p shop -f - --dry-run | grep -q '+ out all traffic to any' || fail "synctl sg apply --dry-run"
-synctl fw drops --since 1h </dev/null | grep -q 'shop/staging/web' || fail "synctl fw drops"
-synctl fw counters </dev/null | grep -q "$gid:in:1" || fail "synctl fw counters"
+out=$(synctl sg list </dev/null); grep -q 'shop *db *2 *1 *production/db' <<<"$out" || fail "synctl sg list: $(synctl sg list </dev/null)"
+out=$(synctl sg check billing/production/worker shop/production/db --port 5432 </dev/null); grep -q '^ALLOWED' <<<"$out" || fail "synctl sg check"
+out=$(synctl sg service db -p shop </dev/null); grep -q 'in  tcp 5432 from service:billing/production/worker  (db)' <<<"$out" || fail "synctl sg service"
+out=$(echo "$G" | synctl sg apply -p shop -f - --dry-run); grep -q '+ out all traffic to any' <<<"$out" || fail "synctl sg apply --dry-run"
+out=$(synctl fw drops --since 1h </dev/null); grep -q 'shop/staging/web' <<<"$out" || fail "synctl fw drops"
+out=$(synctl fw counters </dev/null); grep -q "$gid:in:1" <<<"$out" || fail "synctl fw counters"
 echo "  ✓ synctl sg list/check/service/apply --dry-run, fw drops/counters"
 
 echo "== deleting the group"

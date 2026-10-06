@@ -34,6 +34,7 @@ import {
 import { QuotaPage, QuotasPage } from "./quota/QuotasPage";
 import { ApiPage } from "./api/ApiPage";
 import { NodesPage } from "./compute/NodesPage";
+import { EdgeNodesPage, NodePoolPage, NodePoolsPage } from "./compute/NodePoolsPage";
 import { NewProjectPage, ProjectsPage } from "./projects/ProjectsPage";
 import { ProjectPage } from "./projects/ProjectPage";
 import { NewServiceWizard } from "./projects/NewServiceWizard";
@@ -94,7 +95,9 @@ export const modules: DashboardModule[] = [
       { path: "/compute/tasks", label: "Tasks", component: TasksPage },
       { path: "/compute/jobs", label: "Jobs", component: JobsPage },
       { path: "/compute/nodes", label: "Nodes", component: NodesPage },
-      { path: "/compute/node-pools", label: "Node Pools", component: planned(["Compute"], "Node Pools", "Phase 8", "§6.5", "Provider-backed pools and cluster autoscaling.") },
+      { path: "/compute/node-pools", label: "Node Pools", component: NodePoolsPage },
+      { path: "/compute/node-pools/new", label: "New node pool", component: NodePoolPage, hidden: true },
+      { path: "/compute/node-pools/$name", label: "Node pool", component: NodePoolPage, hidden: true },
     ],
   },
   {
@@ -107,7 +110,7 @@ export const modules: DashboardModule[] = [
       { path: "/network/routing", label: "Routing", component: RoutingPage },
       { path: "/network/routing/middlewares/new", label: "New middleware", component: MiddlewarePage, hidden: true },
       { path: "/network/routing/middlewares/$project/$name", label: "Middleware", component: MiddlewarePage, hidden: true },
-      { path: "/network/edge", label: "Edge Nodes", component: planned(["Network"], "Edge Nodes", "Phase 8", "§8.5", "Traefik replicas that keep public traffic flowing.") },
+      { path: "/network/edge", label: "Edge Nodes", component: EdgeNodesPage },
       { path: "/network/topology", label: "Topology", component: TopologyPage },
       { path: "/network/security-groups", label: "Security groups", component: SecurityGroupsPage },
       { path: "/network/security-groups/new", label: "New security group", component: SecurityGroupPage, hidden: true },

@@ -54,6 +54,11 @@ type Manager struct {
 	OnTaskChange func()
 	// AdmitCount checks a count quota (domains) before adding one.
 	AdmitCount func(ctx context.Context, envID, what string) error
+	unplacedMu sync.Mutex
+	unplaced   map[string]Unplaced
+	// NodePool names a node's pool and its role ("" and "worker" for nodes
+	// outside any pool); edge nodes only run tasks that ask for their pool.
+	NodePool func(nodeID string) (pool, role string)
 	// Admit checks a change against quotas (§7.2); nil admits everything.
 	Admit func(ctx context.Context, req AdmitRequest) error
 	// Reachable reports whether the controller can reach a task over the
@@ -300,6 +305,9 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 
 	// Start missing tasks, up to 200% of desired while old tasks drain (§5.4).
 	missing := desired - len(current)
+	if missing <= 0 {
+		m.trackUnplaced(sv.ID, spec, 0, "", now)
+	}
 	if missing > 0 {
 		if wait := m.backoff(sv.ID, now); wait > 0 {
 			status = fmt.Sprintf("tasks keep failing; next attempt in %s", wait.Round(time.Second))
@@ -309,6 +317,8 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			if len(old) == 0 {
 				room = missing
 			}
+			placed := 0
+			defer func() { m.trackUnplaced(sv.ID, spec, missing-placed, status, now) }()
 			for range min(missing, room) {
 				nodeID, why := m.place(ctx, spec, sv.ID)
 				if nodeID == "" {
@@ -316,6 +326,7 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 					m.enqueueAfter(sv.ID, 15*time.Second)
 					break
 				}
+				placed++
 				t := store.Task{ID: auth.NewID(TaskIDPrefix), ServiceID: sv.ID, Revision: sv.Revision, NodeID: nodeID,
 					Desired: "running", State: store.TaskPending, CreatedAt: now.Truncate(time.Second)}
 				if err := m.st.CreateTask(ctx, t); err != nil {
@@ -427,6 +438,66 @@ func (m *Manager) serving(ctx context.Context, t store.Task) bool {
 	return spec.Health == nil || t.Health == "healthy"
 }
 
+// poolAllows applies placement pools: tasks run in the listed pools, or in
+// any worker pool when none is listed (edge pools only when named).
+func (m *Manager) poolAllows(nodeID string, pools []string) bool {
+	pool, role := "default", "worker"
+	if m.NodePool != nil {
+		if p, r := m.NodePool(nodeID); p != "" {
+			pool, role = p, r
+		}
+	}
+	if len(pools) == 0 {
+		return role != "edge"
+	}
+	for _, p := range pools {
+		if p == pool {
+			return true
+		}
+	}
+	return false
+}
+
+// Unplaced is demand the cluster cannot place: tasks a service is missing
+// because no node has room (the cluster autoscaler's signal, §6.5).
+type Unplaced struct {
+	ServiceID string
+	Count     int
+	CPU       float64 // per task
+	MemoryMiB int
+	Pools     []string
+	Since     time.Time
+}
+
+func (m *Manager) trackUnplaced(serviceID string, spec Spec, count int, status string, now time.Time) {
+	m.unplacedMu.Lock()
+	defer m.unplacedMu.Unlock()
+	if m.unplaced == nil {
+		m.unplaced = map[string]Unplaced{}
+	}
+	if count <= 0 || !strings.HasPrefix(status, "cannot place task") {
+		delete(m.unplaced, serviceID)
+		return
+	}
+	u, ok := m.unplaced[serviceID]
+	if !ok {
+		u.Since = now
+	}
+	u.ServiceID, u.Count, u.CPU, u.MemoryMiB, u.Pools = serviceID, count, spec.Resources.CPU, spec.Resources.Memory, spec.Placement.Pools
+	m.unplaced[serviceID] = u
+}
+
+// UnplacedDemand lists services waiting for capacity.
+func (m *Manager) UnplacedDemand() []Unplaced {
+	m.unplacedMu.Lock()
+	defer m.unplacedMu.Unlock()
+	out := make([]Unplaced, 0, len(m.unplaced))
+	for _, u := range m.unplaced {
+		out = append(out, u)
+	}
+	return out
+}
+
 // pickVictim prefers tasks that are not running yet, then the newest.
 func pickVictim(ts []store.Task) int {
 	best := 0
@@ -520,6 +591,8 @@ func (m *Manager) place(ctx context.Context, spec Spec, serviceID string) (strin
 			c.Eligible, c.Why = false, "network not ready"
 		case spec.Placement.Node != "" && n.Name != spec.Placement.Node:
 			c.Eligible, c.Why = false, "not the pinned node"
+		case !m.poolAllows(n.ID, spec.Placement.Pools):
+			c.Eligible, c.Why = false, "in another node pool"
 		}
 		cands = append(cands, c)
 	}
