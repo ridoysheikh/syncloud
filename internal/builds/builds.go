@@ -217,6 +217,33 @@ func (m *Manager) SetSource(ctx context.Context, sv store.Service, in Source) (S
 	return m.view(saved), nil
 }
 
+// SourceSummary is a Git source with the service it builds.
+type SourceSummary struct {
+	Source
+	Project     string `json:"project"`
+	Environment string `json:"environment"`
+	Service     string `json:"service"`
+}
+
+// ListSources returns every Git source with its service.
+func (m *Manager) ListSources(ctx context.Context) ([]SourceSummary, error) {
+	gs, err := m.st.ListGitSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SourceSummary, 0, len(gs))
+	for _, g := range gs {
+		sv, err := m.st.ServiceByID(ctx, g.ServiceID)
+		if err != nil {
+			continue
+		}
+		v := m.view(g)
+		v.Secret = "" // shown on the service page only
+		out = append(out, SourceSummary{Source: v, Project: sv.Project, Environment: sv.Environment, Service: sv.Name})
+	}
+	return out, nil
+}
+
 func (m *Manager) GetSource(ctx context.Context, serviceID string) (Source, error) {
 	g, err := m.st.GitSourceByService(ctx, serviceID)
 	if err != nil {

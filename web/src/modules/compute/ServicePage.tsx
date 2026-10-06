@@ -66,7 +66,12 @@ export function ServicePage() {
     (s) => s.project === project && s.environment === env && s.name === name,
   );
   const path = servicePath({ project, environment: env, name });
-  const [tab, setTab] = useState<Tab>("metrics");
+  // ?tab=builds (links from the builds and sources lists) opens that tab.
+  const [tab, setTab] = useState<Tab>(
+    () =>
+      (new URLSearchParams(window.location.search).get("tab") as Tab | null) ??
+      "metrics",
+  );
 
   const scale = useMutation({
     mutationFn: (n: number) =>

@@ -33,6 +33,7 @@ import { BackupsPage } from "./settings/BackupsPage";
 import { TopologyPage } from "./network/TopologyPage";
 import { FirewallPage } from "./network/FirewallPage";
 import { LogsPage } from "./logs/LogsPage";
+import { BuildsPage, GitSourcesPage } from "./git/GitPages";
 
 /** The module registry. The side nav and routes are built from this list. */
 export const modules: DashboardModule[] = [
@@ -116,8 +117,8 @@ export const modules: DashboardModule[] = [
     icon: GitBranch,
     order: 60,
     pages: [
-      { path: "/git/sources", label: "Sources", component: planned(["Git & Builds"], "Git sources", "Phase 4", "§5.8", "GitHub, GitLab, Gitea and generic Git, with webhooks and polling.") },
-      { path: "/git/builds", label: "Builds", component: planned(["Git & Builds"], "Builds", "Phase 4", "§5.8", "Build queue, live build logs and history.") },
+      { path: "/git/sources", label: "Sources", component: GitSourcesPage },
+      { path: "/git/builds", label: "Builds", component: BuildsPage },
     ],
   },
   {

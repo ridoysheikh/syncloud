@@ -175,7 +175,34 @@ func (a *app) buildsCmd() *cobra.Command {
 	run.Flags().StringVar(&ref, "ref", "", "branch or tag whose head to build (default: the source's branch)")
 	run.Flags().BoolVarP(&wait, "wait", "w", false, "stream the build log and fail if the build fails")
 
-	b.AddCommand(set, list, run,
+	sources := &cobra.Command{
+		Use: "sources", Short: "List every Git source and the service it builds", Args: cobra.NoArgs,
+		Annotations: op("listGitSources"),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			ss, err := c.ListGitSources(ctx(cmd))
+			if err != nil {
+				return err
+			}
+			rows := make([][]string, 0, len(ss))
+			for _, x := range ss {
+				watch := x.Branch
+				if x.Tags != "" {
+					watch += " +tags " + x.Tags
+				}
+				status := "ok"
+				if x.LastError != "" {
+					status = x.LastError
+				}
+				rows = append(rows, []string{x.Project + "/" + x.Environment + "/" + x.Service, x.URL, watch, orDash(x.Builder), ago(x.LastCheckedAt), status})
+			}
+			return a.printer().table(ss, []string{"SERVICE", "REPOSITORY", "WATCHING", "BUILDER", "CHECKED", "STATUS"}, rows)
+		},
+	}
+	b.AddCommand(set, list, run, sources,
 		&cobra.Command{
 			Use: "source SERVICE", Short: "Show a service's Git source and webhook", Args: cobra.ExactArgs(1),
 			Annotations: op("getGitSource"),

@@ -4165,6 +4165,35 @@
           }
         }
       }
+    },
+    "/api/v1/git/sources": {
+      "get": {
+        "operationId": "listGitSources",
+        "tags": [
+          "builds"
+        ],
+        "summary": "Every Git source with the service it builds (webhook secrets are only on the service)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GitSourceSummary"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6610,6 +6639,27 @@
             "type": "string"
           }
         }
+      },
+      "GitSourceSummary": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/GitSource"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "project": {
+                "type": "string"
+              },
+              "environment": {
+                "type": "string"
+              },
+              "service": {
+                "type": "string"
+              }
+            }
+          }
+        ]
       }
     }
   }

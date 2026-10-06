@@ -936,6 +936,19 @@ type Build struct {
 	FinishedAt  *time.Time `json:"finishedAt"`
 }
 
+// GitSourceSummary is a Git source with the service it builds.
+type GitSourceSummary struct {
+	GitSource
+	Project     string `json:"project"`
+	Environment string `json:"environment"`
+	Service     string `json:"service"`
+}
+
+func (c *Client) ListGitSources(ctx context.Context) ([]GitSourceSummary, error) {
+	var out list[GitSourceSummary]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/git/sources", nil, &out)
+}
+
 func (c *Client) GetGitSource(ctx context.Context, project, env, service string) (GitSource, error) {
 	var out GitSource
 	return out, c.Do(ctx, "GET", svcPath(project, env, service)+"/git", nil, &out)

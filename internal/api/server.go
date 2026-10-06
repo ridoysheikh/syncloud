@@ -267,6 +267,7 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/builds", h: s.handleServiceBuilds},
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/builds", h: s.handleStartBuild},
 		{Method: "GET", Path: "/api/v1/builds", h: s.handleRecentBuilds},
+		{Method: "GET", Path: "/api/v1/git/sources", h: s.handleListGitSources},
 		{Method: "POST", Path: "/api/v1/builds/{id}/deploy", h: s.handleDeployBuild},
 		{Method: "POST", Path: "/api/v1/hooks/git/{id}", Public: true, h: s.handleGitWebhook},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/jobs", h: s.handleListJobs},

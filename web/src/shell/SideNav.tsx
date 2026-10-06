@@ -64,6 +64,10 @@ function Group({
   const pages = m.pages.filter((p) => !p.hidden);
   const Icon = m.icon;
   const groupActive = pages.some((p) => isActive(p.path, current));
+  // Only the most specific match is highlighted (/registry vs /registry/repos).
+  const best = pages
+    .filter((p) => isActive(p.path, current))
+    .sort((a, b) => b.path.length - a.path.length)[0];
 
   // A module with a single page is a plain link.
   if (pages.length === 1) {
@@ -84,7 +88,7 @@ function Group({
       </button>
       {open &&
         pages.map((p) => (
-          <Link key={p.path} to={p.path} className={cn(itemClass(isActive(p.path, current)), "pl-9.5")}>
+          <Link key={p.path} to={p.path} className={cn(itemClass(p === best), "pl-9.5")}>
             <span className="truncate">{p.label}</span>
           </Link>
         ))}

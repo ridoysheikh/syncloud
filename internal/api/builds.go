@@ -159,6 +159,18 @@ func (s *Server) handleStartBuild(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, s.buildViews(r, []store.Build{b})[0])
 }
 
+func (s *Server) handleListGitSources(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBuilds(w) {
+		return
+	}
+	out, err := s.builds.ListSources(r.Context())
+	if err != nil {
+		s.internalError(w, "list git sources", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
 func (s *Server) handleRecentBuilds(w http.ResponseWriter, r *http.Request) {
 	if !s.requireBuilds(w) {
 		return

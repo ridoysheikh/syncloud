@@ -1294,8 +1294,12 @@ Because there is only one controller:
 - **Jobs** (§5.11): one-off tasks, scheduled jobs, pre/post-deploy hooks.
 - Deployment timeline UI and events.
 
-### Phase 4: Git, Build and Registry (3 wks)
+### Phase 4: Git, Build and Registry (3 wks) — ✅ done 2026-10-06 (GitHub App, GitLab/Gitea OAuth, commit statuses, SSH deploy keys, per-branch target environments and Trivy move to "Later")
 **Progress**
+- ✅ Phase 4 close-out (2026-10-06):
+  - **Git & Builds pages** replace their placeholders: Sources (every Git source with its service, watch rule, builder, trigger and last check or error; API `GET /git/sources`, synctl `builds sources`) and Builds (recent builds of every service with logs, Deploy and Cancel, and counts). Service links open the service's Builds tab (`?tab=builds`).
+  - **Cancel** a running build from the dashboard (cancels its job run).
+  - The side nav highlights only the most specific page (`/registry` no longer stays lit on `/registry/repos`).
 - ✅ Slice 4a (2026-10-06), registry for deployments:
   - `@registry/<repo>:<tag>` in a task definition resolves to the registry host (`registry.<base-domain>`, or `--registry-pull-host`). The node gets a **pull-only bearer token for that repository** (30 min, `X-Registry-Auth` `registrytoken`), excluded from the spec hash so rotating tokens never recreate containers. Nodes need no `docker login`.
   - **Registry browser**: the controller reads the registry with tokens it issues to itself. It lists repositories (paginated catalog, empty ones hidden) and images (tag, digest, compressed size, platforms from the index or config, created time) and deletes tags (by manifest digest). API `/registry/info|repositories|images`; synctl `registry info|repos|images|delete`; the Registry dashboard (counts and copyable push commands) and Repositories pages.

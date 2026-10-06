@@ -9,10 +9,12 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { LogsView } from "@/modules/logs/LogsView";
+import { Link } from "@tanstack/react-router";
+import { serviceUrl } from "@/lib/workloads";
 
-type Builder = "auto" | "dockerfile" | "nixpacks" | "static";
+export type Builder = "auto" | "dockerfile" | "nixpacks" | "static";
 
-interface GitSource {
+export interface GitSource {
   url: string;
   branch: string;
   tags: string;
@@ -31,8 +33,11 @@ interface GitSource {
   lastError: string;
 }
 
-interface Build {
+export interface Build {
   id: string;
+  project: string;
+  environment: string;
+  service: string;
   sha: string;
   ref: string;
   trigger: string;
@@ -54,7 +59,7 @@ const buildTone = {
   skipped: "neutral",
 } as const;
 
-const builderLabel: Record<Builder, string> = {
+export const builderLabel: Record<Builder, string> = {
   auto: "Automatic: Dockerfile, else Nixpacks, else static",
   dockerfile: "Dockerfile",
   nixpacks: "Nixpacks (no Dockerfile needed)",
@@ -362,9 +367,10 @@ function SourcePanel({ path, src }: { path: string; src: GitSource }) {
                   : src.dockerfile}
               </span>
             )}
-          {src.builder !== "dockerfile" && src.context && (
-            <span className="text-muted font-mono"> · in {src.context}</span>
-          )}
+          {(src.builder === "nixpacks" || src.builder === "static") &&
+            src.context && (
+              <span className="text-muted font-mono"> · in {src.context}</span>
+            )}
         </dd>
         <dt className="text-muted">Deploys</dt>
         <dd>{src.autoDeploy ? "automatically" : "by hand"}</dd>
@@ -401,34 +407,54 @@ function SourcePanel({ path, src }: { path: string; src: GitSource }) {
   );
 }
 
+/** Polls faster while a build is queued or running. */
+export const buildsRefetch = (q: { state: { data?: Build[] } }) =>
+  q.state.data?.some((b) => b.status === "queued" || b.status === "building")
+    ? 2000
+    : 10_000;
+
 function BuildList({ path }: { path: string }) {
-  const qc = useQueryClient();
-  const [open, setOpen] = useState<string>();
   const { data = [], isLoading } = useQuery({
     queryKey: ["builds", path],
     queryFn: async () =>
       (await api<{ items: Build[] }>("GET", `${path}/builds`)).items,
-    refetchInterval: (q) =>
-      q.state.data?.some(
-        (b) => b.status === "queued" || b.status === "building",
-      )
-        ? 2000
-        : 10_000,
+    refetchInterval: buildsRefetch,
   });
+  return <BuildsTable builds={data} loading={isLoading} />;
+}
+
+/** Builds with their logs, Deploy and Cancel; showService for cluster-wide lists. */
+export function BuildsTable({
+  builds: data,
+  loading: isLoading,
+  showService,
+}: {
+  builds: Build[];
+  loading: boolean;
+  showService?: boolean;
+}) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState<string>();
   const deploy = useMutation({
     mutationFn: (id: string) => api("POST", `/builds/${id}/deploy`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["builds", path] });
+      qc.invalidateQueries({ queryKey: ["builds"] });
       qc.invalidateQueries({ queryKey: ["services"] });
     },
+  });
+  const cancel = useMutation({
+    mutationFn: (runId: string) => api("POST", `/runs/${runId}/cancel`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["builds"] }),
   });
   const shown = data.find((b) => b.id === open);
   return (
     <>
       <Panel title="Builds" flush>
-        {deploy.error && (
+        {(deploy.error || cancel.error) && (
           <div className="p-2">
-            <Alert>{errText(deploy.error, "Deploy failed")}</Alert>
+            <Alert>
+              {errText(deploy.error ?? cancel.error, "Request failed")}
+            </Alert>
           </div>
         )}
         <DataTable
@@ -442,6 +468,29 @@ function BuildList({ path }: { path: string }) {
             )
           }
           columns={[
+            ...(showService
+              ? [
+                  {
+                    header: "Service",
+                    cell: (b: Build) => {
+                      const to: string = serviceUrl({
+                        project: b.project,
+                        environment: b.environment,
+                        name: b.service,
+                      });
+                      return (
+                        <Link
+                          to={to}
+                          search={{ tab: "builds" } as never}
+                          className="hover:text-accent whitespace-nowrap"
+                        >
+                          {b.project}/{b.environment}/{b.service}
+                        </Link>
+                      );
+                    },
+                  },
+                ]
+              : []),
             {
               header: "Commit",
               cell: (b) => (
@@ -501,6 +550,18 @@ function BuildList({ path }: { path: string }) {
                       onClick={() => setOpen(open === b.id ? undefined : b.id)}
                     >
                       {open === b.id ? "Hide log" : "Log"}
+                    </Button>
+                  )}
+                  {b.status === "building" && b.runId && (
+                    <Button
+                      variant="ghost"
+                      disabled={cancel.isPending}
+                      onClick={() =>
+                        confirm(`Cancel the build of ${b.sha.slice(0, 12)}?`) &&
+                        cancel.mutate(b.runId)
+                      }
+                    >
+                      Cancel
                     </Button>
                   )}
                   {b.status === "succeeded" && (
