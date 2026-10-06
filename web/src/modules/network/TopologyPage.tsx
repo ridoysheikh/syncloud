@@ -10,6 +10,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { ThroughputPanels } from "./IpamPage";
 
 interface MeshPeer {
   nodeId: string;
@@ -118,6 +119,7 @@ export function TopologyPage() {
           )
         )}
       </Panel>
+      <ThroughputPanels />
       <Panel title="Members" flush>
         <DataTable
           rows={items}

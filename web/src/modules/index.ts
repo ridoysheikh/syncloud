@@ -31,7 +31,10 @@ import { PlatformPage } from "./settings/PlatformPage";
 import { DomainsPage } from "./settings/DomainsPage";
 import { BackupsPage } from "./settings/BackupsPage";
 import { TopologyPage } from "./network/TopologyPage";
-import { FirewallPage } from "./network/FirewallPage";
+import { FirewallPage, FirewallPolicyPage } from "./network/FirewallPage";
+import { SecurityGroupPage, SecurityGroupsPage } from "./network/SecurityGroups";
+import { IpamPage } from "./network/IpamPage";
+import { MiddlewarePage, RoutingPage } from "./network/RoutingPage";
 import { LogsPage } from "./logs/LogsPage";
 import { TrafficPage } from "./traffic/Traffic";
 import { AlertsPage } from "./monitoring/AlertsPage";
@@ -82,10 +85,18 @@ export const modules: DashboardModule[] = [
     order: 20,
     pages: [
       { path: "/network/traffic", label: "Traffic", component: TrafficPage },
+      { path: "/network/routing", label: "Routing", component: RoutingPage },
+      { path: "/network/routing/middlewares/new", label: "New middleware", component: MiddlewarePage, hidden: true },
+      { path: "/network/routing/middlewares/$project/$name", label: "Middleware", component: MiddlewarePage, hidden: true },
       { path: "/network/edge", label: "Edge Nodes", component: planned(["Network"], "Edge Nodes", "Phase 8", "§8.5", "Traefik replicas that keep public traffic flowing.") },
       { path: "/network/topology", label: "Topology", component: TopologyPage },
+      { path: "/network/security-groups", label: "Security groups", component: SecurityGroupsPage },
+      { path: "/network/security-groups/new", label: "New security group", component: SecurityGroupPage, hidden: true },
+      { path: "/network/security-groups/$project/$group", label: "Security group", component: SecurityGroupPage, hidden: true },
       { path: "/network/firewall", label: "Firewall", component: FirewallPage },
-      { path: "/network/ipam", label: "IPAM & DNS", component: planned(["Network"], "IPAM & DNS", "Phase 1", "§8.1–8.2, §8.6", "Subnets, service VIPs, task IPs and internal DNS.") },
+      { path: "/network/firewall/policies/new", label: "New host policy", component: FirewallPolicyPage, hidden: true },
+      { path: "/network/firewall/policies/$id", label: "Host policy", component: FirewallPolicyPage, hidden: true },
+      { path: "/network/ipam", label: "IPAM & DNS", component: IpamPage },
     ],
   },
   {

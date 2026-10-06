@@ -76,6 +76,7 @@ func (a *app) firewallCmd() *cobra.Command {
 	apply.Flags().StringVarP(&file, "file", "f", "", "policy JSON file, or - for stdin")
 	_ = apply.MarkFlagRequired("file")
 
+	fw.AddCommand(a.firewallVisibilityCmds()...)
 	fw.AddCommand(
 		&cobra.Command{
 			Use: "list", Aliases: []string{"ls"}, Short: "List policies", Args: cobra.NoArgs,

@@ -86,6 +86,11 @@ var chainIDRE = regexp.MustCompile(`^[a-z0-9]{1,40}$`)
 // (after a rollback the agent renders the last confirmed firewall). svcs are
 // the service VIPs to load-balance (§8.6).
 func Render(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall, svcs []*agentv1.VirtualService) (string, error) {
+	return RenderWith(cfg, fw, svcs, nil)
+}
+
+// RenderWith also enforces security groups when sec is set (§8.3).
+func RenderWith(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall, svcs []*agentv1.VirtualService, sec *Security) (string, error) {
 	var b strings.Builder
 	internal := strings.Join([]string{cfg.GetMeshCidr(), cfg.GetContainerCidr(), cfg.GetServiceCidr()}, ", ")
 	// "ip syncloud" was the table name before the host firewall existed.
@@ -125,7 +130,16 @@ func Render(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall, svcs []*agentv1.Vi
 				b.WriteString("\t\t" + l + "\n")
 			}
 		}
+		fmt.Fprintf(&b, "\t\tmeta l4proto { tcp, udp } update @%s { ip saddr . meta l4proto . th dport }\n", SetHostDrops)
 		b.WriteString("\t\tcounter drop comment \"default deny\"\n\t}\n")
+		writeDropSet(&b, SetHostDrops, "ipv4_addr . inet_proto . inet_service")
+	}
+	secForward := ""
+	if sec != nil && sec.Policy != nil {
+		var err error
+		if secForward, err = renderSecurity(&b, cfg, sec); err != nil {
+			return "", err
+		}
 	}
 
 	if err := renderServices(&b, cfg.GetServiceCidr(), svcs); err != nil {
@@ -138,7 +152,7 @@ func Render(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall, svcs []*agentv1.Vi
 		# A VIP still addressed here has no running backend: fail fast.
 		ip daddr %[6]s meta l4proto tcp reject with tcp reset
 		ip daddr %[6]s reject
-	}
+%[8]s	}
 	chain postrouting {
 		type nat hook postrouting priority srcnat + 10; policy accept;
 		meta mark & %[7]s == %[7]s masquerade comment "VIP hairpin"
@@ -146,7 +160,7 @@ func Render(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall, svcs []*agentv1.Vi
 		ip saddr %[4]s ip daddr != { %[5]s } oifname != "%[3]s" masquerade
 	}
 }
-`, cfg.GetContainerCidr(), Interface, Bridge, cfg.GetContainerSubnet(), internal, cfg.GetServiceCidr(), hairpinMark)
+`, cfg.GetContainerCidr(), Interface, Bridge, cfg.GetContainerSubnet(), internal, cfg.GetServiceCidr(), hairpinMark, secForward)
 	return b.String(), nil
 }
 

@@ -99,6 +99,14 @@ export function TasksTable({
                     {t.error}
                   </span>
                 )}
+                {t.central === "unreachable" && (
+                  <span
+                    className="text-warn max-w-xs truncate"
+                    title={`The controller cannot reach this task over the private network (${t.centralError ?? ""}); Traefik routes around it.`}
+                  >
+                    unreachable from controller
+                  </span>
+                )}
               </div>
             ),
           },

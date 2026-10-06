@@ -113,6 +113,9 @@ func (s *Store) CreateProject(ctx context.Context, p Project, env Environment) e
 		env.ID, p.ID, env.Name, env.CreatedAt.Unix()); err != nil {
 		return err
 	}
+	if err := createDefaultGroup(ctx, tx, "sg_"+randHex(8), p.ID, p.CreatedAt); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

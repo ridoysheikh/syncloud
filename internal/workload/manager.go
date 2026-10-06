@@ -52,6 +52,9 @@ type Manager struct {
 	OnChange func()
 	// OnTaskChange runs whenever a task's state changes (service directory).
 	OnTaskChange func()
+	// Reachable reports whether the controller can reach a task over the
+	// private network (§5.6); routes leave out tasks it cannot.
+	Reachable func(taskID string) bool
 	// DNS returns the resolver and search domains for a task on a node
 	// (nil before the node's private network exists).
 	DNS func(nodeID string, sv store.Service) (servers, search []string)
@@ -657,6 +660,22 @@ func stateOf(s agentv1.TaskState) string {
 	return store.TaskPending
 }
 
+// recordAddress keeps the IP history (§8.2).
+func (m *Manager) recordAddress(ctx context.Context, t store.Task, prevIP, nodeID string, now time.Time) {
+	switch {
+	case t.IP != "" && t.IP != prevIP:
+		owner := t.ServiceID
+		if sv, err := m.st.ServiceByID(ctx, t.ServiceID); err == nil {
+			owner = sv.Project + "/" + sv.Environment + "/" + sv.Name
+		}
+		if err := m.st.AssignAddress(ctx, t.IP, t.ID, owner, nodeID, now); err != nil {
+			m.log.Warn("record address", "task", t.ID, "err", err)
+		}
+	case t.IP == "" && prevIP != "":
+		_ = m.st.ReleaseAddress(ctx, t.ID, now)
+	}
+}
+
 func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
 	if !strings.HasPrefix(s.GetTaskId(), TaskIDPrefix) {
 		return
@@ -687,6 +706,7 @@ func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
 	if t.Desired == "stopped" && state == store.TaskStopped && (t.State == store.TaskExited || t.State == store.TaskFailed) {
 		return // removing a dead container: keep why the task failed
 	}
+	prevIP := t.IP
 	t.State, t.IP, t.Health, t.ExitCode, t.Error, t.UpdatedAt = state, s.GetIp(), s.GetHealth(), int(s.GetExitCode()), s.GetError(), now
 	if s.GetContainerId() != "" {
 		t.ContainerID = s.GetContainerId()
@@ -705,6 +725,7 @@ func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
 		m.log.Error("update task", "task", t.ID, "err", err)
 		return
 	}
+	m.recordAddress(ctx, t, prevIP, node.ID, now)
 	m.routesDirty()
 	if m.OnTaskChange != nil {
 		m.OnTaskChange()

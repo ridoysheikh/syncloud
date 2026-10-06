@@ -246,6 +246,12 @@ type ContainerSummary struct {
 	Image  string            `json:"Image"`
 	State  string            `json:"State"` // created, running, exited, …
 	Labels map[string]string `json:"Labels"`
+	// NetworkSettings holds each network's address (running containers).
+	NetworkSettings *struct {
+		Networks map[string]struct {
+			IPAddress string `json:"IPAddress"`
+		} `json:"Networks"`
+	} `json:"NetworkSettings"`
 }
 
 // List returns all containers (running or not) that have every given label.

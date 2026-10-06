@@ -79,8 +79,9 @@ type Registry struct {
 	log *slog.Logger
 	now func() time.Time
 
-	mu    sync.Mutex
-	nodes map[string]*live
+	mu      sync.Mutex
+	nodes   map[string]*live
+	started time.Time // when Load ran: timeouts count from here at the earliest
 }
 
 func NewRegistry(st *store.Store, bus *events.Bus, log *slog.Logger) *Registry {
@@ -89,7 +90,10 @@ func NewRegistry(st *store.Store, bus *events.Bus, log *slog.Logger) *Registry {
 
 // Load fills the registry from SQLite at startup. Every node starts
 // disconnected; heartbeat timeouts then apply from each node's last-seen time,
-// so nodes that don't reconnect go Suspect and then Not ready.
+// so nodes that don't reconnect go Suspect and then Not ready. The stored
+// last-seen time is only written on transitions, and agents need a moment to
+// reconnect, so timeouts count from the controller's start at the earliest:
+// restarting the controller never reschedules tasks.
 func (r *Registry) Load(ctx context.Context) error {
 	list, err := r.st.ListNodes(ctx)
 	if err != nil {
@@ -97,6 +101,7 @@ func (r *Registry) Load(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.started = r.now()
 	for _, n := range list {
 		v := View{ID: n.ID, Name: n.Name, Status: n.Status, StatusAt: n.StatusAt.UTC(), LastSeenAt: n.LastSeenAt, CreatedAt: n.CreatedAt.UTC(), Schedulable: n.Schedulable, Draining: n.Draining}
 		_ = json.Unmarshal([]byte(n.Info), &v.Info)
@@ -241,6 +246,9 @@ func (r *Registry) checkTimeouts(ctx context.Context) {
 			continue
 		}
 		since := now.Sub(*l.view.LastSeenAt)
+		if s := now.Sub(r.started); !r.started.IsZero() && s < since {
+			since = s
+		}
 		next := l.view.Status
 		switch {
 		case since >= NotReadyAfter:

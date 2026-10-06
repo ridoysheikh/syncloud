@@ -61,3 +61,25 @@ func (s *Server) handleEnvironmentMetrics(w http.ResponseWriter, r *http.Request
 	}
 	s.writeMetrics(w, r, metrics.Scope{Project: r.PathValue("project"), Environment: e.Name}, rng)
 }
+
+// handleNetworkThroughput charts node and mesh throughput and ranks the
+// busiest services and tasks (§8.4).
+func (s *Server) handleNetworkThroughput(w http.ResponseWriter, r *http.Request) {
+	rng, ok := metricsRange(w, r)
+	if !ok {
+		return
+	}
+	if s.metrics == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "metrics are not enabled")
+		return
+	}
+	res, err := s.metrics.Network(r.Context(), metrics.Ranges[rng], s.now())
+	if errors.Is(err, metrics.ErrDisabled) {
+		writeError(w, http.StatusNotFound, CodeNotFound, err.Error())
+		return
+	} else if err != nil {
+		writeError(w, http.StatusServiceUnavailable, CodeInternal, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}

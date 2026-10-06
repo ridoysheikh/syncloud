@@ -5,8 +5,10 @@ package traefik
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 )
 
 // Dynamic is the subset of Traefik's dynamic configuration we generate.
@@ -49,6 +51,12 @@ type Middleware struct {
 	RedirectScheme *RedirectScheme `json:"redirectScheme,omitempty"`
 	RedirectRegex  *RedirectRegex  `json:"redirectRegex,omitempty"`
 	Retry          *Retry          `json:"retry,omitempty"`
+	RateLimit      *RateLimit      `json:"rateLimit,omitempty"`
+	BasicAuth      *BasicAuth      `json:"basicAuth,omitempty"`
+	IPAllowList    *IPAllowList    `json:"ipAllowList,omitempty"`
+	Headers        *Headers        `json:"headers,omitempty"`
+	Compress       *Compress       `json:"compress,omitempty"`
+	CircuitBreaker *CircuitBreaker `json:"circuitBreaker,omitempty"`
 }
 
 type Retry struct {
@@ -61,6 +69,10 @@ type ServiceRoute struct {
 	Name    string
 	Host    string
 	Servers []string
+	// Middlewares are attached presets, in the order to apply them. With
+	// OwnRetry set, one of them replaces the default retry.
+	Middlewares []string
+	OwnRetry    bool
 }
 
 type RedirectScheme struct {
@@ -102,6 +114,11 @@ type Provider struct {
 	Certificates func() []Certificate
 	// ServiceRoutes returns the routes of user services.
 	ServiceRoutes func() []ServiceRoute
+	// Middlewares returns the preset middlewares routes refer to.
+	Middlewares func() map[string]Middleware
+	// Custom returns the validated raw configuration merged into the
+	// generated one ("Advanced", §5.7).
+	Custom func() map[string]any
 }
 
 const (
@@ -129,17 +146,26 @@ func (p *Provider) Config() Dynamic {
 		// Retry on another task when one fails mid-request (idempotent requests only, §5.7).
 		d.HTTP.Middlewares["syncloud-retry"] = Middleware{Retry: &Retry{Attempts: 2, InitialInterval: "100ms"}}
 	}
+	if p.Middlewares != nil {
+		for name, m := range p.Middlewares() {
+			d.HTTP.Middlewares[name] = m
+		}
+	}
 	for _, r := range routes {
+		chain := append([]string{}, r.Middlewares...)
+		if !r.OwnRetry {
+			chain = append(chain, "syncloud-retry")
+		}
 		servers := make([]Server, 0, len(r.Servers))
 		for _, u := range r.Servers {
 			servers = append(servers, Server{URL: u})
 		}
 		d.HTTP.Services[r.Name] = Service{LoadBalancer: LoadBalancer{Servers: servers, PassHostHeader: true}}
 		if base == "" {
-			d.HTTP.Routers[r.Name] = Router{Rule: host(r.Host), EntryPoints: web, Middlewares: []string{"syncloud-retry"}, Service: r.Name}
+			d.HTTP.Routers[r.Name] = Router{Rule: host(r.Host), EntryPoints: web, Middlewares: chain, Service: r.Name}
 			continue
 		}
-		d.HTTP.Routers[r.Name] = Router{Rule: host(r.Host), EntryPoints: websecure, Middlewares: []string{"syncloud-retry"}, Service: r.Name, TLS: &RouterTLS{}}
+		d.HTTP.Routers[r.Name] = Router{Rule: host(r.Host), EntryPoints: websecure, Middlewares: chain, Service: r.Name, TLS: &RouterTLS{}}
 		d.HTTP.Routers[r.Name+"-http"] = Router{Rule: host(r.Host), EntryPoints: web, Middlewares: []string{"syncloud-https"}, Service: r.Name}
 	}
 
@@ -202,5 +228,94 @@ func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(p.Config())
+	_ = json.NewEncoder(w).Encode(p.Merged())
+}
+
+// Generated is the configuration without the custom part, as a map.
+func (p *Provider) Generated() map[string]any {
+	var out map[string]any
+	b, _ := json.Marshal(p.Config())
+	_ = json.Unmarshal(b, &out)
+	return out
+}
+
+// Merged is the generated configuration with the custom one added.
+func (p *Provider) Merged() map[string]any {
+	var out map[string]any
+	b, _ := json.Marshal(p.Config())
+	_ = json.Unmarshal(b, &out)
+	if p.Custom != nil {
+		MergeCustom(out, p.Custom())
+	}
+	return out
+}
+
+// MergeCustom adds custom routers, services, middlewares and transports
+// (validated not to collide with generated names) to a configuration.
+func MergeCustom(out, custom map[string]any) {
+	for proto, sections := range custom {
+		secs, ok := sections.(map[string]any)
+		if !ok {
+			continue
+		}
+		dst, _ := out[proto].(map[string]any)
+		if dst == nil {
+			dst = map[string]any{}
+			out[proto] = dst
+		}
+		for sec, entries := range secs {
+			ents, ok := entries.(map[string]any)
+			if !ok {
+				continue
+			}
+			d, _ := dst[sec].(map[string]any)
+			if d == nil {
+				d = map[string]any{}
+				dst[sec] = d
+			}
+			for name, v := range ents {
+				if _, taken := d[name]; !taken {
+					d[name] = v
+				}
+			}
+		}
+	}
+}
+
+// Redacted is the served configuration for display: certificates and keys
+// are replaced by their sizes.
+func (p *Provider) Redacted() map[string]any {
+	out := p.Merged()
+	if tls, ok := out["tls"].(map[string]any); ok {
+		if certs, ok := tls["certificates"].([]any); ok {
+			for _, c := range certs {
+				if m, ok := c.(map[string]any); ok {
+					for _, k := range []string{"certFile", "keyFile"} {
+						if s, ok := m[k].(string); ok {
+							m[k] = fmt.Sprintf("(PEM, %d bytes, redacted)", len(s))
+						}
+					}
+				}
+			}
+		}
+	}
+	if http, ok := out["http"].(map[string]any); ok {
+		if mws, ok := http["middlewares"].(map[string]any); ok {
+			for _, mw := range mws {
+				if m, ok := mw.(map[string]any); ok {
+					if ba, ok := m["basicAuth"].(map[string]any); ok {
+						if users, ok := ba["users"].([]any); ok {
+							for i, u := range users {
+								if s, ok := u.(string); ok {
+									name, _, _ := strings.Cut(s, ":")
+									users[i] = name + ":(hash redacted)"
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return out
 }

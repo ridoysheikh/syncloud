@@ -44,13 +44,32 @@ type Line struct {
 // StreamAccess holds Traefik's access log, one line per request (§5.7).
 const StreamAccess = "access"
 
+// StreamFirewall holds dropped connection attempts (§8.3).
+const StreamFirewall = "firewall"
+
+// FirewallFields are the fields of a drop line.
+var FirewallFields = []string{"direction", "src", "src_name", "dst", "dst_name", "protocol", "port", "packets"}
+
+// streamFields are the extra fields kept per stream.
+var streamFields = map[string][]string{StreamAccess: accessFields, StreamFirewall: FirewallFields}
+
+// Emit stores a line produced by the controller itself (not an agent).
+func (s *Store) Emit(l Line) {
+	s.fanout(l)
+	select {
+	case s.queue <- l:
+	default:
+		s.failed.Add(1)
+	}
+}
+
 // Filter selects lines; empty fields match everything.
 type Filter struct {
 	Project, Environment, Service, TaskID, Node string
 	// Text is a plain substring search (never interpreted as a query).
 	Text string
-	// Stream "access" selects request lines; "" means application logs
-	// (request lines are left out).
+	// Stream "access" selects request lines and "firewall" drop lines; ""
+	// means application logs (both are left out).
 	Stream string
 	// Status is a status class of request lines: "2", "3", "4" or "5".
 	Status string
@@ -59,7 +78,7 @@ type Filter struct {
 }
 
 func (f Filter) match(l Line) bool {
-	if f.Stream == "" && l.Stream == StreamAccess || f.Stream != "" && l.Stream != f.Stream {
+	if f.Stream == "" && (l.Stream == StreamAccess || l.Stream == StreamFirewall) || f.Stream != "" && l.Stream != f.Stream {
 		return false
 	}
 	if f.Status != "" && !strings.HasPrefix(l.Fields["status"], f.Status) || f.Client != "" && l.Fields["client"] != f.Client {
@@ -279,30 +298,6 @@ func (s *Store) Run(ctx context.Context) {
 	}
 }
 
-// record is the JSON line sent to VictoriaLogs.
-type record struct {
-	Time        string `json:"_time"`
-	Msg         string `json:"_msg"`
-	Project     string `json:"project"`
-	Environment string `json:"environment"`
-	Service     string `json:"service"`
-	TaskID      string `json:"task_id"`
-	Revision    string `json:"revision,omitempty"`
-	Node        string `json:"node"`
-	Stream      string `json:"stream"`
-	Level       string `json:"level,omitempty"`
-	// Access log fields.
-	Method     string `json:"method,omitempty"`
-	Host       string `json:"host,omitempty"`
-	Path       string `json:"path,omitempty"`
-	Status     string `json:"status,omitempty"`
-	DurationMs string `json:"duration_ms,omitempty"`
-	Bytes      string `json:"bytes,omitempty"`
-	Client     string `json:"client,omitempty"`
-	Upstream   string `json:"upstream,omitempty"`
-	ServiceID  string `json:"service_id,omitempty"`
-}
-
 func (s *Store) write(ctx context.Context, lines []Line) error {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -311,11 +306,20 @@ func (s *Store) write(ctx context.Context, lines []Line) error {
 		if msg == "" {
 			msg = " " // VictoriaLogs drops records with an empty message
 		}
-		f := l.Fields
-		_ = enc.Encode(record{Time: l.Time.Format(time.RFC3339Nano), Msg: msg, Project: l.Project, Environment: l.Environment,
-			Service: l.Service, TaskID: l.TaskID, Revision: l.Revision, Node: l.Node, Stream: l.Stream, Level: l.Level,
-			Method: f["method"], Host: f["host"], Path: f["path"], Status: f["status"], DurationMs: f["duration_ms"], Bytes: f["bytes"],
-			Client: f["client"], Upstream: f["upstream"], ServiceID: f["service_id"]})
+		r := map[string]string{"_time": l.Time.Format(time.RFC3339Nano), "_msg": msg, "project": l.Project, "environment": l.Environment,
+			"service": l.Service, "task_id": l.TaskID, "node": l.Node, "stream": l.Stream}
+		if l.Revision != "" {
+			r["revision"] = l.Revision
+		}
+		if l.Level != "" {
+			r["level"] = l.Level
+		}
+		for k, v := range l.Fields {
+			if _, fixed := r[k]; !fixed && v != "" {
+				r[k] = v
+			}
+		}
+		_ = enc.Encode(r)
 	}
 	q := url.Values{"_stream_fields": {"project,environment,service,task_id,node,stream"}, "_time_field": {"_time"}, "_msg_field": {"_msg"}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.vlURL+"/insert/jsonline?"+q.Encode(), &buf)
@@ -353,7 +357,7 @@ func (f Filter) LogsQL(since time.Duration) string {
 		parts = append(parts, "i("+quote(f.Text)+")")
 	}
 	if f.Stream == "" {
-		parts = append(parts, "-stream:="+quote(StreamAccess))
+		parts = append(parts, "-stream:in("+quote(StreamAccess)+", "+quote(StreamFirewall)+")")
 	} else {
 		parts = append(parts, "stream:="+quote(f.Stream))
 	}
@@ -408,9 +412,9 @@ func (s *Store) Query(ctx context.Context, f Filter, since time.Duration, limit 
 		t, _ := time.Parse(time.RFC3339Nano, r["_time"])
 		l := Line{Time: t, Project: r["project"], Environment: r["environment"], Service: r["service"], TaskID: r["task_id"],
 			Revision: r["revision"], Node: r["node"], Stream: r["stream"], Level: r["level"], Message: r["_msg"]}
-		if l.Stream == StreamAccess {
+		if fields := streamFields[l.Stream]; fields != nil {
 			l.Fields = map[string]string{}
-			for _, k := range accessFields {
+			for _, k := range fields {
 				if v := r[k]; v != "" {
 					l.Fields[k] = v
 				}

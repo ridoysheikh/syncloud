@@ -30,11 +30,14 @@ import (
 // platform holds the userspace WireGuard device (when the kernel module is
 // missing) and the RTT probe listener.
 type platform struct {
-	lastRuleset string
-	dev         *device.Device
-	uapi        net.Listener
-	probe       net.Listener
-	probeAddr   string
+	lastRuleset  string // live listing after the last apply (drift detection)
+	lastRendered string // what was applied
+	isolated     bool   // bridge ports are isolated (security groups on)
+	watching     bool   // new bridge ports are isolated as they appear
+	dev          *device.Device
+	uapi         net.Listener
+	probe        net.Listener
+	probeAddr    string
 }
 
 func (p *platform) close() {
@@ -99,17 +102,133 @@ func (m *Manager) apply(ctx context.Context, cfg *agentv1.NetworkConfig) (string
 	if err := m.dns.Listen(gateway.String()); err != nil {
 		return mode, fmt.Errorf("DNS server on %s: %w", gateway, err)
 	}
-	ruleset, err := firewall.Render(cfg, m.firewallFor(cfg), m.services())
+	var sec *firewall.Security
+	secErr := ""
+	if pol := m.security(); pol != nil {
+		sec = &firewall.Security{Policy: pol}
+		if sec.Local, err = m.localContainers(ctx); err != nil {
+			secErr = "listing local containers: " + err.Error()
+		}
+	}
+	if err := m.isolatePorts(sec != nil); err != nil {
+		secErr = "isolating bridge ports: " + err.Error()
+	}
+	ruleset, err := firewall.RenderWith(cfg, m.firewallFor(cfg), m.services(), sec)
 	if err != nil {
 		return mode, err
 	}
-	m.checkDrift()
-	if err := applyNft(ruleset); err != nil {
-		return mode, err
+	m.countMu.Lock()
+	m.secErr = secErr
+	drift := m.checkDrift()
+	if drift || ruleset != m.sys.lastRendered {
+		rules, _, _ := readCounters()
+		m.collect()
+		if err := applyNft(ruleset); err != nil {
+			m.countMu.Unlock()
+			return mode, err
+		}
+		m.replaced(rules)
+		m.sys.lastRendered = ruleset
+		m.rememberRuleset()
 	}
-	m.rememberRuleset()
+	m.countMu.Unlock()
 	m.ensureProbe(addr.Addr())
 	return mode, nil
+}
+
+// localContainers lists this node's task containers on the private network
+// with their labels, so they join their security sets at once (§8.3).
+func (m *Manager) localContainers(ctx context.Context) ([]firewall.LocalContainer, error) {
+	list, err := m.docker.List(ctx, "syncloud.managed=true")
+	if err != nil {
+		return nil, err
+	}
+	var out []firewall.LocalContainer
+	for _, c := range list {
+		if c.NetworkSettings == nil {
+			continue
+		}
+		if n, ok := c.NetworkSettings.Networks[Network]; ok && n.IPAddress != "" {
+			out = append(out, firewall.LocalContainer{IP: n.IPAddress, Labels: c.Labels})
+		}
+	}
+	return out, nil
+}
+
+// isolatePorts makes containers on the bridge unable to reach each other
+// directly: the host answers ARP for the subnet (proxy_arp_pvlan) and routes
+// between them, so same-node traffic passes the forward chain like traffic
+// between nodes. This needs no extra kernel modules (br_netfilter).
+func (m *Manager) isolatePorts(on bool) error {
+	if !on && !m.sys.isolated {
+		return nil
+	}
+	br, err := netlink.LinkByName(Bridge)
+	if err != nil {
+		return err
+	}
+	val := "0"
+	if on {
+		val = "1"
+	}
+	for _, f := range []string{"proxy_arp", "proxy_arp_pvlan"} {
+		if err := os.WriteFile("/proc/sys/net/ipv4/conf/"+Bridge+"/"+f, []byte(val), 0o644); err != nil {
+			return err
+		}
+	}
+	if on {
+		// Redirects would tell containers to talk to each other directly.
+		for _, dev := range []string{Bridge, "all"} {
+			_ = os.WriteFile("/proc/sys/net/ipv4/conf/"+dev+"/send_redirects", []byte("0"), 0o644)
+		}
+	}
+	links, err := netlink.LinkList()
+	if err != nil {
+		return err
+	}
+	for _, l := range links {
+		if l.Attrs().MasterIndex == br.Attrs().Index && l.Attrs().Protinfo != nil && l.Attrs().Protinfo.Isolated == on {
+			continue
+		}
+		if l.Attrs().MasterIndex == br.Attrs().Index {
+			if err := netlink.LinkSetIsolated(l, on); err != nil {
+				return fmt.Errorf("%s: %w", l.Attrs().Name, err)
+			}
+		}
+	}
+	m.mu.Lock()
+	m.sys.isolated = on
+	m.mu.Unlock()
+	if on && !m.sys.watching {
+		m.sys.watching = true
+		go m.watchPorts(br.Attrs().Index)
+	}
+	return nil
+}
+
+// watchPorts isolates new bridge ports (a starting container's veth) as
+// soon as they are attached, before the container's process runs.
+func (m *Manager) watchPorts(bridgeIndex int) {
+	ch := make(chan netlink.LinkUpdate, 64)
+	done := make(chan struct{})
+	if err := netlink.LinkSubscribe(ch, done); err != nil {
+		m.log.Warn("watch bridge ports", "err", err)
+		return
+	}
+	for u := range ch {
+		m.mu.Lock()
+		on := m.sys.isolated
+		m.mu.Unlock()
+		if !on || u.Link == nil || u.Link.Attrs().MasterIndex != bridgeIndex {
+			continue
+		}
+		if p := u.Link.Attrs().Protinfo; p != nil && p.Isolated {
+			continue
+		}
+		if err := netlink.LinkSetIsolated(u.Link, true); err != nil {
+			m.log.Warn("isolate bridge port", "port", u.Link.Attrs().Name, "err", err)
+		}
+	}
 }
 
 // ensureLink creates the WireGuard interface: the kernel module when present,
@@ -269,26 +388,39 @@ func ipnet(p netip.Prefix) *net.IPNet {
 	return &net.IPNet{IP: p.Addr().AsSlice(), Mask: net.CIDRMask(p.Bits(), p.Addr().BitLen())}
 }
 
-// listTable returns the live table without counters, for drift detection.
+// listTable returns the live table without counters or drop-log entries,
+// for drift detection.
 func listTable() string {
 	out, err := exec.Command("nft", "-s", "list", "table", "inet", "syncloud").Output()
 	if err != nil {
 		return ""
 	}
-	return string(out)
+	return firewall.StripDynamic(string(out))
+}
+
+// readCounters reads rule counters and drop-log sets from the live table.
+func readCounters() (map[string]firewall.Counts, map[firewall.DropKey]uint64, bool) {
+	out, err := exec.Command("nft", "-j", "list", "table", "inet", "syncloud").Output()
+	if err != nil {
+		return nil, nil, false
+	}
+	rules, drops, err := firewall.ParseCounters(out)
+	return rules, drops, err == nil
 }
 
 // checkDrift compares the live table with what was applied last time.
-func (m *Manager) checkDrift() {
+func (m *Manager) checkDrift() bool {
 	if m.sys.lastRuleset == "" {
-		return
+		return false
 	}
 	if live := listTable(); live != m.sys.lastRuleset {
 		m.mu.Lock()
 		m.drift++
 		m.mu.Unlock()
 		m.log.Warn("managed nftables rules were changed outside SynCloud; restoring them")
+		return true
 	}
+	return false
 }
 
 func (m *Manager) rememberRuleset() { m.sys.lastRuleset = listTable() }

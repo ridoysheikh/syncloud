@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Shield, Trash2, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
@@ -6,10 +7,10 @@ import { useNodes } from "@/lib/nodes";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
-import { Dialog } from "@/ui/Dialog";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { DropLogPanel } from "./SecurityGroups";
 
 interface Rule {
   id?: string;
@@ -50,7 +51,6 @@ export function FirewallPage() {
   });
   const nodes = useNodes();
   const nodeName = (id: string) => (id === "*" ? "all nodes" : (nodes.data?.find((n) => n.id === id)?.name ?? id));
-  const [editing, setEditing] = useState<Policy | "new" | null>(null);
   const del = useMutation({
     mutationFn: (id: string) => api("DELETE", `/firewall/policies/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: key }),
@@ -62,9 +62,11 @@ export function FirewallPage() {
         crumbs={["Network"]}
         title="Firewall"
         actions={
-          <Button variant="primary" onClick={() => setEditing("new")}>
-            <Plus className="size-3.5" /> New policy
-          </Button>
+          <Link to={"/network/firewall/policies/new" as string}>
+            <Button variant="primary">
+              <Plus className="size-3.5" /> New policy
+            </Button>
+          </Link>
         }
       />
       <Alert tone="info">
@@ -108,9 +110,11 @@ export function FirewallPage() {
               header: "",
               cell: (p) => (
                 <div className="flex">
-                  <IconButton label="Edit" onClick={() => setEditing(p)}>
-                    <Pencil className="size-3.5" />
-                  </IconButton>
+                  <Link to={`/network/firewall/policies/${p.id}` as string}>
+                    <IconButton label="Edit">
+                      <Pencil className="size-3.5" />
+                    </IconButton>
+                  </Link>
                   <IconButton label="Delete" onClick={() => confirm(`Delete policy ${p.name}? Its ports close on every node it targets.`) && del.mutate(p.id)}>
                     <Trash2 className="size-3.5" />
                   </IconButton>
@@ -121,7 +125,7 @@ export function FirewallPage() {
         />
       </Panel>
       <EffectiveRules nodes={nodes.data ?? []} />
-      {editing && <PolicyDialog policy={editing === "new" ? null : editing} nodes={nodes.data ?? []} onClose={() => setEditing(null)} />}
+      <DropLogPanel />
     </div>
   );
 }
@@ -135,9 +139,18 @@ function EffectiveRules({ nodes }: { nodes: { id: string; name: string }[] }) {
     enabled: !!id,
   });
   const [raw, setRaw] = useState(false);
+  const nodeName = nodes.find((n) => n.id === id)?.name ?? "";
+  const counters = useQuery({
+    queryKey: ["firewall", "counters", nodeName],
+    queryFn: async () => (await api<{ items: { id: string; packets: number }[] }>("GET", `/firewall/counters?node=${nodeName}`)).items,
+    enabled: !!nodeName,
+    refetchInterval: 15_000,
+  });
+  const hitsOf = (rid?: string) => counters.data?.find((c) => c.id === rid)?.packets ?? 0;
+  const denied = hitsOf("default deny");
   return (
     <Panel
-      title="Effective rules"
+      title={`Effective rules${denied ? ` · ${denied.toLocaleString()} packets denied` : ""}`}
       flush
       actions={
         <>
@@ -174,6 +187,7 @@ function EffectiveRules({ nodes }: { nodes: { id: string; name: string }[] }) {
             { header: "Allows", cell: (r) => <span className="font-mono">{ruleLabel(r)}</span> },
             { header: "From", className: "w-full", cell: (r) => <span className="text-muted">{r.sources.length ? r.sources.join(", ") : "anywhere"}</span> },
             { header: "Description", cell: (r) => <span className="text-faint">{r.description || "—"}</span> },
+            { header: "Hits", cell: (r) => <span className="text-muted font-mono">{hitsOf(r.id).toLocaleString()}</span> },
           ]}
         />
       )}
@@ -183,74 +197,113 @@ function EffectiveRules({ nodes }: { nodes: { id: string; name: string }[] }) {
 
 const emptyRule = (): Rule => ({ protocol: "tcp", ports: "", sources: [], description: "" });
 
-function PolicyDialog({ policy, nodes, onClose }: { policy: Policy | null; nodes: { id: string; name: string }[]; onClose: () => void }) {
+/** Create or edit a host firewall policy, as a full page. */
+export function FirewallPolicyPage() {
+  const { id } = useParams({ strict: false }) as { id?: string };
+  const isNew = !id;
+  const navigate = useNavigate();
   const qc = useQueryClient();
-  const [name, setName] = useState(policy?.name ?? "");
-  const [description, setDescription] = useState(policy?.description ?? "");
-  const [targets, setTargets] = useState<string[]>(policy?.targets ?? ["*"]);
-  const [rules, setRules] = useState<Rule[]>(policy?.rules.length ? policy.rules : [emptyRule()]);
+  const { data: policies } = useQuery({
+    queryKey: key,
+    queryFn: async () => (await api<{ items: Policy[] }>("GET", "/firewall/policies")).items,
+  });
+  const nodes = useNodes().data ?? [];
+  const policy = policies?.find((p) => p.id === id);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [targets, setTargets] = useState<string[]>(["*"]);
+  const [rules, setRules] = useState<Rule[]>([emptyRule()]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (policy && !loaded) {
+      setName(policy.name);
+      setDescription(policy.description);
+      setTargets(policy.targets);
+      setRules(policy.rules.length ? policy.rules : [emptyRule()]);
+      setLoaded(true);
+    }
+  }, [policy, loaded]);
+  const back = () => navigate({ to: "/network/firewall" as string });
   const save = useMutation({
     mutationFn: () => {
       const body = { name, description, targets, rules };
       return policy ? api("PUT", `/firewall/policies/${policy.id}`, body) : api("POST", "/firewall/policies", body);
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["firewall"] });
-      onClose();
+      void qc.invalidateQueries({ queryKey: ["firewall"] });
+      void back();
     },
   });
   const setRule = (i: number, patch: Partial<Rule>) => setRules(rules.map((r, j) => (i === j ? { ...r, ...patch } : r)));
   const all = targets.includes("*");
-
+  if (!isNew && policies && !policy) {
+    return (
+      <div className={cn("flex flex-col", gap)}>
+        <PageHeader crumbs={["Network", "Firewall"]} title="Policy not found" />
+      </div>
+    );
+  }
   return (
-    <Dialog
-      open
-      onClose={onClose}
-      title={policy ? `Edit ${policy.name}` : "New firewall policy"}
-      wide
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="primary" disabled={save.isPending || !name} onClick={() => save.mutate()}>
-            {save.isPending ? "Saving…" : "Save and apply"}
-          </Button>
-        </>
-      }
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        save.mutate();
+      }}
+      className={cn("flex flex-col", gap)}
     >
-      <div className="flex flex-col gap-2.5">
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Name">
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="office-ssh" className="font-mono" />
-          </Field>
-          <Field label="Description">
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+      <PageHeader
+        crumbs={["Network", "Firewall"]}
+        title={isNew ? "New host policy" : policy?.name ?? "Host policy"}
+        actions={
+          <>
+            <Button variant="ghost" onClick={back}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" disabled={save.isPending || !name}>
+              {save.isPending ? "Saving…" : "Save and apply"}
+            </Button>
+          </>
+        }
+      />
+      <Panel title="Policy">
+        <div className="flex max-w-4xl flex-col gap-2.5">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <Field label="Name">
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="office-ssh" className="font-mono" autoFocus={isNew} />
+            </Field>
+            <Field label="Description">
+              <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+            </Field>
+          </div>
+          <Field label="Applies to">
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" checked={all} onChange={(e) => setTargets(e.target.checked ? ["*"] : [])} /> All nodes
+              </label>
+              {!all &&
+                nodes.map((n) => (
+                  <label key={n.id} className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={targets.includes(n.id)}
+                      onChange={(e) => setTargets(e.target.checked ? [...targets, n.id] : targets.filter((t) => t !== n.id))}
+                    />
+                    {n.name}
+                  </label>
+                ))}
+            </div>
           </Field>
         </div>
-        <Field label="Applies to">
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-            <label className="flex items-center gap-1.5">
-              <input type="checkbox" checked={all} onChange={(e) => setTargets(e.target.checked ? ["*"] : [])} /> All nodes
-            </label>
-            {!all &&
-              nodes.map((n) => (
-                <label key={n.id} className="flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    checked={targets.includes(n.id)}
-                    onChange={(e) => setTargets(e.target.checked ? [...targets, n.id] : targets.filter((t) => t !== n.id))}
-                  />
-                  {n.name}
-                </label>
-              ))}
-          </div>
-        </Field>
+      </Panel>
+      <Panel title="Allow inbound (on the nodes' public addresses)">
         <div className="flex flex-col gap-1.5">
-          <span className="text-muted text-xs font-medium">Allow inbound</span>
           {rules.map((r, i) => (
-            <div key={i} className="grid grid-cols-[5.5rem_6.5rem_1fr_1fr_auto] items-center gap-1.5">
-              <select value={r.protocol} onChange={(e) => setRule(i, { protocol: e.target.value as Rule["protocol"], ports: "" })} className="bg-bg border-line h-7 rounded-sm border px-1.5 text-xs">
+            <div key={i} className="grid grid-cols-1 items-center gap-1.5 md:grid-cols-[5.5rem_7rem_1fr_1fr_auto]">
+              <select
+                value={r.protocol}
+                onChange={(e) => setRule(i, { protocol: e.target.value as Rule["protocol"], ports: "" })}
+                className="bg-bg border-line h-7 rounded-sm border px-1.5 text-xs"
+              >
                 <option value="tcp">TCP</option>
                 <option value="udp">UDP</option>
                 <option value="icmp">ICMP</option>
@@ -261,15 +314,15 @@ function PolicyDialog({ policy, nodes, onClose }: { policy: Policy | null; nodes
                 disabled={r.protocol === "icmp" || r.protocol === "any"}
                 onChange={(e) => setRule(i, { ports: e.target.value })}
                 placeholder="22 / 8000-8100"
-                className="font-mono"
+                className="h-7 font-mono"
               />
               <Input
                 value={r.sources.join(", ")}
                 onChange={(e) => setRule(i, { sources: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
                 placeholder="anywhere, or 203.0.113.0/24, cluster"
-                className="font-mono"
+                className="h-7 font-mono"
               />
-              <Input value={r.description} onChange={(e) => setRule(i, { description: e.target.value })} placeholder="description" />
+              <Input value={r.description} onChange={(e) => setRule(i, { description: e.target.value })} placeholder="description" className="h-7" />
               <IconButton label="Remove rule" onClick={() => setRules(rules.filter((_, j) => j !== i))}>
                 <X className="size-3.5" />
               </IconButton>
@@ -281,8 +334,12 @@ function PolicyDialog({ policy, nodes, onClose }: { policy: Policy | null; nodes
             </Button>
           </div>
         </div>
-        {save.error && <Alert>{save.error instanceof ApiError ? save.error.message : "Could not save"}</Alert>}
-      </div>
-    </Dialog>
+      </Panel>
+      <p className="text-muted text-xs">
+        Everything else on public interfaces is denied. Nodes apply a change at once and roll it back by themselves if they lose the
+        controller within 60 seconds.
+      </p>
+      {save.error && <Alert>{save.error instanceof ApiError ? save.error.message : "Could not save"}</Alert>}
+    </form>
   );
 }

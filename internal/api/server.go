@@ -14,9 +14,11 @@ import (
 	"syncloud/internal/backup"
 	"syncloud/internal/builds"
 	"syncloud/internal/certs"
+	"syncloud/internal/discovery"
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
 	"syncloud/internal/execrelay"
+	"syncloud/internal/fwstats"
 	"syncloud/internal/health"
 	"syncloud/internal/jobs"
 	"syncloud/internal/logs"
@@ -29,6 +31,7 @@ import (
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 	"syncloud/internal/system"
+	"syncloud/internal/traefik"
 	"syncloud/internal/upstream"
 	"syncloud/internal/workload"
 )
@@ -69,6 +72,12 @@ type Server struct {
 	registryHosts         func() []string
 	autoscaler            *autoscale.Manager
 	alerts                *alerts.Manager
+	securityGroups        bool
+	onSecurityChange      func()
+	fwStats               *fwstats.Stats
+	discovery             *discovery.Manager
+	traefik               *traefik.Provider
+	traefikExtras         *traefik.Extras
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -133,6 +142,14 @@ type Options struct {
 	Autoscaler *autoscale.Manager
 	// Alerts evaluates alert rules and notifies channels (§9).
 	Alerts *alerts.Manager
+	// SecurityGroups is on when containers are isolated (§8.3);
+	// OnSecurityChange republishes the compiled policy.
+	SecurityGroups   bool
+	OnSecurityChange func()
+	FirewallStats    *fwstats.Stats
+	Discovery        *discovery.Manager
+	Traefik          *traefik.Provider
+	TraefikExtras    *traefik.Extras
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -176,6 +193,12 @@ func New(o Options) *Server {
 		registryHosts:         o.RegistryHosts,
 		autoscaler:            o.Autoscaler,
 		alerts:                o.Alerts,
+		securityGroups:        o.SecurityGroups,
+		onSecurityChange:      o.OnSecurityChange,
+		fwStats:               o.FirewallStats,
+		discovery:             o.Discovery,
+		traefik:               o.Traefik,
+		traefikExtras:         o.TraefikExtras,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -322,6 +345,31 @@ func (s *Server) Routes() []Route {
 		{Method: "PUT", Path: "/api/v1/firewall/policies/{id}", h: s.handleUpdateFirewallPolicy},
 		{Method: "DELETE", Path: "/api/v1/firewall/policies/{id}", h: s.handleDeleteFirewallPolicy},
 		{Method: "GET", Path: "/api/v1/firewall/nodes/{id}/effective", h: s.handleEffectiveFirewall},
+		{Method: "GET", Path: "/api/v1/firewall/drops", h: s.handleFirewallDrops},
+		{Method: "GET", Path: "/api/v1/firewall/counters", h: s.handleFirewallCounters},
+		{Method: "GET", Path: "/api/v1/security-groups", h: s.handleListAllSecurityGroups},
+		{Method: "GET", Path: "/api/v1/projects/{project}/security-groups", h: s.handleListSecurityGroups},
+		{Method: "POST", Path: "/api/v1/projects/{project}/security-groups", h: s.handleCreateSecurityGroup},
+		{Method: "POST", Path: "/api/v1/projects/{project}/security-groups/preview", h: s.handlePreviewSecurityGroup},
+		{Method: "GET", Path: "/api/v1/projects/{project}/security-groups/{group}", h: s.handleGetSecurityGroup},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/security-groups/{group}", h: s.handleUpdateSecurityGroup},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}/security-groups/{group}", h: s.handleDeleteSecurityGroup},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/security", h: s.handleServiceSecurity},
+		{Method: "POST", Path: "/api/v1/network/reachability", h: s.handleReachability},
+		{Method: "GET", Path: "/api/v1/network/ipam", h: s.handleIPAM},
+		{Method: "GET", Path: "/api/v1/middlewares", h: s.handleListAllMiddlewares},
+		{Method: "GET", Path: "/api/v1/projects/{project}/middlewares", h: s.handleListMiddlewares},
+		{Method: "POST", Path: "/api/v1/projects/{project}/middlewares", h: s.handleCreateMiddleware},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/middlewares/{middleware}", h: s.handleUpdateMiddleware},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}/middlewares/{middleware}", h: s.handleDeleteMiddleware},
+		{Method: "GET", Path: "/api/v1/traefik/config", h: s.handleTraefikConfig},
+		{Method: "GET", Path: "/api/v1/traefik/custom", h: s.handleGetTraefikCustom},
+		{Method: "PUT", Path: "/api/v1/traefik/custom", h: s.handlePutTraefikCustom},
+		{Method: "POST", Path: "/api/v1/traefik/custom/validate", h: s.handleValidateTraefikCustom},
+		{Method: "GET", Path: "/api/v1/network/throughput", h: s.handleNetworkThroughput},
+		{Method: "GET", Path: "/api/v1/network/ipam/history", h: s.handleIPHistory},
+		{Method: "GET", Path: "/api/v1/network/dns", h: s.handleDNSRecords},
+		{Method: "GET", Path: "/api/v1/network/dns/lookup", h: s.handleDNSLookup},
 	}
 }
 

@@ -170,6 +170,7 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 	}
 	go net.Run(ctx)
 	runner.NetworkReady = net.Ready
+	runner.OnStart = net.Kick
 	logs := NewLogShipper(d, dataDir, log)
 	go logs.Run(ctx)
 	stats := NewTaskStats(d, log)

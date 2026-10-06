@@ -106,3 +106,84 @@ func TestRenderServices(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderSecurity(t *testing.T) {
+	cfg := &agentv1.NetworkConfig{
+		ListenPort: 51820, ContainerSubnet: "10.91.2.0/24", MeshCidr: "10.90.0.0/16", ContainerCidr: "10.91.0.0/16", ServiceCidr: "10.92.0.0/16",
+	}
+	sec := &Security{
+		Policy: &agentv1.SecurityPolicy{
+			PlatformIps: []string{"10.90.0.1"},
+			Sets: []*agentv1.SecuritySet{
+				{Name: "s_web", Ips: []string{"10.91.3.4"}, Match: []string{"svc:svc_web"}},
+				{Name: "s_env", Ips: []string{"10.91.3.4", "10.91.3.9"}, Match: []string{"env:shop/production"}},
+			},
+			Rules: []*agentv1.SecurityRule{
+				{Id: "sg_a:in:0", Direction: "in", LocalSet: "s_web", PeerSets: []string{"s_env"}, Protocol: "tcp", Ports: "8080"},
+				{Id: "sg_a:in:1", Direction: "in", LocalSet: "s_web", PeerCidrs: []string{"192.168.1.0/24", "10.0.0.1"}, Protocol: "any"},
+				{Id: "sg_a:out:0", Direction: "out", LocalSet: "s_web", PeerCidrs: []string{"0.0.0.0/0"}, Protocol: "any"},
+			},
+		},
+		Local: []LocalContainer{
+			{IP: "10.91.2.7", Labels: map[string]string{"syncloud.service_id": "svc_web", "syncloud.project": "shop", "syncloud.environment": "production"}},
+			{IP: "10.91.2.8", Labels: map[string]string{"syncloud.project": "other", "syncloud.environment": "production"}},
+		},
+	}
+	out, err := RenderWith(cfg, nil, nil, sec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"set s_web {\n\t\ttype ipv4_addr\n\t\telements = { 10.91.2.7, 10.91.3.4 }",
+		"elements = { 10.91.2.7, 10.91.3.4, 10.91.3.9 }",
+		`ip saddr @sg_platform accept comment "builtin:platform"`,
+		`ip daddr @s_web ip saddr @s_env tcp dport 8080 counter accept comment "sg_a:in:0"`,
+		`ip daddr @s_web ip saddr { 192.168.1.0/24, 10.0.0.1/32 } counter accept comment "sg_a:in:1"`,
+		`ip saddr @s_web counter return comment "sg_a:out:0"`,
+		`counter drop comment "builtin:sg-in-deny"`,
+		`iifname "syncloud0" jump sg_out`,
+		`oifname "syncloud0" ip daddr 10.91.2.0/24 jump sg_in`,
+		"update @sg_out_drops { ip saddr . ip daddr . meta l4proto . th dport }",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "10.91.2.8") {
+		t.Error("unrelated local container joined a set")
+	}
+	bad := []*agentv1.SecurityRule{
+		{Id: "x", Direction: "in", LocalSet: "nope", Protocol: "any"},
+		{Id: "x", Direction: "in", LocalSet: "s_web", PeerCidrs: []string{"1.2.3.4 } accept"}, Protocol: "any"},
+		{Id: "x", Direction: "sideways", LocalSet: "s_web", Protocol: "any"},
+		{Id: "x", Direction: "in", LocalSet: "s_web", PeerCidrs: []string{"2001:db8::/64"}, Protocol: "any"},
+	}
+	for _, r := range bad {
+		sec.Policy.Rules = []*agentv1.SecurityRule{r}
+		if _, err := RenderWith(cfg, nil, nil, sec); err == nil {
+			t.Errorf("rule %+v accepted", r)
+		}
+	}
+}
+
+func TestStripDynamicAndCounters(t *testing.T) {
+	listing := "table inet syncloud {\n\tset host_drops {\n\t\ttype ipv4_addr . inet_proto . inet_service\n\t\tsize 4096\t# count 2\n\t\tflags dynamic,timeout\n\t\tcounter\n\t\ttimeout 10m\n\t\telements = { 127.0.0.2 . tcp . 81 counter,\n\t\t\t     127.0.0.2 . tcp . 82 counter }\n\t}\n\tchain input {\n\t}\n}"
+	got := StripDynamic(listing)
+	if strings.Contains(got, "elements") || strings.Contains(got, "count 2") || !strings.Contains(got, "chain input") {
+		t.Errorf("StripDynamic:\n%s", got)
+	}
+	data := `{"nftables": [{"set": {"name": "host_drops", "elem": [{"elem": {"val": {"concat": ["127.0.0.2", "tcp", 81]}, "counter": {"packets": 2, "bytes": 120}}}]}},
+	{"set": {"name": "sg_in_drops", "elem": [{"elem": {"val": {"concat": ["10.91.1.2", "10.91.2.3", "tcp", 5432]}, "counter": {"packets": 3, "bytes": 180}}}]}},
+	{"rule": {"comment": "sg_a:in:0", "expr": [{"counter": {"packets": 5, "bytes": 300}}, {"accept": null}]}},
+	{"rule": {"comment": "sg_a:in:0", "expr": [{"counter": {"packets": 1, "bytes": 60}}, {"accept": null}]}}]}`
+	rules, drops, err := ParseCounters([]byte(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rules["sg_a:in:0"] != (Counts{6, 360}) {
+		t.Errorf("rules = %v", rules)
+	}
+	if drops[DropKey{"host", "127.0.0.2", "", "tcp", 81}] != 2 || drops[DropKey{"in", "10.91.1.2", "10.91.2.3", "tcp", 5432}] != 3 {
+		t.Errorf("drops = %v", drops)
+	}
+}

@@ -34,6 +34,7 @@ import (
 	"syncloud/internal/domain"
 	"syncloud/internal/events"
 	"syncloud/internal/execrelay"
+	"syncloud/internal/fwstats"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 	"syncloud/internal/health"
 	"syncloud/internal/jobs"
@@ -256,6 +257,7 @@ func serve(args []string) error {
 		return host + "/" + path, base64.URLEncoding.EncodeToString(authJSON)
 	}
 	disco := discovery.NewManager(st, gw, workloads, log)
+	disco.Security = cfg.SecurityGroups
 	gw.AddHooks(disco.Hooks())
 	go disco.Run(ctx)
 	workloads.OnTaskChange = disco.Kick
@@ -271,6 +273,7 @@ func serve(args []string) error {
 	workload.Discovery = func(sv store.Service) (string, string) { return disco.VIP(sv.ID), discovery.ServiceName(sv) }
 	jobMgr := jobs.NewManager(st, gw, workloads, registry, bus, log)
 	gw.AddHooks(jobMgr.Hooks())
+	jobMgr.OnRunAddress = disco.Kick
 	workloads.DeployHooks = jobMgr
 	go jobMgr.Run(ctx)
 	buildMgr := builds.New(st, box, jobMgr, workloads, regIssuer, bus, log, builds.Config{
@@ -281,7 +284,10 @@ func serve(args []string) error {
 	// Task resource samples ride on agent heartbeats (§9.1).
 	metricStore := metrics.New(cfg.VictoriaMetricsURL, log)
 	go metricStore.Run(ctx)
-	gw.AddHooks(agentgw.Hooks{OnHeartbeat: func(node store.Node, hb *agentv1.Heartbeat) { metricStore.Add(node.Name, hb.GetTasks()) }})
+	gw.AddHooks(agentgw.Hooks{OnHeartbeat: func(node store.Node, hb *agentv1.Heartbeat) {
+		metricStore.Add(node.Name, hb.GetTasks())
+		metricStore.AddNode(node.Name, hb)
+	}})
 	if cfg.SystemTasks {
 		// Traefik's request metrics, labelled with SynCloud's names (§5.7).
 		serviceNames := func(ctx context.Context) map[string][3]string {
@@ -300,6 +306,16 @@ func serve(args []string) error {
 		BaseDomain: domains.Base, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS, VictoriaMetricsURL: cfg.VictoriaMetricsURL,
 	})
 	go healthMon.Run(ctx)
+	if cfg.CentralProbes {
+		workloads.Reachable = healthMon.TaskReachable
+		workload.CentralCheck = func(id string) (string, string) {
+			if c := healthMon.TaskCheckOf(id); c != nil {
+				return c.State, c.Error
+			}
+			return "", ""
+		}
+		go healthMon.RunTaskProbes(ctx)
+	}
 	execs := execrelay.New(gw)
 	gw.AddHooks(execs.Hooks())
 	regBrowser := &dockerregistry.Browser{URL: "http://" + system.RegistryAddr, Issuer: regIssuer}
@@ -319,6 +335,8 @@ func serve(args []string) error {
 	logStore := logs.New(st, cfg.VictoriaLogsURL, log)
 	gw.AddHooks(agentgw.Hooks{OnLogs: logStore.OnLogs})
 	go logStore.Run(ctx)
+	fwStats := fwstats.New(st, metricStore, logStore, log)
+	gw.AddHooks(agentgw.Hooks{OnHeartbeat: fwStats.OnHeartbeat})
 	alertMgr := alerts.New(st, box, metricStore, logStore, healthMon, bus, log)
 	alertMgr.DashboardURL = func() string { return domains.Endpoints().DashboardURL }
 	go alertMgr.Run(ctx)
@@ -348,16 +366,23 @@ func serve(args []string) error {
 	if httpsPort == "443" {
 		httpsPort = ""
 	}
+	traefikExtras := traefik.NewExtras(st, log)
+	if err := traefikExtras.Reload(ctx); err != nil {
+		return fmt.Errorf("load Traefik middlewares: %w", err)
+	}
 	traefikProvider := &traefik.Provider{
 		Token: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: controllerURL,
 		RegistryURL: "http://" + system.RegistryAddr, BaseDomain: domains.Base, HTTPSPort: httpsPort,
 		ServiceRoutes: func() []traefik.ServiceRoute {
 			var out []traefik.ServiceRoute
 			for _, r := range workloads.Routes(context.Background(), domains.Base()) {
-				out = append(out, traefik.ServiceRoute{Name: r.Name, Host: r.Host, Servers: r.Servers})
+				chain, own := traefikExtras.Chain(r.ServiceID)
+				out = append(out, traefik.ServiceRoute{Name: r.Name, Host: r.Host, Servers: r.Servers, Middlewares: chain, OwnRetry: own})
 			}
 			return out
 		},
+		Middlewares: traefikExtras.Definitions,
+		Custom:      traefikExtras.Custom,
 		Certificates: func() []traefik.Certificate {
 			var out []traefik.Certificate
 			for _, p := range certMgr.Pairs() {
@@ -391,6 +416,12 @@ func serve(args []string) error {
 		Metrics:               metricStore,
 		Autoscaler:            autoscaler,
 		Alerts:                alertMgr,
+		SecurityGroups:        cfg.SecurityGroups,
+		OnSecurityChange:      disco.Kick,
+		FirewallStats:         fwStats,
+		Discovery:             disco,
+		Traefik:               traefikProvider,
+		TraefikExtras:         traefikExtras,
 		ControllerSchedulable: cfg.ControllerSchedulable,
 		ACME:                  api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {

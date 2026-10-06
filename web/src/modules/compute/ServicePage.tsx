@@ -34,6 +34,7 @@ import { TasksTable } from "./TasksPage";
 import { useTasks } from "@/lib/workloads";
 import { LogsView } from "@/modules/logs/LogsView";
 import { RequestsTail, TrafficPanel } from "@/modules/traffic/Traffic";
+import { ServiceSecurityPanel } from "@/modules/network/SecurityGroups";
 import { AutoscalingPanel } from "./AutoscalingPanel";
 
 interface Revision {
@@ -48,6 +49,7 @@ type Tab =
   | "metrics"
   | "traffic"
   | "autoscaling"
+  | "security"
   | "tasks"
   | "logs"
   | "deployments"
@@ -245,6 +247,7 @@ export function ServicePage() {
             "metrics",
             "traffic",
             "autoscaling",
+            "security",
             "logs",
             "tasks",
             "deployments",
@@ -288,6 +291,9 @@ export function ServicePage() {
           desired={svc.desiredCount}
           running={svc.running}
         />
+      )}
+      {tab === "security" && (
+        <ServiceSecurityPanel path={path} project={project} env={env} name={name} />
       )}
       {tab === "tasks" && <ServiceTasks id={svc.id} path={path} />}
       {tab === "logs" && (

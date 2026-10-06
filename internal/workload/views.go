@@ -53,7 +53,15 @@ type TaskView struct {
 	CreatedAt   time.Time  `json:"createdAt"`
 	StartedAt   *time.Time `json:"startedAt"`
 	FinishedAt  *time.Time `json:"finishedAt"`
+	// Central is the controller's probe over the private network (§5.6):
+	// ok, failing or unreachable ("" when not probed).
+	Central      string `json:"central,omitempty"`
+	CentralError string `json:"centralError,omitempty"`
 }
+
+// CentralCheck returns the controller's probe state of a task (set by the
+// health monitor).
+var CentralCheck = func(taskID string) (state, err string) { return "", "" }
 
 // Endpoints returns the public URLs of a service (set by the routing layer).
 var Endpoints = func(sv store.Service, spec Spec, domains []store.Domain) []string { return nil }
@@ -139,6 +147,9 @@ func (m *Manager) taskView(ctx context.Context, t store.Task) (TaskView, error) 
 	}
 	if n, ok := m.nodes.Get(t.NodeID); ok {
 		v.Node = n.Name
+	}
+	if t.State == store.TaskRunning {
+		v.Central, v.CentralError = CentralCheck(t.ID)
 	}
 	sv, err := m.st.ServiceByID(ctx, t.ServiceID)
 	if err == nil {

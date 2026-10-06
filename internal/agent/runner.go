@@ -34,6 +34,9 @@ type Runner struct {
 	out chan *agentv1.TaskStatus
 	// NetworkReady reports whether tasks may join TaskNetwork yet (nil: always).
 	NetworkReady func() error
+	// OnStart is called when a managed container starts (it may need to
+	// join security group sets, §8.3).
+	OnStart func()
 	// prePulls holds images being pulled ahead of deployments.
 	prePulls sync.Map
 
@@ -270,6 +273,9 @@ func (r *Runner) Watch(ctx context.Context) {
 			switch {
 			case e.Action == "start", e.Action == "die", e.Action == "destroy",
 				strings.HasPrefix(e.Action, "health_status"):
+				if e.Action == "start" && r.OnStart != nil {
+					r.OnStart()
+				}
 				r.emit(r.inspect(ctx, e.Actor.ID, taskID))
 			}
 		}

@@ -98,6 +98,9 @@ export interface Task {
   ip: string;
   containerId: string;
   health: string;
+  /** The controller's probe over the private network (§5.6). */
+  central?: "ok" | "failing" | "unreachable";
+  centralError?: string;
   exitCode: number;
   error: string;
   createdAt: string;

@@ -19,6 +19,7 @@ import (
 	"syncloud/internal/agentgw"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 	"syncloud/internal/mesh"
+	"syncloud/internal/secgroup"
 	"syncloud/internal/store"
 	"syncloud/internal/workload"
 )
@@ -52,6 +53,9 @@ type Manager struct {
 	log *slog.Logger
 	gen atomic.Uint64
 
+	// Security compiles security groups into the directory (§8.3).
+	Security bool
+
 	mu   sync.Mutex
 	last *agentv1.Discovery
 	vips map[string]string // service ID -> VIP
@@ -81,6 +85,28 @@ func (m *Manager) Hooks() agentgw.Hooks {
 			m.send(c.Node.ID, d)
 		}
 	}}
+}
+
+// Records returns the DNS records last published (§8.1).
+func (m *Manager) Records() []*agentv1.DNSRecord {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.last.GetRecords()
+}
+
+// Backends returns how many running backends each VIP has, by service ID.
+func (m *Manager) Backends() map[string]int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := map[string]int{}
+	for _, vs := range m.last.GetServices() {
+		n := 0
+		for _, p := range vs.GetPorts() {
+			n = max(n, len(p.GetBackends()))
+		}
+		out["svc_"+vs.GetId()] = n
+	}
+	return out
 }
 
 // VIP returns a service's virtual IP ("" before the first build).
@@ -223,5 +249,12 @@ func (m *Manager) Build(ctx context.Context) (*agentv1.Discovery, map[string]str
 		d.Records = append(d.Records, &agentv1.DNSRecord{Name: n.NodeName + ".node." + Zone, Ips: []string{mesh.MeshAddr(n.MeshIndex).String()}})
 	}
 	sort.Slice(d.Records, func(i, j int) bool { return d.Records[i].Name < d.Records[j].Name })
+	if m.Security {
+		model, err := secgroup.Load(ctx, m.st)
+		if err != nil {
+			return nil, nil, fmt.Errorf("security groups: %w", err)
+		}
+		d.Security = secgroup.Compile(model)
+	}
 	return d, vips, nil
 }

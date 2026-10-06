@@ -26,6 +26,7 @@ var ErrDisabled = errors.New("metrics storage is not configured")
 type sample struct {
 	node string
 	m    *agentv1.TaskMetrics
+	raw  string // or Prometheus text lines
 }
 
 type Store struct {
@@ -47,9 +48,35 @@ func (s *Store) Add(node string, ms []*agentv1.TaskMetrics) {
 	}
 	for _, m := range ms {
 		select {
-		case s.in <- sample{node, m}:
+		case s.in <- sample{node: node, m: m}:
 		default: // storage is behind: drop rather than stall heartbeats
 		}
+	}
+}
+
+// AddNode queues a node's own counters from its heartbeat: network traffic
+// on all interfaces and over the mesh (§8.4).
+func (s *Store) AddNode(node string, hb *agentv1.Heartbeat) {
+	if s.url == "" || hb.GetMetrics() == nil {
+		return
+	}
+	ts := time.Now().UnixMilli()
+	var b strings.Builder
+	m := hb.GetMetrics()
+	fmt.Fprintf(&b, "syncloud_node_net_rx_bytes_total{node=%q} %d %d\n", node, m.GetNetRxBytes(), ts)
+	fmt.Fprintf(&b, "syncloud_node_net_tx_bytes_total{node=%q} %d %d\n", node, m.GetNetTxBytes(), ts)
+	if ns := hb.GetNetwork(); ns != nil {
+		var rx, tx uint64
+		for _, p := range ns.GetPeers() {
+			rx += p.GetRxBytes()
+			tx += p.GetTxBytes()
+		}
+		fmt.Fprintf(&b, "syncloud_node_mesh_rx_bytes_total{node=%q} %d %d\n", node, rx, ts)
+		fmt.Fprintf(&b, "syncloud_node_mesh_tx_bytes_total{node=%q} %d %d\n", node, tx, ts)
+	}
+	select {
+	case s.in <- sample{node: node, raw: b.String()}:
+	default:
 	}
 }
 
@@ -95,6 +122,10 @@ func (s *Store) Run(ctx context.Context) {
 }
 
 func write(b *bytes.Buffer, x sample) {
+	if x.raw != "" {
+		b.WriteString(x.raw)
+		return
+	}
 	m := x.m
 	labels := fmt.Sprintf(`{task=%q,service_id=%q,project=%q,environment=%q,service=%q,node=%q}`,
 		m.GetTaskId(), m.GetServiceId(), m.GetProject(), m.GetEnvironment(), m.GetService(), x.node)

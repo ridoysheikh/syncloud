@@ -262,6 +262,26 @@ message NetworkStatus {
   repeated PeerStatus peers = 4;
   bool firewall_pending = 5;    // applied, waiting for ConfirmNetwork
   uint64 drift_corrections = 6; // times the managed ruleset was changed by hand and restored
+  repeated RuleCounter counters = 7; // per firewall rule, cumulative since the agent started (§8.3)
+  repeated DropFlow drops = 8;       // flows dropped since the last heartbeat
+  string security_error = 9;         // why security groups are not enforced on this node
+}
+
+message RuleCounter {
+  string id = 1;                // rule comment: host rule ID, "<group>:<in|out>:<n>" or a built-in name
+  uint64 packets = 2;
+  uint64 bytes = 3;
+}
+
+// DropFlow is a connection attempt a default deny dropped, aggregated by
+// source, destination, protocol and port.
+message DropFlow {
+  string direction = 1;         // host (public interface) | in (to a container) | out (from a container)
+  string src = 2;
+  string dst = 3;
+  string protocol = 4;          // tcp | udp
+  uint32 port = 5;
+  uint64 packets = 6;
 }
 
 message PeerStatus {
@@ -303,6 +323,36 @@ message Discovery {
   uint64 generation = 1;
   repeated DNSRecord records = 2;
   repeated VirtualService services = 3;
+  SecurityPolicy security = 4;  // unset: security groups are off
+}
+
+// SecurityPolicy is the compiled form of every security group (§8.3):
+// sets of task IPs and allow rules between them. Each agent enforces the
+// rules for traffic to and from its local containers.
+message SecurityPolicy {
+  repeated SecuritySet sets = 1;
+  repeated SecurityRule rules = 2;
+  repeated string platform_ips = 3; // always allowed in: the nodes' mesh addresses (Traefik, health checks)
+}
+
+message SecuritySet {
+  string name = 1;              // nftables set name
+  repeated string ips = 2;      // known members on every node
+  // Local containers join when their labels match one of these, so new
+  // tasks are classified before the controller hears of them:
+  // "svc:<service ID>", "env:<project>/<env>", "proj:<project>",
+  // "standalone:<project>[/<env>]" (job runs without a service).
+  repeated string match = 3;
+}
+
+message SecurityRule {
+  string id = 1;                // "<group ID>:<in|out>:<n>", for counters
+  string direction = 2;         // in | out
+  string local_set = 3;         // the members the rule is for
+  repeated string peer_sets = 4;
+  repeated string peer_cidrs = 5;
+  string protocol = 6;          // tcp | udp | icmp | any
+  string ports = 7;             // "", "8080" or "8000-8100"
 }
 
 message DNSRecord {

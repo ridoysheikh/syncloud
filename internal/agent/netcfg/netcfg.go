@@ -20,6 +20,7 @@ import (
 
 	"syncloud/internal/agent/dnssrv"
 	"syncloud/internal/agent/docker"
+	"syncloud/internal/firewall"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 )
 
@@ -65,13 +66,21 @@ type Manager struct {
 
 	discovery *agentv1.Discovery // service directory (VIPs and DNS records)
 	dns       *dnssrv.Server
+
+	// Firewall counters (§8.3). The table is replaced on every change, which
+	// resets nftables counters, so totals are carried over here.
+	countMu  sync.Mutex
+	ruleBase map[string]firewall.Counts
+	dropSeen map[firewall.DropKey]uint64 // live set counters at the last read
+	dropNew  map[firewall.DropKey]uint64 // not reported yet
+	secErr   string
 }
 
 // New loads (or creates) the node's WireGuard key. With enabled false the
 // manager does nothing and the node stays out of the mesh.
 func New(dataDir string, d *docker.Client, log *slog.Logger, enabled bool) (*Manager, error) {
 	m := &Manager{dataDir: dataDir, docker: d, log: log, enabled: enabled, rtt: map[string]float64{}, kick: make(chan struct{}, 1),
-		dns: dnssrv.New(DNSZone, log)}
+		dns: dnssrv.New(DNSZone, log), ruleBase: map[string]firewall.Counts{}, dropSeen: map[firewall.DropKey]uint64{}, dropNew: map[firewall.DropKey]uint64{}}
 	if !enabled {
 		return m, nil
 	}
@@ -131,6 +140,24 @@ func (m *Manager) services() []*agentv1.VirtualService {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.discovery.GetServices()
+}
+
+func (m *Manager) security() *agentv1.SecurityPolicy {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.discovery.GetSecurity()
+}
+
+// Kick re-applies soon, e.g. when a container starts and must join its
+// security sets.
+func (m *Manager) Kick() {
+	if !m.enabled {
+		return
+	}
+	select {
+	case m.kick <- struct{}{}:
+	default:
+	}
 }
 
 // Submit queues cfg; the newest config wins.
@@ -307,9 +334,75 @@ func (m *Manager) Status() *agentv1.NetworkStatus {
 	st := &agentv1.NetworkStatus{Generation: m.applied, Error: m.lastErr, Mode: m.mode, FirewallPending: m.pendingFW != nil, DriftCorrections: m.drift}
 	rtt := m.rtt
 	m.mu.Unlock()
+	st.Counters, st.Drops, st.SecurityError = m.takeCounters()
 	for _, p := range m.peerStatus() {
 		p.RttMs = rtt[p.GetPublicKey()]
 		st.Peers = append(st.Peers, p)
 	}
 	return st
+}
+
+// collect records drop-set growth since the last read. Callers hold countMu.
+func (m *Manager) collect() {
+	_, drops, ok := readCounters()
+	if !ok {
+		return
+	}
+	for k, n := range drops {
+		prev := m.dropSeen[k]
+		if n < prev { // the element expired and came back
+			prev = 0
+		}
+		if n > prev {
+			m.dropNew[k] += n - prev
+		}
+	}
+	m.dropSeen = drops
+}
+
+// replaced is called after the table was replaced: the counters read just
+// before (rules) become part of the totals. Callers hold countMu.
+func (m *Manager) replaced(rules map[string]firewall.Counts) {
+	for k, c := range rules {
+		b := m.ruleBase[k]
+		b.Packets += c.Packets
+		b.Bytes += c.Bytes
+		m.ruleBase[k] = b
+	}
+	m.dropSeen = map[firewall.DropKey]uint64{}
+}
+
+// takeCounters returns cumulative rule counters and the drops since the
+// last call.
+func (m *Manager) takeCounters() ([]*agentv1.RuleCounter, []*agentv1.DropFlow, string) {
+	m.countMu.Lock()
+	defer m.countMu.Unlock()
+	rules, _, ok := readCounters()
+	if !ok {
+		return nil, nil, m.secErr
+	}
+	m.collect()
+	total := map[string]firewall.Counts{}
+	for k, c := range m.ruleBase {
+		total[k] = c
+	}
+	for k, c := range rules {
+		t := total[k]
+		t.Packets += c.Packets
+		t.Bytes += c.Bytes
+		total[k] = t
+	}
+	out := make([]*agentv1.RuleCounter, 0, len(total))
+	for k, c := range total {
+		out = append(out, &agentv1.RuleCounter{Id: k, Packets: c.Packets, Bytes: c.Bytes})
+	}
+	var drops []*agentv1.DropFlow
+	for k, n := range m.dropNew {
+		drops = append(drops, &agentv1.DropFlow{Direction: k.Direction, Src: k.Src, Dst: k.Dst, Protocol: k.Protocol, Port: k.Port, Packets: n})
+		if len(drops) >= 500 {
+			break
+		}
+	}
+	m.dropNew = map[firewall.DropKey]uint64{}
+	return out, drops, m.secErr
 }

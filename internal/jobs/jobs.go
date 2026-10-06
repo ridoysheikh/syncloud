@@ -137,6 +137,8 @@ type Manager struct {
 	mu    sync.Mutex
 	hooks map[string]map[string]bool // deployment ID -> pending hook run IDs
 
+	// OnRunAddress is called when a run's container address becomes known.
+	OnRunAddress func()
 	// OnFinished runs after any run reaches its final status (builds use it).
 	OnFinished func(ctx context.Context, run store.JobRun)
 }
@@ -398,6 +400,15 @@ func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
 	}
 	switch s.GetState() {
 	case agentv1.TaskState_TASK_STATE_RUNNING, agentv1.TaskState_TASK_STATE_STARTING, agentv1.TaskState_TASK_STATE_PULLING:
+		if ip := s.GetIp(); ip != "" {
+			if changed, err := m.st.SetRunIP(ctx, run.ID, ip); err == nil && changed {
+				sv := m.svcFor(ctx, run)
+				_ = m.st.AssignAddress(ctx, ip, run.ID, sv.Project+"/"+sv.Environment+"/"+sv.Name, node.ID, m.now().UTC())
+				if m.OnRunAddress != nil {
+					m.OnRunAddress() // security group sets include job runs (§8.3)
+				}
+			}
+		}
 		if run.Status == store.RunPending && s.GetState() == agentv1.TaskState_TASK_STATE_RUNNING {
 			now := m.now().UTC()
 			if s.GetStartedAtUnix() > 0 {
@@ -436,6 +447,10 @@ func (m *Manager) finish(ctx context.Context, run store.JobRun, status string, c
 	}
 	m.publish(ctx, run)
 	m.log.Info("job run finished", "run", run.ID, "status", status, "message", msg)
+	_ = m.st.ReleaseAddress(ctx, run.ID, now)
+	if m.OnRunAddress != nil {
+		m.OnRunAddress() // its address leaves the security group sets
+	}
 
 	var spec Spec
 	if run.JobID != "" {

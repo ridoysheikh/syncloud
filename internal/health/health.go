@@ -109,10 +109,12 @@ type Monitor struct {
 
 	mu       sync.Mutex
 	services map[string]*svcState
+	tasks    taskProbes
 }
 
 func New(st *store.Store, wl *workload.Manager, bus *events.Bus, log *slog.Logger, cfg Config) *Monitor {
-	m := &Monitor{st: st, wl: wl, bus: bus, log: log, cfg: cfg, now: time.Now, services: map[string]*svcState{}, vm: &http.Client{Timeout: 10 * time.Second}}
+	m := &Monitor{st: st, wl: wl, bus: bus, log: log, cfg: cfg, now: time.Now, services: map[string]*svcState{}, vm: &http.Client{Timeout: 10 * time.Second},
+		tasks: taskProbes{checks: map[string]*TaskCheck{}}}
 	// Every probe goes to the local Traefik, whatever the URL's host says,
 	// so checks exercise routing, TLS termination and the app (§5.6).
 	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {

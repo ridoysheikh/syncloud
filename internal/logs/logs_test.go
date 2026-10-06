@@ -8,7 +8,7 @@ import (
 func TestLogsQLQuotesUserInput(t *testing.T) {
 	f := Filter{Project: "shop", Service: `web") OR (*`, Text: `a" | delete`}
 	got := f.LogsQL(time.Hour)
-	want := `_time:3600s project:="shop" service:="web\") OR (*" i("a\" | delete") -stream:="access"`
+	want := `_time:3600s project:="shop" service:="web\") OR (*" i("a\" | delete") -stream:in("access", "firewall")`
 	if got != want {
 		t.Fatalf("\n got %s\nwant %s", got, want)
 	}

@@ -52,6 +52,10 @@ type Controller struct {
 	VictoriaMetricsURL string
 	// Firewall manages each node's host firewall (§8.3).
 	Firewall bool
+	// SecurityGroups isolates containers with security groups (§8.3).
+	SecurityGroups bool
+	// CentralProbes checks every task from the controller (§5.6).
+	CentralProbes bool
 	// DownloadsDir holds agent and CLI binaries served to joining nodes.
 	DownloadsDir string
 	// Dev enables development behavior (verbose logs, relaxed origin checks for the Vite dev server).
@@ -87,6 +91,8 @@ func LoadController(args []string) (Controller, error) {
 	fs.StringVar(&c.VictoriaMetricsURL, "victoriametrics-url", env("SYNCLOUD_VICTORIAMETRICS_URL", "http://127.0.0.1:8428"), "VictoriaMetrics for metrics")
 	fs.StringVar(&c.VictoriaLogsURL, "victorialogs-url", env("SYNCLOUD_VICTORIALOGS_URL", "http://127.0.0.1:9428"), "VictoriaLogs for container logs")
 	fs.BoolVar(&c.Firewall, "firewall", env("SYNCLOUD_FIREWALL", "1") == "1", "manage the host firewall on every node (default on)")
+	fs.BoolVar(&c.CentralProbes, "central-probes", env("SYNCLOUD_CENTRAL_PROBES", "1") == "1", "probe every task from the controller and route around unreachable ones (default on)")
+	fs.BoolVar(&c.SecurityGroups, "security-groups", env("SYNCLOUD_SECURITY_GROUPS", "1") == "1", "isolate containers with security groups (default on)")
 	fs.StringVar(&c.DownloadsDir, "downloads-dir", env("SYNCLOUD_DOWNLOADS_DIR", "/usr/local/lib/syncloud/downloads"), "agent/CLI binaries served at /downloads/")
 	if err := fs.Parse(args); err != nil {
 		return c, err

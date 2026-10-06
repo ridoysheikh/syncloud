@@ -41,6 +41,15 @@ type routeCache struct {
 	routes []Route
 }
 
+// InvalidateRoutes rebuilds routes on the next read (e.g. a task became
+// unreachable from the controller).
+func (m *Manager) InvalidateRoutes() {
+	m.routesDirty()
+	if m.OnTaskChange != nil {
+		m.OnTaskChange()
+	}
+}
+
 func (m *Manager) routesDirty() {
 	m.routes.mu.Lock()
 	m.routes.dirty = true
@@ -78,7 +87,7 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 	}
 	running := map[string][]store.Task{}
 	for _, t := range tasks {
-		if t.IP != "" && m.serving(ctx, t) {
+		if t.IP != "" && m.serving(ctx, t) && (m.Reachable == nil || m.Reachable(t.ID)) {
 			running[t.ServiceID] = append(running[t.ServiceID], t)
 		}
 	}
