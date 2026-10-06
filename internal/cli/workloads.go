@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -98,7 +99,95 @@ func (a *app) envsCmd() *cobra.Command {
 	var s scope
 	e := &cobra.Command{Use: "envs", Aliases: []string{"env", "environments"}, Short: "Environments of a project"}
 	a.scopeFlags(e, &s)
+	// update edits the shared variables of --env and reports the rollout.
+	update := func(cmd *cobra.Command, f func(map[string]string) error) error {
+		if err := s.need(); err != nil {
+			return err
+		}
+		c, err := a.client()
+		if err != nil {
+			return err
+		}
+		vars, err := c.SharedVariables(ctx(cmd), s.project, s.env)
+		if err != nil {
+			return err
+		}
+		if vars == nil {
+			vars = map[string]string{}
+		}
+		if err := f(vars); err != nil {
+			return err
+		}
+		redeployed, err := c.SetSharedVariables(ctx(cmd), s.project, s.env, vars)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(a.out, "Updated shared variables of %s/%s", s.project, s.env)
+		if len(redeployed) > 0 {
+			fmt.Fprintf(a.out, "; redeploying %s", strings.Join(redeployed, ", "))
+		}
+		fmt.Fprintln(a.out)
+		return nil
+	}
 	e.AddCommand(
+		&cobra.Command{
+			Use: "vars", Aliases: []string{"variables"}, Short: "Shared variables every service in --env inherits", Args: cobra.NoArgs,
+			Annotations: op("getSharedVariables"),
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				if err := s.need(); err != nil {
+					return err
+				}
+				c, err := a.client()
+				if err != nil {
+					return err
+				}
+				vars, err := c.SharedVariables(ctx(cmd), s.project, s.env)
+				if err != nil {
+					return err
+				}
+				keys := make([]string, 0, len(vars))
+				for k := range vars {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				rows := make([][]string, 0, len(keys))
+				for _, k := range keys {
+					rows = append(rows, []string{k, vars[k]})
+				}
+				return a.printer().table(vars, []string{"NAME", "VALUE"}, rows)
+			},
+		},
+		&cobra.Command{
+			Use: "set KEY=VALUE...", Short: "Set shared variables (services in --env redeploy)", Args: cobra.MinimumNArgs(1),
+			Annotations: op("setSharedVariables"),
+			Example:     "  synctl envs set -p shop -e production DATABASE_URL=postgres://db:5432/shop LOG_LEVEL=info",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return update(cmd, func(vars map[string]string) error {
+					for _, kv := range args {
+						k, v, ok := strings.Cut(kv, "=")
+						if !ok || k == "" {
+							return fmt.Errorf("use KEY=VALUE, got %q", kv)
+						}
+						vars[k] = v
+					}
+					return nil
+				})
+			},
+		},
+		&cobra.Command{
+			Use: "unset KEY...", Short: "Remove shared variables", Args: cobra.MinimumNArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return update(cmd, func(vars map[string]string) error {
+					for _, k := range args {
+						if _, ok := vars[k]; !ok {
+							return fmt.Errorf("no shared variable %s", k)
+						}
+						delete(vars, k)
+					}
+					return nil
+				})
+			},
+		},
 		&cobra.Command{
 			Use: "list", Aliases: []string{"ls"}, Short: "List environments", Args: cobra.NoArgs,
 			Annotations: op("listEnvironments"),

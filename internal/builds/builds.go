@@ -137,7 +137,7 @@ func (m *Manager) SetSource(ctx context.Context, sv store.Service, in Source) (S
 	// Fail early on a wrong URL, branch or token.
 	refs, err := gitremote.LsRemote(ctx, g.URL, in.Token)
 	if err != nil {
-		return Source{}, ErrInvalid{err}
+		return Source{}, ErrInvalid{fmt.Errorf("cannot read the repository (check the URL and token): %w", err)}
 	}
 	if _, ok := gitremote.BranchSHA(refs, g.Branch); !ok {
 		return Source{}, ErrInvalid{fmt.Errorf("branch %s not found in the repository", g.Branch)}

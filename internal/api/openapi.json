@@ -3498,6 +3498,131 @@
           }
         }
       }
+    },
+    "/api/v1/projects/{project}/environments/{env}/variables": {
+      "get": {
+        "operationId": "getSharedVariables",
+        "tags": [
+          "projects"
+        ],
+        "summary": "An environment's shared variables",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "variables": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "setSharedVariables",
+        "tags": [
+          "projects"
+        ],
+        "summary": "Replace an environment's shared variables; every service whose variables change is redeployed as a new revision (rolling)",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "variables": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "variables": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "redeployed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4589,6 +4714,13 @@
           "name": {
             "type": "string"
           },
+          "sharedEnv": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "shared variables every service in the environment inherits"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -4634,6 +4766,14 @@
             "additionalProperties": {
               "type": "string"
             }
+          },
+          "sharedEnv": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "readOnly": true,
+            "description": "snapshot of the environment's shared variables for this revision (set by the platform; env wins)"
           },
           "ports": {
             "type": "array",

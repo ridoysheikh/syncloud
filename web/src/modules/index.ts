@@ -18,6 +18,9 @@ import { planned } from "./planned";
 import { CredentialsPage } from "./iam/CredentialsPage";
 import { NodesPage } from "./compute/NodesPage";
 import { ServicesPage } from "./compute/ServicesPage";
+import { NewProjectPage, ProjectsPage } from "./projects/ProjectsPage";
+import { ProjectPage } from "./projects/ProjectPage";
+import { NewServiceWizard } from "./projects/NewServiceWizard";
 import { ServicePage } from "./compute/ServicePage";
 import { TasksPage } from "./compute/TasksPage";
 import { JobsPage } from "./compute/JobsPage";
@@ -45,7 +48,13 @@ export const modules: DashboardModule[] = [
     icon: Cpu,
     order: 10,
     pages: [
+      { path: "/projects", label: "Projects", component: ProjectsPage },
+      { path: "/projects/new", label: "New project", component: NewProjectPage, hidden: true },
+      { path: "/projects/$project", label: "Project", component: ProjectPage, hidden: true },
+      { path: "/projects/$project/$env", label: "Project", component: ProjectPage, hidden: true },
+      { path: "/projects/$project/$env/new-service", label: "New service", component: NewServiceWizard, hidden: true },
       { path: "/compute/services", label: "Services", component: ServicesPage },
+      { path: "/compute/services/new", label: "New service", component: NewServiceWizard, hidden: true },
       { path: "/compute/services/$project/$env/$name", label: "Service", component: ServicePage, hidden: true },
       { path: "/compute/tasks", label: "Tasks", component: TasksPage },
       { path: "/compute/jobs", label: "Jobs", component: JobsPage },

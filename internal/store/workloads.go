@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -16,10 +17,25 @@ type Project struct {
 }
 
 type Environment struct {
-	ID        string    `json:"id"`
-	ProjectID string    `json:"projectId"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID        string            `json:"id"`
+	ProjectID string            `json:"projectId"`
+	Name      string            `json:"name"`
+	SharedEnv map[string]string `json:"sharedEnv"`
+	CreatedAt time.Time         `json:"createdAt"`
+}
+
+const envCols = `SELECT id, project_id, name, shared_env, created_at FROM environments`
+
+func scanEnv(r scanner) (Environment, error) {
+	var e Environment
+	var shared string
+	var at int64
+	if err := r.Scan(&e.ID, &e.ProjectID, &e.Name, &shared, &at); err != nil {
+		return e, err
+	}
+	e.CreatedAt = time.Unix(at, 0).UTC()
+	err := json.Unmarshal([]byte(shared), &e.SharedEnv)
+	return e, err
 }
 
 type Service struct {
@@ -162,34 +178,55 @@ func (s *Store) CreateEnvironment(ctx context.Context, e Environment) error {
 }
 
 func (s *Store) ListEnvironments(ctx context.Context, projectID string) ([]Environment, error) {
-	rows, err := s.R.QueryContext(ctx, `SELECT id, project_id, name, created_at FROM environments WHERE project_id = ? ORDER BY created_at`, projectID)
+	rows, err := s.R.QueryContext(ctx, envCols+` WHERE project_id = ? ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Environment
 	for rows.Next() {
-		var e Environment
-		var at int64
-		if err := rows.Scan(&e.ID, &e.ProjectID, &e.Name, &at); err != nil {
+		e, err := scanEnv(rows)
+		if err != nil {
 			return nil, err
 		}
-		e.CreatedAt = time.Unix(at, 0).UTC()
 		out = append(out, e)
 	}
 	return out, rows.Err()
 }
 
 func (s *Store) EnvironmentByName(ctx context.Context, projectID, name string) (Environment, error) {
-	var e Environment
-	var at int64
-	err := s.R.QueryRowContext(ctx, `SELECT id, project_id, name, created_at FROM environments WHERE project_id = ? AND name = ?`, projectID, name).
-		Scan(&e.ID, &e.ProjectID, &e.Name, &at)
+	e, err := scanEnv(s.R.QueryRowContext(ctx, envCols+` WHERE project_id = ? AND name = ?`, projectID, name))
 	if errors.Is(err, sql.ErrNoRows) {
 		return e, ErrNotFound
 	}
-	e.CreatedAt = time.Unix(at, 0).UTC()
 	return e, err
+}
+
+func (s *Store) EnvironmentByID(ctx context.Context, id string) (Environment, error) {
+	e, err := scanEnv(s.R.QueryRowContext(ctx, envCols+` WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return e, ErrNotFound
+	}
+	return e, err
+}
+
+// SetSharedEnv replaces an environment's shared variables.
+func (s *Store) SetSharedEnv(ctx context.Context, envID string, vars map[string]string) error {
+	if vars == nil {
+		vars = map[string]string{}
+	}
+	b, err := json.Marshal(vars)
+	if err != nil {
+		return err
+	}
+	res, err := s.W.ExecContext(ctx, `UPDATE environments SET shared_env = ? WHERE id = ?`, string(b), envID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) DeleteEnvironment(ctx context.Context, id string) error {

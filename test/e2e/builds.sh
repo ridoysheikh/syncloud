@@ -35,7 +35,13 @@ for w in w1 w2; do
 done
 api localhost:7070/api/v1/projects -d '{"name":"shop"}' >/dev/null
 SVC=localhost:7070/api/v1/projects/shop/environments/production/services/web
-api -X PUT "$SVC" -d '{"image":"busybox:1.37","command":["httpd","-f","-p","8080","-h","/www"],"ports":[{"container":8080}],"resources":{"cpu":0.05,"memory":16}}' >/dev/null
+# Created like the dashboard wizard does for Git: no image until the first build.
+api -X PUT "$SVC" -d '{"image":"@build","command":["httpd","-f","-p","8080","-h","/www"],"ports":[{"container":8080}],"resources":{"cpu":0.05,"memory":16}}' >/dev/null
+for _ in $(seq 1 20); do api "$SVC" | grep -q '"status":"waiting for the first build"' && break; sleep 0.5; done
+api "$SVC" | grep -q '"status":"waiting for the first build"' || fail "a service without a build is not waiting for it"
+api -X PUT localhost:7070/api/v1/projects/shop/environments/production/variables -d '{"variables":{"GREETING":"hello","MODE":"shared"}}' >/dev/null
+api -X PUT "$SVC" -d '{"image":"@build","command":["httpd","-f","-p","8080","-h","/www"],"ports":[{"container":8080}],"env":{"MODE":"own"},"resources":{"cpu":0.05,"memory":16}}' >/dev/null
+echo "  ✓ service waits for its first build; shared variables set"
 
 echo "== connect"
 api -X PUT "$SVC/git" -d '{"url":"http://127.0.0.1:3000/nope.git"}' >/dev/null 2>&1 && fail "a missing repository was accepted"
@@ -90,6 +96,11 @@ echo "  ✓ BuildKit built ${SHA1:0:12} on ctl-0 and pushed it to the private re
 api localhost:7070/api/v1/registry/repositories | grep -q '"name":"shop/web","tags":2' || fail "image tags missing in the registry"
 wait_serving "@registry/shop/web:${SHA1:0:12}" one
 echo "  ✓ auto-deployed: the service serves version one"
+cid=$(api "$SVC/tasks" | grep -o '"desired":"running","state":"running","ip":"[^"]*","containerId":"[^"]*"' | cut -d'"' -f16 | head -1)
+envs=$(x sc-e2e-ctl docker exec "$cid" env)
+echo "$envs" | grep -qx 'GREETING=hello' || fail "shared variable missing: $envs"
+echo "$envs" | grep -qx 'MODE=own' || fail "the service's own variable must win: $envs"
+echo "  ✓ the task has the shared variables, and the service's own value wins"
 
 echo "== webhook"
 x sc-e2e-ctl sh -c 'cd /src/web && echo two > app/version && git commit -qam two && git push -q origin main'

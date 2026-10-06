@@ -535,6 +535,23 @@ func (c *Client) DeleteEnvironment(ctx context.Context, project, name string) er
 	return c.Do(ctx, "DELETE", "/api/v1/projects/"+url.PathEscape(project)+"/environments/"+url.PathEscape(name), nil, nil)
 }
 
+// SharedVariables returns an environment's shared variables.
+func (c *Client) SharedVariables(ctx context.Context, project, env string) (map[string]string, error) {
+	var out struct {
+		Variables map[string]string `json:"variables"`
+	}
+	return out.Variables, c.Do(ctx, "GET", "/api/v1/projects/"+url.PathEscape(project)+"/environments/"+url.PathEscape(env)+"/variables", nil, &out)
+}
+
+// SetSharedVariables replaces them and returns the redeployed services.
+func (c *Client) SetSharedVariables(ctx context.Context, project, env string, vars map[string]string) ([]string, error) {
+	var out struct {
+		Redeployed []string `json:"redeployed"`
+	}
+	return out.Redeployed, c.Do(ctx, "PUT", "/api/v1/projects/"+url.PathEscape(project)+"/environments/"+url.PathEscape(env)+"/variables",
+		map[string]any{"variables": vars}, &out)
+}
+
 func (c *Client) ListServices(ctx context.Context, project, env string) ([]Service, error) {
 	var out list[Service]
 	if project == "" {

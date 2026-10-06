@@ -1,16 +1,12 @@
-import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Boxes, ExternalLink, Plus } from "lucide-react";
-import { api, ApiError } from "@/lib/api";
-import { useProjects, useServices, type Service } from "@/lib/workloads";
+import { AWAITING_BUILD, useServices, type Service } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { StatTile } from "@/ui/StatTile";
 import { DataTable } from "@/ui/DataTable";
-import { Dialog } from "@/ui/Dialog";
 import { EmptyState } from "@/ui/EmptyState";
-import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
+import { Button, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 
 export function serviceState(s: Service): {
@@ -18,6 +14,8 @@ export function serviceState(s: Service): {
   label: string;
 } {
   if (s.deleting) return { tone: "neutral", label: "deleting" };
+  if (s.spec.image === AWAITING_BUILD)
+    return { tone: "info", label: "awaiting build" };
   if (s.status) return { tone: "bad", label: "degraded" };
   if (s.desiredCount === 0) return { tone: "neutral", label: "stopped" };
   if (s.running >= s.desiredCount && s.pending === 0)
@@ -29,7 +27,7 @@ export function serviceState(s: Service): {
 /** Every service in the cluster (§4). */
 export function ServicesPage() {
   const { data: services = [], isLoading } = useServices();
-  const [creating, setCreating] = useState(false);
+  const newTo: string = "/compute/services/new";
   const running = services.reduce((n, s) => n + s.running, 0);
   const desired = services.reduce((n, s) => n + s.desiredCount, 0);
   const degraded = services.filter(
@@ -42,9 +40,11 @@ export function ServicesPage() {
         crumbs={["Compute"]}
         title="Services"
         actions={
-          <Button variant="primary" onClick={() => setCreating(true)}>
-            <Plus className="size-3.5" /> New service
-          </Button>
+          <Link to={newTo}>
+            <Button variant="primary">
+              <Plus className="size-3.5" /> New service
+            </Button>
+          </Link>
         }
       />
       <div className={cn("grid grid-cols-2 md:grid-cols-4", gap)}>
@@ -152,174 +152,6 @@ export function ServicesPage() {
           ]}
         />
       </Panel>
-      {creating && <NewServiceDialog onClose={() => setCreating(false)} />}
     </div>
-  );
-}
-
-function NewServiceDialog({ onClose }: { onClose: () => void }) {
-  const qc = useQueryClient();
-  const { data: projects = [] } = useProjects();
-  const [f, setF] = useState({
-    project: "",
-    newProject: "",
-    env: "production",
-    name: "",
-    image: "",
-    port: "80",
-    replicas: "1",
-    cpu: "0.1",
-    memory: "128",
-  });
-  const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
-    setF({ ...f, [k]: e.target.value });
-  const project = f.project || projects[0]?.name || "";
-  const isNew = project === "" || project === "__new";
-  const envs = projects.find((p) => p.name === project)?.environments ?? [
-    "production",
-  ];
-
-  const create = useMutation({
-    mutationFn: async () => {
-      let proj = project;
-      if (isNew) {
-        proj = f.newProject;
-        await api("POST", "/projects", { name: proj, environment: f.env });
-      }
-      const spec = {
-        image: f.image,
-        ports: f.port ? [{ container: Number(f.port) }] : [],
-        resources: { cpu: Number(f.cpu), memory: Number(f.memory) },
-        desiredCount: Number(f.replicas),
-      };
-      return api(
-        "PUT",
-        `/projects/${proj}/environments/${isNew ? f.env : f.env || envs[0]}/services/${f.name}`,
-        spec,
-      );
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["services"] });
-      qc.invalidateQueries({ queryKey: ["projects"] });
-      onClose();
-    },
-  });
-
-  return (
-    <Dialog
-      open
-      onClose={onClose}
-      title="New service"
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={create.isPending || !f.name || !f.image}
-            onClick={() => create.mutate()}
-          >
-            {create.isPending ? "Creating…" : "Create and deploy"}
-          </Button>
-        </>
-      }
-    >
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Project">
-          <select
-            value={isNew ? "__new" : project}
-            onChange={set("project")}
-            className="bg-bg border-line h-7 rounded-sm border px-1.5 text-xs"
-          >
-            {projects.map((p) => (
-              <option key={p.id} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-            <option value="__new">New project…</option>
-          </select>
-        </Field>
-        {isNew ? (
-          <Field label="Project name">
-            <Input
-              value={f.newProject}
-              onChange={set("newProject")}
-              placeholder="shop"
-              className="font-mono"
-            />
-          </Field>
-        ) : (
-          <Field label="Environment">
-            <select
-              value={f.env}
-              onChange={set("env")}
-              className="bg-bg border-line h-7 rounded-sm border px-1.5 text-xs"
-            >
-              {envs.map((e) => (
-                <option key={e}>{e}</option>
-              ))}
-            </select>
-          </Field>
-        )}
-        <Field label="Service name">
-          <Input
-            value={f.name}
-            onChange={set("name")}
-            placeholder="api"
-            className="font-mono"
-          />
-        </Field>
-        <Field label="Image">
-          <Input
-            value={f.image}
-            onChange={set("image")}
-            placeholder="nginx:1.27"
-            className="font-mono"
-          />
-        </Field>
-        <Field
-          label="HTTP port"
-          hint="Gets a public URL. Leave empty for workers."
-        >
-          <Input value={f.port} onChange={set("port")} className="font-mono" />
-        </Field>
-        <Field label="Tasks">
-          <Input
-            type="number"
-            min={0}
-            max={100}
-            value={f.replicas}
-            onChange={set("replicas")}
-          />
-        </Field>
-        <Field label="CPU (cores reserved)">
-          <Input
-            type="number"
-            step={0.05}
-            min={0.01}
-            value={f.cpu}
-            onChange={set("cpu")}
-          />
-        </Field>
-        <Field label="Memory (MiB reserved)">
-          <Input
-            type="number"
-            min={4}
-            value={f.memory}
-            onChange={set("memory")}
-          />
-        </Field>
-      </div>
-      {create.error && (
-        <div className="mt-2">
-          <Alert>
-            {create.error instanceof ApiError
-              ? create.error.message
-              : "Could not create the service"}
-          </Alert>
-        </div>
-      )}
-    </Dialog>
   );
 }

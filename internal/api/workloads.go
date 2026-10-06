@@ -150,7 +150,7 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "environment name "+err.Error())
 		return
 	}
-	e := store.Environment{ID: auth.NewID("env_"), ProjectID: p.ID, Name: req.Name, CreatedAt: s.now().UTC().Truncate(1e9)}
+	e := store.Environment{ID: auth.NewID("env_"), ProjectID: p.ID, Name: req.Name, SharedEnv: map[string]string{}, CreatedAt: s.now().UTC().Truncate(1e9)}
 	if err := s.store.CreateEnvironment(r.Context(), e); errors.Is(err, store.ErrNameTaken) {
 		writeError(w, http.StatusConflict, CodeConflict, "environment "+req.Name+" already exists")
 		return
@@ -178,6 +178,50 @@ func (s *Server) handleDeleteEnvironment(w http.ResponseWriter, r *http.Request)
 	u, _ := currentUser(r.Context())
 	s.audit(r, u.ID, "project:DeleteEnvironment", "srn:syncloud:project/"+r.PathValue("project")+"/"+e.Name, nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleGetSharedEnv(w http.ResponseWriter, r *http.Request) {
+	e, ok := s.environment(w, r)
+	if !ok {
+		return
+	}
+	if e.SharedEnv == nil {
+		e.SharedEnv = map[string]string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"variables": e.SharedEnv})
+}
+
+// handleSetSharedEnv replaces the shared variables and redeploys the
+// services whose variables change.
+func (s *Server) handleSetSharedEnv(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWorkloads(w) {
+		return
+	}
+	e, ok := s.environment(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Variables map[string]string `json:"variables"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	u, _ := currentUser(r.Context())
+	redeployed, err := s.workloads.SetSharedEnv(r.Context(), e, req.Variables, u.ID)
+	if err != nil {
+		s.workloadError(w, "set shared variables", err)
+		return
+	}
+	names := make([]string, 0, len(req.Variables))
+	for k := range req.Variables {
+		names = append(names, k)
+	}
+	s.audit(r, u.ID, "project:SetSharedVariables", "srn:syncloud:project/"+r.PathValue("project")+"/"+e.Name, map[string]any{"names": names})
+	if req.Variables == nil {
+		req.Variables = map[string]string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"variables": req.Variables, "redeployed": redeployed})
 }
 
 // ── services ────────────────────────────────────────────────────────────────

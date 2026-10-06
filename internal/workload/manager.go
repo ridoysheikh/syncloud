@@ -279,6 +279,9 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 		}
 	}
 	desired := sv.DesiredCount
+	if spec.Image == AwaitingBuild {
+		desired, status = 0, "waiting for the first build"
+	}
 
 	// Too many of the current revision: stop the extras (not running first, then newest).
 	for len(current) > desired {
@@ -594,6 +597,9 @@ func (m *Manager) RunSpec(sv store.Service, spec Spec, t store.Task) *agentv1.Ta
 // TaskSpec is what the agent runs for a task.
 func TaskSpec(sv store.Service, spec Spec, t store.Task) *agentv1.TaskSpec {
 	env := map[string]string{}
+	for k, v := range spec.SharedEnv {
+		env[k] = v
+	}
 	for _, k := range sortedKeys(spec.Env) {
 		env[k] = spec.Env[k]
 	}

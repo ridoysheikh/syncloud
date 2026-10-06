@@ -17,9 +17,12 @@ type Spec struct {
 	Entrypoint []string          `json:"entrypoint,omitempty"` // replaces the image ENTRYPOINT
 	Command    []string          `json:"command,omitempty"`
 	Env        map[string]string `json:"env,omitempty"`
-	Ports      []Port            `json:"ports,omitempty"`
-	Resources  Resources         `json:"resources"`
-	Placement  Placement         `json:"placement"`
+	// SharedEnv is a snapshot of the environment's shared variables, taken
+	// by the platform for every revision (never user-set). Env wins over it.
+	SharedEnv map[string]string `json:"sharedEnv,omitempty"`
+	Ports     []Port            `json:"ports,omitempty"`
+	Resources Resources         `json:"resources"`
+	Placement Placement         `json:"placement"`
 	// Health is probed by the agent (§5.6); traffic only reaches healthy tasks.
 	Health     *HealthCheck `json:"health,omitempty"`
 	Deployment Deployment   `json:"deployment"`
@@ -83,19 +86,31 @@ func ValidName(s string) error {
 	return nil
 }
 
-// Normalize fills defaults and validates.
-func (s *Spec) Normalize() error {
-	s.Image = strings.TrimSpace(s.Image)
-	if s.Image == "" || strings.ContainsAny(s.Image, " \t\n") {
-		return errors.New("image is required, e.g. nginx:1.27 or ghcr.io/org/app:tag")
-	}
-	for k := range s.Env {
+// AwaitingBuild is the image of a service built from Git before its first
+// build: it runs no tasks until a build is deployed (§5.8).
+const AwaitingBuild = "@build"
+
+// ValidateEnv checks environment variable names.
+func ValidateEnv(env map[string]string) error {
+	for k := range env {
 		if !envKeyRE.MatchString(k) {
 			return fmt.Errorf("invalid environment variable name %q", k)
 		}
 		if strings.HasPrefix(k, "SYNCLOUD_") {
 			return fmt.Errorf("%s: the SYNCLOUD_ prefix is reserved", k)
 		}
+	}
+	return nil
+}
+
+// Normalize fills defaults and validates.
+func (s *Spec) Normalize() error {
+	s.Image = strings.TrimSpace(s.Image)
+	if s.Image == "" || strings.ContainsAny(s.Image, " \t\n") {
+		return errors.New("image is required, e.g. nginx:1.27 or ghcr.io/org/app:tag")
+	}
+	if err := ValidateEnv(s.Env); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	for i := range s.Ports {

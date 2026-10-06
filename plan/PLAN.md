@@ -1318,6 +1318,25 @@ Because there is only one controller:
     - The same commit is refused twice; an older build is redeployed by hand.
     - Disconnect removes the webhook.
   - Still to do: GitHub App installation flow, watch rules and path filters, Nixpacks (builds without a Dockerfile), build cache volume, cancelling a build from the UI.
+- ✅ Projects and shared variables (2026-10-06), a user-requested UI rework before the rest of Phase 4:
+  - **Project pages**:
+    - `/projects` shows projects as cards (environments, service count, task health).
+    - `/projects/{p}/{env}` has an environment switcher, a **service card grid**, **Shared variables** and Settings (add or delete environments, delete the project).
+    - The service page links back to its project.
+  - **Full-page "New service" wizard** replaces the dialog: Source → Service → Variables → Review.
+    - Source: a container image, or a Git repository with branch, context, Dockerfile, token and auto-deploy.
+    - Service settings: project and environment, name, network (public HTTP, internal TCP or none), port, health path, tasks, CPU and memory.
+    - Variables: a key/value editor with a `.env` paste box, masked values, and inherited shared variables marked when overridden.
+    - Routes `/projects/{p}/{env}/new-service` and `/compute/services/new`. If connecting a Git repository fails, the half-created service is removed.
+  - **Shared variables per environment** (`GET/PUT …/environments/{env}/variables`; synctl `envs vars|set|unset`):
+    - Each revision snapshots them into a platform-set `sharedEnv`, so a rollback restores them too. A service's own `env` wins.
+    - Changing them redeploys only the services whose variables change, as normal rolling revisions.
+    - The service page has a Variables tab for its own variables.
+  - **Services built from Git can exist before their first build**: image `@build` runs no tasks ("waiting for the first build", health "stopped"). The first deployed build starts the desired tasks. Task definitions also gained `entrypoint`.
+  - Verified:
+    - Unit test `TestSharedEnvRollsOutAsRevisions`.
+    - `test/e2e/builds.sh` now creates the service as `@build` and checks that shared variables reach the container, with the service's own value winning.
+    - The dashboard was checked in headless Chrome against a scratch controller (both wizard paths, and Git failure cleanup).
 - ECR-style registry UI (§5.10): dashboard, repositories, images, push commands, lifecycle policies with preview, permissions, upstream credentials, registry tokens; registry event tracking; pre-pull before deploys.
 - (v1.1) Trivy scanning and the deploy gate.
 - GitHub App, GitLab, Gitea and generic Git; webhooks plus the polling scheduler (watch rules, path filters, SHA dedup, backoff) (§5.8).

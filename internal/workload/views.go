@@ -192,6 +192,15 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 	if err := spec.Normalize(); err != nil {
 		return ServiceView{}, false, ErrInvalid{err}
 	}
+	// Every revision carries the environment's shared variables as they are now.
+	e, err := m.st.EnvironmentByID(ctx, env.ID)
+	if err != nil {
+		return ServiceView{}, false, err
+	}
+	spec.SharedEnv = nil
+	if len(e.SharedEnv) > 0 {
+		spec.SharedEnv = e.SharedEnv
+	}
 	if desired > maxDesired {
 		return ServiceView{}, false, ErrInvalid{fmt.Errorf("desiredCount must be at most %d", maxDesired)}
 	}
@@ -312,6 +321,41 @@ func (m *Manager) rollback(ctx context.Context, sv store.Service, revision int, 
 	}
 	m.Enqueue(sv.ID)
 	return m.ServiceView(ctx, sv.ID)
+}
+
+// SetSharedEnv replaces an environment's shared variables and rolls them out:
+// every service whose variables change gets a new revision (a normal rolling
+// deployment). It returns the services that were redeployed.
+func (m *Manager) SetSharedEnv(ctx context.Context, env store.Environment, vars map[string]string, actor string) ([]string, error) {
+	if err := ValidateEnv(vars); err != nil {
+		return nil, ErrInvalid{err}
+	}
+	if err := m.st.SetSharedEnv(ctx, env.ID, vars); err != nil {
+		return nil, err
+	}
+	services, err := m.st.ListServicesIn(ctx, env.ID)
+	if err != nil {
+		return nil, err
+	}
+	redeployed := []string{}
+	for _, sv := range services {
+		if sv.Deleting {
+			continue
+		}
+		spec, err := m.SpecFor(ctx, sv.ID, sv.Revision)
+		if err != nil {
+			return redeployed, err
+		}
+		before := sv.Revision
+		v, _, err := m.Apply(ctx, env, sv.Name, spec, -1, actor)
+		if err != nil {
+			return redeployed, fmt.Errorf("%s: %w", sv.Name, err)
+		}
+		if v.Revision != before {
+			redeployed = append(redeployed, sv.Name)
+		}
+	}
+	return redeployed, nil
 }
 
 // Delete stops all tasks, then removes the service.

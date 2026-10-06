@@ -235,8 +235,12 @@ func (m *Monitor) evaluate(ctx context.Context, sv store.Service, r workload.Rou
 			lastStopped = &tasks[i]
 		}
 	}
+	desired := sv.DesiredCount
+	if spec, err := m.wl.SpecFor(ctx, sv.ID, sv.Revision); err == nil && spec.Image == workload.AwaitingBuild {
+		desired = 0 // nothing to run until the first build is deployed
+	}
 	var check *Check
-	if r.Host != "" && sv.DesiredCount > 0 {
+	if r.Host != "" && desired > 0 {
 		c := m.probe(ctx, r, base)
 		check = &c
 		m.push(ctx, sv, c)
@@ -271,7 +275,7 @@ func (m *Monitor) evaluate(ctx context.Context, sv store.Service, r workload.Rou
 	deploying := depErr == nil && dep.ToRev == sv.Revision
 	state, reason := Healthy, ""
 	switch {
-	case sv.DesiredCount == 0:
+	case desired == 0:
 		state = Stopped
 	case deploying && serving == 0 && dep.FromRev == 0:
 		state = Deploying // a new service is still starting

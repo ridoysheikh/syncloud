@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Minus, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import {
   deploymentTone,
+  AWAITING_BUILD,
   servicePath,
   useServices,
+  useSharedVars,
   type Deployment,
   type Spec,
 } from "@/lib/workloads";
@@ -19,6 +21,13 @@ import { cn, gap } from "@/ui/cn";
 import { since } from "@/lib/nodes";
 import { serviceState } from "./ServicesPage";
 import { DomainsPanel } from "./DomainsPanel";
+import {
+  toRows,
+  toVars,
+  VarsEditor,
+  varsError,
+  type VarRow,
+} from "@/modules/projects/VarsEditor";
 import { BuildsPanel } from "./BuildsPanel";
 import { TasksTable } from "./TasksPage";
 import { useTasks } from "@/lib/workloads";
@@ -32,7 +41,14 @@ interface Revision {
   createdBy: string;
 }
 
-type Tab = "tasks" | "logs" | "deployments" | "builds" | "revisions" | "spec";
+type Tab =
+  | "tasks"
+  | "logs"
+  | "deployments"
+  | "builds"
+  | "variables"
+  | "revisions"
+  | "spec";
 
 /** One service: scale, tasks, revisions and its spec (§4). */
 export function ServicePage() {
@@ -74,7 +90,16 @@ export function ServicePage() {
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader
-        crumbs={["Compute", "Services", `${project} / ${env}`]}
+        crumbs={[
+          "Compute",
+          <Link
+            key="p"
+            to={`/projects/${project}/${env}` as string}
+            className="hover:text-fg"
+          >
+            {project} / {env}
+          </Link>,
+        ]}
         title={name}
         status={<StatusBadge tone={st.tone}>{st.label}</StatusBadge>}
         actions={
@@ -112,7 +137,15 @@ export function ServicePage() {
           </>
         }
       />
-      {svc.status && <Alert>{svc.status}</Alert>}
+      {svc.status &&
+        (svc.spec.image === AWAITING_BUILD ? (
+          <Alert tone="info">
+            Waiting for the first build. Tasks start when it is deployed; see
+            the Builds tab.
+          </Alert>
+        ) : (
+          <Alert>{svc.status}</Alert>
+        ))}
       {svc.deployment &&
         svc.deployment.status !== "succeeded" &&
         svc.deployment.status !== "superseded" && (
@@ -131,7 +164,15 @@ export function ServicePage() {
           value={`${svc.running}/${svc.desiredCount}`}
           tone={svc.running < svc.desiredCount ? "warn" : "ok"}
         />
-        <StatTile label="Revision" value={svc.revision} hint={svc.spec.image} />
+        <StatTile
+          label="Revision"
+          value={svc.revision}
+          hint={
+            svc.spec.image === AWAITING_BUILD
+              ? "waiting for the first build"
+              : svc.spec.image
+          }
+        />
         <StatTile
           label="Reserved per task"
           value={`${svc.spec.resources.cpu ?? 0.1} CPU`}
@@ -192,6 +233,7 @@ export function ServicePage() {
             "logs",
             "deployments",
             "builds",
+            "variables",
             "revisions",
             "spec",
           ] as Tab[]
@@ -219,6 +261,15 @@ export function ServicePage() {
       )}
       {tab === "deployments" && <Deployments path={path} />}
       {tab === "builds" && <BuildsPanel path={path} />}
+      {tab === "variables" && (
+        <ServiceVariables
+          key={svc.revision}
+          path={path}
+          project={project}
+          env={env}
+          spec={svc.spec}
+        />
+      )}
       {tab === "revisions" && <Revisions path={path} />}
       {tab === "spec" && <SpecEditor path={path} spec={svc.spec} />}
     </div>
@@ -354,7 +405,10 @@ function Revisions({ path }: { path: string }) {
 
 function SpecEditor({ path, spec }: { path: string; spec: Spec }) {
   const qc = useQueryClient();
-  const [text, setText] = useState(JSON.stringify(spec, null, 2));
+  const [text, setText] = useState(() => {
+    const { sharedEnv: _, ...own } = spec; // set by the platform, not editable
+    return JSON.stringify(own, null, 2);
+  });
   const [parseErr, setParseErr] = useState("");
   const apply = useMutation({
     mutationFn: (s: unknown) => api("PUT", path, s),
@@ -405,6 +459,73 @@ function SpecEditor({ path, spec }: { path: string; spec: Spec }) {
           Changing the definition creates a new revision and replaces tasks with
           a rolling update. Scaling does not.
         </p>
+      </div>
+    </Panel>
+  );
+}
+
+function ServiceVariables({
+  path,
+  project,
+  env,
+  spec,
+}: {
+  path: string;
+  project: string;
+  env: string;
+  spec: Spec;
+}) {
+  const qc = useQueryClient();
+  const { data: shared } = useSharedVars(project, env);
+  const [rows, setRows] = useState<VarRow[]>(() => toRows(spec.env));
+  const save = useMutation({
+    mutationFn: () => {
+      const { sharedEnv: _, ...own } = spec;
+      return api("PUT", path, { ...own, env: toVars(rows) });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["services"] });
+      qc.invalidateQueries({ queryKey: ["revisions", path] });
+    },
+  });
+  const err = varsError(rows);
+  const dirty =
+    JSON.stringify(toVars(rows)) !== JSON.stringify(toVars(toRows(spec.env)));
+  const projectTo: string = `/projects/${project}/${env}`;
+  return (
+    <Panel
+      title="Variables"
+      actions={
+        <Button
+          variant="primary"
+          disabled={!dirty || !!err || save.isPending}
+          onClick={() => save.mutate()}
+        >
+          {save.isPending ? "Deploying…" : "Save and deploy"}
+        </Button>
+      }
+    >
+      <div className="flex max-w-3xl flex-col gap-2">
+        <p className="text-muted text-xs">
+          This service's own variables. It also inherits the{" "}
+          <Link to={projectTo} className="text-accent">
+            shared variables of {project}/{env}
+          </Link>
+          ; a variable here with the same name wins. Saving deploys a new
+          revision.
+        </p>
+        <VarsEditor rows={rows} onChange={setRows} inherited={shared} />
+        {err && <Alert>{err}</Alert>}
+        {save.error && (
+          <Alert>
+            {save.error instanceof ApiError
+              ? save.error.message
+              : "Could not save"}
+          </Alert>
+        )}
+        {save.isSuccess && !dirty && (
+          <Alert tone="info">Saved. A new revision is rolling out.</Alert>
+        )}
       </div>
     </Panel>
   );

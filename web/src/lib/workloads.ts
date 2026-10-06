@@ -14,6 +14,8 @@ export interface Spec {
   entrypoint?: string[];
   command?: string[];
   env?: Record<string, string>;
+  /** Snapshot of the environment's shared variables (set by the platform). */
+  sharedEnv?: Record<string, string>;
   ports?: Port[];
   resources: {
     cpu?: number;
@@ -197,5 +199,26 @@ export function useTasks(service?: { id: string; path: string }) {
           service ? `${service.path}/tasks` : "/tasks",
         )
       ).items,
+  });
+}
+
+/** Image of a Git-built service before its first build is deployed. */
+export const AWAITING_BUILD = "@build";
+
+export const envPath = (project: string, env: string) =>
+  `/projects/${project}/environments/${env}`;
+
+/** Shared variables of one environment of a project. */
+export function useSharedVars(project: string, env: string) {
+  return useQuery({
+    queryKey: ["shared-vars", project, env],
+    enabled: !!project && !!env,
+    queryFn: async () =>
+      (
+        await api<{ variables: Record<string, string> }>(
+          "GET",
+          `${envPath(project, env)}/variables`,
+        )
+      ).variables,
   });
 }
