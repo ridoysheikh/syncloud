@@ -130,6 +130,12 @@ func keyID(pub *ecdsa.PublicKey) string {
 
 // Issue returns a signed token for subject with the given access.
 func (is *Issuer) Issue(subject string, access []Access, now time.Time) (string, error) {
+	return is.IssueTTL(subject, access, now, TokenTTL)
+}
+
+// IssueTTL is Issue with a custom lifetime (node pull tokens outlive a
+// docker login token because large pulls take a while).
+func (is *Issuer) IssueTTL(subject string, access []Access, now time.Time, ttl time.Duration) (string, error) {
 	if access == nil {
 		access = []Access{}
 	}
@@ -143,7 +149,7 @@ func (is *Issuer) Issue(subject string, access []Access, now time.Time) (string,
 	}
 	claims := map[string]any{
 		"iss": IssuerName, "sub": subject, "aud": Service,
-		"iat": now.Unix(), "nbf": now.Add(-10 * time.Second).Unix(), "exp": now.Add(TokenTTL).Unix(),
+		"iat": now.Unix(), "nbf": now.Add(-10 * time.Second).Unix(), "exp": now.Add(ttl).Unix(),
 		"jti": base64.RawURLEncoding.EncodeToString(jti), "access": access,
 	}
 	h, err := json.Marshal(header)

@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -117,4 +118,89 @@ func grantRegistry(u store.User, req registry.Access) registry.Access {
 		}
 	}
 	return out
+}
+
+var repoNameRE = regexp.MustCompile(`^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$`)
+
+func (s *Server) requireBrowser(w http.ResponseWriter) bool {
+	if s.registryBrowser == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "the registry is not enabled")
+		return false
+	}
+	return true
+}
+
+func (s *Server) registryErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, registry.ErrUnavailable):
+		writeError(w, http.StatusServiceUnavailable, CodeInternal, err.Error())
+	case strings.HasPrefix(err.Error(), "not found"):
+		writeError(w, http.StatusNotFound, CodeNotFound, err.Error())
+	default:
+		writeError(w, http.StatusBadGateway, CodeInternal, err.Error())
+	}
+}
+
+// handleRegistryInfo tells clients how to push (§5.10 push commands).
+func (s *Server) handleRegistryInfo(w http.ResponseWriter, r *http.Request) {
+	host := ""
+	if s.domains != nil {
+		host = s.domains.Endpoints().RegistryHost
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"host":  host,
+		"alias": "@registry",
+		"login": "docker login " + host + " -u <access-key-id> -p <secret>   (or any user name and a personal access token)",
+	})
+}
+
+func (s *Server) handleListRepositories(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBrowser(w) {
+		return
+	}
+	repos, err := s.registryBrowser.Repositories(r.Context())
+	if err != nil {
+		s.registryErr(w, err)
+		return
+	}
+	if repos == nil {
+		repos = []registry.Repository{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": repos})
+}
+
+func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBrowser(w) {
+		return
+	}
+	repo := r.URL.Query().Get("repository")
+	if !repoNameRE.MatchString(repo) {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "repository must be a registry path like shop/api")
+		return
+	}
+	imgs, err := s.registryBrowser.Images(r.Context(), repo)
+	if err != nil {
+		s.registryErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": imgs})
+}
+
+func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBrowser(w) {
+		return
+	}
+	q := r.URL.Query()
+	repo, tag := q.Get("repository"), q.Get("tag")
+	if !repoNameRE.MatchString(repo) || tag == "" || strings.ContainsAny(tag, "/ ") {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "repository and tag are required")
+		return
+	}
+	if err := s.registryBrowser.DeleteTag(r.Context(), repo, tag); err != nil {
+		s.registryErr(w, err)
+		return
+	}
+	u, _ := currentUser(r.Context())
+	s.audit(r, u.ID, "registry:DeleteImage", "srn:syncloud:registry/"+repo+":"+tag, nil)
+	w.WriteHeader(http.StatusNoContent)
 }

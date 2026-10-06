@@ -57,6 +57,9 @@ type Manager struct {
 	DNS func(nodeID string, sv store.Service) (servers, search []string)
 	// Hooks runs pre- and post-deploy jobs (§5.11); may be nil.
 	DeployHooks DeployHooks
+	// ResolveImage turns "@registry/…" into the private registry's reference
+	// and returns pull credentials for the node (§5.9); may be nil.
+	ResolveImage func(image string) (ref, registryAuth string)
 
 	queue    chan string
 	mu       sync.Mutex
@@ -551,10 +554,7 @@ func (m *Manager) sendRun(ctx context.Context, sv store.Service, spec Spec, t st
 		}
 		spec = s
 	}
-	ts := TaskSpec(sv, spec, t)
-	if m.DNS != nil {
-		ts.DnsServers, ts.DnsSearch = m.DNS(t.NodeID, sv)
-	}
+	ts := m.RunSpec(sv, spec, t)
 	err := m.gw.Send(t.NodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_RunTask{RunTask: &agentv1.RunTask{Spec: ts}}})
 	if err != nil && !errors.Is(err, agentgw.ErrNotConnected) {
 		m.log.Warn("send run", "task", t.ID, "err", err)
@@ -582,6 +582,9 @@ func (m *Manager) RunSpec(sv store.Service, spec Spec, t store.Task) *agentv1.Ta
 	ts := TaskSpec(sv, spec, t)
 	if m.DNS != nil {
 		ts.DnsServers, ts.DnsSearch = m.DNS(t.NodeID, sv)
+	}
+	if m.ResolveImage != nil {
+		ts.Image, ts.RegistryAuth = m.ResolveImage(ts.Image)
 	}
 	return ts
 }

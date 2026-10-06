@@ -55,6 +55,7 @@ type Server struct {
 	exec                  *execrelay.Relay
 	jobs                  *jobs.Manager
 	health                *health.Monitor
+	registryBrowser       *registry.Browser
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -103,6 +104,8 @@ type Options struct {
 	Jobs *jobs.Manager
 	// Health is the central health monitor (§5.6); may be nil.
 	Health *health.Monitor
+	// RegistryBrowser reads repositories and images (§5.10); may be nil.
+	RegistryBrowser *registry.Browser
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -138,6 +141,7 @@ func New(o Options) *Server {
 		exec:                  o.Exec,
 		jobs:                  o.Jobs,
 		health:                o.Health,
+		registryBrowser:       o.RegistryBrowser,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -165,6 +169,10 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/openapi.json", Public: true, h: handleOpenAPI},
 		{Method: "GET", Path: "/api/v1/system/tasks", h: s.handleSystemTasks},
 		{Method: "GET", Path: "/api/v1/registry/token", Public: true, h: s.handleRegistryToken},
+		{Method: "GET", Path: "/api/v1/registry/info", h: s.handleRegistryInfo},
+		{Method: "GET", Path: "/api/v1/registry/repositories", h: s.handleListRepositories},
+		{Method: "GET", Path: "/api/v1/registry/images", h: s.handleListImages},
+		{Method: "DELETE", Path: "/api/v1/registry/images", h: s.handleDeleteImage},
 		{Method: "POST", Path: "/api/v1/setup", Public: true, h: s.handleSetup},
 		{Method: "POST", Path: "/api/v1/auth/login", Public: true, h: s.handleLogin},
 		{Method: "POST", Path: "/api/v1/auth/logout", h: s.handleLogout},

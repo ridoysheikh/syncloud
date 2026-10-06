@@ -29,6 +29,10 @@ done
 docker build -q -t syncloud-e2e-node -f test/e2e/node.Dockerfile test/e2e >/dev/null
 docker image inspect busybox:1.37 >/dev/null 2>&1 || docker pull -q busybox:1.37 >/dev/null
 docker save busybox:1.37 -o "$BIN/busybox.tar"
+if [ "${WITH_REGISTRY:-0}" = 1 ]; then
+  docker image inspect registry:3.1.2 >/dev/null 2>&1 || docker pull -q registry:3.1.2 >/dev/null
+  docker save registry:3.1.2 -o "$BIN/registry.tar"
+fi
 if [ "${WITH_TRAEFIK:-0}" = 1 ]; then
   docker image inspect traefik:v3.7.13 >/dev/null 2>&1 || docker pull -q traefik:v3.7.13 >/dev/null
   docker save traefik:v3.7.13 -o "$BIN/traefik.tar"
@@ -49,7 +53,7 @@ done
 CTL_IP=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" sc-e2e-ctl)
 
 echo "== controller on $CTL_IP"
-x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false > /var/log/controller.log 2>&1"
+x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false ${CTL_FLAGS:-} > /var/log/controller.log 2>&1"
 for _ in $(seq 1 30); do x sc-e2e-ctl curl -fs localhost:7070/api/v1/system/status >/dev/null 2>&1 && break; sleep 1; done
 x sc-e2e-ctl /opt/sc/syncloud-agent join --controller http://127.0.0.1:7070 --token-file /data/local-join.token --name ctl-0 --data-dir /agent >/dev/null
 x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-agent run --data-dir /agent --network on > /var/log/agent.log 2>&1"
@@ -99,4 +103,14 @@ start_traefik() {
     --entrypoints.web.address=:8080 --entrypoints.websecure.address=:8443 \
     --providers.http.endpoint=http://127.0.0.1:7070/internal/traefik/config --providers.http.pollInterval=2s \
     "--providers.http.headers.X-Syncloud-Token=$tok" >/dev/null
+}
+
+# start_registry runs the private registry on the controller node like the
+# system task: token auth against the controller (§5.9).
+start_registry() {
+  x sc-e2e-ctl docker load -q -i /opt/sc/registry.tar >/dev/null
+  x sc-e2e-ctl docker run -d --name registry -p 127.0.0.1:5000:5000 -v /data/registry/registry-token.crt:/etc/syncloud/registry-token.crt:ro \
+    -e REGISTRY_AUTH_TOKEN_REALM=http://127.0.0.1:7070/api/v1/registry/token -e REGISTRY_AUTH_TOKEN_SERVICE=syncloud-registry \
+    -e REGISTRY_AUTH_TOKEN_ISSUER=syncloud -e REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE=/etc/syncloud/registry-token.crt \
+    -e REGISTRY_STORAGE_DELETE_ENABLED=true -e OTEL_TRACES_EXPORTER=none registry:3.1.2 >/dev/null
 }

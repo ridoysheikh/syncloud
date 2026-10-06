@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -216,6 +218,31 @@ func serve(args []string) error {
 	certMgr.SetHosts(certHosts(domains.Endpoints()))
 	gw.AddHooks(workloads.Hooks())
 	go workloads.Run(ctx)
+	// "@registry/shop/api:tag" in a task definition means the private
+	// registry; nodes get a pull-only token for that repository (§5.9).
+	workloads.ResolveImage = func(image string) (string, string) {
+		path, ok := strings.CutPrefix(image, "@registry/")
+		if !ok {
+			return image, ""
+		}
+		host := cfg.RegistryPullHost
+		if host == "" {
+			host = domains.Endpoints().RegistryHost
+		}
+		repo := path
+		if i := strings.IndexByte(repo, '@'); i >= 0 {
+			repo = repo[:i]
+		}
+		if i := strings.LastIndexByte(repo, ':'); i > strings.LastIndexByte(repo, '/') {
+			repo = repo[:i]
+		}
+		tok, err := regIssuer.IssueTTL("node", []dockerregistry.Access{{Type: "repository", Name: repo, Actions: []string{"pull"}}}, time.Now(), 30*time.Minute)
+		if err != nil {
+			return host + "/" + path, ""
+		}
+		authJSON, _ := json.Marshal(map[string]string{"registrytoken": tok})
+		return host + "/" + path, base64.URLEncoding.EncodeToString(authJSON)
+	}
 	disco := discovery.NewManager(st, gw, workloads, log)
 	gw.AddHooks(disco.Hooks())
 	go disco.Run(ctx)
@@ -302,8 +329,10 @@ func serve(args []string) error {
 			"GET " + certs.ChallengePrefix: certMgr,
 		},
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
-		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon, ControllerSchedulable: cfg.ControllerSchedulable,
-		ACME: api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
+		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon,
+		RegistryBrowser:       &dockerregistry.Browser{URL: "http://" + system.RegistryAddr, Issuer: regIssuer},
+		ControllerSchedulable: cfg.ControllerSchedulable,
+		ACME:                  api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {
 			_ = os.Remove(filepath.Join(cfg.DataDir, setupTokenFile))
 			_ = os.Remove(filepath.Join(cfg.DataDir, recoveryKeyFile))

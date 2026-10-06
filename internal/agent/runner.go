@@ -71,6 +71,10 @@ func (r *Runner) emit(s *agentv1.TaskStatus) {
 
 // SpecHash identifies a spec's content; a changed hash means "recreate".
 func SpecHash(spec *agentv1.TaskSpec) string {
+	if spec.GetRegistryAuth() != "" { // credentials rotate; the container does not change
+		spec = proto.Clone(spec).(*agentv1.TaskSpec)
+		spec.RegistryAuth = ""
+	}
 	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(spec)
 	if err != nil {
 		panic(err)
@@ -129,7 +133,7 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 		status.State = agentv1.TaskState_TASK_STATE_PULLING
 		r.emit(proto.Clone(status).(*agentv1.TaskStatus))
 		r.log.Info("pulling image", "image", spec.Image)
-		if err := r.docker.Pull(ctx, spec.Image, ""); err != nil {
+		if err := r.docker.Pull(ctx, spec.Image, spec.GetRegistryAuth()); err != nil {
 			fail(err)
 			return
 		}

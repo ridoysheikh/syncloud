@@ -22,6 +22,7 @@ import { ServicePage } from "./compute/ServicePage";
 import { TasksPage } from "./compute/TasksPage";
 import { JobsPage } from "./compute/JobsPage";
 import { IncidentsPage, ServiceHealthPage } from "./health/HealthPages";
+import { RegistryDashboard, RepositoriesPage } from "./registry/RegistryPages";
 import { PlatformPage } from "./settings/PlatformPage";
 import { DomainsPage } from "./settings/DomainsPage";
 import { BackupsPage } from "./settings/BackupsPage";
@@ -86,8 +87,8 @@ export const modules: DashboardModule[] = [
     order: 50,
     permission: "registry:ListRepositories",
     pages: [
-      { path: "/registry", label: "Dashboard", component: planned(["Registry"], "Registry", "Phase 4", "§5.10", "Storage, pushes and pulls, top repositories.") },
-      { path: "/registry/repos", label: "Repositories", component: planned(["Registry"], "Repositories", "Phase 4", "§5.10", "ECR-style repositories, images, push commands and lifecycle policies.") },
+      { path: "/registry", label: "Dashboard", component: RegistryDashboard },
+      { path: "/registry/repos", label: "Repositories", component: RepositoriesPage },
       { path: "/registry/upstreams", label: "Upstreams", component: planned(["Registry"], "Upstream credentials", "Phase 4", "§5.9", "Credentials for pulling from Docker Hub, GHCR and others.") },
     ],
   },

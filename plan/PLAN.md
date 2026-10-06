@@ -1295,6 +1295,12 @@ Because there is only one controller:
 - Deployment timeline UI and events.
 
 ### Phase 4: Git, Build and Registry (3 wks)
+**Progress**
+- ✅ Slice 4a (2026-10-06), registry for deployments:
+  - `@registry/<repo>:<tag>` in a task definition resolves to the registry host (`registry.<base-domain>`, or `--registry-pull-host`). The node gets a **pull-only bearer token for that repository** (30 min, `X-Registry-Auth` `registrytoken`), excluded from the spec hash so rotating tokens never recreate containers. Nodes need no `docker login`.
+  - **Registry browser**: the controller reads the registry with tokens it issues to itself. It lists repositories (paginated catalog, empty ones hidden) and images (tag, digest, compressed size, platforms from the index or config, created time) and deletes tags (by manifest digest). API `/registry/info|repositories|images`; synctl `registry info|repos|images|delete`; the Registry dashboard (counts and copyable push commands) and Repositories pages.
+  - Verified with `test/e2e/registry.sh`: `docker login` with an access key, push, browse, a service deployed from `@registry/…` pulled by the node with a minted token, and tag deletion.
+  - Still to do in Phase 4: lifecycle policies, garbage collection, upstream credentials and per-project permissions (Phase 7 IAM).
 - ECR-style registry UI (§5.10): dashboard, repositories, images, push commands, lifecycle policies with preview, permissions, upstream credentials, registry tokens; registry event tracking; pre-pull before deploys.
 - (v1.1) Trivy scanning and the deploy gate.
 - GitHub App, GitLab, Gitea and generic Git; webhooks plus the polling scheduler (watch rules, path filters, SHA dedup, backoff) (§5.8).

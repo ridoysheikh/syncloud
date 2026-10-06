@@ -816,3 +816,35 @@ func (c *Client) Incidents(ctx context.Context, openOnly bool) ([]Incident, erro
 	}
 	return out.Items, c.Do(ctx, "GET", "/api/v1/health/incidents"+q, nil, &out)
 }
+
+type Repository struct {
+	Name string `json:"name"`
+	Tags int    `json:"tags"`
+}
+
+type Image struct {
+	Tag       string     `json:"tag"`
+	Digest    string     `json:"digest"`
+	SizeBytes int64      `json:"sizeBytes"`
+	Platforms []string   `json:"platforms"`
+	Created   *time.Time `json:"created"`
+}
+
+func (c *Client) RegistryInfo(ctx context.Context) (map[string]string, error) {
+	var out map[string]string
+	return out, c.Do(ctx, "GET", "/api/v1/registry/info", nil, &out)
+}
+
+func (c *Client) ListRepositories(ctx context.Context) ([]Repository, error) {
+	var out list[Repository]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/registry/repositories", nil, &out)
+}
+
+func (c *Client) ListImages(ctx context.Context, repo string) ([]Image, error) {
+	var out list[Image]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/registry/images?repository="+url.QueryEscape(repo), nil, &out)
+}
+
+func (c *Client) DeleteImage(ctx context.Context, repo, tag string) error {
+	return c.Do(ctx, "DELETE", "/api/v1/registry/images?"+url.Values{"repository": {repo}, "tag": {tag}}.Encode(), nil, nil)
+}
