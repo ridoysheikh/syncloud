@@ -29,7 +29,9 @@ const (
 )
 
 // Terminal reports whether no guard works on a state in phase p.
-func Terminal(p string) bool { return p == PhaseDone || p == PhaseRolledBack || p == PhaseFailed || p == "" }
+func Terminal(p string) bool {
+	return p == PhaseDone || p == PhaseRolledBack || p == PhaseFailed || p == ""
+}
 
 // RunInfoFile is where the controller records how it was started.
 const RunInfoFile = "controller-run.json"

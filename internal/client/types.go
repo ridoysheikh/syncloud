@@ -919,6 +919,10 @@ type GitSource struct {
 	LastCheckedAt *time.Time        `json:"lastCheckedAt,omitempty"`
 	LastError     string            `json:"lastError,omitempty"`
 	Refs          map[string]string `json:"refs,omitempty"`
+	Connection    string            `json:"connection,omitempty"`
+	Repo          string            `json:"repo,omitempty"`
+	Webhook       string            `json:"webhook,omitempty"`
+	HookError     string            `json:"hookError,omitempty"`
 }
 
 type Build struct {

@@ -17,6 +17,12 @@ import { Panel } from "@/ui/Panel";
 import { Alert, Button, Field, Input } from "@/ui/controls";
 import { cn, gap, pad } from "@/ui/cn";
 import { toVars, VarsEditor, varsError, type VarRow } from "./VarsEditor";
+import {
+  BranchInput,
+  RepoPicker,
+  useGitConnections,
+  type GitConnection,
+} from "@/modules/integrations/RepoPicker";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 const steps = ["Source", "Service", "Variables", "Review"] as const;
@@ -29,6 +35,9 @@ interface Form {
   source: "image" | "git";
   image: string;
   gitUrl: string;
+  /** A Git connection (null: the first one, if any; "": any Git URL). */
+  connection: string | null;
+  repo: string;
   branch: string;
   context: string;
   dockerfile: string;
@@ -63,6 +72,8 @@ export function NewServiceWizard() {
     source: "image",
     image: "",
     gitUrl: "",
+    connection: null,
+    repo: "",
     branch: "main",
     context: "",
     dockerfile: "Dockerfile",
@@ -82,6 +93,8 @@ export function NewServiceWizard() {
   });
   const set = <K extends keyof Form>(k: K, v: Form[K]) =>
     setF((x) => ({ ...x, [k]: v }));
+  const { data: conns = [] } = useGitConnections();
+  const connection = f.connection ?? conns[0]?.name ?? "";
 
   const project = f.project || projects[0]?.name || "";
   const envs = projects.find((p) => p.name === project)?.environments ?? [];
@@ -100,11 +113,15 @@ export function NewServiceWizard() {
           : /\s/.test(f.image.trim())
             ? "The image must not contain spaces"
             : ""
-        : !/^https?:\/\/[^/]+\/.+/.test(f.gitUrl.trim())
-          ? "Enter the repository's https:// clone URL"
-          : !f.branch.trim()
-            ? "Enter a branch"
-            : "",
+        : connection
+          ? !f.repo
+            ? "Pick a repository"
+            : ""
+          : !/^https?:\/\/[^/]+\/.+/.test(f.gitUrl.trim())
+            ? "Enter the repository's https:// clone URL"
+            : !f.branch.trim()
+              ? "Enter a branch"
+              : "",
     Service: !project
       ? "Create a project first"
       : !nameRE.test(f.name)
@@ -154,13 +171,14 @@ export function NewServiceWizard() {
       if (f.source === "git") {
         try {
           await api("PUT", `${path}/git`, {
-            url: f.gitUrl.trim(),
+            ...(connection
+              ? { connection, repo: f.repo }
+              : { url: f.gitUrl.trim(), token: f.token || undefined }),
             branch: f.branch.trim(),
             context: f.context.trim(),
             dockerfile: f.dockerfile.trim() || "Dockerfile",
             builder: f.builder,
             paths: f.paths.split(/\s+/).filter(Boolean),
-            token: f.token || undefined,
             autoDeploy: f.autoDeploy,
           });
         } catch (e) {
@@ -228,7 +246,14 @@ export function NewServiceWizard() {
         </ol>
         <div className="flex min-w-0 flex-col gap-2">
           <Panel title={step}>
-            {step === "Source" && <SourceStep f={f} set={set} />}
+            {step === "Source" && (
+              <SourceStep
+                f={f}
+                set={set}
+                conns={conns}
+                connection={connection}
+              />
+            )}
             {step === "Service" && (
               <ServiceStep
                 f={f}
@@ -252,6 +277,7 @@ export function NewServiceWizard() {
             {step === "Review" && (
               <Review
                 f={f}
+                connection={connection}
                 project={project}
                 env={env}
                 vars={toVars(vars)}
@@ -346,7 +372,17 @@ function Choice({
   );
 }
 
-function SourceStep({ f, set }: { f: Form; set: SetFn }) {
+function SourceStep({
+  f,
+  set,
+  conns,
+  connection,
+}: {
+  f: Form;
+  set: SetFn;
+  conns: GitConnection[];
+  connection: string;
+}) {
   return (
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -384,22 +420,43 @@ function SourceStep({ f, set }: { f: Form; set: SetFn }) {
         </Field>
       ) : (
         <div className="flex flex-col gap-2">
-          <Field label="Repository URL">
-            <Input
-              value={f.gitUrl}
-              onChange={(e) => set("gitUrl", e.target.value)}
-              placeholder="https://github.com/acme/api.git"
-              className="font-mono"
-              autoFocus
-            />
-          </Field>
+          <RepoPicker
+            connections={conns}
+            connection={connection}
+            repo={f.repo}
+            onConnection={(c) => set("connection", c)}
+            onRepo={(r) => {
+              set("repo", r.fullName);
+              set("branch", r.defaultBranch);
+            }}
+          />
+          {connection === "" && (
+            <Field label="Repository URL">
+              <Input
+                value={f.gitUrl}
+                onChange={(e) => set("gitUrl", e.target.value)}
+                placeholder="https://github.com/acme/api.git"
+                className="font-mono"
+                autoFocus
+              />
+            </Field>
+          )}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <Field label="Branch">
-              <Input
-                value={f.branch}
-                onChange={(e) => set("branch", e.target.value)}
-                className="font-mono"
-              />
+              {connection ? (
+                <BranchInput
+                  connection={connection}
+                  repo={f.repo}
+                  value={f.branch}
+                  onChange={(v) => set("branch", v)}
+                />
+              ) : (
+                <Input
+                  value={f.branch}
+                  onChange={(e) => set("branch", e.target.value)}
+                  className="font-mono"
+                />
+              )}
             </Field>
             <Field label="Context directory">
               <Input
@@ -454,17 +511,24 @@ function SourceStep({ f, set }: { f: Form; set: SetFn }) {
               with an index.html is served as a static site on port 80.
             </p>
           )}
-          <Field
-            label="Access token"
-            hint="Only for private repositories. Stored encrypted."
-          >
-            <Input
-              type="password"
-              value={f.token}
-              onChange={(e) => set("token", e.target.value)}
-              autoComplete="off"
-            />
-          </Field>
+          {connection ? (
+            <p className="text-muted text-xs">
+              SynCloud creates the push webhook on the repository and shows each
+              build's status on the commit.
+            </p>
+          ) : (
+            <Field
+              label="Access token"
+              hint="Only for private repositories. Stored encrypted. Connect the Git host instead to pick repositories and get webhooks set up for you."
+            >
+              <Input
+                type="password"
+                value={f.token}
+                onChange={(e) => set("token", e.target.value)}
+                autoComplete="off"
+              />
+            </Field>
+          )}
           <label className="flex items-center gap-2 text-xs">
             <input
               type="checkbox"
@@ -636,8 +700,10 @@ function Review({
   env,
   vars,
   shared,
+  connection,
 }: {
   f: Form;
+  connection: string;
   project: string;
   env: string;
   vars: Record<string, string>;
@@ -661,7 +727,8 @@ function Review({
         <>
           <Row k="Repository">
             <span className="font-mono">
-              {f.gitUrl} @ {f.branch}
+              {connection ? `${f.repo} on ${connection}` : f.gitUrl} @{" "}
+              {f.branch || "default branch"}
             </span>
           </Row>
           <Row k="Build">

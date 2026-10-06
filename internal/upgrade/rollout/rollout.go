@@ -57,8 +57,8 @@ type Manager struct {
 	target    string
 	log       *slog.Logger
 
-	mu      sync.Mutex
-	cur     *Rollout
+	mu    sync.Mutex
+	cur   *Rollout
 	waits map[string]*wait
 }
 

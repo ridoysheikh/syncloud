@@ -11,6 +11,11 @@ import { cn, gap } from "@/ui/cn";
 import { LogsView } from "@/modules/logs/LogsView";
 import { Link } from "@tanstack/react-router";
 import { serviceUrl } from "@/lib/workloads";
+import {
+  BranchInput,
+  RepoPicker,
+  useGitConnections,
+} from "@/modules/integrations/RepoPicker";
 
 export type Builder = "auto" | "dockerfile" | "nixpacks" | "static";
 
@@ -31,6 +36,11 @@ export interface GitSource {
   lastSha: string;
   lastCheckedAt: string | null;
   lastError: string;
+  connection?: string;
+  repo?: string;
+  webhook: "created" | "app" | "manual";
+  hookError?: string;
+  lastWebhookAt?: string | null;
 }
 
 export interface Build {
@@ -98,6 +108,12 @@ export function BuildsPanel({ path }: { path: string }) {
 
 function ConnectForm({ path, initial }: { path: string; initial?: GitSource }) {
   const qc = useQueryClient();
+  const { data: conns = [] } = useGitConnections();
+  const [conn, setConn] = useState<string | null>(
+    initial ? (initial.connection ?? "") : null,
+  );
+  const connection = conn ?? conns[0]?.name ?? "";
+  const [repo, setRepo] = useState(initial?.repo ?? "");
   const [url, setUrl] = useState(initial?.url ?? "");
   const [branch, setBranch] = useState(initial?.branch ?? "main");
   const [dockerfile, setDockerfile] = useState(
@@ -112,7 +128,9 @@ function ConnectForm({ path, initial }: { path: string; initial?: GitSource }) {
   const save = useMutation({
     mutationFn: () =>
       api<GitSource>("PUT", `${path}/git`, {
-        url,
+        ...(connection
+          ? { connection, repo }
+          : { url, token: token || undefined }),
         branch,
         tags,
         builder,
@@ -122,15 +140,15 @@ function ConnectForm({ path, initial }: { path: string; initial?: GitSource }) {
           .filter(Boolean),
         dockerfile,
         context,
-        token: token || undefined,
         autoDeploy,
         pollSeconds: initial?.pollSeconds,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["git", path] }),
   });
+  const ready = connection ? repo !== "" : url.trim() !== "";
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (url.trim()) save.mutate();
+    if (ready) save.mutate();
   };
   return (
     <Panel title="Build from Git">
@@ -143,21 +161,42 @@ function ConnectForm({ path, initial }: { path: string; initial?: GitSource }) {
             : " listed for deploying by hand"}
           .
         </p>
-        <Field label="Repository URL">
-          <Input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://github.com/acme/api.git"
-            className="font-mono"
-          />
-        </Field>
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-          <Field label="Branch" hint="A name, or a pattern like release/*">
+        <RepoPicker
+          connections={conns}
+          connection={connection}
+          repo={repo}
+          onConnection={setConn}
+          onRepo={(r) => {
+            setRepo(r.fullName);
+            setBranch(r.defaultBranch);
+          }}
+        />
+        {connection === "" && (
+          <Field label="Repository URL">
             <Input
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://github.com/acme/api.git"
               className="font-mono"
             />
+          </Field>
+        )}
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+          <Field label="Branch" hint="A name, or a pattern like release/*">
+            {connection ? (
+              <BranchInput
+                connection={connection}
+                repo={repo}
+                value={branch}
+                onChange={setBranch}
+              />
+            ) : (
+              <Input
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                className="font-mono"
+              />
+            )}
           </Field>
           <Field label="Context directory">
             <Input
@@ -222,21 +261,23 @@ function ConnectForm({ path, initial }: { path: string; initial?: GitSource }) {
             className="bg-bg border-line w-full rounded-sm border p-2 font-mono text-xs"
           />
         </Field>
-        <Field
-          label="Access token"
-          hint={
-            initial?.hasToken
-              ? "Leave empty to keep the saved token."
-              : "Only for private repositories."
-          }
-        >
-          <Input
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            autoComplete="off"
-          />
-        </Field>
+        {connection === "" && (
+          <Field
+            label="Access token"
+            hint={
+              initial?.hasToken
+                ? "Leave empty to keep the saved token."
+                : "Only for private repositories."
+            }
+          >
+            <Input
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              autoComplete="off"
+            />
+          </Field>
+        )}
         <label className="flex items-center gap-2 text-xs">
           <input
             type="checkbox"
@@ -254,7 +295,7 @@ function ConnectForm({ path, initial }: { path: string; initial?: GitSource }) {
           <Button
             type="submit"
             variant="primary"
-            disabled={save.isPending || !url.trim()}
+            disabled={save.isPending || !ready}
           >
             <GitBranch className="size-3.5" />{" "}
             {save.isPending ? "Checking…" : initial ? "Save" : "Connect"}
@@ -323,7 +364,16 @@ function SourcePanel({ path, src }: { path: string; src: GitSource }) {
     >
       <dl className="grid grid-cols-[7rem_1fr] gap-y-1 text-xs">
         <dt className="text-muted">Repository</dt>
-        <dd className="font-mono break-all">{src.url}</dd>
+        <dd className="font-mono break-all">
+          {src.repo ? (
+            <>
+              {src.repo}{" "}
+              <span className="text-faint font-sans">via {src.connection}</span>
+            </>
+          ) : (
+            src.url
+          )}
+        </dd>
         <dt className="text-muted">Watching</dt>
         <dd className="font-mono">
           {src.branch}
@@ -380,16 +430,35 @@ function SourcePanel({ path, src }: { path: string; src: GitSource }) {
           {src.lastCheckedAt && `, last ${since(src.lastCheckedAt)}`}
         </dd>
         <dt className="text-muted">Webhook</dt>
-        <dd className="font-mono break-all">
-          {location.origin}
-          {src.webhookPath}
-          <div className="text-faint font-sans">
-            Content type application/json, secret{" "}
-            <span className="font-mono select-all">{src.webhookSecret}</span>.
-            Optional: the branch is polled anyway (every 10 minutes while
-            webhooks arrive).
-          </div>
-        </dd>
+        {src.webhook === "created" || src.webhook === "app" ? (
+          <dd>
+            {src.webhook === "app"
+              ? "Delivered by the GitHub App"
+              : "Created on the repository by SynCloud"}
+            {src.lastWebhookAt && (
+              <span className="text-muted">
+                , last push {since(src.lastWebhookAt)}
+              </span>
+            )}
+            <div className="text-faint">
+              Build statuses are reported on each commit.
+            </div>
+          </dd>
+        ) : (
+          <dd className="font-mono break-all">
+            {src.hookError && (
+              <div className="text-warn font-sans">{src.hookError}</div>
+            )}
+            {location.origin}
+            {src.webhookPath}
+            <div className="text-faint font-sans">
+              Content type application/json, secret{" "}
+              <span className="font-mono select-all">{src.webhookSecret}</span>.
+              Optional: the branch is polled anyway (every 10 minutes while
+              webhooks arrive).
+            </div>
+          </dd>
+        )}
       </dl>
       {src.lastError && (
         <div className="mt-2">

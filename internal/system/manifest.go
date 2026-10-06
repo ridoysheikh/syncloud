@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	"syncloud/internal/traefik"
 )
 
 // Release manifest: tested image versions for this SynCloud release.
@@ -44,6 +45,8 @@ type Config struct {
 	// RegistryReadOnly rejects pushes while garbage collection runs; pulls
 	// keep working.
 	RegistryReadOnly bool
+	// TraefikSettings adds the global static Traefik flags (§5.7).
+	TraefikSettings traefik.Settings
 }
 
 // Component describes one system task for the dashboard.
@@ -96,7 +99,7 @@ var Components = []Component{
 func traefikSpec(c Config) *agentv1.TaskSpec {
 	return &agentv1.TaskSpec{
 		TaskId: "sys-traefik", Name: "syncloud-traefik", Image: ImageTraefik,
-		Command: []string{
+		Command: traefik.WithStatic([]string{
 			"--global.checkNewVersion=false",
 			"--global.sendAnonymousUsage=false",
 			"--entrypoints.web.address=" + c.HTTPAddr,
@@ -117,8 +120,7 @@ func traefikSpec(c Config) *agentv1.TaskSpec {
 			fmt.Sprintf("--providers.http.headers.%s=%s", TraefikTokenHeader, c.TraefikToken),
 			"--accesslog=true",
 			"--accesslog.format=json",
-			"--log.level=INFO",
-		},
+		}, c.TraefikSettings),
 		NetworkMode: "host",
 		System:      true,
 	}

@@ -14,7 +14,7 @@ import { SideNav } from "./SideNav";
 /** Signed-in layout: header, modular side nav, page, bottom drawer (§10). */
 export function AppShell() {
   const { data: user } = useSuspenseQuery(meQuery);
-  const [collapsed, setCollapsed] = useState(() => readPref("nav.collapsed", false));
+  const [collapsed, setCollapsed] = useState(() => readPref("nav.collapsed", window.innerWidth < 768)); // narrow screens start collapsed
   const [drawer, setDrawer] = useState(false);
 
   useEffect(() => {

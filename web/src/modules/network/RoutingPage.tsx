@@ -88,7 +88,12 @@ export function RoutingPage() {
       />
       <Alert tone="info">
         Every HTTP route of a service applies its middlewares in a fixed order (allow-list, rate limit, auth, redirects, CORS, headers, circuit
-        breaker, compression), then retries a failed request once on another task unless a retry preset says otherwise.
+        breaker, compression), after the global defaults, then retries a failed request on another task unless a retry preset says otherwise.
+        Global options (TLS, timeouts, trusted proxies, retries) are under{" "}
+        <Link to={"/network/traefik" as string} className="underline">
+          Network › Traefik
+        </Link>
+        .
       </Alert>
       {del.error && <Alert>{del.error instanceof ApiError ? del.error.message : "Could not delete"}</Alert>}
       <Panel title="Middleware presets" flush>

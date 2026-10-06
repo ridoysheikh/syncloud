@@ -29,10 +29,17 @@ type GitSource struct {
 	Builder       string            // auto | dockerfile | nixpacks | static
 	RefSHAs       map[string]string // last seen commit of each matching ref
 	LastWebhookAt *time.Time
+	// From a Git connection (§5.8): the connection, the repository's full
+	// name, the webhook SynCloud created on it and why creating it failed.
+	ConnectionID string
+	Repo         string
+	HookID       string
+	HookError    string
 }
 
 const gitCols = `SELECT id, service_id, url, branch, dockerfile, context, token_enc, auto_deploy, poll_seconds, webhook_secret,
-	last_sha, last_checked_at, last_error, failures, created_at, tags, paths, builder, ref_shas, last_webhook_at FROM git_sources`
+	last_sha, last_checked_at, last_error, failures, created_at, tags, paths, builder, ref_shas, last_webhook_at,
+	connection_id, repo, hook_id, hook_error FROM git_sources`
 
 func scanGit(r scanner) (GitSource, error) {
 	var g GitSource
@@ -40,7 +47,8 @@ func scanGit(r scanner) (GitSource, error) {
 	var created int64
 	var paths, refs string
 	err := r.Scan(&g.ID, &g.ServiceID, &g.URL, &g.Branch, &g.Dockerfile, &g.Context, &g.TokenEnc, &g.AutoDeploy, &g.PollSeconds,
-		&g.WebhookSecret, &g.LastSHA, &checked, &g.LastError, &g.Failures, &created, &g.Tags, &paths, &g.Builder, &refs, &hooked)
+		&g.WebhookSecret, &g.LastSHA, &checked, &g.LastError, &g.Failures, &created, &g.Tags, &paths, &g.Builder, &refs, &hooked,
+		&g.ConnectionID, &g.Repo, &g.HookID, &g.HookError)
 	if err != nil {
 		return g, err
 	}
@@ -62,14 +70,15 @@ func (s *Store) PutGitSource(ctx context.Context, g GitSource) error {
 	}
 	paths, _ := json.Marshal(g.Paths)
 	_, err := s.W.ExecContext(ctx,
-		`INSERT INTO git_sources (id, service_id, url, branch, dockerfile, context, token_enc, auto_deploy, poll_seconds, webhook_secret, created_at, tags, paths, builder)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO git_sources (id, service_id, url, branch, dockerfile, context, token_enc, auto_deploy, poll_seconds, webhook_secret, created_at, tags, paths, builder,
+		   connection_id, repo)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(service_id) DO UPDATE SET url = excluded.url, branch = excluded.branch, dockerfile = excluded.dockerfile,
 		   context = excluded.context, token_enc = coalesce(excluded.token_enc, token_enc), auto_deploy = excluded.auto_deploy,
 		   poll_seconds = excluded.poll_seconds, failures = 0, last_error = '', tags = excluded.tags, paths = excluded.paths,
-		   builder = excluded.builder`,
+		   builder = excluded.builder, connection_id = excluded.connection_id, repo = excluded.repo`,
 		g.ID, g.ServiceID, g.URL, g.Branch, g.Dockerfile, g.Context, g.TokenEnc, g.AutoDeploy, g.PollSeconds, g.WebhookSecret, g.CreatedAt.Unix(),
-		g.Tags, string(paths), g.Builder)
+		g.Tags, string(paths), g.Builder, g.ConnectionID, g.Repo)
 	return err
 }
 
@@ -78,6 +87,39 @@ func (s *Store) SetGitRefs(ctx context.Context, id string, refs map[string]strin
 	b, _ := json.Marshal(refs)
 	_, err := s.W.ExecContext(ctx, `UPDATE git_sources SET ref_shas = ? WHERE id = ?`, string(b), id)
 	return err
+}
+
+// SetGitHook records the webhook created on the repository (or why not).
+func (s *Store) SetGitHook(ctx context.Context, id, hookID, hookErr string) error {
+	_, err := s.W.ExecContext(ctx, `UPDATE git_sources SET hook_id = ?, hook_error = ? WHERE id = ?`, hookID, hookErr, id)
+	return err
+}
+
+// GitSourcesByRepo returns the sources building a connection's repository.
+func (s *Store) GitSourcesByRepo(ctx context.Context, connectionID, repo string) ([]GitSource, error) {
+	return s.queryGit(ctx, ` WHERE connection_id = ? AND lower(repo) = lower(?)`, connectionID, repo)
+}
+
+// GitSourcesByConnection returns every source of a connection.
+func (s *Store) GitSourcesByConnection(ctx context.Context, connectionID string) ([]GitSource, error) {
+	return s.queryGit(ctx, ` WHERE connection_id = ?`, connectionID)
+}
+
+func (s *Store) queryGit(ctx context.Context, where string, args ...any) ([]GitSource, error) {
+	rows, err := s.R.QueryContext(ctx, gitCols+where+` ORDER BY created_at`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GitSource
+	for rows.Next() {
+		g, err := scanGit(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
 }
 
 // RecordGitWebhook notes a webhook delivery (polling then slows down).

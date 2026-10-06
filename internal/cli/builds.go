@@ -56,6 +56,9 @@ func (a *app) buildsCmd() *cobra.Command {
 		if a.output == "json" {
 			return a.printer().json(src)
 		}
+		if src.Repo != "" {
+			fmt.Fprintf(a.out, "%s on %s: ", src.Repo, src.Connection)
+		}
 		fmt.Fprintf(a.out, "%s (branch %s", src.URL, src.Branch)
 		if src.Tags != "" {
 			fmt.Fprintf(a.out, ", tags %s", src.Tags)
@@ -91,18 +94,35 @@ func (a *app) buildsCmd() *cobra.Command {
 		if src.LastError != "" {
 			fmt.Fprintf(a.out, "  error:   %s\n", src.LastError)
 		}
-		fmt.Fprintf(a.out, "  webhook: <dashboard URL>%s\n  secret:  %s\n", src.WebhookPath, src.WebhookSecret)
+		switch src.Webhook {
+		case "created":
+			fmt.Fprintln(a.out, "  webhook: created on the repository by SynCloud")
+		case "app":
+			fmt.Fprintln(a.out, "  webhook: the GitHub App's")
+		default:
+			if src.HookError != "" {
+				fmt.Fprintf(a.out, "  webhook: %s\n", src.HookError)
+			}
+			fmt.Fprintf(a.out, "  webhook: <dashboard URL>%s\n  secret:  %s\n", src.WebhookPath, src.WebhookSecret)
+		}
 		return nil
 	}
 
 	var in client.GitSource
 	var noAuto bool
 	set := &cobra.Command{
-		Use: "connect SERVICE --url URL", Short: "Build and deploy a service from a Git repository", Args: cobra.ExactArgs(1),
+		Use: "connect SERVICE (--url URL | --connection NAME --repo OWNER/NAME)", Short: "Build and deploy a service from a Git repository", Args: cobra.ExactArgs(1),
 		Annotations: op("setGitSource"),
-		Example:     "  SYNCLOUD_GIT_TOKEN=ghp_… synctl builds connect api -p shop --url https://github.com/acme/api.git --branch main",
+		Example: `  synctl builds connect api -p shop --connection github --repo acme/api     # webhook and commit statuses set up for you
+  SYNCLOUD_GIT_TOKEN=ghp_… synctl builds connect api -p shop --url https://github.com/acme/api.git --branch main`,
 		RunE: with(func(cmd *cobra.Command, c *client.Client, args []string) error {
 			src := in
+			if (src.URL == "") == (src.Connection == "") {
+				return errors.New("give --url, or --connection with --repo")
+			}
+			if src.Connection != "" && !cmd.Flags().Changed("branch") {
+				src.Branch = "" // the repository's default branch
+			}
 			if src.Token == "" {
 				src.Token = os.Getenv("SYNCLOUD_GIT_TOKEN")
 			}
@@ -125,7 +145,8 @@ func (a *app) buildsCmd() *cobra.Command {
 	set.Flags().StringVar(&in.Token, "token", "", "access token for a private repository (default $SYNCLOUD_GIT_TOKEN)")
 	set.Flags().IntVar(&in.PollSeconds, "poll", 60, "seconds between branch checks")
 	set.Flags().BoolVar(&noAuto, "no-auto-deploy", false, "build new commits but deploy them by hand")
-	_ = set.MarkFlagRequired("url")
+	set.Flags().StringVar(&in.Connection, "connection", "", "a Git connection (synctl integrations git list)")
+	set.Flags().StringVar(&in.Repo, "repo", "", "owner/name on the connection")
 
 	var all bool
 	list := &cobra.Command{

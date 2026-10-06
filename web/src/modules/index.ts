@@ -8,6 +8,7 @@ import {
   KeyRound,
   LayoutDashboard,
   Network,
+  Plug,
   ScrollText,
   Settings,
   SquareTerminal,
@@ -53,12 +54,14 @@ import { FirewallPage, FirewallPolicyPage } from "./network/FirewallPage";
 import { SecurityGroupPage, SecurityGroupsPage } from "./network/SecurityGroups";
 import { IpamPage } from "./network/IpamPage";
 import { MiddlewarePage, RoutingPage } from "./network/RoutingPage";
+import { TraefikPage } from "./network/TraefikPage";
 import { LogsPage } from "./logs/LogsPage";
 import { TrafficPage } from "./traffic/Traffic";
 import { AlertsPage } from "./monitoring/AlertsPage";
 import { MetricsExplorerPage } from "./monitoring/MetricsExplorer";
 import { AlertRulePage } from "./monitoring/AlertRulePage";
 import { BuildsPage, GitSourcesPage } from "./git/GitPages";
+import { GitConnectionPage, GitConnectPage, IntegrationsPage } from "./integrations/IntegrationsPages";
 
 /** The module registry. The side nav and routes are built from this list. */
 export const modules: DashboardModule[] = [
@@ -109,6 +112,7 @@ export const modules: DashboardModule[] = [
     order: 20,
     pages: [
       { path: "/network/traffic", label: "Traffic", component: TrafficPage },
+      { path: "/network/traefik", label: "Traefik", component: TraefikPage },
       { path: "/network/routing", label: "Routing", component: RoutingPage },
       { path: "/network/routing/middlewares/new", label: "New middleware", component: MiddlewarePage, hidden: true },
       { path: "/network/routing/middlewares/$project/$name", label: "Middleware", component: MiddlewarePage, hidden: true },
@@ -163,6 +167,17 @@ export const modules: DashboardModule[] = [
     pages: [
       { path: "/git/sources", label: "Sources", component: GitSourcesPage },
       { path: "/git/builds", label: "Builds", component: BuildsPage },
+    ],
+  },
+  {
+    id: "integrations",
+    label: "Integrations",
+    icon: Plug,
+    order: 62,
+    pages: [
+      { path: "/integrations", label: "All integrations", component: IntegrationsPage },
+      { path: "/integrations/git/new", label: "Connect a Git provider", component: GitConnectPage, hidden: true },
+      { path: "/integrations/git/$name", label: "Git connection", component: GitConnectionPage, hidden: true },
     ],
   },
   {

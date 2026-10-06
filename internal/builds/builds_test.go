@@ -1,6 +1,7 @@
 package builds
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -24,7 +25,7 @@ func TestBuildSpec(t *testing.T) {
 		TokenEnc: box.Seal([]byte("tok"), []byte("git:svc_1"))}
 	g.Paths = []string{"app/**", "!app/docs/**"}
 	sha := strings.Repeat("ab", 20)
-	spec, err := m.buildSpec(sv, g, store.Build{SHA: sha, Ref: "refs/heads/feature/x", BaseSHA: "base"})
+	spec, err := m.buildSpec(context.Background(), sv, g, store.Build{SHA: sha, Ref: "refs/heads/feature/x", BaseSHA: "base"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,13 +46,13 @@ func TestBuildSpec(t *testing.T) {
 	if spec.Placement.Node != "ctl-0" || spec.Image != BuildKitImage || !strings.Contains(spec.Entrypoint[2], "buildctl-daemonless.sh") {
 		t.Errorf("spec: %+v", spec)
 	}
-	tagged, err := m.buildSpec(sv, g, store.Build{SHA: sha, Ref: "refs/tags/v1.2.0"})
+	tagged, err := m.buildSpec(context.Background(), sv, g, store.Build{SHA: sha, Ref: "refs/tags/v1.2.0"})
 	if err != nil || !strings.Contains(tagged.Env["OUTPUT"], "registry.example.com/shop/web:v1.2.0\"") {
 		t.Errorf("tag build output: %s %v", tagged.Env["OUTPUT"], err)
 	}
 
 	m.cfg.RegistryHost = func() string { return "" }
-	if _, err := m.buildSpec(sv, g, store.Build{SHA: sha}); err == nil {
+	if _, err := m.buildSpec(context.Background(), sv, g, store.Build{SHA: sha}); err == nil {
 		t.Error("built without a registry host")
 	}
 }

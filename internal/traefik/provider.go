@@ -57,6 +57,7 @@ type Middleware struct {
 	Headers        *Headers        `json:"headers,omitempty"`
 	Compress       *Compress       `json:"compress,omitempty"`
 	CircuitBreaker *CircuitBreaker `json:"circuitBreaker,omitempty"`
+	Buffering      *Buffering      `json:"buffering,omitempty"`
 }
 
 type Retry struct {
@@ -88,7 +89,8 @@ type RedirectRegex struct {
 }
 
 type TLSConfig struct {
-	Certificates []Certificate `json:"certificates"`
+	Certificates []Certificate         `json:"certificates,omitempty"`
+	Options      map[string]TLSOptions `json:"options,omitempty"`
 }
 
 // Certificate holds PEM content inline (Traefik accepts content or a path).
@@ -122,6 +124,8 @@ type Provider struct {
 	// MeshControllerURL is the controller as edge nodes reach it over the
 	// private network (§8.5).
 	MeshControllerURL func() string
+	// Settings returns the global settings (nil: the defaults).
+	Settings func() Settings
 }
 
 const (
@@ -145,9 +149,17 @@ func (p *Provider) Config() Dynamic {
 	if p.ServiceRoutes != nil {
 		routes = p.ServiceRoutes()
 	}
+	set := DefaultSettings()
+	if p.Settings != nil {
+		set = p.Settings()
+	}
+	d.TLS = &TLSConfig{Options: set.tlsOptions()}
+	var defaults []string
+	retry := false
 	if len(routes) > 0 {
-		// Retry on another task when one fails mid-request (idempotent requests only, §5.7).
-		d.HTTP.Middlewares["syncloud-retry"] = Middleware{Retry: &Retry{Attempts: 2, InitialInterval: "100ms"}}
+		// Global defaults first; retry on another task when one fails
+		// mid-request (idempotent requests only, §5.7) comes last.
+		defaults, retry = set.defaults(&d)
 	}
 	if p.Middlewares != nil {
 		for name, m := range p.Middlewares() {
@@ -155,9 +167,9 @@ func (p *Provider) Config() Dynamic {
 		}
 	}
 	for _, r := range routes {
-		chain := append([]string{}, r.Middlewares...)
-		if !r.OwnRetry {
-			chain = append(chain, "syncloud-retry")
+		chain := append(append([]string{}, defaults...), r.Middlewares...)
+		if retry && !r.OwnRetry {
+			chain = append(chain, mwRetry)
 		}
 		servers := make([]Server, 0, len(r.Servers))
 		for _, u := range r.Servers {
@@ -169,7 +181,11 @@ func (p *Provider) Config() Dynamic {
 			continue
 		}
 		d.HTTP.Routers[r.Name] = Router{Rule: host(r.Host), EntryPoints: websecure, Middlewares: chain, Service: r.Name, TLS: &RouterTLS{}}
-		d.HTTP.Routers[r.Name+"-http"] = Router{Rule: host(r.Host), EntryPoints: web, Middlewares: []string{"syncloud-https"}, Service: r.Name}
+		if set.RedirectHTTPS {
+			d.HTTP.Routers[r.Name+"-http"] = Router{Rule: host(r.Host), EntryPoints: web, Middlewares: []string{"syncloud-https"}, Service: r.Name}
+		} else {
+			d.HTTP.Routers[r.Name+"-http"] = Router{Rule: host(r.Host), EntryPoints: web, Middlewares: chain, Service: r.Name}
+		}
 	}
 
 	if base == "" {
@@ -206,9 +222,7 @@ func (p *Provider) Config() Dynamic {
 		d.HTTP.Routers["syncloud-registry"] = Router{Rule: host(registryHost), EntryPoints: websecure, Service: svcRegistry, TLS: &RouterTLS{}}
 	}
 	if p.Certificates != nil {
-		if certs := p.Certificates(); len(certs) > 0 {
-			d.TLS = &TLSConfig{Certificates: certs}
-		}
+		d.TLS.Certificates = p.Certificates()
 	}
 	return d
 }

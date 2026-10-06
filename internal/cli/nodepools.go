@@ -268,4 +268,3 @@ func (a *app) nodeID(cmd *cobra.Command, ref string) (string, error) {
 	}
 	return "", fmt.Errorf("no node %q", ref)
 }
-

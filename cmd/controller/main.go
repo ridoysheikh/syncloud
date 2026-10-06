@@ -38,7 +38,9 @@ import (
 	"syncloud/internal/events"
 	"syncloud/internal/execrelay"
 	"syncloud/internal/fwstats"
+	"syncloud/internal/gc"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	"syncloud/internal/gitconn"
 	"syncloud/internal/health"
 	"syncloud/internal/jobs"
 	"syncloud/internal/logs"
@@ -50,17 +52,16 @@ import (
 	"syncloud/internal/quota"
 	dockerregistry "syncloud/internal/registry"
 	"syncloud/internal/regmaint"
+	"syncloud/internal/s3"
 	"syncloud/internal/secrets"
 	"syncloud/internal/shell"
 	"syncloud/internal/store"
 	"syncloud/internal/system"
 	"syncloud/internal/traefik"
-	"syncloud/internal/upstream"
-	"syncloud/internal/version"
-	"syncloud/internal/gc"
-	"syncloud/internal/s3"
 	"syncloud/internal/upgrade"
 	"syncloud/internal/upgrade/rollout"
+	"syncloud/internal/upstream"
+	"syncloud/internal/version"
 	"syncloud/internal/web"
 	"syncloud/internal/workload"
 )
@@ -207,9 +208,14 @@ func serve(args []string) error {
 	}
 
 	controllerURL := "http://" + loopbackURLHost(cfg.Listen)
+	traefikExtras := traefik.NewExtras(st, log)
+	if err := traefikExtras.Reload(ctx); err != nil {
+		return fmt.Errorf("load Traefik settings and middlewares: %w", err)
+	}
 	sysCfg := func(ep domain.Endpoints) system.Config {
 		return system.Config{
-			ControllerURL: controllerURL, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS,
+			TraefikSettings: traefikExtras.Settings(),
+			ControllerURL:   controllerURL, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS,
 			AdminAddr: cfg.TraefikAdmin, TraefikToken: traefikToken,
 			RegistryRealm: ep.DashboardURL + "/api/v1/registry/token", RegistryTokenCert: regIssuer.CertPath,
 		}
@@ -306,6 +312,9 @@ func serve(args []string) error {
 		RegistryHost: registryHost, RegistryInsecure: cfg.RegistryInsecure, Node: cfg.BuildNode,
 		UpstreamAuths: func() map[string]any { return upstreams.DockerConfigAuths(context.Background()) },
 	})
+	dashboardURL := func() string { return domains.Endpoints().DashboardURL }
+	gitConns := gitconn.New(st, box, dashboardURL, log)
+	buildMgr.Connections, buildMgr.DashboardURL = gitConns, dashboardURL
 	go buildMgr.Run(ctx)
 	// Task resource samples ride on agent heartbeats (§9.1).
 	metricStore := metrics.New(cfg.VictoriaMetricsURL, log)
@@ -436,13 +445,9 @@ func serve(args []string) error {
 		}
 		return out
 	}, edge.Config{Image: system.ImageTraefik, TraefikToken: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: meshControllerURL,
-		Edges: pools.EdgeNodes}, log)
+		Edges: pools.EdgeNodes, Settings: traefikExtras.Settings}, log)
 	gw.AddHooks(edges.Hooks())
 	go edges.Run(ctx)
-	traefikExtras := traefik.NewExtras(st, log)
-	if err := traefikExtras.Reload(ctx); err != nil {
-		return fmt.Errorf("load Traefik middlewares: %w", err)
-	}
 	traefikProvider := &traefik.Provider{
 		Token: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: controllerURL,
 		RegistryURL: "http://" + system.RegistryAddr, BaseDomain: domains.Base, HTTPSPort: httpsPort,
@@ -455,6 +460,7 @@ func serve(args []string) error {
 			return out
 		},
 		Middlewares:       traefikExtras.Definitions,
+		Settings:          traefikExtras.Settings,
 		MeshControllerURL: meshControllerURL,
 		Custom:            traefikExtras.Custom,
 		Certificates: func() []traefik.Certificate {
@@ -510,27 +516,32 @@ func serve(args []string) error {
 		},
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
 		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon,
-		RegistryBrowser:       regBrowser,
-		RegistryMaint:         regMaint,
-		Upstreams:             upstreams,
-		RegistryHosts:         func() []string { return []string{registryHost(), domains.Endpoints().RegistryHost} },
-		Builds:                buildMgr,
-		Metrics:               metricStore,
-		Autoscaler:            autoscaler,
-		Alerts:                alertMgr,
-		SecurityGroups:        cfg.SecurityGroups,
-		OnSecurityChange:      disco.Kick,
-		FirewallStats:         fwStats,
-		Quotas:                quotas,
-		Shell:                 shells,
-		Pools:                 pools,
-		Edges:                 edges,
-		Upgrades:              upgrades,
-		S3:                    s3Mgr,
-		AgentRollout:          agentRollout,
-		Discovery:             disco,
-		Traefik:               traefikProvider,
-		TraefikExtras:         traefikExtras,
+		RegistryBrowser:  regBrowser,
+		RegistryMaint:    regMaint,
+		Upstreams:        upstreams,
+		RegistryHosts:    func() []string { return []string{registryHost(), domains.Endpoints().RegistryHost} },
+		Builds:           buildMgr,
+		GitConnections:   gitConns,
+		Metrics:          metricStore,
+		Autoscaler:       autoscaler,
+		Alerts:           alertMgr,
+		SecurityGroups:   cfg.SecurityGroups,
+		OnSecurityChange: disco.Kick,
+		FirewallStats:    fwStats,
+		Quotas:           quotas,
+		Shell:            shells,
+		Pools:            pools,
+		Edges:            edges,
+		Upgrades:         upgrades,
+		S3:               s3Mgr,
+		AgentRollout:     agentRollout,
+		Discovery:        disco,
+		Traefik:          traefikProvider,
+		TraefikExtras:    traefikExtras,
+		OnTraefikSettings: func() {
+			sysMgr.SetConfig(sysCfg(domains.Endpoints()))
+			edges.Refresh(ctx)
+		},
 		ControllerSchedulable: cfg.ControllerSchedulable,
 		ACME:                  api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
 		OnSetup: func() {

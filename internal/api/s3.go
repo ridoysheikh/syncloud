@@ -98,7 +98,9 @@ func (s *Server) putS3Endpoint(w http.ResponseWriter, r *http.Request, ref strin
 	writeJSON(w, status, e)
 }
 
-func (s *Server) handleCreateS3Endpoint(w http.ResponseWriter, r *http.Request) { s.putS3Endpoint(w, r, "") }
+func (s *Server) handleCreateS3Endpoint(w http.ResponseWriter, r *http.Request) {
+	s.putS3Endpoint(w, r, "")
+}
 func (s *Server) handleUpdateS3Endpoint(w http.ResponseWriter, r *http.Request) {
 	s.putS3Endpoint(w, r, r.PathValue("endpoint"))
 }

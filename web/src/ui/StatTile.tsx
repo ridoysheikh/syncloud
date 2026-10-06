@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cn, pad } from "./cn";
+import { useNested } from "./Panel";
 
 export function StatTile({
   label,
@@ -14,8 +15,10 @@ export function StatTile({
   hint?: ReactNode;
   tone?: "ok" | "warn" | "bad";
 }) {
+  // Inside a Panel the tile is a plain figure with a rule, not a second card.
+  const nested = useNested();
   return (
-    <div className={cn("bg-surface border-line min-w-0 rounded-md border", pad)}>
+    <div className={cn("min-w-0", nested ? "border-line border-l-2 pl-2" : cn("bg-surface border-line rounded-md border", pad))}>
       <div className="text-muted truncate text-xs">{label}</div>
       <div
         className={cn(

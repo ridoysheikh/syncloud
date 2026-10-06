@@ -22,10 +22,10 @@ type Spec struct {
 	SharedEnv map[string]string `json:"sharedEnv,omitempty"`
 	// S3 snapshots the service's S3 bindings (§16) for every revision, set
 	// by the platform; credentials are added when a task starts.
-	S3 []S3Ref `json:"s3,omitempty"`
-	Ports     []Port            `json:"ports,omitempty"`
-	Resources Resources         `json:"resources"`
-	Placement Placement         `json:"placement"`
+	S3        []S3Ref   `json:"s3,omitempty"`
+	Ports     []Port    `json:"ports,omitempty"`
+	Resources Resources `json:"resources"`
+	Placement Placement `json:"placement"`
 	// Health is probed by the agent (§5.6); traffic only reaches healthy tasks.
 	Health     *HealthCheck `json:"health,omitempty"`
 	Deployment Deployment   `json:"deployment"`

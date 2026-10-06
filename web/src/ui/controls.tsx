@@ -12,9 +12,9 @@ export function Button({
     <button
       {...props}
       className={cn(
-        "inline-flex h-7 items-center justify-center gap-1.5 rounded-sm border px-2.5 text-xs font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-        variant === "primary" && "bg-accent text-accent-fg border-accent hover:brightness-110",
-        variant === "default" && "bg-raised border-line-strong hover:bg-hover",
+        "inline-flex h-7 items-center justify-center gap-1.5 rounded-btn border px-2.5 text-xs font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        variant === "primary" && "bg-btn-primary hover:bg-btn-primary-hover text-accent-fg border-btn-primary-hover/60",
+        variant === "default" && "bg-btn border-line-strong hover:bg-btn-hover hover:border-line-strong text-fg",
         variant === "ghost" && "text-muted hover:text-fg hover:bg-hover border-transparent",
         variant === "danger" && "bg-bad/10 text-bad border-bad/40 hover:bg-bad/20",
         className,
@@ -34,7 +34,7 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={cn(
-        "text-muted hover:text-fg hover:bg-hover inline-flex size-7 items-center justify-center rounded-sm transition-colors",
+        "text-muted hover:text-fg hover:bg-hover rounded-btn inline-flex size-7 items-center justify-center transition-colors",
         className,
       )}
     />
@@ -99,5 +99,42 @@ export function Alert({ tone = "bad", children }: { tone?: "bad" | "warn" | "inf
     >
       {children}
     </div>
+  );
+}
+
+/** An on/off switch with a label and an optional hint. */
+export function Toggle({
+  checked,
+  onChange,
+  label,
+  hint,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: ReactNode;
+  hint?: ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <label className={cn("flex items-start gap-2", disabled ? "opacity-50" : "cursor-pointer")}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={cn(
+          "mt-0.5 inline-flex h-4 w-7 shrink-0 items-center rounded-full border p-px transition-colors",
+          checked ? "bg-btn-primary border-btn-primary-hover" : "bg-btn border-line-strong",
+        )}
+      >
+        <span className={cn("size-3 rounded-full transition-transform", checked ? "bg-accent-fg translate-x-3" : "bg-muted translate-x-0")} />
+      </button>
+      <span className="flex flex-col gap-0.5">
+        <span className="text-xs">{label}</span>
+        {hint && <span className="text-faint text-xs">{hint}</span>}
+      </span>
+    </label>
   );
 }

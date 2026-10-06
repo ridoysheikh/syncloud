@@ -176,7 +176,7 @@ func TestAlive(t *testing.T) {
 	if !alive(os.Getpid()) {
 		t.Fatal("self not alive")
 	}
-	if alive(0) || alive(1 << 30) {
+	if alive(0) || alive(1<<30) {
 		t.Fatal("bogus PID alive")
 	}
 }

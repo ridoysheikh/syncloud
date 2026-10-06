@@ -31,12 +31,14 @@ type AgentResult struct {
 	Error   string `json:"error"`
 }
 
-func agentDir(dataDir string) string        { return filepath.Join(dataDir, "upgrade") }
+func agentDir(dataDir string) string         { return filepath.Join(dataDir, "upgrade") }
 func agentPendingFile(dataDir string) string { return filepath.Join(agentDir(dataDir), "pending.json") }
 func agentResultFile(dataDir string) string  { return filepath.Join(agentDir(dataDir), "result.json") }
 
 // AgentStagingFile is where an incoming agent binary is written.
-func AgentStagingFile(dataDir string) string { return filepath.Join(agentDir(dataDir), "syncloud-agent.new") }
+func AgentStagingFile(dataDir string) string {
+	return filepath.Join(agentDir(dataDir), "syncloud-agent.new")
+}
 
 // ReadAgentPending returns the pending upgrade, if any.
 func ReadAgentPending(dataDir string) (AgentPending, bool) {

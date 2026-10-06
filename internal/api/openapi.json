@@ -3591,6 +3591,386 @@
         }
       }
     },
+    "/api/v1/hooks/github-app/{id}": {
+      "post": {
+        "operationId": "gitHubAppWebhook",
+        "tags": [
+          "integrations"
+        ],
+        "security": [],
+        "summary": "A GitHub App's webhook (HMAC-SHA256): a push checks every service building that repository",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ignored event"
+          },
+          "202": {
+            "description": "Checks queued"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/git": {
+      "get": {
+        "operationId": "listGitConnections",
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Connected Git providers",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GitConnection"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createGitConnection",
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Connect GitHub, GitLab or Gitea/Forgejo with an access token (checked before saving; sealed)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "name",
+                  "token"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "github",
+                      "gitlab",
+                      "gitea"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "server URL (default github.com / gitlab.com; required for Gitea)"
+                  },
+                  "token": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitConnection"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/git/{connection}": {
+      "get": {
+        "operationId": "getGitConnection",
+        "tags": [
+          "integrations"
+        ],
+        "summary": "A Git connection, the services built from it, and (GitHub App) where it is installed",
+        "parameters": [
+          {
+            "name": "connection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitConnection"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteGitConnection",
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Remove a Git connection no service builds from",
+        "parameters": [
+          {
+            "name": "connection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/git/{connection}/repos": {
+      "get": {
+        "operationId": "listGitRepos",
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Repositories the connection can read",
+        "parameters": [
+          {
+            "name": "connection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "name filter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GitRepo"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/git/{connection}/branches": {
+      "get": {
+        "operationId": "listGitBranches",
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Branches of a repository",
+        "parameters": [
+          {
+            "name": "connection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/github/manifest": {
+      "post": {
+        "operationId": "createGitHubAppManifest",
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Start creating a GitHub App: post the returned manifest to postUrl in a browser",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "default": "github"
+                  },
+                  "org": {
+                    "type": "string",
+                    "description": "create the app under this organization"
+                  },
+                  "githubUrl": {
+                    "type": "string",
+                    "description": "GitHub Enterprise server (default github.com)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "postUrl": {
+                      "type": "string"
+                    },
+                    "manifest": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/github/callback": {
+      "get": {
+        "operationId": "completeGitHubApp",
+        "tags": [
+          "integrations"
+        ],
+        "summary": "GitHub redirects here after the app is created; saves it and continues to installing it",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "To the installation page, or back to the dashboard with an error"
+          }
+        }
+      }
+    },
     "/api/v1/projects/{project}/environments/{env}/variables": {
       "get": {
         "operationId": "getSharedVariables",
@@ -6596,6 +6976,65 @@
                 }
               }
             }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/traefik/settings": {
+      "get": {
+        "operationId": "getTraefikSettings",
+        "tags": [
+          "traefik"
+        ],
+        "summary": "Global Traefik settings, the flags they add and the replicas they apply to",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraefikSettingsView"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateTraefikSettings",
+        "tags": [
+          "traefik"
+        ],
+        "summary": "Save global Traefik settings; changing static ones restarts every replica",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraefikSettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraefikSettingsView"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
           },
           "404": {
             "$ref": "#/components/responses/Error"
@@ -12876,14 +13315,31 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "connection": {
+            "type": "string",
+            "description": "Git connection the repository comes from"
+          },
+          "repo": {
+            "type": "string",
+            "description": "owner/name of the repository on the connection"
+          },
+          "webhook": {
+            "type": "string",
+            "enum": [
+              "created",
+              "app",
+              "manual"
+            ],
+            "description": "how pushes arrive: a webhook SynCloud created, the GitHub App's, or one to add by hand"
+          },
+          "hookError": {
+            "type": "string"
           }
         }
       },
       "GitSourceInput": {
         "type": "object",
-        "required": [
-          "url"
-        ],
         "properties": {
           "url": {
             "type": "string"
@@ -12934,8 +13390,17 @@
             ],
             "default": "auto",
             "description": "auto: the Dockerfile, else Nixpacks, else a static site (index.html served by nginx on port 80)"
+          },
+          "connection": {
+            "type": "string",
+            "description": "name of a Git connection"
+          },
+          "repo": {
+            "type": "string",
+            "description": "owner/name on that connection; the branch defaults to the repository's default branch"
           }
-        }
+        },
+        "description": "Give url (any Git host), or connection and repo (a connected provider: SynCloud then creates the webhook and reports commit statuses)."
       },
       "Build": {
         "type": "object",
@@ -14810,6 +15275,206 @@
             "type": "integer"
           },
           "partial": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TraefikSettings": {
+        "type": "object",
+        "description": "Global Traefik options for every replica (\u00a75.7). Static options restart Traefik; dynamic ones apply within seconds.",
+        "properties": {
+          "logLevel": {
+            "type": "string",
+            "enum": [
+              "DEBUG",
+              "INFO",
+              "WARN",
+              "ERROR"
+            ]
+          },
+          "readTimeout": {
+            "type": "string",
+            "description": "Entrypoint read timeout, e.g. 60s (empty = Traefik default)"
+          },
+          "writeTimeout": {
+            "type": "string"
+          },
+          "idleTimeout": {
+            "type": "string"
+          },
+          "trustedIPs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Proxies whose X-Forwarded-* headers are trusted (IPs or CIDRs)"
+          },
+          "proxyProtocol": {
+            "type": "boolean"
+          },
+          "http3": {
+            "type": "boolean"
+          },
+          "dialTimeout": {
+            "type": "string"
+          },
+          "responseHeaderTimeout": {
+            "type": "string"
+          },
+          "maxIdleConnsPerHost": {
+            "type": "integer"
+          },
+          "redirectHttps": {
+            "type": "boolean"
+          },
+          "minTls": {
+            "type": "string",
+            "enum": [
+              "1.2",
+              "1.3"
+            ]
+          },
+          "sniStrict": {
+            "type": "boolean"
+          },
+          "retryAttempts": {
+            "type": "integer"
+          },
+          "hstsSeconds": {
+            "type": "integer"
+          },
+          "compress": {
+            "type": "boolean"
+          },
+          "maxBodyMb": {
+            "type": "integer"
+          }
+        }
+      },
+      "TraefikSettingsView": {
+        "type": "object",
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/TraefikSettings"
+          },
+          "defaults": {
+            "$ref": "#/components/schemas/TraefikSettings"
+          },
+          "staticArgs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "version": {
+            "type": "string"
+          },
+          "restarted": {
+            "type": "boolean"
+          },
+          "replicas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "node": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "error": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "GitConnection": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "github-app",
+              "github",
+              "gitlab",
+              "gitea"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "apiUrl": {
+            "type": "string"
+          },
+          "webUrl": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          },
+          "appSlug": {
+            "type": "string"
+          },
+          "appId": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "installUrl": {
+            "type": "string",
+            "description": "adds the GitHub App to more accounts or repositories"
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "installations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "problem": {
+            "type": "string"
+          },
+          "serviceRepos": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "project/environment/service -> repository"
+          }
+        }
+      },
+      "GitRepo": {
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "type": "string"
+          },
+          "cloneUrl": {
+            "type": "string"
+          },
+          "webUrl": {
+            "type": "string"
+          },
+          "defaultBranch": {
+            "type": "string"
+          },
+          "private": {
             "type": "boolean"
           }
         }

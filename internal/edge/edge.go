@@ -20,6 +20,7 @@ import (
 	"syncloud/internal/metrics"
 	"syncloud/internal/nodes"
 	"syncloud/internal/store"
+	"syncloud/internal/traefik"
 )
 
 // TaskID is the edge Traefik's task ID on every edge node.
@@ -37,6 +38,8 @@ type Config struct {
 	ControllerURL func() string
 	// Edges lists the nodes of edge pools.
 	Edges func() []nodes.View
+	// Settings returns the global Traefik settings (§5.7).
+	Settings func() traefik.Settings
 }
 
 // Health is the controller's view of one edge.
@@ -91,7 +94,7 @@ func (m *Manager) meshIP(ctx context.Context, nodeID string) string {
 func (m *Manager) Spec(nodeName, meshIP string) *agentv1.TaskSpec {
 	return &agentv1.TaskSpec{
 		TaskId: TaskID, Name: "syncloud-edge-traefik", Image: m.cfg.Image,
-		Command: []string{
+		Command: traefik.WithStatic([]string{
 			"--global.checkNewVersion=false",
 			"--global.sendAnonymousUsage=false",
 			"--entrypoints.web.address=:80",
@@ -110,10 +113,23 @@ func (m *Manager) Spec(nodeName, meshIP string) *agentv1.TaskSpec {
 			fmt.Sprintf("--providers.http.headers.%s=%s", m.cfg.TokenHeader, m.cfg.TraefikToken),
 			"--accesslog=true",
 			"--accesslog.format=json",
-			"--log.level=INFO",
-		},
+		}, m.settings()),
 		NetworkMode: "host",
 		System:      true,
+	}
+}
+
+func (m *Manager) settings() traefik.Settings {
+	if m.cfg.Settings == nil {
+		return traefik.DefaultSettings()
+	}
+	return m.cfg.Settings()
+}
+
+// Refresh re-sends the replica to every edge node (after a settings change).
+func (m *Manager) Refresh(ctx context.Context) {
+	for _, v := range m.cfg.Edges() {
+		m.apply(ctx, v.ID, v.Name)
 	}
 }
 

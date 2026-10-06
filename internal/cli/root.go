@@ -95,6 +95,7 @@ func NewRoot(in io.Reader, out, errOut io.Writer) *cobra.Command {
 		a.usageCmd(),
 		a.middlewaresCmd(),
 		a.traefikCmd(),
+		a.integrationsCmd(),
 		a.projectsCmd(),
 		a.envsCmd(),
 		a.servicesCmd(),

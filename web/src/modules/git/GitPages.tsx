@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { GitBranch } from "lucide-react";
+import { GitBranch, Plug } from "lucide-react";
 import { api } from "@/lib/api";
 import { since } from "@/lib/nodes";
 import { serviceUrl } from "@/lib/workloads";
@@ -9,7 +9,7 @@ import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { StatTile } from "@/ui/StatTile";
-import { StatusBadge } from "@/ui/controls";
+import { Button, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import {
   BuildsTable,
@@ -65,7 +65,17 @@ export function GitSourcesPage() {
   const failing = data.filter((s) => s.lastError).length;
   return (
     <div className={cn("flex flex-col", gap)}>
-      <PageHeader crumbs={["Git & Builds"]} title="Sources" />
+      <PageHeader
+        crumbs={["Git & Builds"]}
+        title="Sources"
+        actions={
+          <Link to={"/integrations" as string}>
+            <Button>
+              <Plug className="size-3.5" /> Git providers
+            </Button>
+          </Link>
+        }
+      />
       <div className={cn("grid grid-cols-2 md:grid-cols-4", gap)}>
         <StatTile label="Sources" value={data.length} />
         <StatTile
@@ -90,11 +100,19 @@ export function GitSourcesPage() {
             { header: "Service", cell: (s) => <ServiceLink s={s} /> },
             {
               header: "Repository",
-              cell: (s) => (
-                <span className="font-mono break-all">
-                  {s.url.replace(/^https?:\/\//, "")}
-                </span>
-              ),
+              cell: (s) =>
+                s.repo ? (
+                  <span className="font-mono break-all">
+                    {s.repo}{" "}
+                    <span className="text-faint font-sans">
+                      via {s.connection}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="font-mono break-all">
+                    {s.url.replace(/^https?:\/\//, "")}
+                  </span>
+                ),
             },
             {
               header: "Watching",

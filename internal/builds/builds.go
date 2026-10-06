@@ -21,6 +21,7 @@ import (
 
 	"syncloud/internal/auth"
 	"syncloud/internal/events"
+	"syncloud/internal/gitprovider"
 	"syncloud/internal/gitremote"
 	"syncloud/internal/jobs"
 	"syncloud/internal/registry"
@@ -70,7 +71,17 @@ type Config struct {
 	UpstreamAuths func() map[string]any
 }
 
+// Connections resolves Git provider connections (§5.8).
+type Connections interface {
+	Provider(ctx context.Context, idOrName string) (store.GitConnection, gitprovider.Provider, error)
+}
+
 type Manager struct {
+	// Connections lets sources name a repository of a connected provider
+	// (nil: sources need a URL).
+	Connections Connections
+	// DashboardURL is where Git hosts send webhooks and commit statuses link.
+	DashboardURL func() string
 	// BuildSlots returns a service's project and its concurrent-builds
 	// quota (0: none).
 	BuildSlots func(ctx context.Context, serviceID string) (projectID string, limit int)
@@ -88,6 +99,15 @@ type Manager struct {
 	mu   sync.Mutex
 	kick chan struct{}
 	due  map[string]string // sources to check now -> build trigger
+
+	statusOnce sync.Once
+	statuses   chan statusReport
+}
+
+type statusReport struct {
+	b     store.Build
+	state string
+	desc  string
 }
 
 func New(st *store.Store, box *secrets.Box, jm *jobs.Manager, wl *workload.Manager, issuer *registry.Issuer, bus *events.Bus, log *slog.Logger, cfg Config) *Manager {
@@ -107,15 +127,23 @@ var pathRE = regexp.MustCompile(`^!?[A-Za-z0-9._/*?\[\]-]+$`)
 
 // Source is a Git source as the API shows and accepts it.
 type Source struct {
-	URL         string     `json:"url"`
-	Branch      string     `json:"branch"`
-	Tags        string     `json:"tags"`
-	Paths       []string   `json:"paths"`
-	Builder     string     `json:"builder"`
-	Dockerfile  string     `json:"dockerfile"`
-	Context     string     `json:"context"`
-	Token       string     `json:"token,omitempty"` // write-only
-	HasToken    bool       `json:"hasToken"`
+	URL        string   `json:"url"`
+	Branch     string   `json:"branch"`
+	Tags       string   `json:"tags"`
+	Paths      []string `json:"paths"`
+	Builder    string   `json:"builder"`
+	Dockerfile string   `json:"dockerfile"`
+	Context    string   `json:"context"`
+	Token      string   `json:"token,omitempty"` // write-only
+	HasToken   bool     `json:"hasToken"`
+	// Connection and Repo pick a repository of a connected provider instead
+	// of a URL; SynCloud then creates the webhook and reports statuses.
+	Connection string `json:"connection,omitempty"`
+	Repo       string `json:"repo,omitempty"`
+	// Webhook is how pushes arrive: "created" (SynCloud added it to the
+	// repository), "app" (the GitHub App's) or "manual" (add it yourself).
+	Webhook     string     `json:"webhook"`
+	HookError   string     `json:"hookError,omitempty"`
 	AutoDeploy  *bool      `json:"autoDeploy,omitempty"`
 	PollSeconds int        `json:"pollSeconds"`
 	WebhookPath string     `json:"webhookPath"` // relative to the dashboard URL
@@ -138,9 +166,25 @@ func (m *Manager) view(g store.GitSource) Source {
 	if paths == nil {
 		paths = []string{}
 	}
-	return Source{URL: g.URL, Branch: g.Branch, Tags: g.Tags, Paths: paths, Builder: g.Builder, Dockerfile: g.Dockerfile, Context: g.Context,
+	v := Source{URL: g.URL, Branch: g.Branch, Tags: g.Tags, Paths: paths, Builder: g.Builder, Dockerfile: g.Dockerfile, Context: g.Context,
 		HasToken: len(g.TokenEnc) > 0, AutoDeploy: &auto, PollSeconds: g.PollSeconds, WebhookPath: "/api/v1/hooks/git/" + g.ID,
-		Secret: g.WebhookSecret, LastSHA: g.LastSHA, LastChecked: g.LastCheckedAt, LastError: g.LastError, Refs: refs, LastWebhook: g.LastWebhookAt}
+		Secret: g.WebhookSecret, LastSHA: g.LastSHA, LastChecked: g.LastCheckedAt, LastError: g.LastError, Refs: refs, LastWebhook: g.LastWebhookAt,
+		Repo: g.Repo, Webhook: "manual", HookError: g.HookError}
+	if g.ConnectionID != "" {
+		v.Connection = g.ConnectionID
+		if m.Connections != nil {
+			if c, _, err := m.Connections.Provider(context.Background(), g.ConnectionID); err == nil {
+				v.Connection = c.Name
+				if c.Kind == gitprovider.KindGitHubApp {
+					v.Webhook = "app"
+				}
+			}
+		}
+		if g.HookID != "" {
+			v.Webhook = "created"
+		}
+	}
+	return v
 }
 
 // ErrInvalid wraps validation errors.
@@ -150,6 +194,36 @@ func (e ErrInvalid) Error() string { return e.Err.Error() }
 
 // SetSource connects a service to a repository.
 func (m *Manager) SetSource(ctx context.Context, sv store.Service, in Source) (Source, error) {
+	var conn store.GitConnection
+	var prov gitprovider.Provider
+	token := in.Token
+	if in.Connection != "" {
+		if m.Connections == nil {
+			return Source{}, ErrInvalid{errors.New("Git connections are not enabled")}
+		}
+		var err error
+		if conn, prov, err = m.Connections.Provider(ctx, in.Connection); errors.Is(err, store.ErrNotFound) {
+			return Source{}, ErrInvalid{fmt.Errorf("no Git connection %s", in.Connection)}
+		} else if err != nil {
+			return Source{}, err
+		}
+		if !gitprovider.ValidRepoName(in.Repo) {
+			return Source{}, ErrInvalid{errors.New("repo must be owner/name")}
+		}
+		repo, err := prov.Repo(ctx, in.Repo)
+		if err != nil {
+			return Source{}, ErrInvalid{fmt.Errorf("cannot read %s through %s: %w", in.Repo, conn.Name, err)}
+		}
+		if token, err = prov.Token(ctx, repo.FullName); err != nil {
+			return Source{}, ErrInvalid{err}
+		}
+		in.URL, in.Repo, in.Token = repo.CloneURL, repo.FullName, ""
+		if in.Branch == "" {
+			in.Branch = repo.DefaultBranch
+		}
+	} else if in.Repo != "" {
+		return Source{}, ErrInvalid{errors.New("repo needs a connection")}
+	}
 	if err := gitremote.ValidateURL(in.URL); err != nil {
 		return Source{}, ErrInvalid{err}
 	}
@@ -198,18 +272,19 @@ func (m *Manager) SetSource(ctx context.Context, sv store.Service, in Source) (S
 	_, _ = rand.Read(secret)
 	g := store.GitSource{ID: auth.NewID("git_"), ServiceID: sv.ID, URL: in.URL, Branch: in.Branch, Dockerfile: in.Dockerfile, Context: in.Context,
 		AutoDeploy: auto, PollSeconds: in.PollSeconds, WebhookSecret: hex.EncodeToString(secret), CreatedAt: m.now().UTC(),
-		Tags: in.Tags, Paths: in.Paths, Builder: in.Builder}
+		Tags: in.Tags, Paths: in.Paths, Builder: in.Builder, ConnectionID: conn.ID, Repo: in.Repo}
 	if in.Token != "" {
 		g.TokenEnc = m.box.Seal([]byte(in.Token), []byte("git:"+sv.ID))
 	}
 	// Fail early on a wrong URL, branch or token.
-	refs, err := gitremote.LsRemote(ctx, g.URL, in.Token)
+	refs, err := gitremote.LsRemote(ctx, g.URL, token)
 	if err != nil {
 		return Source{}, ErrInvalid{fmt.Errorf("cannot read the repository (check the URL and token): %w", err)}
 	}
 	if err := branchFound(refs, g); err != nil {
 		return Source{}, ErrInvalid{err}
 	}
+	prev, prevErr := m.st.GitSourceByService(ctx, sv.ID)
 	if err := m.st.PutGitSource(ctx, g); err != nil {
 		return Source{}, err
 	}
@@ -217,8 +292,70 @@ func (m *Manager) SetSource(ctx context.Context, sv store.Service, in Source) (S
 	if err != nil {
 		return Source{}, err
 	}
+	if prevErr == nil && (prev.ConnectionID != saved.ConnectionID || !strings.EqualFold(prev.Repo, saved.Repo)) {
+		m.removeHook(ctx, prev) // the old repository no longer builds this service
+		saved.HookID, saved.HookError = "", ""
+		_ = m.st.SetGitHook(ctx, saved.ID, "", "")
+	}
+	if prov != nil && saved.HookID == "" {
+		saved.HookID, saved.HookError = m.createHook(ctx, prov, saved)
+		_ = m.st.SetGitHook(ctx, saved.ID, saved.HookID, saved.HookError)
+	}
 	m.check(saved.ID, "poll")
 	return m.view(saved), nil
+}
+
+// createHook adds the push webhook to the repository; failures (e.g. a
+// dashboard the Git host cannot reach) leave polling in charge.
+func (m *Manager) createHook(ctx context.Context, prov gitprovider.Provider, g store.GitSource) (id, problem string) {
+	dash := ""
+	if m.DashboardURL != nil {
+		dash = strings.TrimRight(m.DashboardURL(), "/")
+	}
+	if dash == "" {
+		return "", "the dashboard has no URL yet"
+	}
+	id, err := prov.CreateHook(ctx, g.Repo, dash+"/api/v1/hooks/git/"+g.ID, g.WebhookSecret)
+	if err != nil {
+		m.log.Warn("create webhook", "repo", g.Repo, "err", err)
+		return "", "could not create the webhook (polling continues): " + err.Error()
+	}
+	return id, ""
+}
+
+func (m *Manager) removeHook(ctx context.Context, g store.GitSource) {
+	if g.HookID == "" || g.ConnectionID == "" || m.Connections == nil {
+		return
+	}
+	if _, prov, err := m.Connections.Provider(ctx, g.ConnectionID); err == nil {
+		if err := prov.DeleteHook(ctx, g.Repo, g.HookID); err != nil {
+			m.log.Warn("delete webhook", "repo", g.Repo, "err", err)
+		}
+	}
+}
+
+// DeleteSource disconnects a service from Git and removes the webhook
+// SynCloud created.
+func (m *Manager) DeleteSource(ctx context.Context, serviceID string) error {
+	g, err := m.st.GitSourceByService(ctx, serviceID)
+	if err != nil {
+		return err
+	}
+	m.removeHook(ctx, g)
+	return m.st.DeleteGitSource(ctx, serviceID)
+}
+
+// CheckRepo polls every source building a connection's repository (a
+// GitHub App push webhook).
+func (m *Manager) CheckRepo(ctx context.Context, connectionID, repo string) int {
+	gs, err := m.st.GitSourcesByRepo(ctx, connectionID, repo)
+	if err != nil {
+		return 0
+	}
+	for _, g := range gs {
+		m.Check(g.ID)
+	}
+	return len(gs)
 }
 
 // SourceSummary is a Git source with the service it builds.
@@ -327,7 +464,7 @@ func (m *Manager) poll(ctx context.Context) {
 			continue
 		}
 		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		refs, err := gitremote.LsRemote(cctx, g.URL, m.token(g))
+		refs, err := gitremote.LsRemote(cctx, g.URL, m.token(cctx, g))
 		cancel()
 		if err == nil {
 			err = branchFound(refs, g)
@@ -407,7 +544,18 @@ func (m *Manager) watch(ctx context.Context, g store.GitSource, refs map[string]
 	return last
 }
 
-func (m *Manager) token(g store.GitSource) string {
+func (m *Manager) token(ctx context.Context, g store.GitSource) string {
+	if g.ConnectionID != "" && m.Connections != nil {
+		_, prov, err := m.Connections.Provider(ctx, g.ConnectionID)
+		if err == nil {
+			var tok string
+			if tok, err = prov.Token(ctx, g.Repo); err == nil {
+				return tok
+			}
+		}
+		m.log.Warn("git connection token", "repo", g.Repo, "err", err)
+		return ""
+	}
 	if len(g.TokenEnc) == 0 {
 		return ""
 	}
@@ -432,6 +580,7 @@ func (m *Manager) enqueue(ctx context.Context, g store.GitSource, ref, sha, base
 		return store.Build{}, err
 	}
 	m.log.Info("build queued", "service", sv.Project+"/"+sv.Name, "sha", sha[:12], "trigger", trigger)
+	m.report(b, gitprovider.StatePending, "Queued ("+trigger+")")
 	m.bus.Publish(TopicBuild, b)
 	select {
 	case m.kick <- struct{}{}:
@@ -458,7 +607,7 @@ func (m *Manager) BuildNow(ctx context.Context, sv store.Service, ref, sha strin
 	}
 	fullRef := "refs/heads/" + ref
 	if sha == "" {
-		refs, err := gitremote.LsRemote(ctx, g.URL, m.token(g))
+		refs, err := gitremote.LsRemote(ctx, g.URL, m.token(ctx, g))
 		if err != nil {
 			return store.Build{}, ErrInvalid{err}
 		}
@@ -525,6 +674,7 @@ func (m *Manager) start(ctx context.Context, b store.Build) {
 		b.Status, b.Message, b.FinishedAt = BuildFailed, msg, &now
 		_ = m.st.UpdateBuild(ctx, b)
 		m.bus.Publish(TopicBuild, b)
+		m.report(b, gitprovider.StateFailure, "Build failed: "+msg)
 	}
 	sv, err := m.st.ServiceByID(ctx, b.ServiceID)
 	if err != nil {
@@ -536,7 +686,7 @@ func (m *Manager) start(ctx context.Context, b store.Build) {
 		fail("the service no longer has a Git source")
 		return
 	}
-	spec, err := m.buildSpec(sv, g, b)
+	spec, err := m.buildSpec(ctx, sv, g, b)
 	if err != nil {
 		fail(err.Error())
 		return
@@ -551,11 +701,12 @@ func (m *Manager) start(ctx context.Context, b store.Build) {
 	_ = m.st.UpdateBuild(ctx, b)
 	m.bus.Publish(TopicBuild, b)
 	m.log.Info("build started", "service", sv.Project+"/"+sv.Name, "sha", b.SHA[:12], "run", run.ID)
+	m.report(b, gitprovider.StateRunning, "Building")
 }
 
 // buildSpec is the BuildKit task: fetch the commit from Git, build the
 // Dockerfile, push to the private registry.
-func (m *Manager) buildSpec(sv store.Service, g store.GitSource, b store.Build) (workload.Spec, error) {
+func (m *Manager) buildSpec(ctx context.Context, sv store.Service, g store.GitSource, b store.Build) (workload.Spec, error) {
 	host := m.cfg.RegistryHost()
 	if host == "" {
 		return workload.Spec{}, errors.New("no registry host: set a base domain first")
@@ -597,7 +748,7 @@ func (m *Manager) buildSpec(sv store.Service, g store.GitSource, b store.Build) 
 	if env["BUILDER"] == "" {
 		env["BUILDER"] = "auto"
 	}
-	if t := m.token(g); t != "" {
+	if t := m.token(ctx, g); t != "" {
 		env["GIT_TOKEN"] = t
 	}
 	spec := workload.Spec{
@@ -643,6 +794,7 @@ func (m *Manager) onRunFinished(ctx context.Context, run store.JobRun) {
 		_ = m.st.UpdateBuild(ctx, b)
 		m.bus.Publish(TopicBuild, b)
 		m.log.Info("build skipped", "build", b.ID, "sha", b.SHA[:12])
+		m.report(b, gitprovider.StateSuccess, "Skipped: no watched path changed")
 		select {
 		case m.kick <- struct{}{}:
 		default:
@@ -657,16 +809,21 @@ func (m *Manager) onRunFinished(ctx context.Context, run store.JobRun) {
 		_ = m.st.UpdateBuild(ctx, b)
 		m.bus.Publish(TopicBuild, b)
 		m.log.Warn("build failed", "build", b.ID, "reason", b.Message)
+		m.report(b, gitprovider.StateFailure, b.Message)
 		return
 	}
 	b.Status = BuildSucceeded
+	state, desc := gitprovider.StateSuccess, "Built; deploy it from the dashboard"
 	if g, err := m.st.GitSourceByService(ctx, b.ServiceID); err == nil && g.AutoDeploy {
 		if err := m.Deploy(ctx, b); err != nil {
 			b.Message = "deploy failed: " + err.Error()
+			state, desc = gitprovider.StateFailure, "Built, but the "+b.Message
 		} else {
 			b.Deployed = true
+			desc = "Built and deployed"
 		}
 	}
+	m.report(b, state, desc)
 	_ = m.st.UpdateBuild(ctx, b)
 	m.bus.Publish(TopicBuild, b)
 	select {
@@ -694,4 +851,52 @@ func (m *Manager) Deploy(ctx context.Context, b store.Build) error {
 		m.log.Info("build deployed", "service", sv.Project+"/"+sv.Name, "image", b.Image)
 	}
 	return err
+}
+
+// report sets the commit status on the Git host for sources from a
+// connection. Reports go out one at a time, in order, in the background.
+func (m *Manager) report(b store.Build, state, desc string) {
+	if m.Connections == nil || len(b.SHA) != 40 {
+		return
+	}
+	m.statusOnce.Do(func() {
+		m.statuses = make(chan statusReport, 256)
+		go func() {
+			for r := range m.statuses {
+				m.sendStatus(r)
+			}
+		}()
+	})
+	select {
+	case m.statuses <- statusReport{b, state, desc}:
+	default:
+		m.log.Warn("commit status dropped: queue full", "build", b.ID)
+	}
+}
+
+func (m *Manager) sendStatus(r statusReport) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	g, err := m.st.GitSourceByService(ctx, r.b.ServiceID)
+	if err != nil || g.ConnectionID == "" {
+		return
+	}
+	sv, err := m.st.ServiceByID(ctx, r.b.ServiceID)
+	if err != nil {
+		return
+	}
+	_, prov, err := m.Connections.Provider(ctx, g.ConnectionID)
+	if err != nil {
+		return
+	}
+	target := ""
+	if m.DashboardURL != nil {
+		if dash := strings.TrimRight(m.DashboardURL(), "/"); dash != "" {
+			target = dash + "/projects/" + sv.Project + "/" + sv.Environment + "/services/" + sv.Name + "?tab=builds"
+		}
+	}
+	st := gitprovider.Status{State: r.state, Context: "syncloud/" + sv.Project + "/" + sv.Environment + "/" + sv.Name, Description: r.desc, TargetURL: target}
+	if err := prov.SetStatus(ctx, g.Repo, r.b.SHA, st); err != nil {
+		m.log.Warn("set commit status", "repo", g.Repo, "sha", r.b.SHA[:12], "err", err)
+	}
 }

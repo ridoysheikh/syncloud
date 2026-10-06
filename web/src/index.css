@@ -24,15 +24,22 @@
   /* Accent and status */
   --color-accent: #4c8dff;
   --color-accent-fg: #ffffff;
+  /* Button fills: darker than the accent and the raised surface (§10.1). */
+  --color-btn: #0e1115;
+  --color-btn-hover: #161a20;
+  --color-btn-primary: #2556b8;
+  --color-btn-primary-hover: #2c63d1;
   --color-ok: #3fb950;
   --color-warn: #d29922;
   --color-bad: #f85149;
   --color-info: #4c8dff;
   --color-neutral: #6e7681;
 
-  /* Minor radii: rounded-sm (2px) for controls, rounded-md (4px) max for panels. */
+  /* Minor radii: rounded-sm (2px) for inputs, rounded-btn (5px) for buttons,
+     rounded-md (4px) for panels. */
   --radius-sm: 0.125rem;
   --radius-md: 0.25rem;
+  --radius-btn: 0.3125rem;
 }
 
 @layer base {

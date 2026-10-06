@@ -22,6 +22,7 @@ import (
 	"syncloud/internal/events"
 	"syncloud/internal/execrelay"
 	"syncloud/internal/fwstats"
+	"syncloud/internal/gitconn"
 	"syncloud/internal/health"
 	"syncloud/internal/jobs"
 	"syncloud/internal/logs"
@@ -33,15 +34,15 @@ import (
 	"syncloud/internal/quota"
 	"syncloud/internal/registry"
 	"syncloud/internal/regmaint"
+	"syncloud/internal/s3"
 	"syncloud/internal/secrets"
 	"syncloud/internal/shell"
 	"syncloud/internal/store"
 	"syncloud/internal/system"
 	"syncloud/internal/traefik"
-	"syncloud/internal/upstream"
-	"syncloud/internal/s3"
 	"syncloud/internal/upgrade"
 	"syncloud/internal/upgrade/rollout"
+	"syncloud/internal/upstream"
 	"syncloud/internal/workload"
 )
 
@@ -94,6 +95,8 @@ type Server struct {
 	discovery             *discovery.Manager
 	traefik               *traefik.Provider
 	traefikExtras         *traefik.Extras
+	gitConns              *gitconn.Manager
+	onTraefikSettings     func()
 	controllerSchedulable bool
 	bus                   *events.Bus
 	log                   *slog.Logger
@@ -177,6 +180,10 @@ type Options struct {
 	Discovery        *discovery.Manager
 	Traefik          *traefik.Provider
 	TraefikExtras    *traefik.Extras
+	GitConnections   *gitconn.Manager
+	// OnTraefikSettings re-renders the Traefik replicas after the static
+	// settings changed.
+	OnTraefikSettings func()
 	// ControllerSchedulable lets ctl-0 run services from the moment it joins (D3).
 	ControllerSchedulable bool
 	Bus                   *events.Bus
@@ -234,6 +241,8 @@ func New(o Options) *Server {
 		discovery:             o.Discovery,
 		traefik:               o.Traefik,
 		traefikExtras:         o.TraefikExtras,
+		gitConns:              o.GitConnections,
+		onTraefikSettings:     o.OnTraefikSettings,
 		controllerSchedulable: o.ControllerSchedulable,
 		bus:                   o.Bus,
 		log:                   o.Log,
@@ -429,6 +438,15 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/git/sources", h: s.handleListGitSources},
 		{Method: "POST", Path: "/api/v1/builds/{id}/deploy", h: s.handleDeployBuild},
 		{Method: "POST", Path: "/api/v1/hooks/git/{id}", Public: true, h: s.handleGitWebhook},
+		{Method: "POST", Path: "/api/v1/hooks/github-app/{id}", Public: true, h: s.handleGitHubAppWebhook},
+		{Method: "GET", Path: "/api/v1/integrations/git", h: s.handleListGitConnections},
+		{Method: "POST", Path: "/api/v1/integrations/git", h: s.handleCreateGitConnection},
+		{Method: "GET", Path: "/api/v1/integrations/git/{connection}", h: s.handleGetGitConnection},
+		{Method: "DELETE", Path: "/api/v1/integrations/git/{connection}", h: s.handleDeleteGitConnection},
+		{Method: "GET", Path: "/api/v1/integrations/git/{connection}/repos", h: s.handleListGitRepos},
+		{Method: "GET", Path: "/api/v1/integrations/git/{connection}/branches", h: s.handleListGitBranches},
+		{Method: "POST", Path: "/api/v1/integrations/github/manifest", h: s.handleGitHubManifest},
+		{Method: "GET", Path: "/api/v1/integrations/github/callback", h: s.handleGitHubCallback},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/jobs", h: s.handleListJobs},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/jobs/{job}", h: s.handleGetJob},
 		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/jobs/{job}", h: s.handleApplyJob},
@@ -484,6 +502,8 @@ func (s *Server) Routes() []Route {
 		{Method: "PUT", Path: "/api/v1/projects/{project}/middlewares/{middleware}", h: s.handleUpdateMiddleware},
 		{Method: "DELETE", Path: "/api/v1/projects/{project}/middlewares/{middleware}", h: s.handleDeleteMiddleware},
 		{Method: "GET", Path: "/api/v1/traefik/config", h: s.handleTraefikConfig},
+		{Method: "GET", Path: "/api/v1/traefik/settings", h: s.handleGetTraefikSettings},
+		{Method: "PUT", Path: "/api/v1/traefik/settings", h: s.handlePutTraefikSettings},
 		{Method: "GET", Path: "/api/v1/traefik/custom", h: s.handleGetTraefikCustom},
 		{Method: "PUT", Path: "/api/v1/traefik/custom", h: s.handlePutTraefikCustom},
 		{Method: "POST", Path: "/api/v1/traefik/custom/validate", h: s.handleValidateTraefikCustom},

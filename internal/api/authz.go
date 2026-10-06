@@ -24,6 +24,7 @@ var tagPrefix = map[string]string{
 	"projects": "project", "registry": "registry", "services": "service", "settings": "settings", "system": "system", "tasks": "task",
 	"traefik": "traefik", "traffic": "traffic", "quotas": "quota", "usage": "usage", "audit": "audit", "sts": "sts", "shell": "shell",
 	"docs": "docs", "nodepools": "nodepool", "storage": "s3",
+	"integrations": "integration",
 }
 
 type opInfo struct{ id, tag string }
@@ -161,6 +162,8 @@ func (s *Server) resourceOf(r *http.Request, action string) string {
 			res += "/bucket/" + b
 		}
 		return res
+	case strings.HasPrefix(path, "/api/v1/integrations/git/") && pv("connection") != "":
+		return "srn:syncloud:integration/git/" + pv("connection")
 	case strings.HasPrefix(path, "/api/v1/registry/"):
 		if repo := r.URL.Query().Get("repository"); repo != "" {
 			return "srn:syncloud:registry/" + repo

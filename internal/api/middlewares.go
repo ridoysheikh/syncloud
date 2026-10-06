@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"syncloud/internal/auth"
 	"syncloud/internal/store"
+	"syncloud/internal/system"
 	"syncloud/internal/traefik"
 )
 
@@ -326,4 +328,83 @@ func (s *Server) handlePutTraefikCustom(w http.ResponseWriter, r *http.Request) 
 	u, _ := currentUser(r.Context())
 	s.audit(r, u.ID, "traefik:EditCustomConfig", "srn:syncloud:traefik/custom", map[string]any{"bytes": len(text)})
 	writeJSON(w, http.StatusOK, map[string]string{"yaml": text})
+}
+
+// traefikReplica is one running Traefik: the controller's or an edge's.
+type traefikReplica struct {
+	Node  string `json:"node"`
+	Role  string `json:"role"` // controller | edge
+	State string `json:"state"`
+	Error string `json:"error,omitempty"`
+}
+
+type traefikSettingsView struct {
+	Settings traefik.Settings `json:"settings"`
+	Defaults traefik.Settings `json:"defaults"`
+	// StaticArgs are the flags the settings add to every replica.
+	StaticArgs []string         `json:"staticArgs"`
+	Replicas   []traefikReplica `json:"replicas"`
+	Version    string           `json:"version"`
+	// Restarted is set when saving changed static settings, which restarts
+	// every replica (a few seconds without public traffic each).
+	Restarted bool `json:"restarted,omitempty"`
+}
+
+func (s *Server) traefikSettingsView() traefikSettingsView {
+	set := s.traefikExtras.Settings()
+	v := traefikSettingsView{Settings: set, Defaults: traefik.DefaultSettings(), StaticArgs: set.StaticArgs(), Replicas: []traefikReplica{},
+		Version: strings.TrimPrefix(system.ImageTraefik, "traefik:")}
+	if s.system != nil {
+		if t, ok := s.system.Task("sys-traefik"); ok {
+			v.Replicas = append(v.Replicas, traefikReplica{Node: "controller", Role: "controller", State: t.State, Error: t.Error})
+		}
+	}
+	if s.edges != nil {
+		for _, h := range s.edges.List() {
+			v.Replicas = append(v.Replicas, traefikReplica{Node: h.Node, Role: "edge", State: h.State, Error: h.Error})
+		}
+	}
+	return v
+}
+
+func (s *Server) handleGetTraefikSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.requireTraefik(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, s.traefikSettingsView())
+}
+
+// handlePutTraefikSettings saves the global settings. Dynamic ones reach
+// Traefik on its next poll; static ones restart every replica.
+func (s *Server) handlePutTraefikSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.requireTraefik(w) {
+		return
+	}
+	in := traefik.DefaultSettings()
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if err := in.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
+		return
+	}
+	before := s.traefikExtras.Settings().StaticArgs()
+	b, _ := json.Marshal(in)
+	if err := s.store.SetSetting(r.Context(), traefik.SettingGlobal, string(b)); err != nil {
+		s.internalError(w, "save Traefik settings", err)
+		return
+	}
+	if err := s.traefikExtras.Reload(r.Context()); err != nil {
+		s.internalError(w, "reload Traefik settings", err)
+		return
+	}
+	restart := !slices.Equal(before, in.StaticArgs())
+	if restart && s.onTraefikSettings != nil {
+		s.onTraefikSettings()
+	}
+	u, _ := currentUser(r.Context())
+	s.audit(r, u.ID, "traefik:UpdateTraefikSettings", "srn:syncloud:traefik/settings", map[string]any{"restart": restart})
+	v := s.traefikSettingsView()
+	v.Restarted = restart
+	writeJSON(w, http.StatusOK, v)
 }

@@ -2,9 +2,12 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -185,6 +188,114 @@ func (a *app) traefikCmd() *cobra.Command {
 	apply.Flags().BoolVar(&dry, "dry-run", false, "only validate")
 	_ = apply.MarkFlagRequired("file")
 	custom.AddCommand(apply)
-	cmd.AddCommand(custom)
+	cmd.AddCommand(custom, a.traefikSettingsCmd())
 	return cmd
+}
+
+func (a *app) traefikSettingsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "settings", Short: "Global Traefik settings for every replica (timeouts, trusted proxies, TLS, defaults)", Args: cobra.NoArgs,
+		Annotations: op("getTraefikSettings"),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			v, err := c.TraefikSettings(ctx(cmd))
+			if err != nil {
+				return err
+			}
+			return a.printSettings(v)
+		},
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use: "set KEY=VALUE...", Short: "Change settings; static ones (timeouts, proxies, log level, HTTP/3) restart Traefik", Args: cobra.MinimumNArgs(1),
+		Annotations: op("updateTraefikSettings"),
+		Example: `  synctl traefik settings set minTls=1.3 hstsSeconds=31536000 compress=true
+  synctl traefik settings set trustedIPs=173.245.48.0/20,103.21.244.0/22 readTimeout=120s
+  synctl traefik settings set redirectHttps=false`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			v, err := c.TraefikSettings(ctx(cmd))
+			if err != nil {
+				return err
+			}
+			set, _ := v["settings"].(map[string]any)
+			if set == nil {
+				return errors.New("unexpected response")
+			}
+			for _, kv := range args {
+				k, val, ok := strings.Cut(kv, "=")
+				cur, known := set[k]
+				if !ok || !known {
+					return fmt.Errorf("%q: use KEY=VALUE with one of: %s", kv, strings.Join(sortedMapKeys(set), ", "))
+				}
+				switch cur.(type) {
+				case bool:
+					b, err := strconv.ParseBool(val)
+					if err != nil {
+						return fmt.Errorf("%s must be true or false", k)
+					}
+					set[k] = b
+				case float64:
+					n, err := strconv.Atoi(val)
+					if err != nil {
+						return fmt.Errorf("%s must be a whole number", k)
+					}
+					set[k] = n
+				case []any:
+					list := []string{}
+					for _, x := range strings.Split(val, ",") {
+						if x = strings.TrimSpace(x); x != "" {
+							list = append(list, x)
+						}
+					}
+					set[k] = list
+				default:
+					set[k] = val
+				}
+			}
+			out, err := c.UpdateTraefikSettings(ctx(cmd), set)
+			if err != nil {
+				return err
+			}
+			if r, _ := out["restarted"].(bool); r {
+				fmt.Fprintln(a.out, "Saved. Static settings changed: every Traefik replica restarts now.")
+			} else {
+				fmt.Fprintln(a.out, "Saved. Traefik applies it within 2 seconds.")
+			}
+			return a.printSettings(out)
+		},
+	})
+	return cmd
+}
+
+func (a *app) printSettings(v map[string]any) error {
+	set, _ := v["settings"].(map[string]any)
+	keys := sortedMapKeys(set)
+	rows := make([][]string, 0, len(keys))
+	for _, k := range keys {
+		val := set[k]
+		if l, ok := val.([]any); ok {
+			parts := make([]string, 0, len(l))
+			for _, x := range l {
+				parts = append(parts, fmt.Sprint(x))
+			}
+			val = joinOrDash(parts)
+		}
+		rows = append(rows, []string{k, fmt.Sprint(val)})
+	}
+	return a.printer().table(v, []string{"SETTING", "VALUE"}, rows)
+}
+
+func sortedMapKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

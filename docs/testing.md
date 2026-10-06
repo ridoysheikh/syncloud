@@ -27,6 +27,7 @@ Run one script with `test/e2e/<name>.sh`. Add `KEEP=1` to leave the nodes runnin
 | `secgroups.sh`, `routing.sh` | Security groups, IPAM/DNS, middlewares |
 | `iam.sh` | IAM, quotas, Cloud Shell |
 | `pools.sh` | Node pools with a fake cloud (`test/e2e/cloudsim`), cluster autoscaling, edge nodes |
+| `integrations.sh` | A real Gitea connected with a token: repositories and branches listed, the push webhook created automatically, builds reported as commit statuses, pushes delivered through Traefik with the global Traefik settings |
 | `storage.sh` | MinIO deployed as a service and registered as an S3 endpoint, the bucket browser, bindings, the metrics explorer |
 | `upgrade.sh` | Controller upgrade and rollback, agent rollout and rollback, uninstall |
 | `restore.sh` | Restore drill on a new host with a different IP |

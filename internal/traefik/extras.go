@@ -28,10 +28,11 @@ type Extras struct {
 	ownRetry map[string]bool
 	custom   map[string]any
 	text     string
+	settings Settings
 }
 
 func NewExtras(st *store.Store, log *slog.Logger) *Extras {
-	return &Extras{st: st, log: log, defs: map[string]Middleware{}, chains: map[string][]string{}, ownRetry: map[string]bool{}, custom: map[string]any{}}
+	return &Extras{st: st, log: log, defs: map[string]Middleware{}, chains: map[string][]string{}, ownRetry: map[string]bool{}, custom: map[string]any{}, settings: DefaultSettings()}
 }
 
 // MiddlewareName is a preset's Traefik name.
@@ -83,8 +84,13 @@ func (e *Extras) Reload(ctx context.Context) error {
 			custom = map[string]any{}
 		}
 	}
+	global, _, err := e.st.GetSetting(ctx, SettingGlobal)
+	if err != nil {
+		return err
+	}
 	e.mu.Lock()
 	e.defs, e.chains, e.ownRetry, e.custom, e.text = defs, chains, own, custom, text
+	e.settings = ParseSettings(global)
 	e.mu.Unlock()
 	return nil
 }
@@ -116,4 +122,11 @@ func (e *Extras) CustomText() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.text
+}
+
+// Settings returns the global settings.
+func (e *Extras) Settings() Settings {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.settings
 }

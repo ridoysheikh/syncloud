@@ -106,7 +106,7 @@ func (s *Server) handleDeleteGitSource(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.store.DeleteGitSource(r.Context(), sv.ID); errors.Is(err, store.ErrNotFound) {
+	if err := s.builds.DeleteSource(r.Context(), sv.ID); errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "the service has no Git source")
 		return
 	} else if err != nil {

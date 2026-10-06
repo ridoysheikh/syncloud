@@ -315,3 +315,80 @@ func (c *Client) PutTraefikCustom(ctx context.Context, yaml string) error {
 func (c *Client) ValidateTraefikCustom(ctx context.Context, yaml string) error {
 	return c.Do(ctx, "POST", "/api/v1/traefik/custom/validate", map[string]string{"yaml": yaml}, nil)
 }
+
+// TraefikSettings is GET /traefik/settings, kept loose so the CLI can set
+// any field by name.
+func (c *Client) TraefikSettings(ctx context.Context) (map[string]any, error) {
+	var out map[string]any
+	return out, c.Do(ctx, "GET", "/api/v1/traefik/settings", nil, &out)
+}
+
+func (c *Client) UpdateTraefikSettings(ctx context.Context, settings map[string]any) (map[string]any, error) {
+	var out map[string]any
+	return out, c.Do(ctx, "PUT", "/api/v1/traefik/settings", settings, &out)
+}
+
+// GitConnection is a connected Git provider (§5.8).
+type GitConnection struct {
+	ID            string    `json:"id"`
+	Kind          string    `json:"kind"`
+	Name          string    `json:"name"`
+	APIURL        string    `json:"apiUrl"`
+	WebURL        string    `json:"webUrl"`
+	Account       string    `json:"account"`
+	AppSlug       string    `json:"appSlug,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	InstallURL    string    `json:"installUrl,omitempty"`
+	Services      []string  `json:"services"`
+	Installations []string  `json:"installations,omitempty"`
+	Problem       string    `json:"problem,omitempty"`
+}
+
+type GitRepo struct {
+	FullName      string `json:"fullName"`
+	CloneURL      string `json:"cloneUrl"`
+	WebURL        string `json:"webUrl"`
+	DefaultBranch string `json:"defaultBranch"`
+	Private       bool   `json:"private"`
+}
+
+func (c *Client) ListGitConnections(ctx context.Context) ([]GitConnection, error) {
+	var out list[GitConnection]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/integrations/git", nil, &out)
+}
+
+func (c *Client) CreateGitConnection(ctx context.Context, kind, name, serverURL, token string) (GitConnection, error) {
+	var out GitConnection
+	return out, c.Do(ctx, "POST", "/api/v1/integrations/git", map[string]string{"kind": kind, "name": name, "url": serverURL, "token": token}, &out)
+}
+
+func (c *Client) GetGitConnection(ctx context.Context, name string) (GitConnection, error) {
+	var out GitConnection
+	return out, c.Do(ctx, "GET", "/api/v1/integrations/git/"+url.PathEscape(name), nil, &out)
+}
+
+func (c *Client) DeleteGitConnection(ctx context.Context, name string) error {
+	return c.Do(ctx, "DELETE", "/api/v1/integrations/git/"+url.PathEscape(name), nil, nil)
+}
+
+func (c *Client) ListGitRepos(ctx context.Context, name, query string) ([]GitRepo, error) {
+	var out list[GitRepo]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/integrations/git/"+url.PathEscape(name)+"/repos?q="+url.QueryEscape(query), nil, &out)
+}
+
+func (c *Client) ListGitBranches(ctx context.Context, name, repo string) ([]string, error) {
+	var out list[string]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/integrations/git/"+url.PathEscape(name)+"/branches?repo="+url.QueryEscape(repo), nil, &out)
+}
+
+// GitHubAppManifest starts the GitHub App flow (finished in a browser).
+type GitHubAppManifest struct {
+	PostURL  string `json:"postUrl"`
+	Manifest string `json:"manifest"`
+	State    string `json:"state"`
+}
+
+func (c *Client) CreateGitHubAppManifest(ctx context.Context, name, org, githubURL string) (GitHubAppManifest, error) {
+	var out GitHubAppManifest
+	return out, c.Do(ctx, "POST", "/api/v1/integrations/github/manifest", map[string]string{"name": name, "org": org, "githubUrl": githubURL}, &out)
+}
