@@ -619,6 +619,8 @@ type LogLine struct {
 	Stream      string    `json:"stream"`
 	Level       string    `json:"level"`
 	Message     string    `json:"message"`
+	// Fields of request lines (stream "access").
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 // LogQuery selects log lines; empty fields match everything.
@@ -626,11 +628,14 @@ type LogQuery struct {
 	Project, Environment, Service, Task, Node, Text string
 	Since                                           string // e.g. "1h"
 	Limit                                           int
+	// Stream "access" selects request lines, which take Status ("5xx") and Client.
+	Stream, Status, Client string
 }
 
 func (q LogQuery) values() url.Values {
 	v := url.Values{}
-	for k, val := range map[string]string{"project": q.Project, "environment": q.Environment, "service": q.Service, "task": q.Task, "node": q.Node, "q": q.Text, "since": q.Since} {
+	for k, val := range map[string]string{"project": q.Project, "environment": q.Environment, "service": q.Service, "task": q.Task, "node": q.Node, "q": q.Text, "since": q.Since,
+		"stream": q.Stream, "status": q.Status, "client": q.Client} {
 		if val != "" {
 			v.Set(k, val)
 		}
@@ -1007,6 +1012,64 @@ func (c *Client) Metrics(ctx context.Context, project, env, service, rng string)
 		path = svcPath(project, env, service)
 	}
 	return out, c.Do(ctx, "GET", path+"/metrics?range="+url.QueryEscape(rng), nil, &out)
+}
+
+// RouteTraffic is one routed service's traffic over the last minutes.
+type RouteTraffic struct {
+	ServiceID   string  `json:"serviceId"`
+	Project     string  `json:"project"`
+	Environment string  `json:"environment"`
+	Service     string  `json:"service"`
+	RPS         float64 `json:"rps"`
+	Errors4xx   float64 `json:"errors4xx"`
+	Errors5xx   float64 `json:"errors5xx"`
+	P50Ms       float64 `json:"p50Ms"`
+	P95Ms       float64 `json:"p95Ms"`
+	BytesIn     float64 `json:"bytesIn"`
+	BytesOut    float64 `json:"bytesOut"`
+}
+
+type Traffic struct {
+	Metrics
+	Routes        []RouteTraffic `json:"routes"`
+	WindowSeconds int            `json:"windowSeconds"`
+}
+
+// Traffic returns request charts and per-route numbers of everything
+// (project ""), an environment (service "") or one service.
+func (c *Client) Traffic(ctx context.Context, project, env, service, rng string) (Traffic, error) {
+	var out Traffic
+	path := "/api/v1/traffic"
+	switch {
+	case service != "":
+		path = svcPath(project, env, service) + "/traffic"
+	case project != "":
+		path = "/api/v1/projects/" + url.PathEscape(project) + "/environments/" + url.PathEscape(env) + "/traffic"
+	}
+	return out, c.Do(ctx, "GET", path+"?range="+url.QueryEscape(rng), nil, &out)
+}
+
+type TrafficMapTask struct {
+	ID       string  `json:"id"`
+	Node     string  `json:"node"`
+	IP       string  `json:"ip"`
+	State    string  `json:"state"`
+	Health   string  `json:"health"`
+	Revision int     `json:"revision"`
+	RPS      float64 `json:"rps"`
+}
+
+type TrafficMapRoute struct {
+	RouteTraffic
+	Hosts []string         `json:"hosts"`
+	Tasks []TrafficMapTask `json:"tasks"`
+}
+
+func (c *Client) TrafficMap(ctx context.Context) ([]TrafficMapRoute, error) {
+	var out struct {
+		Routes []TrafficMapRoute `json:"routes"`
+	}
+	return out.Routes, c.Do(ctx, "GET", "/api/v1/traffic/map", nil, &out)
 }
 
 type LifecycleRule struct {

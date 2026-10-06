@@ -1410,6 +1410,13 @@ Because there is only one controller:
 - BuildKit system task (privileged; moved from Phase 0b), BuildKit/Nixpacks builds, build logs, auto-deploy.
 
 ### Phase 5: Autoscaling and Traffic Insights (2–3 wks)
+**Progress**
+- ✅ Slice 5a (2026-10-06), traffic insights (§5.7, §9.1):
+  - **Traefik metrics**: the controller scrapes Traefik's Prometheus endpoint (admin entrypoint, loopback) every 10s and imports the service, router and entrypoint series into VictoriaMetrics with SynCloud labels (`service_id`, `project`, `environment`, `app`, `edge`). Platform routes are labelled `syncloud/system/<component>`; series of deleted services are dropped. Traefik gets finer latency buckets (2ms…10s; the defaults read every fast request as ~50ms), and the system VictoriaMetrics shows data after 10s instead of 30s (`-search.latencyOffset`).
+  - **Access log**: Traefik's JSON access lines (system task `sys-traefik`) become request lines of the service they reached, stream `access`, with method, host, path, status, duration, bytes, client, the answering task (`upstream`) and service ID as VictoriaLogs fields. They are left out of application logs unless asked for (`stream=access`, plus `status=5xx` and `client=` filters, history and live tail).
+  - API: `GET /traffic` (everything), `…/environments/{env}/traffic`, `…/services/{s}/traffic` (charts: requests by status class, p50/p95/p99 latency, bandwidth, requests per service; plus a per-route table of the last 5 minutes), `GET /traffic/map` (hostname → service → task, each task's share of the request rate from the access log). synctl `traffic [SERVICE]`, `traffic map`, `requests [SERVICE] -f --status 5xx --client IP`.
+  - **Dashboard**: Network › Traffic (live traffic map as a Sankey: hostnames → services → tasks colored by health and error rate, click through to the service; totals, charts, routes table, live request tail with status and client filters), a Traffic tab on every service and on the project page.
+  - Verified with `test/e2e/traffic.sh` on the real system tasks: 2xx/4xx/5xx rates, p50 below 25ms, per-service/environment/total charts, request lines with status filtering and kept out of application logs, the map's task rates, synctl. `services.sh` and `metrics.sh` still pass; screenshots checked.
 - Traefik metrics and access-log ingestion; dynamic traffic dashboard: live traffic map, RPS, latency and errors per service and in total, request tail (§5.7).
 - Target-tracking autoscaler (CPU, memory, RPS/task, latency); scaling history UI.
 - Alerts with notification channels, including log-based alerts.

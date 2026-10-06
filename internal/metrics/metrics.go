@@ -179,6 +179,16 @@ func (s *Store) Query(ctx context.Context, sc Scope, d time.Duration, now time.T
 }
 
 func (s *Store) queryRange(ctx context.Context, q string, start, end time.Time, step int) ([]Series, error) {
+	return s.queryRangeKey(ctx, q, start, end, step, func(m map[string]string) string {
+		if k := m["task"]; k != "" {
+			return k
+		}
+		return m["service"]
+	})
+}
+
+// queryRangeKey runs a range query, naming each series with key(labels).
+func (s *Store) queryRangeKey(ctx context.Context, q string, start, end time.Time, step int, key func(map[string]string) string) ([]Series, error) {
 	v := url.Values{"query": {q}, "start": {strconv.FormatInt(start.Unix(), 10)}, "end": {strconv.FormatInt(end.Unix(), 10)}, "step": {strconv.Itoa(step) + "s"}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.url+"/api/v1/query_range?"+v.Encode(), nil)
 	if err != nil {
@@ -207,11 +217,7 @@ func (s *Store) queryRange(ctx context.Context, q string, start, end time.Time, 
 	}
 	out := make([]Series, 0, len(body.Data.Result))
 	for _, r := range body.Data.Result {
-		key := r.Metric["task"]
-		if key == "" {
-			key = r.Metric["service"]
-		}
-		sr := Series{Key: key, Node: r.Metric["node"], Points: make([][2]float64, 0, len(r.Values))}
+		sr := Series{Key: key(r.Metric), Node: r.Metric["node"], Points: make([][2]float64, 0, len(r.Values))}
 		for _, p := range r.Values {
 			ts, _ := p[0].(float64)
 			str, _ := p[1].(string)

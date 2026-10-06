@@ -37,6 +37,8 @@ export function HistoryChart({
   height = 180,
   area,
   markLine,
+  colors,
+  stack,
 }: {
   series: HistorySeries[];
   start: number;
@@ -46,6 +48,10 @@ export function HistoryChart({
   area?: boolean;
   /** A dashed reference line, e.g. a memory limit. */
   markLine?: { value: number; label: string };
+  /** Fixed colors by series name (e.g. status classes). */
+  colors?: Record<string, string>;
+  /** Stack the series (areas add up to the total). */
+  stack?: boolean;
 }) {
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<echarts.ECharts | null>(null);
@@ -85,7 +91,10 @@ export function HistoryChart({
           type: "line",
           showSymbol: false,
           connectNulls: false,
-          areaStyle: area ? { opacity: 0.06 } : undefined,
+          areaStyle:
+            area || stack ? { opacity: stack ? 0.25 : 0.06 } : undefined,
+          stack: stack ? "total" : undefined,
+          color: colors?.[s.name],
           data: s.points,
           markLine:
             i === 0 && markLine
@@ -101,7 +110,7 @@ export function HistoryChart({
       },
       { notMerge: true },
     );
-  }, [series, start, end, format, area, markLine]);
+  }, [series, start, end, format, area, markLine, colors, stack]);
 
   return <div ref={el} style={{ height }} className="w-full" />;
 }

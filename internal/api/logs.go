@@ -11,10 +11,25 @@ import (
 	"syncloud/internal/logs"
 )
 
-func logFilter(r *http.Request) logs.Filter {
+// logFilter reads the line filter. stream=access selects request lines
+// (Traefik's access log), which take status (2xx…5xx) and client filters.
+func logFilter(w http.ResponseWriter, r *http.Request) (logs.Filter, bool) {
 	q := r.URL.Query()
-	return logs.Filter{Project: q.Get("project"), Environment: q.Get("environment"), Service: q.Get("service"),
-		TaskID: q.Get("task"), Node: q.Get("node"), Text: q.Get("q")}
+	f := logs.Filter{Project: q.Get("project"), Environment: q.Get("environment"), Service: q.Get("service"),
+		TaskID: q.Get("task"), Node: q.Get("node"), Text: q.Get("q"), Stream: q.Get("stream"), Client: q.Get("client")}
+	switch f.Stream {
+	case "", "stdout", "stderr", logs.StreamAccess:
+	default:
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "stream must be stdout, stderr or access")
+		return f, false
+	}
+	status, ok := requestStatus(q.Get("status"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "status must be 2xx, 3xx, 4xx or 5xx")
+		return f, false
+	}
+	f.Status = status
+	return f, true
 }
 
 // handleQueryLogs returns stored lines, oldest first (§9.2).
@@ -42,7 +57,11 @@ func (s *Server) handleQueryLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	lines, err := s.logs.Query(r.Context(), logFilter(r), since, limit)
+	f, ok := logFilter(w, r)
+	if !ok {
+		return
+	}
+	lines, err := s.logs.Query(r.Context(), f, since, limit)
 	if errors.Is(err, logs.ErrUnavailable) {
 		writeError(w, http.StatusServiceUnavailable, CodeInternal, err.Error())
 		return
@@ -63,8 +82,12 @@ func (s *Server) handleTailLogs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "logs are not enabled")
 		return
 	}
+	f, ok := logFilter(w, r)
+	if !ok {
+		return
+	}
 	rc := http.NewResponseController(w) // unwraps middleware recorders
-	c, cancel := s.logs.Tail(logFilter(r))
+	c, cancel := s.logs.Tail(f)
 	defer cancel()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")

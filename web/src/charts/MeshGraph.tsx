@@ -21,10 +21,19 @@ export interface GraphLink {
   label: string;
 }
 
-const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const css = (name: string) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 /** Mesh topology (§8.4): nodes on a circle, links colored by health. */
-export function MeshGraph({ nodes, links, height = 320 }: { nodes: GraphNode[]; links: GraphLink[]; height?: number }) {
+export function MeshGraph({
+  nodes,
+  links,
+  height = 320,
+}: {
+  nodes: GraphNode[];
+  links: GraphLink[];
+  height?: number;
+}) {
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<echarts.ECharts | null>(null);
 
@@ -43,7 +52,10 @@ export function MeshGraph({ nodes, links, height = 320 }: { nodes: GraphNode[]; 
   useEffect(() => {
     const color = (t: string) => css(`--color-${t}`);
     chart.current?.setOption({
-      tooltip: { formatter: (p: { dataType: string; data: { tip?: string } }) => p.data.tip ?? "" },
+      tooltip: {
+        formatter: (p: { dataType: string; data: { tip?: string } }) =>
+          p.data.tip ?? "",
+      },
       series: [
         {
           type: "graph",
@@ -51,14 +63,29 @@ export function MeshGraph({ nodes, links, height = 320 }: { nodes: GraphNode[]; 
           circular: { rotateLabel: false },
           roam: true,
           symbolSize: 34,
-          label: { show: true, position: "bottom", color: css("--color-fg"), fontSize: 11, formatter: "{b}" },
-          edgeLabel: { show: true, fontSize: 9, color: css("--color-faint"), formatter: (p: { data: { label: string } }) => p.data.label },
+          label: {
+            show: true,
+            position: "bottom",
+            color: css("--color-fg"),
+            fontSize: 11,
+            formatter: "{b}",
+          },
+          edgeLabel: {
+            show: true,
+            fontSize: 9,
+            color: css("--color-faint"),
+            formatter: (p: { data: { label: string } }) => p.data.label,
+          },
           lineStyle: { width: 1.5, opacity: 0.9, curveness: 0.08 },
           data: nodes.map((n) => ({
             id: n.id,
             name: n.label,
             tip: `${n.label}<br/>${n.sub}`,
-            itemStyle: { color: css("--color-raised"), borderColor: color(n.tone), borderWidth: 2 },
+            itemStyle: {
+              color: css("--color-raised"),
+              borderColor: color(n.tone),
+              borderWidth: 2,
+            },
           })),
           links: links.map((l) => ({
             source: l.source,

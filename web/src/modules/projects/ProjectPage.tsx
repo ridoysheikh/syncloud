@@ -21,6 +21,7 @@ import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap, pad } from "@/ui/cn";
 import { MetricsPanel } from "./MetricsPanel";
 import { LogsView } from "@/modules/logs/LogsView";
+import { RequestsTail, TrafficPanel } from "@/modules/traffic/Traffic";
 import {
   toRows,
   toVars,
@@ -29,7 +30,8 @@ import {
   type VarRow,
 } from "./VarsEditor";
 
-type Tab = "services" | "metrics" | "logs" | "variables" | "settings";
+type Tab =
+  "services" | "metrics" | "traffic" | "logs" | "variables" | "settings";
 
 /** One project: its environments, their services and shared variables. */
 export function ProjectPage() {
@@ -78,7 +80,14 @@ export function ProjectPage() {
       <div className="border-line flex flex-wrap items-center justify-between gap-2 border-b">
         <div className="flex gap-3 text-xs">
           {(
-            ["services", "metrics", "logs", "variables", "settings"] as Tab[]
+            [
+              "services",
+              "metrics",
+              "traffic",
+              "logs",
+              "variables",
+              "settings",
+            ] as Tab[]
           ).map((t) => (
             <button
               key={t}
@@ -118,6 +127,16 @@ export function ProjectPage() {
       {tab === "services" && <ServiceGrid services={inEnv} newTo={newTo} />}
       {tab === "metrics" && (
         <MetricsPanel key={env} path={envPath(p.name, env)} by="service" />
+      )}
+      {tab === "traffic" && (
+        <div className={cn("flex flex-col", gap)}>
+          <TrafficPanel
+            key={env}
+            path={`${envPath(p.name, env)}/traffic`}
+            scope="environment"
+          />
+          <RequestsTail filter={{ project: p.name, environment: env }} />
+        </div>
       )}
       {tab === "logs" && (
         <LogsView key={env} filter={{ project: p.name, environment: env }} />

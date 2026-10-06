@@ -68,7 +68,9 @@ var Components = []Component{
 		spec: func(Config) *agentv1.TaskSpec {
 			return &agentv1.TaskSpec{
 				TaskId: "sys-victoriametrics", Name: "syncloud-victoriametrics", Image: ImageVictoriaMetrics,
-				Command:     []string{"-storageDataPath=/storage", "-retentionPeriod=15d", "-httpListenAddr=:8428"},
+				// Data arrives within seconds (pushes and 10s scrapes): show it
+				// sooner than the 30s default.
+				Command:     []string{"-storageDataPath=/storage", "-retentionPeriod=15d", "-httpListenAddr=:8428", "-search.latencyOffset=10s"},
 				Ports:       []*agentv1.PortBinding{{HostIp: "127.0.0.1", HostPort: 8428, ContainerPort: 8428}},
 				Mounts:      []*agentv1.Mount{{Type: agentv1.Mount_TYPE_VOLUME, Source: "syncloud-victoriametrics", Target: "/storage"}},
 				NetworkMode: Network, System: true,
@@ -107,6 +109,9 @@ func traefikSpec(c Config) *agentv1.TaskSpec {
 			"--metrics.prometheus.entrypoint=admin",
 			"--metrics.prometheus.addRoutersLabels=true",
 			"--metrics.prometheus.addServicesLabels=true",
+			// Finer than the default 0.1/0.3/1.2/5s, so millisecond latencies
+			// do not all read as ~50ms.
+			"--metrics.prometheus.buckets=0.002,0.005,0.01,0.025,0.05,0.1,0.25,0.5,1,2.5,5,10",
 			"--providers.http.endpoint=" + c.ControllerURL + "/internal/traefik/config",
 			"--providers.http.pollInterval=2s",
 			fmt.Sprintf("--providers.http.headers.%s=%s", TraefikTokenHeader, c.TraefikToken),

@@ -1926,6 +1926,41 @@
               "default": 500,
               "maximum": 5000
             }
+          },
+          {
+            "name": "stream",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "stdout",
+                "stderr",
+                "access"
+              ]
+            },
+            "description": "access: request lines from Traefik's access log (left out otherwise)"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2xx",
+                "3xx",
+                "4xx",
+                "5xx"
+              ]
+            },
+            "description": "request lines with this status class"
+          },
+          {
+            "name": "client",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "request lines from this client IP"
           }
         ],
         "responses": {
@@ -2003,6 +2038,41 @@
               "type": "string"
             },
             "description": "plain-text substring (case-insensitive)"
+          },
+          {
+            "name": "stream",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "stdout",
+                "stderr",
+                "access"
+              ]
+            },
+            "description": "access: request lines from Traefik's access log (left out otherwise)"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2xx",
+                "3xx",
+                "4xx",
+                "5xx"
+              ]
+            },
+            "description": "request lines with this status class"
+          },
+          {
+            "name": "client",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "request lines from this client IP"
           }
         ],
         "responses": {
@@ -4194,6 +4264,270 @@
           }
         }
       }
+    },
+    "/api/v1/traffic": {
+      "get": {
+        "operationId": "getTraffic",
+        "tags": [
+          "traffic"
+        ],
+        "summary": "Requests, latency and bandwidth of every route, from Traefik's metrics (\u00a75.7)",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h",
+                "6h",
+                "24h",
+                "7d"
+              ],
+              "default": "1h"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Traffic"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/environments/{env}/traffic": {
+      "get": {
+        "operationId": "getEnvironmentTraffic",
+        "tags": [
+          "traffic"
+        ],
+        "summary": "Traffic of a project environment, with requests per service",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h",
+                "6h",
+                "24h",
+                "7d"
+              ],
+              "default": "1h"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Traffic"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/traffic": {
+      "get": {
+        "operationId": "getServiceTraffic",
+        "tags": [
+          "traffic"
+        ],
+        "summary": "Traffic of one service",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h",
+                "6h",
+                "24h",
+                "7d"
+              ],
+              "default": "1h"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Traffic"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/traffic/map": {
+      "get": {
+        "operationId": "getTrafficMap",
+        "tags": [
+          "traffic"
+        ],
+        "summary": "Live traffic map: routed services with their hostnames, traffic and the tasks that answer",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "windowSeconds": {
+                      "type": "integer"
+                    },
+                    "routes": {
+                      "type": "array",
+                      "items": {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/RouteTraffic"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "tasks": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "node": {
+                                      "type": "string"
+                                    },
+                                    "ip": {
+                                      "type": "string"
+                                    },
+                                    "state": {
+                                      "type": "string"
+                                    },
+                                    "health": {
+                                      "type": "string"
+                                    },
+                                    "revision": {
+                                      "type": "integer"
+                                    },
+                                    "rps": {
+                                      "type": "number",
+                                      "description": "requests per second this task answered (from the access log)"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5702,6 +6036,13 @@
           },
           "message": {
             "type": "string"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "request lines only: method, host, path, status, duration_ms, bytes, client, upstream, service_id"
           }
         }
       },
@@ -6660,6 +7001,86 @@
             }
           }
         ]
+      },
+      "RouteTraffic": {
+        "type": "object",
+        "description": "one routed service's traffic over the summary window",
+        "properties": {
+          "serviceId": {
+            "type": "string",
+            "description": "empty for platform routes (dashboard, registry)"
+          },
+          "project": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "rps": {
+            "type": "number"
+          },
+          "errors4xx": {
+            "type": "number",
+            "description": "per second"
+          },
+          "errors5xx": {
+            "type": "number",
+            "description": "per second"
+          },
+          "p50Ms": {
+            "type": "number"
+          },
+          "p95Ms": {
+            "type": "number"
+          },
+          "bytesIn": {
+            "type": "number",
+            "description": "bytes per second"
+          },
+          "bytesOut": {
+            "type": "number",
+            "description": "bytes per second"
+          }
+        }
+      },
+      "Traffic": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stepSeconds": {
+            "type": "integer"
+          },
+          "charts": {
+            "type": "object",
+            "description": "requests (series per status class 2xx\u20265xx, req/s), latency (p50/p95/p99, ms), bandwidth (in/out, bytes/s) and, beyond one service, services (req/s per service)",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/MetricSeries"
+              }
+            }
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteTraffic"
+            }
+          },
+          "windowSeconds": {
+            "type": "integer",
+            "description": "window of routes"
+          }
+        }
       }
     }
   }

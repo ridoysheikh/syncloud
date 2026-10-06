@@ -33,6 +33,7 @@ import { BackupsPage } from "./settings/BackupsPage";
 import { TopologyPage } from "./network/TopologyPage";
 import { FirewallPage } from "./network/FirewallPage";
 import { LogsPage } from "./logs/LogsPage";
+import { TrafficPage } from "./traffic/Traffic";
 import { BuildsPage, GitSourcesPage } from "./git/GitPages";
 
 /** The module registry. The side nav and routes are built from this list. */
@@ -78,7 +79,7 @@ export const modules: DashboardModule[] = [
     icon: Network,
     order: 20,
     pages: [
-      { path: "/network/traffic", label: "Traffic", component: planned(["Network"], "Traffic", "Phase 2/5", "§5.7", "Domains, routes, middlewares, certificates and the live traffic map.") },
+      { path: "/network/traffic", label: "Traffic", component: TrafficPage },
       { path: "/network/edge", label: "Edge Nodes", component: planned(["Network"], "Edge Nodes", "Phase 8", "§8.5", "Traefik replicas that keep public traffic flowing.") },
       { path: "/network/topology", label: "Topology", component: TopologyPage },
       { path: "/network/firewall", label: "Firewall", component: FirewallPage },

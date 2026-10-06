@@ -33,6 +33,7 @@ import { BuildsPanel } from "./BuildsPanel";
 import { TasksTable } from "./TasksPage";
 import { useTasks } from "@/lib/workloads";
 import { LogsView } from "@/modules/logs/LogsView";
+import { RequestsTail, TrafficPanel } from "@/modules/traffic/Traffic";
 
 interface Revision {
   revision: number;
@@ -44,6 +45,7 @@ interface Revision {
 
 type Tab =
   | "metrics"
+  | "traffic"
   | "tasks"
   | "logs"
   | "deployments"
@@ -239,6 +241,7 @@ export function ServicePage() {
         {(
           [
             "metrics",
+            "traffic",
             "logs",
             "tasks",
             "deployments",
@@ -269,6 +272,12 @@ export function ServicePage() {
           shorten={shortTask}
           memoryLimit={(svc.spec.resources.memoryLimit ?? 0) * 1024 * 1024}
         />
+      )}
+      {tab === "traffic" && (
+        <div className={cn("flex flex-col", gap)}>
+          <TrafficPanel path={`${path}/traffic`} scope="service" />
+          <RequestsTail filter={{ project, environment: env, service: name }} />
+        </div>
       )}
       {tab === "tasks" && <ServiceTasks id={svc.id} path={path} />}
       {tab === "logs" && (

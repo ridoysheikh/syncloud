@@ -1,11 +1,23 @@
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
 import * as echarts from "echarts/core";
 import { LineChart } from "echarts/charts";
-import { GridComponent, TooltipComponent, LegendComponent, AxisPointerComponent } from "echarts/components";
+import {
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  AxisPointerComponent,
+} from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { registerTheme, THEME } from "./theme";
 
-echarts.use([LineChart, GridComponent, TooltipComponent, LegendComponent, AxisPointerComponent, CanvasRenderer]);
+echarts.use([
+  LineChart,
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  AxisPointerComponent,
+  CanvasRenderer,
+]);
 
 export interface SeriesDef {
   name: string;
@@ -48,7 +60,10 @@ export function TimeSeriesChart({
       grid: { top: series.length > 1 ? 22 : 12 },
       tooltip: {
         trigger: "axis",
-        valueFormatter: (v: unknown) => (typeof v === "number" ? `${+v.toFixed(2)}${unit ? ` ${unit}` : ""}` : String(v)),
+        valueFormatter: (v: unknown) =>
+          typeof v === "number"
+            ? `${+v.toFixed(2)}${unit ? ` ${unit}` : ""}`
+            : String(v),
       },
       xAxis: { type: "time" },
       yAxis: { type: "value", splitNumber: 3, scale: true },
@@ -76,7 +91,9 @@ export function TimeSeriesChart({
         d.push([t, values[i] ?? NaN]);
         if (d.length > windowSize) d.shift();
       });
-      chart.current?.setOption({ series: data.current.map((d) => ({ data: d })) });
+      chart.current?.setOption({
+        series: data.current.map((d) => ({ data: d })),
+      });
     },
   }));
 

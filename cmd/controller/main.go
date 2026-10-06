@@ -280,6 +280,18 @@ func serve(args []string) error {
 	metricStore := metrics.New(cfg.VictoriaMetricsURL, log)
 	go metricStore.Run(ctx)
 	gw.AddHooks(agentgw.Hooks{OnHeartbeat: func(node store.Node, hb *agentv1.Heartbeat) { metricStore.Add(node.Name, hb.GetTasks()) }})
+	if cfg.SystemTasks {
+		// Traefik's request metrics, labelled with SynCloud's names (§5.7).
+		serviceNames := func(ctx context.Context) map[string][3]string {
+			out := map[string][3]string{}
+			svcs, _ := st.ListServices(ctx)
+			for _, sv := range svcs {
+				out[sv.ID] = [3]string{sv.Project, sv.Environment, sv.Name}
+			}
+			return out
+		}
+		go metricStore.ScrapeTraefik(ctx, "http://"+cfg.TraefikAdmin+"/metrics", LocalNodeName, serviceNames, 10*time.Second)
+	}
 	healthMon := health.New(st, workloads, bus, log, health.Config{
 		BaseDomain: domains.Base, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS, VictoriaMetricsURL: cfg.VictoriaMetricsURL,
 	})

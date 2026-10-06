@@ -36,16 +36,35 @@ type Line struct {
 	Stream      string    `json:"stream"`
 	Level       string    `json:"level,omitempty"`
 	Message     string    `json:"message"`
+	// Fields of an access log line (stream "access"): method, host, path,
+	// status, duration_ms, bytes, client, upstream, service_id.
+	Fields map[string]string `json:"fields,omitempty"`
 }
+
+// StreamAccess holds Traefik's access log, one line per request (§5.7).
+const StreamAccess = "access"
 
 // Filter selects lines; empty fields match everything.
 type Filter struct {
 	Project, Environment, Service, TaskID, Node string
 	// Text is a plain substring search (never interpreted as a query).
 	Text string
+	// Stream "access" selects request lines; "" means application logs
+	// (request lines are left out).
+	Stream string
+	// Status is a status class of request lines: "2", "3", "4" or "5".
+	Status string
+	// Client selects request lines from one client IP.
+	Client string
 }
 
 func (f Filter) match(l Line) bool {
+	if f.Stream == "" && l.Stream == StreamAccess || f.Stream != "" && l.Stream != f.Stream {
+		return false
+	}
+	if f.Status != "" && !strings.HasPrefix(l.Fields["status"], f.Status) || f.Client != "" && l.Fields["client"] != f.Client {
+		return false
+	}
 	return (f.Project == "" || f.Project == l.Project) && (f.Environment == "" || f.Environment == l.Environment) &&
 		(f.Service == "" || f.Service == l.Service) && (f.TaskID == "" || f.TaskID == l.TaskID) &&
 		(f.Node == "" || f.Node == l.Node) && (f.Text == "" || strings.Contains(strings.ToLower(l.Message), strings.ToLower(f.Text)))
@@ -82,6 +101,17 @@ func (s *Store) OnLogs(node store.Node, b *agentv1.LogBatch) {
 		s.log.Warn("node dropped log lines (buffer full)", "node", node.Name, "lines", n)
 	}
 	for _, l := range b.GetLines() {
+		if l.GetTaskId() == TraefikTaskID {
+			if line, ok := s.accessLine(node.Name, l.GetLine()); ok {
+				s.fanout(line)
+				select {
+				case s.queue <- line:
+				default:
+					s.failed.Add(1)
+				}
+				continue
+			}
+		}
 		lb := s.labelsFor(l.GetTaskId())
 		line := Line{
 			Time: time.Unix(0, l.GetTimeUnixNano()).UTC(), Project: lb.project, Environment: lb.environment, Service: lb.service,
@@ -261,6 +291,16 @@ type record struct {
 	Node        string `json:"node"`
 	Stream      string `json:"stream"`
 	Level       string `json:"level,omitempty"`
+	// Access log fields.
+	Method     string `json:"method,omitempty"`
+	Host       string `json:"host,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Status     string `json:"status,omitempty"`
+	DurationMs string `json:"duration_ms,omitempty"`
+	Bytes      string `json:"bytes,omitempty"`
+	Client     string `json:"client,omitempty"`
+	Upstream   string `json:"upstream,omitempty"`
+	ServiceID  string `json:"service_id,omitempty"`
 }
 
 func (s *Store) write(ctx context.Context, lines []Line) error {
@@ -271,8 +311,11 @@ func (s *Store) write(ctx context.Context, lines []Line) error {
 		if msg == "" {
 			msg = " " // VictoriaLogs drops records with an empty message
 		}
+		f := l.Fields
 		_ = enc.Encode(record{Time: l.Time.Format(time.RFC3339Nano), Msg: msg, Project: l.Project, Environment: l.Environment,
-			Service: l.Service, TaskID: l.TaskID, Revision: l.Revision, Node: l.Node, Stream: l.Stream, Level: l.Level})
+			Service: l.Service, TaskID: l.TaskID, Revision: l.Revision, Node: l.Node, Stream: l.Stream, Level: l.Level,
+			Method: f["method"], Host: f["host"], Path: f["path"], Status: f["status"], DurationMs: f["duration_ms"], Bytes: f["bytes"],
+			Client: f["client"], Upstream: f["upstream"], ServiceID: f["service_id"]})
 	}
 	q := url.Values{"_stream_fields": {"project,environment,service,task_id,node,stream"}, "_time_field": {"_time"}, "_msg_field": {"_msg"}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.vlURL+"/insert/jsonline?"+q.Encode(), &buf)
@@ -309,15 +352,25 @@ func (f Filter) LogsQL(since time.Duration) string {
 	if f.Text != "" {
 		parts = append(parts, "i("+quote(f.Text)+")")
 	}
+	if f.Stream == "" {
+		parts = append(parts, "-stream:="+quote(StreamAccess))
+	} else {
+		parts = append(parts, "stream:="+quote(f.Stream))
+	}
+	if f.Status != "" {
+		parts = append(parts, "status:~"+quote("^"+regexp.QuoteMeta(f.Status)))
+	}
+	if f.Client != "" {
+		parts = append(parts, "client:="+quote(f.Client))
+	}
 	return strings.Join(parts, " ")
 }
 
 // ErrUnavailable means VictoriaLogs could not be queried.
 var ErrUnavailable = errors.New("log store unavailable")
 
-// Query returns up to limit lines (newest last) matching f within since.
-func (s *Store) Query(ctx context.Context, f Filter, since time.Duration, limit int) ([]Line, error) {
-	q := f.LogsQL(since) + fmt.Sprintf(" | sort by (_time desc) | limit %d", limit)
+// queryRows runs a LogsQL query and returns its rows as field maps.
+func (s *Store) queryRows(ctx context.Context, q string) ([]map[string]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.vlURL+"/select/logsql/query", strings.NewReader(url.Values{"query": {q}}.Encode()))
 	if err != nil {
 		return nil, err
@@ -332,18 +385,39 @@ func (s *Store) Query(ctx context.Context, f Filter, since time.Duration, limit 
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return nil, fmt.Errorf("%w: HTTP %d: %s", ErrUnavailable, resp.StatusCode, bytes.TrimSpace(b))
 	}
-	var out []Line
+	var rows []map[string]string
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 1<<20), 4<<20)
 	for sc.Scan() {
 		var r map[string]string
-		if json.Unmarshal(sc.Bytes(), &r) != nil {
-			continue
+		if json.Unmarshal(sc.Bytes(), &r) == nil {
+			rows = append(rows, r)
 		}
+	}
+	return rows, sc.Err()
+}
+
+// Query returns up to limit lines (newest last) matching f within since.
+func (s *Store) Query(ctx context.Context, f Filter, since time.Duration, limit int) ([]Line, error) {
+	rows, err := s.queryRows(ctx, f.LogsQL(since)+fmt.Sprintf(" | sort by (_time desc) | limit %d", limit))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Line, 0, len(rows))
+	for _, r := range rows {
 		t, _ := time.Parse(time.RFC3339Nano, r["_time"])
-		out = append(out, Line{Time: t, Project: r["project"], Environment: r["environment"], Service: r["service"], TaskID: r["task_id"],
-			Revision: r["revision"], Node: r["node"], Stream: r["stream"], Level: r["level"], Message: r["_msg"]})
+		l := Line{Time: t, Project: r["project"], Environment: r["environment"], Service: r["service"], TaskID: r["task_id"],
+			Revision: r["revision"], Node: r["node"], Stream: r["stream"], Level: r["level"], Message: r["_msg"]}
+		if l.Stream == StreamAccess {
+			l.Fields = map[string]string{}
+			for _, k := range accessFields {
+				if v := r[k]; v != "" {
+					l.Fields[k] = v
+				}
+			}
+		}
+		out = append(out, l)
 	}
 	slices.SortFunc(out, func(a, b Line) int { return a.Time.Compare(b.Time) })
-	return out, sc.Err()
+	return out, nil
 }
