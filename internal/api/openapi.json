@@ -2308,6 +2308,98 @@
           }
         }
       }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/deployments": {
+      "get": {
+        "operationId": "listServiceDeployments",
+        "tags": [
+          "services"
+        ],
+        "summary": "Rollouts, newest first (circuit breaker outcomes included)",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Deployment"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/drain": {
+      "post": {
+        "operationId": "drainNode",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Move a node's tasks elsewhere (replacements start first) and stop new placements. Undo with setNodeSchedulable true.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Node"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2758,6 +2850,9 @@
             ]
           },
           "schedulable": {
+            "type": "boolean"
+          },
+          "draining": {
             "type": "boolean"
           }
         }
@@ -3488,6 +3583,56 @@
                 ]
               }
             }
+          },
+          "health": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "http",
+                  "tcp",
+                  "cmd"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "port": {
+                "type": "string"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "interval": {
+                "type": "integer"
+              },
+              "timeout": {
+                "type": "integer"
+              },
+              "retries": {
+                "type": "integer"
+              },
+              "startPeriod": {
+                "type": "integer"
+              }
+            }
+          },
+          "deployment": {
+            "type": "object",
+            "properties": {
+              "circuitBreaker": {
+                "type": "boolean",
+                "default": true
+              },
+              "rollback": {
+                "type": "boolean",
+                "default": true
+              }
+            }
           }
         }
       },
@@ -3565,6 +3710,14 @@
           "dnsName": {
             "type": "string",
             "example": "api.production.shop.syncloud.internal"
+          },
+          "deployment": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Deployment"
+              }
+            ],
+            "nullable": true
           }
         }
       },
@@ -3792,6 +3945,48 @@
           },
           "dns": {
             "$ref": "#/components/schemas/DomainCheck"
+          }
+        }
+      },
+      "Deployment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "serviceId": {
+            "type": "string"
+          },
+          "fromRevision": {
+            "type": "integer"
+          },
+          "toRevision": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "succeeded",
+              "failed",
+              "rolled_back",
+              "superseded"
+            ]
+          },
+          "failedTasks": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           }
         }
       }

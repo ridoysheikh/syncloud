@@ -78,7 +78,7 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 	}
 	running := map[string][]store.Task{}
 	for _, t := range tasks {
-		if t.Desired == "running" && t.State == store.TaskRunning && t.IP != "" {
+		if t.IP != "" && m.serving(ctx, t) {
 			running[t.ServiceID] = append(running[t.ServiceID], t)
 		}
 	}

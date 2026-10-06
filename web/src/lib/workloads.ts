@@ -14,9 +14,44 @@ export interface Spec {
   command?: string[];
   env?: Record<string, string>;
   ports?: Port[];
-  resources: { cpu?: number; memory?: number; cpuLimit?: number; memoryLimit?: number };
+  resources: {
+    cpu?: number;
+    memory?: number;
+    cpuLimit?: number;
+    memoryLimit?: number;
+  };
   placement: { strategy?: "spread" | "binpack" };
+  health?: {
+    type: "http" | "tcp" | "cmd";
+    path?: string;
+    port?: string;
+    command?: string[];
+    interval?: number;
+    timeout?: number;
+    retries?: number;
+    startPeriod?: number;
+  };
+  deployment?: { circuitBreaker?: boolean; rollback?: boolean };
 }
+
+export interface Deployment {
+  id: string;
+  fromRevision: number;
+  toRevision: number;
+  status: "in_progress" | "succeeded" | "failed" | "rolled_back" | "superseded";
+  failedTasks: number;
+  message: string;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export const deploymentTone = {
+  in_progress: "info",
+  succeeded: "ok",
+  failed: "bad",
+  rolled_back: "warn",
+  superseded: "neutral",
+} as const;
 
 export interface Service {
   id: string;
@@ -33,6 +68,7 @@ export interface Service {
   endpoints: string[];
   vip: string;
   dnsName: string;
+  deployment: Deployment | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -47,7 +83,15 @@ export interface Task {
   nodeId: string;
   node: string;
   desired: "running" | "stopped";
-  state: "pending" | "pulling" | "starting" | "running" | "exited" | "failed" | "stopped" | "lost";
+  state:
+    | "pending"
+    | "pulling"
+    | "starting"
+    | "running"
+    | "exited"
+    | "failed"
+    | "stopped"
+    | "lost";
   ip: string;
   containerId: string;
   health: string;
@@ -76,8 +120,11 @@ export const taskTone = {
   lost: "warn",
 } as const;
 
-export const servicePath = (s: { project: string; environment: string; name: string }) =>
-  `/projects/${s.project}/environments/${s.environment}/services/${s.name}`;
+export const servicePath = (s: {
+  project: string;
+  environment: string;
+  name: string;
+}) => `/projects/${s.project}/environments/${s.environment}/services/${s.name}`;
 
 /** Every service, kept live from the event stream. */
 export function useServices() {
@@ -98,11 +145,19 @@ export function useServices() {
       }),
     [qc],
   );
-  return useQuery({ queryKey: ["services"], queryFn: async () => (await api<{ items: Service[] }>("GET", "/services")).items });
+  return useQuery({
+    queryKey: ["services"],
+    queryFn: async () =>
+      (await api<{ items: Service[] }>("GET", "/services")).items,
+  });
 }
 
 export function useProjects() {
-  return useQuery({ queryKey: ["projects"], queryFn: async () => (await api<{ items: Project[] }>("GET", "/projects")).items });
+  return useQuery({
+    queryKey: ["projects"],
+    queryFn: async () =>
+      (await api<{ items: Project[] }>("GET", "/projects")).items,
+  });
 }
 
 /** Tasks of one service (or all active tasks), kept live. */
@@ -120,7 +175,13 @@ export function useTasks(service?: { id: string; path: string }) {
           if (i === -1) return [t, ...prev];
           const next = prev.slice();
           next[i] = t;
-          return service ? next : next.filter((x) => x.desired === "running" || !["stopped", "lost", "exited", "failed"].includes(x.state));
+          return service
+            ? next
+            : next.filter(
+                (x) =>
+                  x.desired === "running" ||
+                  !["stopped", "lost", "exited", "failed"].includes(x.state),
+              );
         });
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -128,6 +189,12 @@ export function useTasks(service?: { id: string; path: string }) {
   );
   return useQuery({
     queryKey: key,
-    queryFn: async () => (await api<{ items: Task[] }>("GET", service ? `${service.path}/tasks` : "/tasks")).items,
+    queryFn: async () =>
+      (
+        await api<{ items: Task[] }>(
+          "GET",
+          service ? `${service.path}/tasks` : "/tasks",
+        )
+      ).items,
   });
 }

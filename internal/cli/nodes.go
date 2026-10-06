@@ -52,7 +52,23 @@ func (a *app) nodesCmd() *cobra.Command {
 			},
 		},
 		a.schedulableCmd("cordon", "Stop placing new tasks on a node", false),
-		a.schedulableCmd("uncordon", "Allow new tasks on a node again", true),
+		a.schedulableCmd("uncordon", "Allow new tasks on a node again (ends a drain)", true),
+		&cobra.Command{
+			Use: "drain ID", Short: "Move a node's tasks to other nodes (replacements first)", Args: cobra.ExactArgs(1),
+			Annotations: op("drainNode"),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				c, err := a.client()
+				if err != nil {
+					return err
+				}
+				n, err := c.DrainNode(ctx(cmd), args[0])
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(a.out, "Draining %s: its tasks move to other nodes as replacements become healthy\n", n.Name)
+				return nil
+			},
+		},
 		a.joinTokensCmd(),
 	)
 	return nodes

@@ -35,15 +35,18 @@ type Runner struct {
 	// NetworkReady reports whether tasks may join TaskNetwork yet (nil: always).
 	NetworkReady func() error
 
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	mu     sync.Mutex
+	locks  map[string]*sync.Mutex
+	probes map[string]*prober // task ID -> health probe
+	ctx    context.Context    // for probes started from Run
 }
 
 // TaskNetwork is the Docker network service tasks join (§8).
 const TaskNetwork = "syncloud"
 
 func NewRunner(d *docker.Client, log *slog.Logger) *Runner {
-	return &Runner{docker: d, log: log, out: make(chan *agentv1.TaskStatus, 256), locks: map[string]*sync.Mutex{}}
+	return &Runner{docker: d, log: log, out: make(chan *agentv1.TaskStatus, 256), locks: map[string]*sync.Mutex{},
+		probes: map[string]*prober{}, ctx: context.Background()}
 }
 
 func (r *Runner) lock(taskID string) func() {
@@ -101,6 +104,7 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 					return
 				}
 			}
+			r.startProbe(spec, c.ID, hash)
 			r.emit(r.inspect(ctx, c.ID, spec.TaskId))
 			return
 		}
@@ -159,12 +163,14 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 		return
 	}
 	r.log.Info("task started", "task", spec.TaskId, "container", id[:12])
+	r.startProbe(spec, id, hash)
 	r.emit(r.inspect(ctx, id, spec.TaskId))
 }
 
 // Stop stops (and optionally removes) the task's containers.
 func (r *Runner) Stop(ctx context.Context, taskID string, timeout time.Duration, remove bool) {
 	defer r.lock(taskID)()
+	r.stopProbe(taskID)
 	existing, err := r.docker.List(ctx, LabelTaskID+"="+taskID)
 	if err != nil {
 		r.emit(&agentv1.TaskStatus{TaskId: taskID, State: agentv1.TaskState_TASK_STATE_FAILED, Error: err.Error()})
@@ -225,6 +231,9 @@ func (r *Runner) inspect(ctx context.Context, containerID, taskID string) *agent
 	if c.State.Health != nil {
 		s.Health = c.State.Health.Status
 	}
+	if h := r.probeHealth(taskID); h != "" && c.State.Running {
+		s.Health = h // the agent's own probe (§5.6) wins over a Docker HEALTHCHECK
+	}
 	if t, err := time.Parse(time.RFC3339Nano, c.State.StartedAt); err == nil && !t.IsZero() {
 		s.StartedAtUnix = t.Unix()
 	}
@@ -242,6 +251,9 @@ func (r *Runner) inspect(ctx context.Context, containerID, taskID string) *agent
 // Watch reports container state changes from Docker events until ctx ends,
 // reconnecting to the event stream if it drops.
 func (r *Runner) Watch(ctx context.Context) {
+	r.mu.Lock()
+	r.ctx = ctx // probes live as long as the agent, not one controller session
+	r.mu.Unlock()
 	for ctx.Err() == nil {
 		evc, errc := r.docker.Events(ctx, LabelManaged+"=true")
 		for e := range evc {

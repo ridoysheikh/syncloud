@@ -24,13 +24,21 @@ interface ServiceDomain {
 }
 
 /** Custom domains of a service with live DNS status (§5.7). */
-export function DomainsPanel({ path, httpPorts }: { path: string; httpPorts: string[] }) {
+export function DomainsPanel({
+  path,
+  httpPorts,
+}: {
+  path: string;
+  httpPorts: string[];
+}) {
   const qc = useQueryClient();
   const key = ["domains", path];
   const { data = [], isLoading } = useQuery({
     queryKey: key,
-    queryFn: async () => (await api<{ items: ServiceDomain[] }>("GET", `${path}/domains`)).items,
-    refetchInterval: (q) => (q.state.data?.some((d) => !d.dns.ready) ? 10_000 : false),
+    queryFn: async () =>
+      (await api<{ items: ServiceDomain[] }>("GET", `${path}/domains`)).items,
+    refetchInterval: (q) =>
+      q.state.data?.some((d) => !d.dns.ready) ? 10_000 : false,
   });
   const [host, setHost] = useState("");
   const [port, setPort] = useState("");
@@ -43,7 +51,8 @@ export function DomainsPanel({ path, httpPorts }: { path: string; httpPorts: str
     },
   });
   const remove = useMutation({
-    mutationFn: (h: string) => api("DELETE", `${path}/domains/${encodeURIComponent(h)}`),
+    mutationFn: (h: string) =>
+      api("DELETE", `${path}/domains/${encodeURIComponent(h)}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["services"] });
@@ -61,9 +70,18 @@ export function DomainsPanel({ path, httpPorts }: { path: string; httpPorts: str
       flush
       actions={
         <form onSubmit={submit} className="flex items-center gap-1.5">
-          <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="shop.example.com" className="h-7 w-48 font-mono" />
+          <Input
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+            placeholder="shop.example.com"
+            className="h-7 w-48 font-mono"
+          />
           {httpPorts.length > 1 && (
-            <select value={port} onChange={(e) => setPort(e.target.value)} className="bg-bg border-line h-7 rounded-sm border px-1.5 text-xs">
+            <select
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+              className="bg-bg border-line h-7 rounded-sm border px-1.5 text-xs"
+            >
               {httpPorts.map((p) => (
                 <option key={p} value={p}>
                   {p}
@@ -71,7 +89,11 @@ export function DomainsPanel({ path, httpPorts }: { path: string; httpPorts: str
               ))}
             </select>
           )}
-          <Button type="submit" variant="primary" disabled={add.isPending || !host.trim()}>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={add.isPending || !host.trim()}
+          >
             Add domain
           </Button>
         </form>
@@ -79,7 +101,11 @@ export function DomainsPanel({ path, httpPorts }: { path: string; httpPorts: str
     >
       {add.error && (
         <div className="p-2">
-          <Alert>{add.error instanceof ApiError ? add.error.message : "Could not add the domain"}</Alert>
+          <Alert>
+            {add.error instanceof ApiError
+              ? add.error.message
+              : "Could not add the domain"}
+          </Alert>
         </div>
       )}
       <DataTable
@@ -88,13 +114,20 @@ export function DomainsPanel({ path, httpPorts }: { path: string; httpPorts: str
         empty={
           !isLoading && (
             <EmptyState icon={Globe} title="No custom domains">
-              Point your own domain at this service. HTTPS certificates are issued automatically once DNS is in place.
+              Point your own domain at this service. HTTPS certificates are
+              issued automatically once DNS is in place.
             </EmptyState>
           )
         }
         columns={[
-          { header: "Domain", cell: (d) => <span className="font-mono">{d.host}</span> },
-          { header: "Port", cell: (d) => <span className="text-muted">{d.port}</span> },
+          {
+            header: "Domain",
+            cell: (d) => <span className="font-mono">{d.host}</span>,
+          },
+          {
+            header: "Port",
+            cell: (d) => <span className="text-muted">{d.port}</span>,
+          },
           {
             header: "DNS",
             className: "w-full",
@@ -105,8 +138,13 @@ export function DomainsPanel({ path, httpPorts }: { path: string; httpPorts: str
                 <div className="flex flex-col gap-0.5 py-1">
                   <StatusBadge tone="warn">waiting for DNS</StatusBadge>
                   <span className="text-muted">
-                    Create <code className="text-fg font-mono">{d.dns.record || `A record → this server`}</code>
-                    {d.dns.addresses.length > 0 && <> (now resolves to {d.dns.addresses.join(", ")})</>}
+                    Create{" "}
+                    <code className="text-fg font-mono">
+                      {d.dns.record || `A record → this server`}
+                    </code>
+                    {d.dns.addresses.length > 0 && (
+                      <> (now resolves to {d.dns.addresses.join(", ")})</>
+                    )}
                   </span>
                 </div>
               ),
@@ -114,7 +152,12 @@ export function DomainsPanel({ path, httpPorts }: { path: string; httpPorts: str
           {
             header: "",
             cell: (d) => (
-              <IconButton label="Remove domain" onClick={() => confirm(`Stop routing ${d.host}?`) && remove.mutate(d.host)}>
+              <IconButton
+                label="Remove domain"
+                onClick={() =>
+                  confirm(`Stop routing ${d.host}?`) && remove.mutate(d.host)
+                }
+              >
                 <Trash2 className="size-3.5" />
               </IconButton>
             ),

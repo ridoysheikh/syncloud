@@ -217,6 +217,16 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 	now := m.now()
 	changed := false
 	status := ""
+	dep, depErr := m.st.ActiveDeployment(ctx, sv.ID)
+	hasDep := depErr == nil && dep.ToRev == sv.Revision
+	failed := func(t store.Task) {
+		m.recordFailure(sv.ID, now)
+		if hasDep && t.Revision == dep.ToRev {
+			if n, err := m.st.IncDeploymentFailures(ctx, dep.ID); err == nil {
+				dep.Failed = n
+			}
+		}
+	}
 	var active []store.Task
 	for _, t := range tasks {
 		if t.Desired != "running" {
@@ -232,7 +242,14 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 		case t.State == store.TaskExited || t.State == store.TaskFailed:
 			m.setDesired(ctx, t, "", now)
 			m.sendStop(t) // remove the dead container
-			m.recordFailure(sv.ID, now)
+			failed(t)
+			changed = true
+		case t.State == store.TaskRunning && t.Health == "unhealthy":
+			// Failed its health check (§5.6): replace it.
+			m.log.Info("replacing unhealthy task", "task", t.ID, "service", sv.Name)
+			m.setDesired(ctx, t, "", now)
+			m.sendStop(t)
+			failed(t)
 			changed = true
 		default:
 			if t.State == store.TaskPending && now.Sub(t.UpdatedAt) > pendingResend {
@@ -244,6 +261,12 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 
 	var current, old []store.Task
 	for _, t := range active {
+		// Tasks on a draining node are retired like an old revision, so
+		// replacements start elsewhere before they stop.
+		if n, ok := m.nodes.Get(t.NodeID); ok && n.Draining {
+			old = append(old, t)
+			continue
+		}
 		if t.Revision == sv.Revision {
 			current = append(current, t)
 		} else {
@@ -292,19 +315,45 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 		}
 	}
 
-	// Retire old revisions as new tasks become running, keeping the running
-	// total at the desired count.
-	runningNew := 0
+	// Retire old revisions as new tasks become serving (running, and healthy
+	// when the revision has a health check), keeping the serving total at the
+	// desired count.
+	servingNew := 0
 	for _, t := range current {
-		if t.State == store.TaskRunning {
-			runningNew++
+		if m.serving(ctx, t) {
+			servingNew++
 		}
 	}
-	for keepOld := max(desired-runningNew, 0); len(old) > keepOld; {
+	for keepOld := max(desired-servingNew, 0); len(old) > keepOld; {
 		i := pickVictim(old)
 		m.stop(ctx, old[i], now)
 		old = append(old[:i], old[i+1:]...)
 		changed = true
+	}
+
+	// Deployment outcome (§5.4): done when every desired task of the new
+	// revision serves and the old ones are gone; the circuit breaker trips
+	// when too many new tasks fail.
+	if hasDep {
+		threshold := min(max((desired+1)/2, 3), 200)
+		switch {
+		case *spec.Deployment.CircuitBreaker && dep.Failed >= threshold:
+			msg := fmt.Sprintf("%d tasks of revision %d failed or turned unhealthy", dep.Failed, dep.ToRev)
+			if *spec.Deployment.Rollback && dep.FromRev > 0 {
+				_ = m.st.FinishDeployment(ctx, dep.ID, store.DeployRolledBack, msg+"; rolled back to revision "+fmt.Sprint(dep.FromRev), now)
+				m.log.Warn("deployment failed; rolling back", "service", sv.Name, "revision", dep.ToRev, "to", dep.FromRev)
+				if _, err := m.rollback(ctx, sv, dep.FromRev, "circuit-breaker", "automatic rollback: "+msg); err != nil {
+					m.log.Error("automatic rollback", "service", sv.ID, "err", err)
+				}
+				return
+			}
+			_ = m.st.FinishDeployment(ctx, dep.ID, store.DeployFailed, msg, now)
+			status = "deployment failed: " + msg
+			changed = true
+		case servingNew >= desired && len(old) == 0:
+			_ = m.st.FinishDeployment(ctx, dep.ID, store.DeploySucceeded, "", now)
+			changed = true
+		}
 	}
 
 	if sv.Deleting && len(current)+len(old) == 0 {
@@ -345,6 +394,19 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			m.bus.Publish(TopicService, v)
 		}
 	}
+}
+
+// serving reports whether a task should receive traffic: running, and
+// healthy when its revision defines a health check.
+func (m *Manager) serving(ctx context.Context, t store.Task) bool {
+	if t.State != store.TaskRunning || t.Desired != "running" {
+		return false
+	}
+	spec, err := m.SpecFor(ctx, t.ServiceID, t.Revision)
+	if err != nil {
+		return false
+	}
+	return spec.Health == nil || t.Health == "healthy"
 }
 
 // pickVictim prefers tasks that are not running yet, then the newest.
@@ -522,6 +584,13 @@ func TaskSpec(sv store.Service, spec Spec, t store.Task) *agentv1.TaskSpec {
 	if spec.Resources.CPULimit > 0 {
 		ts.NanoCpus = int64(spec.Resources.CPULimit * 1e9)
 	}
+	if h := spec.Health; h != nil {
+		port, _ := spec.PortNumber(h.Port)
+		ts.Health = &agentv1.HealthCheck{
+			Type: h.Type, Path: h.Path, Port: uint32(port), Command: h.Command,
+			IntervalSeconds: uint32(h.Interval), TimeoutSeconds: uint32(h.Timeout), Retries: uint32(h.Retries), StartPeriodSeconds: uint32(h.StartPeriod),
+		}
+	}
 	return ts
 }
 
@@ -621,6 +690,11 @@ func (m *Manager) onConnect(c agentgw.Conn) {
 			m.onTaskStatus(c.Node, s)
 			if t.Desired == "stopped" {
 				m.sendStop(t)
+			} else if sv, err := m.st.ServiceByID(ctx, t.ServiceID); err == nil {
+				// Idempotent: lets a restarted agent resume health probes.
+				if spec, err := m.SpecFor(ctx, sv.ID, t.Revision); err == nil {
+					m.sendRun(ctx, sv, spec, t)
+				}
 			}
 		case t.Desired == "running" && (t.State == store.TaskRunning || t.State == store.TaskExited):
 			m.onTaskStatus(c.Node, &agentv1.TaskStatus{TaskId: t.ID, State: agentv1.TaskState_TASK_STATE_EXITED, Error: "container disappeared while the node was disconnected"})

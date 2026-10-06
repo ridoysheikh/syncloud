@@ -125,6 +125,12 @@ type Node struct {
 	Metrics    *NodeMetrics `json:"metrics"`
 	// Schedulable allows new tasks on the node.
 	Schedulable bool `json:"schedulable"`
+	Draining    bool `json:"draining"`
+}
+
+func (c *Client) DrainNode(ctx context.Context, id string) (Node, error) {
+	var out Node
+	return out, c.Do(ctx, "POST", "/api/v1/nodes/"+url.PathEscape(id)+"/drain", nil, &out)
 }
 
 type JoinToken struct {
@@ -416,7 +422,36 @@ type ServiceSpec struct {
 	Placement struct {
 		Strategy string `json:"strategy,omitempty"`
 	} `json:"placement"`
-	DesiredCount *int `json:"desiredCount,omitempty"`
+	Health       *HealthCheck   `json:"health,omitempty"`
+	Deployment   map[string]any `json:"deployment,omitempty"`
+	DesiredCount *int           `json:"desiredCount,omitempty"`
+}
+
+type HealthCheck struct {
+	Type        string   `json:"type"`
+	Path        string   `json:"path,omitempty"`
+	Port        string   `json:"port,omitempty"`
+	Command     []string `json:"command,omitempty"`
+	Interval    int      `json:"interval,omitempty"`
+	Timeout     int      `json:"timeout,omitempty"`
+	Retries     int      `json:"retries,omitempty"`
+	StartPeriod int      `json:"startPeriod,omitempty"`
+}
+
+type Deployment struct {
+	ID           string     `json:"id"`
+	FromRevision int        `json:"fromRevision"`
+	ToRevision   int        `json:"toRevision"`
+	Status       string     `json:"status"`
+	FailedTasks  int        `json:"failedTasks"`
+	Message      string     `json:"message"`
+	StartedAt    time.Time  `json:"startedAt"`
+	FinishedAt   *time.Time `json:"finishedAt"`
+}
+
+func (c *Client) ServiceDeployments(ctx context.Context, project, env, name string) ([]Deployment, error) {
+	var out list[Deployment]
+	return out.Items, c.Do(ctx, "GET", svcPath(project, env, name)+"/deployments", nil, &out)
 }
 
 type Service struct {
@@ -434,6 +469,7 @@ type Service struct {
 	Endpoints    []string    `json:"endpoints"`
 	VIP          string      `json:"vip"`
 	DNSName      string      `json:"dnsName"`
+	Deployment   *Deployment `json:"deployment"`
 	CreatedAt    time.Time   `json:"createdAt"`
 	UpdatedAt    time.Time   `json:"updatedAt"`
 }

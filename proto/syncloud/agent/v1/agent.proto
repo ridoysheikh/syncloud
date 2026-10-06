@@ -112,6 +112,7 @@ message TaskSpec {
   bool system = 14;             // platform component (§5.0): never evicted by users
   repeated string dns_servers = 15; // the node's discovery DNS (§8.1)
   repeated string dns_search = 16;  // e.g. production.shop.syncloud.internal
+  HealthCheck health = 17;      // probed by the agent (§5.6); unset = no check
 }
 
 message PortBinding {
@@ -323,4 +324,19 @@ message ExecOutput {
   bool exited = 3;
   int32 exit_code = 4;
   string error = 5;             // could not start
+}
+
+// HealthCheck is probed by the agent against the task's IP (§5.6, layer 1).
+// The task is "starting" until the first success, "unhealthy" after
+// `retries` consecutive failures (failures during the start period do not
+// count), and "healthy" again after one success.
+message HealthCheck {
+  string type = 1;              // http | tcp | cmd
+  string path = 2;              // http: request path
+  uint32 port = 3;              // http, tcp: container port
+  repeated string command = 4;  // cmd: run in the container; exit 0 = healthy
+  uint32 interval_seconds = 5;
+  uint32 timeout_seconds = 6;
+  uint32 retries = 7;
+  uint32 start_period_seconds = 8;
 }

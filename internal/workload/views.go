@@ -12,22 +12,24 @@ import (
 
 // ServiceView is a service as the API shows it.
 type ServiceView struct {
-	ID           string    `json:"id"`
-	Project      string    `json:"project"`
-	Environment  string    `json:"environment"`
-	Name         string    `json:"name"`
-	Revision     int       `json:"revision"`
-	DesiredCount int       `json:"desiredCount"`
-	Running      int       `json:"running"`
-	Pending      int       `json:"pending"`
-	Status       string    `json:"status"`
-	Deleting     bool      `json:"deleting"`
-	Spec         Spec      `json:"spec"`
-	Endpoints    []string  `json:"endpoints"`
-	VIP          string    `json:"vip"`
-	DNSName      string    `json:"dnsName"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID           string   `json:"id"`
+	Project      string   `json:"project"`
+	Environment  string   `json:"environment"`
+	Name         string   `json:"name"`
+	Revision     int      `json:"revision"`
+	DesiredCount int      `json:"desiredCount"`
+	Running      int      `json:"running"`
+	Pending      int      `json:"pending"`
+	Status       string   `json:"status"`
+	Deleting     bool     `json:"deleting"`
+	Spec         Spec     `json:"spec"`
+	Endpoints    []string `json:"endpoints"`
+	VIP          string   `json:"vip"`
+	// Deployment is the latest rollout.
+	Deployment *store.Deployment `json:"deployment"`
+	DNSName    string            `json:"dnsName"`
+	CreatedAt  time.Time         `json:"createdAt"`
+	UpdatedAt  time.Time         `json:"updatedAt"`
 }
 
 // TaskView is a task as the API shows it.
@@ -85,6 +87,9 @@ func (m *Manager) serviceView(ctx context.Context, sv store.Service) (ServiceVie
 		v.Endpoints = []string{}
 	}
 	v.VIP, v.DNSName = Discovery(sv)
+	if ds, err := m.st.ListDeployments(ctx, sv.ID, 1); err == nil && len(ds) == 1 {
+		v.Deployment = &ds[0]
+	}
 	tasks, err := m.st.ServiceTasks(ctx, sv.ID, 0)
 	if err != nil {
 		return v, err
@@ -93,7 +98,7 @@ func (m *Manager) serviceView(ctx context.Context, sv store.Service) (ServiceVie
 		if t.Desired != "running" {
 			continue
 		}
-		if t.State == store.TaskRunning {
+		if m.serving(ctx, t) {
 			v.Running++
 		} else if live(t) {
 			v.Pending++
@@ -205,6 +210,7 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 			}
 			return ServiceView{}, false, err
 		}
+		m.startDeployment(ctx, sv.ID, 0, 1, "")
 		created = true
 	case err != nil:
 		return ServiceView{}, false, err
@@ -215,8 +221,12 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 		if desired < 0 {
 			desired = sv.DesiredCount
 		}
-		if _, err := m.st.UpdateService(ctx, sv.ID, spec.Canonical(), desired, actor, now); err != nil {
+		rev, err := m.st.UpdateService(ctx, sv.ID, spec.Canonical(), desired, actor, now)
+		if err != nil {
 			return ServiceView{}, false, err
+		}
+		if rev != sv.Revision {
+			m.startDeployment(ctx, sv.ID, sv.Revision, rev, "")
 		}
 	}
 	m.routesDirty()
@@ -226,6 +236,18 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 	m.Enqueue(sv.ID)
 	v, err := m.ServiceView(ctx, sv.ID)
 	return v, created, err
+}
+
+// Serving reports whether a task receives traffic (running and healthy).
+func (m *Manager) Serving(ctx context.Context, t store.Task) bool { return m.serving(ctx, t) }
+
+// startDeployment records a rollout to toRev.
+func (m *Manager) startDeployment(ctx context.Context, serviceID string, fromRev, toRev int, msg string) {
+	err := m.st.StartDeployment(ctx, store.Deployment{ID: auth.NewID("dep_"), ServiceID: serviceID, FromRev: fromRev, ToRev: toRev,
+		Message: msg, StartedAt: m.now().UTC().Truncate(time.Second)})
+	if err != nil {
+		m.log.Error("record deployment", "service", serviceID, "err", err)
+	}
 }
 
 // Scale sets the desired count.
@@ -253,12 +275,20 @@ func (m *Manager) Rollback(ctx context.Context, serviceID string, revision int, 
 	if err != nil {
 		return ServiceView{}, err
 	}
-	td, err := m.st.TaskDefinition(ctx, serviceID, revision)
+	return m.rollback(ctx, sv, revision, actor, fmt.Sprintf("rollback to revision %d", revision))
+}
+
+func (m *Manager) rollback(ctx context.Context, sv store.Service, revision int, actor, msg string) (ServiceView, error) {
+	td, err := m.st.TaskDefinition(ctx, sv.ID, revision)
 	if err != nil {
 		return ServiceView{}, err
 	}
-	if _, err := m.st.UpdateService(ctx, sv.ID, td.Spec, sv.DesiredCount, actor, m.now()); err != nil {
+	rev, err := m.st.UpdateService(ctx, sv.ID, td.Spec, sv.DesiredCount, actor, m.now())
+	if err != nil {
 		return ServiceView{}, err
+	}
+	if rev != sv.Revision {
+		m.startDeployment(ctx, sv.ID, sv.Revision, rev, msg)
 	}
 	m.Enqueue(sv.ID)
 	return m.ServiceView(ctx, sv.ID)

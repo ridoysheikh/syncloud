@@ -438,3 +438,19 @@ func (s *Server) handleRestartTask(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, u.ID, "task:Restart", "srn:syncloud:task/"+id, nil)
 	w.WriteHeader(http.StatusAccepted)
 }
+
+func (s *Server) handleServiceDeployments(w http.ResponseWriter, r *http.Request) {
+	sv, ok := s.service(w, r)
+	if !ok {
+		return
+	}
+	ds, err := s.store.ListDeployments(r.Context(), sv.ID, 50)
+	if err != nil {
+		s.internalError(w, "list deployments", err)
+		return
+	}
+	if ds == nil {
+		ds = []store.Deployment{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": ds})
+}

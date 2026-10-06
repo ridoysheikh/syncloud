@@ -160,7 +160,7 @@ func (m *Manager) Build(ctx context.Context) (*agentv1.Discovery, map[string]str
 	}
 	running := map[string][]store.Task{}
 	for _, t := range tasks {
-		if t.Desired == "running" && t.State == store.TaskRunning && t.IP != "" {
+		if t.IP != "" && m.wl.Serving(ctx, t) {
 			running[t.ServiceID] = append(running[t.ServiceID], t)
 		}
 	}

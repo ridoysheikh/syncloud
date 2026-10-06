@@ -1266,6 +1266,14 @@ Because there is only one controller:
 - Service UI with a YAML view.
 
 ### Phase 3: Deployments, Health and Jobs (3 wks)
+**Progress**
+- ✅ Slice 3a (2026-10-06), health checks and deployments:
+  - Spec `health` (`http` path, `tcp` or `cmd`, with interval, timeout, retries and start period) is **probed by the agent** against the task IP, or by exec for `cmd`. Probes live for the agent's lifetime and resume after a restart because the controller re-sends running tasks on reconnect. States: starting → healthy, or unhealthy after N consecutive failures.
+  - Only **serving** tasks (running, and healthy when a check is defined) get Traefik routes, VIP backends and DNS `tasks.` records. Unhealthy tasks are replaced.
+  - Rolling updates retire old tasks only as new ones *serve*. **Deployments** record each rollout (from→to revision, status, failed-task count, message). The **circuit breaker** (on by default) trips after max(3, ⌈desired/2⌉) failed or unhealthy tasks of the new revision and, if `rollback` is on, rolls back automatically to the previous revision as a new revision with the reason recorded. Old tasks keep serving throughout.
+  - API `…/deployments`, `synctl services deployments`, a Deployments tab, health badges on tasks, and the latest deployment shown in the service view.
+- ✅ Slice 3b (2026-10-06), drain: `POST /nodes/{id}/drain` (`synctl nodes drain`, Nodes page "drain") treats a node's tasks like an old revision, so replacements start elsewhere and the node's tasks stop once they serve. Uncordon ends a drain.
+- Verified with `test/e2e/deploy.sh`: a health-gated first rollout, replacement of a task made unhealthy, a bad revision tripping the breaker and rolling back while the old tasks kept serving, and a drain.
 - Two-layer health (agent plus controller), service and task health model, uptime monitors, incidents (§5.6).
 - Rolling deploys, circuit breaker with rollback.
 - Node failure, rescheduling, cordon and drain.

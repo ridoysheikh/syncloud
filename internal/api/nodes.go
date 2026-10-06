@@ -194,9 +194,31 @@ func (s *Server) handleSetSchedulable(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "set schedulable", err)
 		return
 	}
-	s.nodes.SetSchedulable(r.Context(), id, req.Schedulable)
+	prev, _ := s.nodes.Get(id)
+	s.nodes.SetSchedulable(r.Context(), id, req.Schedulable, prev.Draining && !req.Schedulable)
 	u, _ := currentUser(r.Context())
 	s.audit(r, u.ID, "node:SetSchedulable", "srn:syncloud:node/"+id, map[string]any{"schedulable": req.Schedulable})
+	if s.workloads != nil {
+		s.workloads.EnqueueAll()
+	}
+	v, _ := s.nodes.Get(id)
+	writeJSON(w, http.StatusOK, v)
+}
+
+// handleDrainNode moves a node's tasks elsewhere: replacements start first,
+// then the node's tasks stop (§5.4). Undo with PUT …/schedulable true.
+func (s *Server) handleDrainNode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.store.DrainNode(r.Context(), id); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, CodeNotFound, "no such node")
+		return
+	} else if err != nil {
+		s.internalError(w, "drain node", err)
+		return
+	}
+	s.nodes.SetSchedulable(r.Context(), id, false, true)
+	u, _ := currentUser(r.Context())
+	s.audit(r, u.ID, "node:Drain", "srn:syncloud:node/"+id, nil)
 	if s.workloads != nil {
 		s.workloads.EnqueueAll()
 	}

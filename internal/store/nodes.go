@@ -26,6 +26,8 @@ type Node struct {
 	LastSeenAt *time.Time
 	// Schedulable allows new tasks on the node.
 	Schedulable bool
+	// Draining moves the node's tasks elsewhere.
+	Draining bool
 }
 
 type JoinToken struct {
@@ -180,13 +182,13 @@ func (s *Store) DeleteNode(ctx context.Context, id string) error {
 	return nil
 }
 
-const nodeCols = `SELECT id, name, status, info, cert_serial, created_at, status_at, last_seen_at, schedulable FROM nodes`
+const nodeCols = `SELECT id, name, status, info, cert_serial, created_at, status_at, last_seen_at, schedulable, draining FROM nodes`
 
 func scanNode(r scanner) (Node, error) {
 	var n Node
 	var created, statusAt int64
 	var seen sql.NullInt64
-	err := r.Scan(&n.ID, &n.Name, &n.Status, &n.Info, &n.CertSerial, &created, &statusAt, &seen, &n.Schedulable)
+	err := r.Scan(&n.ID, &n.Name, &n.Status, &n.Info, &n.CertSerial, &created, &statusAt, &seen, &n.Schedulable, &n.Draining)
 	n.CreatedAt, n.StatusAt, n.LastSeenAt = time.Unix(created, 0), time.Unix(statusAt, 0), nullTime(seen)
 	return n, err
 }

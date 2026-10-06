@@ -191,6 +191,9 @@ func (a *app) servicesCmd() *cobra.Command {
 		if v.Status != "" {
 			fmt.Fprintf(a.out, "  status: %s\n", v.Status)
 		}
+		if d := v.Deployment; d != nil && d.Status != "succeeded" {
+			fmt.Fprintf(a.out, "  deployment %d → %d: %s %s\n", d.FromRevision, d.ToRevision, d.Status, d.Message)
+		}
 		return nil
 	}
 
@@ -441,6 +444,21 @@ func (a *app) servicesCmd() *cobra.Command {
 					rows = append(rows, []string{fmt.Sprint(r.Revision) + cur, r.Spec.Image, age(r.CreatedAt)})
 				}
 				return a.printer().table(rs, []string{"REVISION", "IMAGE", "CREATED"}, rows)
+			}),
+		},
+		&cobra.Command{
+			Use: "deployments NAME", Aliases: []string{"rollouts"}, Short: "Rollouts of a service, newest first", Args: cobra.ExactArgs(1),
+			Annotations: op("listServiceDeployments"),
+			RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+				ds, err := c.ServiceDeployments(ctx(cmd), s.project, s.env, args[0])
+				if err != nil {
+					return err
+				}
+				rows := make([][]string, 0, len(ds))
+				for _, d := range ds {
+					rows = append(rows, []string{fmt.Sprintf("%d → %d", d.FromRevision, d.ToRevision), d.Status, fmt.Sprint(d.FailedTasks), age(d.StartedAt), orDash(d.Message)})
+				}
+				return a.printer().table(ds, []string{"REVISIONS", "STATUS", "FAILED", "STARTED", "MESSAGE"}, rows)
 			}),
 		},
 		&cobra.Command{

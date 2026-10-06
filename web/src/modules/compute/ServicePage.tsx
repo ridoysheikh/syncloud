@@ -3,7 +3,13 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Minus, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { servicePath, useServices, type Spec } from "@/lib/workloads";
+import {
+  deploymentTone,
+  servicePath,
+  useServices,
+  type Deployment,
+  type Spec,
+} from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { StatTile } from "@/ui/StatTile";
@@ -25,7 +31,7 @@ interface Revision {
   createdBy: string;
 }
 
-type Tab = "tasks" | "logs" | "revisions" | "spec";
+type Tab = "tasks" | "logs" | "deployments" | "revisions" | "spec";
 
 /** One service: scale, tasks, revisions and its spec (§4). */
 export function ServicePage() {
@@ -106,6 +112,18 @@ export function ServicePage() {
         }
       />
       {svc.status && <Alert>{svc.status}</Alert>}
+      {svc.deployment &&
+        svc.deployment.status !== "succeeded" &&
+        svc.deployment.status !== "superseded" && (
+          <Alert
+            tone={svc.deployment.status === "in_progress" ? "info" : "warn"}
+          >
+            Deployment {svc.deployment.fromRevision} →{" "}
+            {svc.deployment.toRevision}:{" "}
+            {svc.deployment.status.replace("_", " ")}
+            {svc.deployment.message && ` — ${svc.deployment.message}`}
+          </Alert>
+        )}
       <div className={cn("grid grid-cols-2 md:grid-cols-4", gap)}>
         <StatTile
           label="Running"
@@ -167,20 +185,22 @@ export function ServicePage() {
           .map((p) => p.name ?? String(p.container))}
       />
       <div className="border-line flex gap-3 border-b text-xs">
-        {(["tasks", "logs", "revisions", "spec"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={cn(
-              "-mb-px border-b-2 px-1 pb-1.5 capitalize",
-              tab === t
-                ? "border-accent text-fg"
-                : "text-muted hover:text-fg border-transparent",
-            )}
-          >
-            {t}
-          </button>
-        ))}
+        {(["tasks", "logs", "deployments", "revisions", "spec"] as Tab[]).map(
+          (t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={cn(
+                "-mb-px border-b-2 px-1 pb-1.5 capitalize",
+                tab === t
+                  ? "border-accent text-fg"
+                  : "text-muted hover:text-fg border-transparent",
+              )}
+            >
+              {t}
+            </button>
+          ),
+        )}
       </div>
       {tab === "tasks" && <ServiceTasks id={svc.id} path={path} />}
       {tab === "logs" && (
@@ -189,6 +209,7 @@ export function ServicePage() {
           showSource={false}
         />
       )}
+      {tab === "deployments" && <Deployments path={path} />}
       {tab === "revisions" && <Revisions path={path} />}
       {tab === "spec" && <SpecEditor path={path} spec={svc.spec} />}
     </div>
@@ -200,6 +221,62 @@ function ServiceTasks({ id, path }: { id: string; path: string }) {
   return (
     <Panel flush>
       <TasksTable tasks={data} loading={isLoading} showService={false} />
+    </Panel>
+  );
+}
+
+function Deployments({ path }: { path: string }) {
+  const { data = [] } = useQuery({
+    queryKey: ["deployments", path],
+    queryFn: async () =>
+      (await api<{ items: Deployment[] }>("GET", `${path}/deployments`)).items,
+    refetchInterval: 5000,
+  });
+  return (
+    <Panel flush>
+      <DataTable
+        rows={data}
+        rowKey={(d) => d.id}
+        columns={[
+          {
+            header: "Revisions",
+            cell: (d) => (
+              <span className="font-mono">
+                {d.fromRevision
+                  ? `${d.fromRevision} → ${d.toRevision}`
+                  : `→ ${d.toRevision}`}
+              </span>
+            ),
+          },
+          {
+            header: "Status",
+            cell: (d) => (
+              <StatusBadge tone={deploymentTone[d.status]}>
+                {d.status.replace("_", " ")}
+              </StatusBadge>
+            ),
+          },
+          {
+            header: "Failed tasks",
+            cell: (d) => (
+              <span className={d.failedTasks ? "text-bad" : "text-muted"}>
+                {d.failedTasks}
+              </span>
+            ),
+          },
+          {
+            header: "Started",
+            cell: (d) => (
+              <span className="text-muted">{since(d.startedAt)}</span>
+            ),
+          },
+          {
+            header: "Message",
+            className: "w-full",
+            cell: (d) => <span className="text-muted">{d.message || "—"}</span>,
+          },
+        ]}
+      />
     </Panel>
   );
 }

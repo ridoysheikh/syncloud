@@ -19,7 +19,32 @@ type Spec struct {
 	Ports     []Port            `json:"ports,omitempty"`
 	Resources Resources         `json:"resources"`
 	Placement Placement         `json:"placement"`
+	// Health is probed by the agent (§5.6); traffic only reaches healthy tasks.
+	Health     *HealthCheck `json:"health,omitempty"`
+	Deployment Deployment   `json:"deployment"`
 }
+
+// HealthCheck defines how a task's health is probed.
+type HealthCheck struct {
+	Type        string   `json:"type"`                  // http | tcp | cmd
+	Path        string   `json:"path,omitempty"`        // http (default /)
+	Port        string   `json:"port,omitempty"`        // port name (default: the first port)
+	Command     []string `json:"command,omitempty"`     // cmd: exit 0 = healthy
+	Interval    int      `json:"interval,omitempty"`    // seconds (default 10)
+	Timeout     int      `json:"timeout,omitempty"`     // seconds (default 3)
+	Retries     int      `json:"retries,omitempty"`     // consecutive failures before unhealthy (default 3)
+	StartPeriod int      `json:"startPeriod,omitempty"` // seconds in which failures do not count (default 10)
+}
+
+// Deployment controls rollouts (§5.4).
+type Deployment struct {
+	// CircuitBreaker stops a rollout whose new tasks keep failing (default on).
+	CircuitBreaker *bool `json:"circuitBreaker,omitempty"`
+	// Rollback returns to the previous revision when the breaker trips (default on).
+	Rollback *bool `json:"rollback,omitempty"`
+}
+
+func boolPtr(b bool) *bool { return &b }
 
 // Port is a container port. HTTP ports get a public route (§5.7).
 type Port struct {
@@ -110,6 +135,57 @@ func (s *Spec) Normalize() error {
 	if r.Memory < 4 || r.Memory > 4<<20 || r.MemoryLimit < r.Memory {
 		return errors.New("memory must be 4 MiB–4 TiB, and memoryLimit at least memory")
 	}
+	if s.Deployment.CircuitBreaker == nil {
+		s.Deployment.CircuitBreaker = boolPtr(true)
+	}
+	if s.Deployment.Rollback == nil {
+		s.Deployment.Rollback = boolPtr(true)
+	}
+	if h := s.Health; h != nil {
+		switch h.Type {
+		case "http", "tcp":
+			if len(s.Ports) == 0 {
+				return fmt.Errorf("an %s health check needs a port", h.Type)
+			}
+			if h.Port == "" {
+				h.Port = s.Ports[0].Name
+			}
+			if _, ok := s.PortNumber(h.Port); !ok {
+				return fmt.Errorf("health check port %q is not one of the service's ports", h.Port)
+			}
+			if h.Type == "http" && h.Path == "" {
+				h.Path = "/"
+			}
+			if h.Type == "http" && !strings.HasPrefix(h.Path, "/") {
+				return errors.New("health check path must start with /")
+			}
+			h.Command = nil
+		case "cmd":
+			if len(h.Command) == 0 {
+				return errors.New("a cmd health check needs a command")
+			}
+			h.Path, h.Port = "", ""
+		default:
+			return errors.New("health check type must be http, tcp or cmd")
+		}
+		for _, v := range []*int{&h.Interval, &h.Timeout, &h.Retries, &h.StartPeriod} {
+			if *v < 0 || *v > 3600 {
+				return errors.New("health check timings must be 0–3600 seconds")
+			}
+		}
+		if h.Interval == 0 {
+			h.Interval = 10
+		}
+		if h.Timeout == 0 {
+			h.Timeout = 3
+		}
+		if h.Retries == 0 {
+			h.Retries = 3
+		}
+		if h.StartPeriod == 0 {
+			h.StartPeriod = 10
+		}
+	}
 	switch s.Placement.Strategy {
 	case "":
 		s.Placement.Strategy = "spread"
@@ -131,6 +207,16 @@ func ParseSpec(raw string) (Spec, error) {
 	var s Spec
 	err := json.Unmarshal([]byte(raw), &s)
 	return s, err
+}
+
+// PortNumber resolves a port name.
+func (s Spec) PortNumber(name string) (int, bool) {
+	for _, p := range s.Ports {
+		if p.Name == name {
+			return p.Container, true
+		}
+	}
+	return 0, false
 }
 
 // HTTPPorts returns the ports that get public routes, in order.

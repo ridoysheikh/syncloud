@@ -470,7 +470,8 @@ func (s *Store) PruneTasks(ctx context.Context, serviceID string, keep int) erro
 // ── node scheduling ─────────────────────────────────────────────────────────
 
 func (s *Store) SetNodeSchedulable(ctx context.Context, id string, on bool) error {
-	res, err := s.W.ExecContext(ctx, `UPDATE nodes SET schedulable = ? WHERE id = ?`, on, id)
+	// Allowing tasks again also ends a drain.
+	res, err := s.W.ExecContext(ctx, `UPDATE nodes SET schedulable = ?, draining = CASE WHEN ? THEN 0 ELSE draining END WHERE id = ?`, on, on, id)
 	if err != nil {
 		return err
 	}
@@ -576,4 +577,113 @@ func (s *Store) ListDomains(ctx context.Context, serviceID string) ([]Domain, er
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// ── deployments ─────────────────────────────────────────────────────────────
+
+// Deployment statuses.
+const (
+	DeployInProgress = "in_progress"
+	DeploySucceeded  = "succeeded"
+	DeployFailed     = "failed"
+	DeployRolledBack = "rolled_back"
+	DeploySuperseded = "superseded"
+)
+
+type Deployment struct {
+	ID         string     `json:"id"`
+	ServiceID  string     `json:"serviceId"`
+	FromRev    int        `json:"fromRevision"`
+	ToRev      int        `json:"toRevision"`
+	Status     string     `json:"status"`
+	Failed     int        `json:"failedTasks"`
+	Message    string     `json:"message"`
+	StartedAt  time.Time  `json:"startedAt"`
+	FinishedAt *time.Time `json:"finishedAt"`
+}
+
+// StartDeployment supersedes any running deployment of the service and
+// records a new one.
+func (s *Store) StartDeployment(ctx context.Context, d Deployment) error {
+	tx, err := s.W.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE deployments SET status = ?, finished_at = ? WHERE service_id = ? AND status = ?`,
+		DeploySuperseded, d.StartedAt.Unix(), d.ServiceID, DeployInProgress); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO deployments (id, service_id, from_rev, to_rev, status, message, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.ServiceID, d.FromRev, d.ToRev, DeployInProgress, d.Message, d.StartedAt.Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+const deploymentCols = `SELECT id, service_id, from_rev, to_rev, status, failed, message, started_at, finished_at FROM deployments`
+
+func scanDeployment(r scanner) (Deployment, error) {
+	var d Deployment
+	var started int64
+	var finished sql.NullInt64
+	err := r.Scan(&d.ID, &d.ServiceID, &d.FromRev, &d.ToRev, &d.Status, &d.Failed, &d.Message, &started, &finished)
+	d.StartedAt = time.Unix(started, 0).UTC()
+	if finished.Valid {
+		t := time.Unix(finished.Int64, 0).UTC()
+		d.FinishedAt = &t
+	}
+	return d, err
+}
+
+// ActiveDeployment returns the service's in-progress deployment.
+func (s *Store) ActiveDeployment(ctx context.Context, serviceID string) (Deployment, error) {
+	d, err := scanDeployment(s.R.QueryRowContext(ctx, deploymentCols+` WHERE service_id = ? AND status = ? ORDER BY started_at DESC LIMIT 1`, serviceID, DeployInProgress))
+	if errors.Is(err, sql.ErrNoRows) {
+		return d, ErrNotFound
+	}
+	return d, err
+}
+
+func (s *Store) ListDeployments(ctx context.Context, serviceID string, limit int) ([]Deployment, error) {
+	rows, err := s.R.QueryContext(ctx, deploymentCols+` WHERE service_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`, serviceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Deployment
+	for rows.Next() {
+		d, err := scanDeployment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// IncDeploymentFailures counts a failed task of the deployment's revision.
+func (s *Store) IncDeploymentFailures(ctx context.Context, id string) (int, error) {
+	var n int
+	err := s.W.QueryRowContext(ctx, `UPDATE deployments SET failed = failed + 1 WHERE id = ? RETURNING failed`, id).Scan(&n)
+	return n, err
+}
+
+func (s *Store) FinishDeployment(ctx context.Context, id, status, message string, now time.Time) error {
+	// An empty message keeps the existing one (e.g. "automatic rollback: …").
+	_, err := s.W.ExecContext(ctx, `UPDATE deployments SET status = ?, message = CASE WHEN ? = '' THEN message ELSE ? END, finished_at = ? WHERE id = ? AND status = ?`,
+		status, message, message, now.Unix(), id, DeployInProgress)
+	return err
+}
+
+// DrainNode stops new placements on the node and marks it draining.
+func (s *Store) DrainNode(ctx context.Context, id string) error {
+	res, err := s.W.ExecContext(ctx, `UPDATE nodes SET schedulable = 0, draining = 1 WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

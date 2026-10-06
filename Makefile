@@ -42,6 +42,7 @@ release: web
 e2e:
 	test/e2e/mesh.sh
 	test/e2e/services.sh
+	test/e2e/deploy.sh
 
 ## proto: regenerate gRPC code (tools are installed into .tools/ on first use)
 proto: .tools/buf .tools/protoc-gen-go .tools/protoc-gen-go-grpc

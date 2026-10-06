@@ -1020,6 +1020,7 @@ type TaskSpec struct {
 	System           bool                   `protobuf:"varint,14,opt,name=system,proto3" json:"system,omitempty"`                                               // platform component (§5.0): never evicted by users
 	DnsServers       []string               `protobuf:"bytes,15,rep,name=dns_servers,json=dnsServers,proto3" json:"dns_servers,omitempty"`                      // the node's discovery DNS (§8.1)
 	DnsSearch        []string               `protobuf:"bytes,16,rep,name=dns_search,json=dnsSearch,proto3" json:"dns_search,omitempty"`                         // e.g. production.shop.syncloud.internal
+	Health           *HealthCheck           `protobuf:"bytes,17,opt,name=health,proto3" json:"health,omitempty"`                                                // probed by the agent (§5.6); unset = no check
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1162,6 +1163,13 @@ func (x *TaskSpec) GetDnsServers() []string {
 func (x *TaskSpec) GetDnsSearch() []string {
 	if x != nil {
 		return x.DnsSearch
+	}
+	return nil
+}
+
+func (x *TaskSpec) GetHealth() *HealthCheck {
+	if x != nil {
+		return x.Health
 	}
 	return nil
 }
@@ -2870,6 +2878,110 @@ func (x *ExecOutput) GetError() string {
 	return ""
 }
 
+// HealthCheck is probed by the agent against the task's IP (§5.6, layer 1).
+// The task is "starting" until the first success, "unhealthy" after
+// `retries` consecutive failures (failures during the start period do not
+// count), and "healthy" again after one success.
+type HealthCheck struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Type               string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`       // http | tcp | cmd
+	Path               string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`       // http: request path
+	Port               uint32                 `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`      // http, tcp: container port
+	Command            []string               `protobuf:"bytes,4,rep,name=command,proto3" json:"command,omitempty"` // cmd: run in the container; exit 0 = healthy
+	IntervalSeconds    uint32                 `protobuf:"varint,5,opt,name=interval_seconds,json=intervalSeconds,proto3" json:"interval_seconds,omitempty"`
+	TimeoutSeconds     uint32                 `protobuf:"varint,6,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	Retries            uint32                 `protobuf:"varint,7,opt,name=retries,proto3" json:"retries,omitempty"`
+	StartPeriodSeconds uint32                 `protobuf:"varint,8,opt,name=start_period_seconds,json=startPeriodSeconds,proto3" json:"start_period_seconds,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *HealthCheck) Reset() {
+	*x = HealthCheck{}
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealthCheck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealthCheck) ProtoMessage() {}
+
+func (x *HealthCheck) ProtoReflect() protoreflect.Message {
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealthCheck.ProtoReflect.Descriptor instead.
+func (*HealthCheck) Descriptor() ([]byte, []int) {
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *HealthCheck) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *HealthCheck) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *HealthCheck) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *HealthCheck) GetCommand() []string {
+	if x != nil {
+		return x.Command
+	}
+	return nil
+}
+
+func (x *HealthCheck) GetIntervalSeconds() uint32 {
+	if x != nil {
+		return x.IntervalSeconds
+	}
+	return 0
+}
+
+func (x *HealthCheck) GetTimeoutSeconds() uint32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+func (x *HealthCheck) GetRetries() uint32 {
+	if x != nil {
+		return x.Retries
+	}
+	return 0
+}
+
+func (x *HealthCheck) GetStartPeriodSeconds() uint32 {
+	if x != nil {
+		return x.StartPeriodSeconds
+	}
+	return 0
+}
+
 var File_syncloud_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
@@ -2940,7 +3052,7 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xde\x05\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\x96\x06\n" +
 	"\bTaskSpec\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -2961,7 +3073,8 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\vdns_servers\x18\x0f \x03(\tR\n" +
 	"dnsServers\x12\x1d\n" +
 	"\n" +
-	"dns_search\x18\x10 \x03(\tR\tdnsSearch\x1a6\n" +
+	"dns_search\x18\x10 \x03(\tR\tdnsSearch\x126\n" +
+	"\x06health\x18\x11 \x01(\v2\x1e.syncloud.agent.v1.HealthCheckR\x06health\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a9\n" +
@@ -3113,7 +3226,16 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x16\n" +
 	"\x06exited\x18\x03 \x01(\bR\x06exited\x12\x1b\n" +
 	"\texit_code\x18\x04 \x01(\x05R\bexitCode\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error*\xa3\x01\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\"\x83\x02\n" +
+	"\vHealthCheck\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x12\n" +
+	"\x04port\x18\x03 \x01(\rR\x04port\x12\x18\n" +
+	"\acommand\x18\x04 \x03(\tR\acommand\x12)\n" +
+	"\x10interval_seconds\x18\x05 \x01(\rR\x0fintervalSeconds\x12'\n" +
+	"\x0ftimeout_seconds\x18\x06 \x01(\rR\x0etimeoutSeconds\x12\x18\n" +
+	"\aretries\x18\a \x01(\rR\aretries\x120\n" +
+	"\x14start_period_seconds\x18\b \x01(\rR\x12startPeriodSeconds*\xa3\x01\n" +
 	"\rRestartPolicy\x12\x1e\n" +
 	"\x1aRESTART_POLICY_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RESTART_POLICY_NO\x10\x01\x12\x19\n" +
@@ -3144,7 +3266,7 @@ func file_syncloud_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_syncloud_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_syncloud_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_syncloud_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_syncloud_agent_v1_agent_proto_goTypes = []any{
 	(RestartPolicy)(0),        // 0: syncloud.agent.v1.RestartPolicy
 	(TaskState)(0),            // 1: syncloud.agent.v1.TaskState
@@ -3182,8 +3304,9 @@ var file_syncloud_agent_v1_agent_proto_goTypes = []any{
 	(*ExecStart)(nil),         // 33: syncloud.agent.v1.ExecStart
 	(*ExecResize)(nil),        // 34: syncloud.agent.v1.ExecResize
 	(*ExecOutput)(nil),        // 35: syncloud.agent.v1.ExecOutput
-	nil,                       // 36: syncloud.agent.v1.TaskSpec.EnvEntry
-	nil,                       // 37: syncloud.agent.v1.TaskSpec.LabelsEntry
+	(*HealthCheck)(nil),       // 36: syncloud.agent.v1.HealthCheck
+	nil,                       // 37: syncloud.agent.v1.TaskSpec.EnvEntry
+	nil,                       // 38: syncloud.agent.v1.TaskSpec.LabelsEntry
 }
 var file_syncloud_agent_v1_agent_proto_depIdxs = []int32{
 	5,  // 0: syncloud.agent.v1.ConnectRequest.hello:type_name -> syncloud.agent.v1.Hello
@@ -3205,31 +3328,32 @@ var file_syncloud_agent_v1_agent_proto_depIdxs = []int32{
 	16, // 16: syncloud.agent.v1.Hello.tasks:type_name -> syncloud.agent.v1.TaskStatus
 	9,  // 17: syncloud.agent.v1.Heartbeat.metrics:type_name -> syncloud.agent.v1.NodeMetrics
 	22, // 18: syncloud.agent.v1.Heartbeat.network:type_name -> syncloud.agent.v1.NetworkStatus
-	36, // 19: syncloud.agent.v1.TaskSpec.env:type_name -> syncloud.agent.v1.TaskSpec.EnvEntry
-	37, // 20: syncloud.agent.v1.TaskSpec.labels:type_name -> syncloud.agent.v1.TaskSpec.LabelsEntry
+	37, // 19: syncloud.agent.v1.TaskSpec.env:type_name -> syncloud.agent.v1.TaskSpec.EnvEntry
+	38, // 20: syncloud.agent.v1.TaskSpec.labels:type_name -> syncloud.agent.v1.TaskSpec.LabelsEntry
 	12, // 21: syncloud.agent.v1.TaskSpec.ports:type_name -> syncloud.agent.v1.PortBinding
 	13, // 22: syncloud.agent.v1.TaskSpec.mounts:type_name -> syncloud.agent.v1.Mount
 	0,  // 23: syncloud.agent.v1.TaskSpec.restart:type_name -> syncloud.agent.v1.RestartPolicy
-	2,  // 24: syncloud.agent.v1.Mount.type:type_name -> syncloud.agent.v1.Mount.Type
-	11, // 25: syncloud.agent.v1.RunTask.spec:type_name -> syncloud.agent.v1.TaskSpec
-	1,  // 26: syncloud.agent.v1.TaskStatus.state:type_name -> syncloud.agent.v1.TaskState
-	21, // 27: syncloud.agent.v1.NetworkConfig.peers:type_name -> syncloud.agent.v1.Peer
-	18, // 28: syncloud.agent.v1.NetworkConfig.firewall:type_name -> syncloud.agent.v1.Firewall
-	19, // 29: syncloud.agent.v1.Firewall.rules:type_name -> syncloud.agent.v1.FirewallRule
-	23, // 30: syncloud.agent.v1.NetworkStatus.peers:type_name -> syncloud.agent.v1.PeerStatus
-	27, // 31: syncloud.agent.v1.LogBatch.lines:type_name -> syncloud.agent.v1.LogLine
-	29, // 32: syncloud.agent.v1.Discovery.records:type_name -> syncloud.agent.v1.DNSRecord
-	30, // 33: syncloud.agent.v1.Discovery.services:type_name -> syncloud.agent.v1.VirtualService
-	31, // 34: syncloud.agent.v1.VirtualService.ports:type_name -> syncloud.agent.v1.VirtualPort
-	33, // 35: syncloud.agent.v1.ExecInput.start:type_name -> syncloud.agent.v1.ExecStart
-	34, // 36: syncloud.agent.v1.ExecInput.resize:type_name -> syncloud.agent.v1.ExecResize
-	3,  // 37: syncloud.agent.v1.AgentGatewayService.Connect:input_type -> syncloud.agent.v1.ConnectRequest
-	4,  // 38: syncloud.agent.v1.AgentGatewayService.Connect:output_type -> syncloud.agent.v1.ConnectResponse
-	38, // [38:39] is the sub-list for method output_type
-	37, // [37:38] is the sub-list for method input_type
-	37, // [37:37] is the sub-list for extension type_name
-	37, // [37:37] is the sub-list for extension extendee
-	0,  // [0:37] is the sub-list for field type_name
+	36, // 24: syncloud.agent.v1.TaskSpec.health:type_name -> syncloud.agent.v1.HealthCheck
+	2,  // 25: syncloud.agent.v1.Mount.type:type_name -> syncloud.agent.v1.Mount.Type
+	11, // 26: syncloud.agent.v1.RunTask.spec:type_name -> syncloud.agent.v1.TaskSpec
+	1,  // 27: syncloud.agent.v1.TaskStatus.state:type_name -> syncloud.agent.v1.TaskState
+	21, // 28: syncloud.agent.v1.NetworkConfig.peers:type_name -> syncloud.agent.v1.Peer
+	18, // 29: syncloud.agent.v1.NetworkConfig.firewall:type_name -> syncloud.agent.v1.Firewall
+	19, // 30: syncloud.agent.v1.Firewall.rules:type_name -> syncloud.agent.v1.FirewallRule
+	23, // 31: syncloud.agent.v1.NetworkStatus.peers:type_name -> syncloud.agent.v1.PeerStatus
+	27, // 32: syncloud.agent.v1.LogBatch.lines:type_name -> syncloud.agent.v1.LogLine
+	29, // 33: syncloud.agent.v1.Discovery.records:type_name -> syncloud.agent.v1.DNSRecord
+	30, // 34: syncloud.agent.v1.Discovery.services:type_name -> syncloud.agent.v1.VirtualService
+	31, // 35: syncloud.agent.v1.VirtualService.ports:type_name -> syncloud.agent.v1.VirtualPort
+	33, // 36: syncloud.agent.v1.ExecInput.start:type_name -> syncloud.agent.v1.ExecStart
+	34, // 37: syncloud.agent.v1.ExecInput.resize:type_name -> syncloud.agent.v1.ExecResize
+	3,  // 38: syncloud.agent.v1.AgentGatewayService.Connect:input_type -> syncloud.agent.v1.ConnectRequest
+	4,  // 39: syncloud.agent.v1.AgentGatewayService.Connect:output_type -> syncloud.agent.v1.ConnectResponse
+	39, // [39:40] is the sub-list for method output_type
+	38, // [38:39] is the sub-list for method input_type
+	38, // [38:38] is the sub-list for extension type_name
+	38, // [38:38] is the sub-list for extension extendee
+	0,  // [0:38] is the sub-list for field type_name
 }
 
 func init() { file_syncloud_agent_v1_agent_proto_init() }
@@ -3269,7 +3393,7 @@ func file_syncloud_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_syncloud_agent_v1_agent_proto_rawDesc), len(file_syncloud_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   35,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

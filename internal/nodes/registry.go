@@ -64,6 +64,8 @@ type View struct {
 	Metrics    *Metrics   `json:"metrics"`
 	// Schedulable allows new tasks (§6.4: off for the controller by default).
 	Schedulable bool `json:"schedulable"`
+	// Draining moves the node's tasks to other nodes.
+	Draining bool `json:"draining"`
 }
 
 type live struct {
@@ -96,7 +98,7 @@ func (r *Registry) Load(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, n := range list {
-		v := View{ID: n.ID, Name: n.Name, Status: n.Status, StatusAt: n.StatusAt.UTC(), LastSeenAt: n.LastSeenAt, CreatedAt: n.CreatedAt.UTC(), Schedulable: n.Schedulable}
+		v := View{ID: n.ID, Name: n.Name, Status: n.Status, StatusAt: n.StatusAt.UTC(), LastSeenAt: n.LastSeenAt, CreatedAt: n.CreatedAt.UTC(), Schedulable: n.Schedulable, Draining: n.Draining}
 		_ = json.Unmarshal([]byte(n.Info), &v.Info)
 		r.nodes[n.ID] = &live{view: v}
 	}
@@ -106,7 +108,7 @@ func (r *Registry) Load(ctx context.Context) error {
 // Added registers a freshly joined node.
 func (r *Registry) Added(n store.Node) {
 	r.mu.Lock()
-	v := View{ID: n.ID, Name: n.Name, Status: n.Status, StatusAt: n.StatusAt.UTC(), CreatedAt: n.CreatedAt.UTC(), Schedulable: n.Schedulable}
+	v := View{ID: n.ID, Name: n.Name, Status: n.Status, StatusAt: n.StatusAt.UTC(), CreatedAt: n.CreatedAt.UTC(), Schedulable: n.Schedulable, Draining: n.Draining}
 	r.nodes[n.ID] = &live{view: v}
 	r.mu.Unlock()
 	r.bus.Publish(TopicNode, v)
@@ -190,8 +192,8 @@ func (r *Registry) persistStatus(ctx context.Context, v View) {
 
 // List returns all nodes sorted by name.
 // SetSchedulable updates the live view after the store changed.
-func (r *Registry) SetSchedulable(ctx context.Context, id string, on bool) {
-	r.update(ctx, id, func(l *live) { l.view.Schedulable = on })
+func (r *Registry) SetSchedulable(ctx context.Context, id string, on, draining bool) {
+	r.update(ctx, id, func(l *live) { l.view.Schedulable, l.view.Draining = on, draining })
 }
 
 // Get returns one node's view.

@@ -28,7 +28,24 @@ export function NodesPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["nodes"] }),
   });
 
-  const count = (s: Node["status"]) => nodes.filter((n) => n.status === s).length;
+  const schedule = useMutation({
+    mutationFn: ({
+      id,
+      action,
+    }: {
+      id: string;
+      action: "cordon" | "drain" | "uncordon";
+    }) =>
+      action === "drain"
+        ? api("POST", `/nodes/${id}/drain`)
+        : api("PUT", `/nodes/${id}/schedulable`, {
+            schedulable: action === "uncordon",
+          }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["nodes"] }),
+  });
+
+  const count = (s: Node["status"]) =>
+    nodes.filter((n) => n.status === s).length;
 
   return (
     <div className={cn("flex flex-col", gap)}>
@@ -42,17 +59,36 @@ export function NodesPage() {
         }
       />
       <div className={cn("grid grid-cols-2 md:grid-cols-4", gap)}>
-        <StatTile label="Ready" value={count("ready")} tone={count("ready") ? "ok" : undefined} />
-        <StatTile label="Suspect" value={count("suspect")} tone={count("suspect") ? "warn" : undefined} />
-        <StatTile label="Not ready" value={count("not_ready")} tone={count("not_ready") ? "bad" : undefined} />
-        <StatTile label="Pending" value={count("pending")} hint="joined, never connected" />
+        <StatTile
+          label="Ready"
+          value={count("ready")}
+          tone={count("ready") ? "ok" : undefined}
+        />
+        <StatTile
+          label="Suspect"
+          value={count("suspect")}
+          tone={count("suspect") ? "warn" : undefined}
+        />
+        <StatTile
+          label="Not ready"
+          value={count("not_ready")}
+          tone={count("not_ready") ? "bad" : undefined}
+        />
+        <StatTile
+          label="Pending"
+          value={count("pending")}
+          hint="joined, never connected"
+        />
       </div>
       <Panel title={`Nodes (${nodes.length})`} flush>
         <NodesTable
           nodes={nodes}
           loading={isLoading}
+          onSchedule={(n, action) => schedule.mutate({ id: n.id, action })}
           onDelete={(n) =>
-            confirm(`Remove node ${n.name}? Its certificate stops working immediately and it must join again.`) && remove.mutate(n.id)
+            confirm(
+              `Remove node ${n.name}? Its certificate stops working immediately and it must join again.`,
+            ) && remove.mutate(n.id)
           }
         />
       </Panel>
@@ -61,7 +97,13 @@ export function NodesPage() {
   );
 }
 
-function AddNodeDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function AddNodeDialog({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   const [token, setToken] = useState<JoinToken | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -70,7 +112,13 @@ function AddNodeDialog({ open, onClose }: { open: boolean; onClose: () => void }
     setBusy(true);
     setError(null);
     try {
-      setToken(await api<JoinToken>("POST", "/nodes/join-tokens", { ttlMinutes: 60, singleUse: true, description: "dashboard" }));
+      setToken(
+        await api<JoinToken>("POST", "/nodes/join-tokens", {
+          ttlMinutes: 60,
+          singleUse: true,
+          description: "dashboard",
+        }),
+      );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Request failed.");
     } finally {
@@ -109,7 +157,8 @@ function AddNodeDialog({ open, onClose }: { open: boolean; onClose: () => void }
       {!token ? (
         <div className="flex flex-col gap-2 text-xs">
           <p className="text-muted">
-            A single-use join token valid for 1 hour lets one server join. The server generates its own key; the controller only signs its
+            A single-use join token valid for 1 hour lets one server join. The
+            server generates its own key; the controller only signs its
             certificate.
           </p>
           {error && <Alert>{error}</Alert>}
@@ -117,17 +166,26 @@ function AddNodeDialog({ open, onClose }: { open: boolean; onClose: () => void }
       ) : (
         <div className="flex flex-col gap-2.5">
           <Field label="Run on the new server">
-            <CommandBox value={`curl -fsSL ${origin}/join.sh | sudo bash -s -- --token ${token.token}`} />
+            <CommandBox
+              value={`curl -fsSL ${origin}/join.sh | sudo bash -s -- --token ${token.token}`}
+            />
           </Field>
           <p className="text-faint text-xs">
-            Installs Docker and nftables if missing, downloads the agent from this controller (checksum-verified), joins and starts it as a
-            systemd service. Add <code className="font-mono">--advertise-address IP</code> if other nodes must reach this one on a different
-            address. Expires {new Date(token.expiresAt).toLocaleTimeString()}.
+            Installs Docker and nftables if missing, downloads the agent from
+            this controller (checksum-verified), joins and starts it as a
+            systemd service. Add{" "}
+            <code className="font-mono">--advertise-address IP</code> if other
+            nodes must reach this one on a different address. Expires{" "}
+            {new Date(token.expiresAt).toLocaleTimeString()}.
           </p>
           <details className="text-xs">
-            <summary className="text-muted cursor-pointer">Agent already installed?</summary>
+            <summary className="text-muted cursor-pointer">
+              Agent already installed?
+            </summary>
             <div className="mt-1.5">
-              <CommandBox value={`syncloud-agent join --controller ${origin} --token ${token.token} && syncloud-agent run`} />
+              <CommandBox
+                value={`syncloud-agent join --controller ${origin} --token ${token.token} && syncloud-agent run`}
+              />
             </div>
           </details>
         </div>
@@ -140,7 +198,9 @@ function CommandBox({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="bg-bg border-line-strong flex items-start gap-1 rounded-sm border p-1.5 pl-2">
-      <code className="flex-1 font-mono text-xs break-all select-all">{value}</code>
+      <code className="flex-1 font-mono text-xs break-all select-all">
+        {value}
+      </code>
       <IconButton
         label="Copy"
         onClick={() =>
@@ -150,7 +210,11 @@ function CommandBox({ value }: { value: string }) {
           })
         }
       >
-        {copied ? <Check className="text-ok size-3.5" /> : <Copy className="size-3.5" />}
+        {copied ? (
+          <Check className="text-ok size-3.5" />
+        ) : (
+          <Copy className="size-3.5" />
+        )}
       </IconButton>
     </div>
   );

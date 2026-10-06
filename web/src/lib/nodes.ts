@@ -41,6 +41,8 @@ export interface Node {
   createdAt: string;
   info: NodeInfo;
   metrics: NodeMetrics | null;
+  schedulable: boolean;
+  draining: boolean;
 }
 
 const key = ["nodes"];
