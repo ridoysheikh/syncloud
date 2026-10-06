@@ -1452,6 +1452,7 @@ Because there is only one controller:
 - **Security groups** and egress rules with nftables sets, default project isolation, preview and diff (§8.3).
 - Rule hit counters, drop logs, effective rules viewer, reachability check.
 - **Network section** of the dashboard: topology map, traffic per node/service/container, IPAM and DNS pages (§8.4).
+- Carried over from Phase 2/3/5: Traefik middleware presets and the validated raw YAML editor (§5.7), central per-task probes over the mesh (§5.6).
 
 ### Phase 7: IAM, Multi-tenancy and Quotas (3 wks)
 - Users, groups, roles, service accounts, JSON policies with conditions, policy evaluation middleware, MFA.
