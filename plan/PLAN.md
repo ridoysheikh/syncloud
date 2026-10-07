@@ -1897,9 +1897,14 @@ One image runs every role, chosen by its command: Patroni-managed Postgres, PgBo
   - Reloadable settings apply at once.
   - For settings that need a restart, the controller restarts members flagged `pending_restart` one at a time: replicas first, then the leader. Each restart waits until the member streams again, and each is recorded as an event.
   - Vertical scaling also re-tunes memory this way. Before, the tuning was only applied at the first bootstrap.
-- **UI:** the wizard's PostgreSQL step gets extensions (toggles), replication (mode, sync count, failover lag) and an "advanced parameters" editor. The Settings tab edits the same fields on a running cluster and shows which ones need a restart.
+- **UI:**
+  - The wizard: replication mode, sync count and failover settings in Capacity; add-on toggles and a grouped parameter editor in Data.
+  - A **Configuration** tab edits the same fields on a running cluster, plus replica count, memory, CPU and max connections, and shows which parameters have a restart pending.
   - A **Replication** tab shows `pg_stat_replication`: each replica's state, sync state, send/write/flush/replay lag and bytes behind, plus the replication slots and the timeline.
-- **API / CLI:** the spec fields come through the existing `PUT /databases/{name}`; `GET /databases/{name}/pg/replication`; `GET /databases/pg/parameters` (the catalog). CLI: `synctl db replication`, `synctl db config set|unset KEY[=VALUE]`, `synctl db extensions enable|disable NAME` (cluster-level).
+- **API / CLI:**
+  - The spec fields go through the existing `PUT /databases/{name}`.
+  - New endpoints: `GET /databases/{name}/pg/settings` (the catalog with live values and the add-ons) and `GET /databases/{name}/pg/replication`. The engine registry also carries the catalogs, so the wizard has them.
+  - CLI: `synctl db settings [--changed]`, `db config set|unset NAME KEY[=VALUE]…`, `db addons NAME`, `db addon enable|disable NAME ADDON…`, `db replication NAME`, and `db replication set NAME --mode … --sync-replicas … --failover-ttl … --max-lag …`.
 - **e2e:**
   - create a cluster with one extension and custom parameters, then check `SHOW`;
   - install a disabled extension (refused), enable it (rolling restart), then install it;
@@ -1979,7 +1984,31 @@ One image runs every role, chosen by its command: Patroni-managed Postgres, PgBo
   - **Restores:** a restore keeps the source's version, and asking for another one is refused.
   - **Aliases:** `TaskSpec.network_aliases` (proto field 22). The agent sets them through `NetworkingConfig`. etcd and Patroni members carry their discovery names, which fixes "waiting for the platform etcd" on a node outside the mesh; checked in DinD with no discovery DNS.
   - **e2e:** `PG_VERSIONS` (default `18`) picks the images the nodes load. The backup e2e passes on 18 (server version check, restore version refusal). The CLI stage takes the controller URL from the environment, because `db backup config --endpoint` is the S3 endpoint.
-- ⬜ 13c2: configuration, optional extensions, replication settings and status (user request, 2026-10-08), then 13b2, 13d, 13e.
+- ✅ 13c2: configuration, optional extensions and replication (2026-10-08):
+  - **Backend (`internal/dbs/pgconfig.go`):**
+    - The add-on catalog, the parameter catalog (53 entries, with typed validation of units and ranges), and `PgReplicationSpec`.
+    - `pgDynamicConfig`, applied with `syncPgConfig` (`PATCH /config`; removed keys sent as null). Restarts for pending settings go one at a time, replicas first, through `POST /restart` with `restart_pending`.
+    - `bootstrap.dcs` is frozen in `State.BootstrapDCS`, so configuration changes never recreate members (checked in the e2e).
+    - Explorer installs check that the add-on is enabled and its library loaded.
+  - **API:** `GET …/pg/settings` and `GET …/pg/replication`. The engine registry carries the catalogs.
+  - **CLI:** `db settings`, `db config set|unset`, `db addons`, `db addon enable|disable`, `db replication [set]`.
+  - **Web:**
+    - The wizard: replication fields in Capacity; add-ons and parameters in Data.
+    - A Configuration tab: add-ons, size, replicas, replication, max connections, and grouped parameters with live values and restart-pending marks.
+    - A Replication tab: replicas with lag, Patroni's members, and slots.
+  - **etcd rollout fix:** a changed etcd member spec (image, aliases, DNS) now rolls out one member at a time, once the others have settled for 15 s. Before, existing members never got a new spec, so the alias fix never reached a dev node's etcd and it stayed in "waiting for the platform etcd". Verified on 3 nodes (members updated 20–25 s apart, the database stayed healthy).
+  - **e2e:**
+    - `postgres-config.sh` passes on 18:
+      - a disabled add-on is refused;
+      - enabling one restarts the replica, then the leader;
+      - removing an installed add-on is refused;
+      - a reload parameter applies without restarts and a restart parameter restarts the members;
+      - sync mode gives a synchronous replica;
+      - no container is recreated;
+      - the CLI works.
+    - `postgres-single.sh`: one node with `CTL_NETWORK=off` (lib.sh now takes `WORKERS` and `CTL_NETWORK`).
+  - **Not in this step:** a leader with pending settings restarts in place (a few seconds without writes) rather than switching over first.
+- ⬜ 13b2, 13d, 13e.
 
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)

@@ -22,6 +22,10 @@ type EngineInfo struct {
 	// Features the dashboard and CLI offer: explorer, console, failover,
 	// memoryAutoscaling, replicaAutoscaling.
 	Features []string `json:"features"`
+	// PostgreSQL: the optional add-ons and the parameters users may set
+	// (§13c2), for the wizard.
+	Addons     []PgAddon `json:"addons,omitempty"`
+	Parameters []PgParam `json:"parameters,omitempty"`
 }
 
 // Engine names.
@@ -40,9 +44,10 @@ var Engines = []EngineInfo{
 	},
 	{
 		Name: EnginePostgres, Title: "PostgreSQL", Available: true,
-		Description: "PostgreSQL 18 or 17 with Patroni failover and streaming replicas; pgvector, TimescaleDB (Apache), pg_duckdb, PostGIS, pg_partman and pg_cron.",
+		Description: "PostgreSQL 18 or 17 with Patroni failover, streaming replicas and WAL-G backups; optional pgvector, TimescaleDB (Apache), pg_duckdb, PostGIS, pg_partman and pg_cron.",
 		Versions:    pgVersions, DefaultVersion: pgDefaultVersion, Port: PostgresPort, Scheme: "postgresql", TLSScheme: "postgresql",
 		Entrypoint: "postgres", Features: []string{"failover"},
+		Addons: PgAddons, Parameters: PgParams,
 	},
 }
 

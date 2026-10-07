@@ -6,7 +6,13 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 NET=sc-e2e
-NODES=(sc-e2e-ctl sc-e2e-w1 sc-e2e-w2)
+# WORKERS: the worker nodes (WORKERS= for a single node); CTL_NETWORK: the
+# controller node's private network (off = a node outside the mesh, like
+# single-node development).
+WORKERS=${WORKERS-w1 w2}
+CTL_NETWORK=${CTL_NETWORK:-on}
+NODES=(sc-e2e-ctl)
+for w in $WORKERS; do NODES+=("sc-e2e-$w"); done
 BIN=$(mktemp -d)
 
 cleanup() {
@@ -84,7 +90,7 @@ echo "== controller on $CTL_IP"
 x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false ${CTL_FLAGS:-} > /var/log/controller.log 2>&1"
 for _ in $(seq 1 30); do x sc-e2e-ctl curl -fs localhost:7070/api/v1/system/status >/dev/null 2>&1 && break; sleep 1; done
 x sc-e2e-ctl /opt/sc/syncloud-agent join --controller http://127.0.0.1:7070 --token-file /data/local-join.token --name ctl-0 --data-dir /agent >/dev/null
-x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-agent run --data-dir /agent --network on > /var/log/agent.log 2>&1"
+x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-agent run --data-dir /agent --network $CTL_NETWORK > /var/log/agent.log 2>&1"
 
 # Root account and a join token for the workers.
 TOK=$(x sc-e2e-ctl cat /data/setup-token)
@@ -94,7 +100,7 @@ x sc-e2e-ctl curl -fs -c /tmp/jar -H 'content-type: application/json' localhost:
   -d "{\"setupToken\":\"$TOK\",\"email\":\"e2e@example.com\",\"name\":\"E2E\",\"password\":\"e2e-password-123\",\"recoveryKeySuffix\":\"$SUF\"}" >/dev/null
 JOIN=$(x sc-e2e-ctl curl -fs -b /tmp/jar -H 'content-type: application/json' localhost:7070/api/v1/nodes/join-tokens -d '{"singleUse":false,"ttlMinutes":30}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 [ -n "$JOIN" ] || fail "no join token"
-for w in w1 w2; do
+for w in $WORKERS; do
   x sc-e2e-$w /opt/sc/syncloud-agent join --controller "http://$CTL_IP:7070" --token "$JOIN" --name "$w" --data-dir /agent >/dev/null
   # w2 uses userspace WireGuard, so both implementations are tested together.
   mode=kernel; [ $w = w2 ] && mode=userspace

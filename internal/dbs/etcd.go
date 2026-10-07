@@ -210,6 +210,26 @@ func (m *Manager) reconcileEtcd(ctx context.Context) {
 			m.etcdSend(ctx, &mb)
 		}
 	}
+	// A changed spec (image, aliases, DNS) rolls out one member at a time,
+	// while the rest are running, so the cluster keeps its quorum. The
+	// member keeps its data volume.
+	for _, mb := range members {
+		if mb.SpecHash == "" || mb.SpecHash == specHash(m.etcdSpec(mb)) {
+			continue
+		}
+		others := true
+		for _, x := range members {
+			// Settled: the last one updated has rejoined before the next goes.
+			if (x.ID != mb.ID && x.State != store.TaskRunning) || now.Sub(x.UpdatedAt) < 15*time.Second {
+				others = false
+			}
+		}
+		if n, ok := m.nodes.Get(mb.NodeID); others && ok && n.Connected {
+			m.log.Info("updating an etcd member", "member", etcdName(mb.Ordinal))
+			m.etcdSend(ctx, &mb)
+		}
+		break
+	}
 	if m.etcdAllRunning(members) {
 		if err := m.etcdEnableAuth(ctx); err != nil {
 			m.log.Warn("etcd auth", "err", err)
@@ -252,12 +272,17 @@ func (m *Manager) etcdAllRunning(ms []store.EtcdMember) bool {
 	return len(ms) > 0
 }
 
-func (m *Manager) etcdSend(ctx context.Context, mb *store.EtcdMember) {
+// etcdSpec is what a member should run now.
+func (m *Manager) etcdSpec(mb store.EtcdMember) *agentv1.TaskSpec {
 	var dns, search []string
 	if m.DNS != nil {
 		dns, search = m.DNS(mb.NodeID, "", "")
 	}
-	ts := etcdTaskSpec(m.pgImage(pgDefaultVersion), *mb, dns, search)
+	return etcdTaskSpec(m.pgImage(pgDefaultVersion), mb, dns, search)
+}
+
+func (m *Manager) etcdSend(ctx context.Context, mb *store.EtcdMember) {
+	ts := m.etcdSpec(*mb)
 	mb.SpecHash = specHash(ts)
 	_ = m.st.UpdateEtcdMember(ctx, *mb, m.now().UTC())
 	err := m.gw.Send(mb.NodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_RunTask{RunTask: &agentv1.RunTask{Spec: ts}}})

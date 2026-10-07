@@ -45,16 +45,19 @@ func (m *Manager) pgImage(version string) string {
 	return m.PostgresImages[version]
 }
 
-// PreloadLibraries are loaded by every member (changing them restarts Postgres).
-var PreloadLibraries = []string{"pg_stat_statements", "timescaledb", "pg_cron", "pg_duckdb"}
-
 // PostgresSpec holds the PostgreSQL-only settings.
 type PostgresSpec struct {
-	// Synchronous makes commits wait for one replica (no data loss on
-	// failover; needs a replica).
+	// Synchronous mirrors replication.mode != async (older clients set it).
 	Synchronous bool `json:"synchronous"`
 	// MaxConnections defaults from memory.
 	MaxConnections int `json:"maxConnections"`
+	// Extensions are the enabled add-ons (§13c2); nil on clusters from
+	// before them means all.
+	Extensions []string `json:"extensions"`
+	// Parameters override PostgreSQL settings from the curated catalog.
+	Parameters map[string]string `json:"parameters,omitempty"`
+	// Replication is how members replicate and fail over.
+	Replication *PgReplicationSpec `json:"replication,omitempty"`
 	// Backup turns on WAL archiving and base backups to S3 (Phase 13c).
 	Backup *PgBackupSpec `json:"backup,omitempty"`
 }
@@ -80,9 +83,6 @@ func (s *Spec) normalizePostgres() error {
 	}
 	s.Persistence, s.EvictionPolicy = "", "" // Valkey's
 	p := s.Postgres
-	if p.Synchronous && s.Replicas.Min < 1 {
-		return errors.New("synchronous replication needs at least one replica (replicas.min ≥ 1)")
-	}
 	if p.MaxConnections == 0 {
 		p.MaxConnections = defaultMaxConnections(s.Memory.Min)
 	}
@@ -93,6 +93,9 @@ func (s *Spec) normalizePostgres() error {
 		if err := p.Backup.normalize(); err != nil {
 			return err
 		}
+	}
+	if err := s.normalizePgConfig(); err != nil {
+		return err
 	}
 	if s.Autoscaling.CPUTarget == 0 {
 		s.Autoscaling.CPUTarget = 60
@@ -133,16 +136,9 @@ func etcdUser(d store.Database) string { return "pg_" + strings.TrimPrefix(d.ID,
 // patroniConfig is a member's Patroni configuration (JSON is valid YAML).
 func patroniConfig(d store.Database, spec Spec, st State, sec Secrets, mb store.DatabaseMember, etcdHosts []string) []byte {
 	self := memberHost(d, mb.Kind, mb.Ordinal)
-	params := map[string]any{
-		"wal_level": "replica", "hot_standby": "on", "max_wal_senders": 10, "max_replication_slots": 10,
-		"wal_keep_size": "256MB", "wal_log_hints": "on", "archive_mode": "on", "archive_command": "/bin/true",
-		"shared_preload_libraries":    strings.Join(PreloadLibraries, ","),
-		"cron.database_name":          PgDatabase(d),
-		"timescaledb.telemetry_level": "off",
-		"password_encryption":         "scram-sha-256",
-	}
-	for k, v := range pgTuning(st.MemoryMiB, spec.Postgres.MaxConnections) {
-		params[k] = v
+	var dcs any = json.RawMessage(st.BootstrapDCS)
+	if st.BootstrapDCS == "" { // clusters from before §13c2
+		dcs = pgDynamicConfig(d, spec, st)
 	}
 	cfg := map[string]any{
 		"scope": d.ID, "namespace": pgNamespace, "name": memberName(mb),
@@ -152,11 +148,7 @@ func patroniConfig(d store.Database, spec Spec, st State, sec Secrets, mb store.
 		},
 		"etcd3": map[string]any{"hosts": etcdHosts, "protocol": "http", "username": etcdUser(d), "password": sec.EtcdPassword},
 		"bootstrap": map[string]any{
-			"dcs": map[string]any{
-				"ttl": 30, "loop_wait": 10, "retry_timeout": 10, "maximum_lag_on_failover": 1 << 20,
-				"synchronous_mode": spec.Postgres.Synchronous,
-				"postgresql":       map[string]any{"use_pg_rewind": true, "use_slots": true, "parameters": params},
-			},
+			"dcs":    dcs,
 			"initdb": []any{map[string]string{"encoding": "UTF8"}, map[string]string{"locale": "C.UTF-8"}, "data-checksums"},
 		},
 		"postgresql": map[string]any{
@@ -312,6 +304,15 @@ func (m *Manager) probePostgres(ctx context.Context, d store.Database, st State,
 		_ = m.st.SetDatabaseState(ctx, d.ID, encode(st))
 		m.event(ctx, d.ID, "created", "", "user "+pgAppUser+", database "+PgDatabase(d), "ready", "operator")
 		m.publish(ctx, d.ID)
+	}
+	if leader >= 0 && st.Bootstrapped {
+		spec, _ := parseSpec(d.Spec)
+		spec.ForEngine(d.Engine)
+		if err := m.syncPgConfig(ctx, d, spec, &st, sec, leaderIP); err != nil {
+			m.log.Warn("apply the PostgreSQL configuration", "database", d.Name, "err", err)
+			return
+		}
+		m.restartPending(d, sec, members, status, leader)
 	}
 }
 

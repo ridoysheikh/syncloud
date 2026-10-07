@@ -980,7 +980,7 @@ func pgCommands(a *app) []*cobra.Command {
 	f2.BoolVar(&bc.off, "off", false, "stop archiving and base backups")
 	backup.AddCommand(backupNow, backupConfig)
 
-	return []*cobra.Command{sqlCmd, databases, database, roles, role, grant, revoke, privileges, schema, describe, rowsCmd, extensions, extension, sessions, session, backups, backup}
+	return append([]*cobra.Command{sqlCmd, databases, database, roles, role, grant, revoke, privileges, schema, describe, rowsCmd, extensions, extension, sessions, session, backups, backup}, pgConfigCommands(a)...)
 }
 
 // pgRoleView is a role as the CLI lists it.

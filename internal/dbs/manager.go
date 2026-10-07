@@ -83,6 +83,9 @@ type Manager struct {
 	auto      map[string]*autoState
 	etcdUsers map[string]bool          // PostgreSQL clusters whose etcd user exists
 	pgSlots   map[string]chan struct{} // explorer connection slots per PostgreSQL cluster
+	// pgRestarting: PostgreSQL clusters with a member restarting for
+	// pending settings (one at a time).
+	pgRestarting map[string]bool
 }
 
 // Recorder imports Prometheus text samples.
@@ -205,6 +208,15 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
 		b := *srcSpec.Postgres.Backup
 		b.Prefix = ""
 		spec.Postgres.Backup = &b
+		// The restored data may use the source's add-ons and settings.
+		sp := srcSpec.Postgres
+		spec.Postgres.Extensions = append(enabledAddons(*sp), spec.Postgres.Extensions...)
+		if spec.Postgres.Parameters == nil {
+			spec.Postgres.Parameters = sp.Parameters
+		}
+	}
+	if eng.Name == EnginePostgres && spec.Postgres.Extensions == nil {
+		spec.Postgres.Extensions = []string{} // plain PostgreSQL: add-ons are opt-in
 	}
 	if err := spec.Normalize(); err != nil {
 		return View{}, ErrInvalid{err}
@@ -254,6 +266,13 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
 	d.Secrets = m.box.Seal(sec, aad(d.ID))
 	d.Spec = encode(spec)
 	d.State = encode(st)
+	if eng.Name == EnginePostgres {
+		// Frozen: later changes go through Patroni's dynamic configuration,
+		// so they never change the members' container spec.
+		b, _ := json.Marshal(pgDynamicConfig(d, spec, st))
+		st.BootstrapDCS = string(b)
+		d.State = encode(st)
+	}
 	if err := m.st.CreateDatabase(ctx, d); errors.Is(err, store.ErrNameTaken) {
 		return View{}, ErrInvalid{fmt.Errorf("the name %s is taken (database names are unique in the cluster, and a project database cannot share its name with a service)", name)}
 	} else if err != nil {
@@ -285,11 +304,21 @@ func (m *Manager) Update(ctx context.Context, id string, spec Spec, actor string
 		return View{}, err
 	}
 	spec.ForEngine(d.Engine)
+	old, _ := parseSpec(d.Spec)
+	old.ForEngine(d.Engine)
+	if d.Engine == EnginePostgres && spec.Postgres.Extensions == nil {
+		spec.Postgres.Extensions = old.Postgres.Extensions
+	}
 	if err := spec.Normalize(); err != nil {
 		return View{}, ErrInvalid{err}
 	}
 	if err := m.checkBackupEndpoint(ctx, spec); err != nil {
 		return View{}, err
+	}
+	if d.Engine == EnginePostgres {
+		if err := m.checkAddonsRemoval(ctx, d, *old.Postgres, *spec.Postgres); err != nil {
+			return View{}, err
+		}
 	}
 	if !d.Standalone() {
 		e, err := m.st.EnvironmentByID(ctx, d.EnvironmentID)
@@ -300,7 +329,6 @@ func (m *Manager) Update(ctx context.Context, id string, spec Spec, actor string
 			return View{}, err
 		}
 	}
-	old, _ := parseSpec(d.Spec)
 	st := parseState(d.State)
 	st.MemoryMiB = min(max(st.MemoryMiB, spec.Memory.Min), spec.Memory.Max)
 	st.Replicas = min(max(st.Replicas, spec.Replicas.Min), spec.Replicas.Max)

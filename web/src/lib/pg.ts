@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
+import type { PgAddon, PgParam, PgReplicationSpec } from "./databases";
 
 /** PostgreSQL explorer and administration (§13 "Explorer and administration"). */
 
@@ -406,5 +407,78 @@ export function useS3Buckets(endpoint: string) {
         )
       ).items,
     enabled: !!endpoint,
+  });
+}
+
+// ── configuration and replication (§13c2) ──
+
+/** A parameter with its live value on the leader. */
+export interface PgSetting extends PgParam {
+  value: string;
+  source: string;
+  /** The database's own value ("" = the platform's). */
+  configured: string;
+  pendingRestart: boolean;
+  /** Its add-on is enabled. */
+  available: boolean;
+  platformDefault: string;
+}
+
+export function usePgSettings(path: string) {
+  return useQuery({
+    queryKey: ["pg", path, "settings"],
+    queryFn: () =>
+      api<{ items: PgSetting[]; addons: PgAddon[] }>(
+        "GET",
+        `${path}/pg/settings`,
+      ),
+    refetchInterval: 10000,
+  });
+}
+
+export interface PgReplica {
+  name: string;
+  clientAddr: string;
+  state: string;
+  syncState: string;
+  sentLsn: string;
+  replayLsn: string;
+  lagBytes: number;
+  writeLagMs: number;
+  flushLagMs: number;
+  replayLagMs: number;
+}
+
+export interface PgSlot {
+  name: string;
+  type: string;
+  active: boolean;
+  walStatus: string;
+  heldBytes: number;
+}
+
+export interface PgClusterMember {
+  name: string;
+  role: string;
+  state: string;
+  timeline: number;
+  lag?: number | string;
+  pendingRestart: boolean;
+}
+
+export interface PgReplication {
+  settings: PgReplicationSpec;
+  replicas: PgReplica[];
+  slots: PgSlot[];
+  members: PgClusterMember[];
+  currentLsn: string;
+  timeline: number;
+}
+
+export function usePgReplication(path: string) {
+  return useQuery({
+    queryKey: ["pg", path, "replication"],
+    queryFn: () => api<PgReplication>("GET", `${path}/pg/replication`),
+    refetchInterval: 5000,
   });
 }

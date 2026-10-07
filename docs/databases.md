@@ -163,20 +163,46 @@ New databases get PostgreSQL 18. Pick 17 with `--version 17` or in the wizard. E
 
 Members and the platform etcd address each other by name. On a node outside the private network (for example a single-node development setup) those names resolve through Docker's own DNS on the node.
 
-### Extensions
+### Add-ons (optional extensions)
 
-The image `ghcr.io/syncloud/postgres` includes the extensions below. Enable one with `CREATE EXTENSION` in your database.
+A new database is plain PostgreSQL with WAL-G backups. Only `pg_stat_statements` is preloaded, because it ships with PostgreSQL. Everything else in the image `ghcr.io/syncloud/postgres` is an **add-on** you enable when you need it:
 
-| Extension | For |
-| --- | --- |
-| `vector` | pgvector: embeddings and similarity search |
-| `timescaledb` | TimescaleDB, Apache-licensed edition: hypertables and time functions |
-| `pg_duckdb` | the DuckDB engine for analytical queries and Parquet files |
-| `postgis` | geospatial types and indexes |
-| `pg_partman`, `pg_cron`, `hypopg`, `pg_stat_statements` | partitions, scheduled jobs, hypothetical indexes, query statistics |
-| contrib modules | `pg_trgm`, `pgcrypto`, `hstore` and the rest |
+| Add-on | For | Preloaded library |
+| --- | --- | --- |
+| `timescaledb` | TimescaleDB, Apache-licensed edition: hypertables and time functions | yes |
+| `pg_duckdb` | the DuckDB engine for analytical queries and Parquet files | yes |
+| `pg_cron` | scheduled SQL jobs | yes |
+| `vector` | pgvector: embeddings and similarity search | no |
+| `postgis` | geospatial types and indexes (also `postgis_topology`, `postgis_raster`, `postgis_tiger_geocoder`) | no |
+| `pg_partman` | partition management | no |
+| `hypopg` | hypothetical indexes | no |
 
-The libraries `pg_stat_statements`, `timescaledb`, `pg_cron` and `pg_duckdb` are preloaded. Memory sets the tuning: `shared_buffers` is 25% of it, `effective_cache_size` is 75%, and `max_connections` is about one per 8 MiB, between 50 and 500.
+Enable add-ons in the wizard, on the **Configuration** tab, or with `synctl db addon enable orders timescaledb`. Then install one with `CREATE EXTENSION` (or under **Explorer**) in each database that uses it. Installing an add-on that isn't enabled is refused.
+
+- Enabling an add-on with a library restarts the members one at a time, replicas first. It can be installed once its library is loaded.
+- Disabling an add-on is refused while any database still has it installed.
+
+The contrib modules (`pg_trgm`, `pgcrypto`, `hstore`, `citext` and the rest) are part of PostgreSQL, so they can always be installed. Databases created before add-ons existed keep all of them enabled.
+
+### Parameters
+
+Memory sets the default tuning:
+
+- `shared_buffers` is 25% of it;
+- `effective_cache_size` is 75%;
+- `max_connections` is about one per 8 MiB, between 50 and 500.
+
+On top of that you can set about 50 curated parameters: memory, parallelism, planner, WAL and checkpoints, timeouts, autovacuum, logging, statistics, replica delays, and the add-ons' own settings. Set them in the wizard, on the **Configuration** tab, or with the CLI:
+
+```sh
+synctl db settings orders                  # every parameter with its live value
+synctl db config set orders work_mem=64MB statement_timeout=30s
+synctl db config unset orders statement_timeout
+```
+
+Values are checked before they're saved: type, unit (`64MB`, `30s`) and range. Settings the platform owns are refused, such as archiving, `wal_level`, `listen_addresses` and `shared_preload_libraries`.
+
+Changes don't recreate the members. Settings that PostgreSQL can reload apply within seconds. For those that need a restart, the members restart one at a time: replicas first, then the primary. The Configuration tab marks them **restart pending** until that's done.
 
 ### Endpoints and users
 
@@ -192,7 +218,31 @@ Applications connect as `app`, which owns the database `orders`. A hyphen in the
 
 Patroni keeps its leader lock in the platform etcd. SynCloud runs that etcd itself on up to three nodes, with one user per database. When the primary stops responding, Patroni promotes the replica that is furthest ahead, normally within about 30 seconds. This does not need the controller. The controller follows the new leader and moves the `url` and `readUrl` addresses to it. While the controller is down, the `haUrl` still finds the new primary. The old primary rejoins as a replica, using `pg_rewind` when needed.
 
-**Failover** on the database page, or `POST /api/v1/databases/<name>/failover`, performs a planned switchover to a healthy replica. With **synchronous replication** on, each commit waits until a replica has it, so a failover never loses a committed transaction.
+**Failover** on the database page, or `POST /api/v1/databases/<name>/failover`, performs a planned switchover to a healthy replica.
+
+### Replication
+
+Set replication when you create the database or later on the **Configuration** tab. Changes apply within seconds, without restarts.
+
+| Setting | Meaning |
+| --- | --- |
+| **Mode** | `async` (default): commits don't wait. `sync`: each commit waits until replicas have it, so a failover loses nothing; with no replica left, writes continue. `strict`: writes stop rather than continue without a replica that has them. |
+| **Replicas that confirm each commit** | how many synchronous replicas (sync modes) |
+| **Leader lease** | seconds before a silent leader is replaced (15–300, default 30) |
+| **Max lag to be promoted** | a replica further behind (MiB) is never promoted |
+| **Slots**, **WAL kept**, **WAL a slot may hold** | how much WAL the primary keeps for replicas |
+| **Hot standby feedback** | long queries on replicas aren't cancelled by vacuum |
+
+The **Replication** tab shows what the primary sees:
+
+- each replica's state, sync state, bytes behind, and write, flush and replay lag;
+- Patroni's members with their timelines and pending restarts;
+- the replication slots and the WAL they hold.
+
+```sh
+synctl db replication orders
+synctl db replication set orders --mode sync --sync-replicas 1 --failover-ttl 20
+```
 
 ### Explorer and administration
 

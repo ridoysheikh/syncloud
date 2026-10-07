@@ -7,10 +7,12 @@ import { useProjects } from "@/lib/workloads";
 import { useNodes } from "@/lib/nodes";
 import {
   dbUrl,
+  defaultPgReplication,
   EVICTION_POLICIES,
   useDatabaseEngines,
   type Database,
   type DatabaseSpec,
+  type PgReplicationSpec,
 } from "@/lib/databases";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
@@ -61,11 +63,18 @@ export interface Form {
   access: string[] | null;
   public: boolean;
   allow: string;
-  /** PostgreSQL: commits wait for a replica. */
-  synchronous: boolean;
+  /** PostgreSQL: add-ons, parameters and replication (§13c2). */
+  pg: PgConfigForm;
   /** PostgreSQL: WAL-G backups to this S3 endpoint and bucket ("" = off). */
   backupEndpoint: string;
   backupBucket: string;
+}
+
+/** PostgreSQL settings chosen in the wizard. */
+export interface PgConfigForm {
+  extensions: string[];
+  parameters: Record<string, string>;
+  replication: PgReplicationSpec;
 }
 
 export function specOf(f: {
@@ -79,7 +88,7 @@ export function specOf(f: {
   eviction: string;
   nodes: string[];
   engine?: string;
-  synchronous?: boolean;
+  pg?: PgConfigForm;
   /** PostgreSQL settings kept as they are (backups, connection limit). */
   postgres?: DatabaseSpec["postgres"];
   backupEndpoint?: string;
@@ -96,7 +105,10 @@ export function specOf(f: {
       postgres: {
         maxConnections: 0,
         ...f.postgres,
-        synchronous: !!f.synchronous,
+        ...f.pg,
+        synchronous:
+          (f.pg?.replication ?? f.postgres?.replication)?.mode !== undefined &&
+          (f.pg?.replication ?? f.postgres?.replication)?.mode !== "async",
         ...(f.backupEndpoint && f.backupBucket
           ? {
               backup: {
@@ -154,7 +166,11 @@ export function NewDatabaseWizard() {
     access: null,
     public: false,
     allow: "",
-    synchronous: false,
+    pg: {
+      extensions: [],
+      parameters: {},
+      replication: { ...defaultPgReplication },
+    },
     backupEndpoint: "",
     backupBucket: "",
   });
@@ -410,7 +426,7 @@ export function NewDatabaseWizard() {
               ))}
             {step === "Data" &&
               (f.engine === "postgres" ? (
-                <PgDataStep f={f} set={set} backups />
+                <PgDataStep f={f} set={set} backups config />
               ) : (
                 <DataStep f={f} set={set} />
               ))}
@@ -768,8 +784,26 @@ function Review({
           [
             "Failover",
             f.repMin > 0
-              ? `Patroni${f.synchronous ? ", synchronous (no data loss)" : ", asynchronous"}`
+              ? `Patroni, ${f.pg.replication.mode === "async" ? "asynchronous" : `${f.pg.replication.mode === "strict" ? "strict " : ""}synchronous (${f.pg.replication.syncReplicas} replica${f.pg.replication.syncReplicas > 1 ? "s" : ""} confirm each commit)`}, leader lease ${f.pg.replication.failoverTtl}s`
               : "none (single server)",
+          ],
+          [
+            "Add-ons",
+            f.pg.extensions.length
+              ? f.pg.extensions.join(", ")
+              : "none (plain PostgreSQL)",
+          ],
+          [
+            "Parameters",
+            Object.keys(f.pg.parameters).length ? (
+              <span className="font-mono">
+                {Object.entries(f.pg.parameters)
+                  .map(([k, v]) => `${k}=${v}`)
+                  .join(", ")}
+              </span>
+            ) : (
+              "the platform's (tuned from memory)"
+            ),
           ],
           [
             "Database",

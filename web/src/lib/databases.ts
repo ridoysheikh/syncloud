@@ -19,9 +19,63 @@ export interface DatabaseSpec {
   /** PostgreSQL only. */
   postgres?: {
     synchronous: boolean;
+    /** 0: derived from memory. */
     maxConnections: number;
     backup?: PgBackupSpec;
+    /** Enabled add-ons; absent on clusters that predate them (all enabled). */
+    extensions?: string[] | null;
+    parameters?: Record<string, string>;
+    replication?: PgReplicationSpec;
   };
+}
+
+/** How PostgreSQL members replicate and fail over (§13c2). */
+export interface PgReplicationSpec {
+  mode: "async" | "sync" | "strict";
+  syncReplicas: number;
+  /** MiB */
+  maxLagOnFailover: number;
+  /** Seconds */
+  failoverTtl: number;
+  slots: boolean;
+  hotStandbyFeedback: boolean;
+  /** MiB */
+  walKeepSize: number;
+  /** MiB, 0 = unlimited */
+  maxSlotWalKeepSize: number;
+}
+
+export const defaultPgReplication: PgReplicationSpec = {
+  mode: "async",
+  syncReplicas: 1,
+  maxLagOnFailover: 1,
+  failoverTtl: 30,
+  slots: true,
+  hotStandbyFeedback: false,
+  walKeepSize: 256,
+  maxSlotWalKeepSize: 0,
+};
+
+/** An optional PostgreSQL extension. */
+export interface PgAddon {
+  name: string;
+  title: string;
+  description: string;
+  preload?: string;
+  extensions?: string[];
+}
+
+/** A PostgreSQL parameter users may set. */
+export interface PgParam {
+  name: string;
+  group: string;
+  type: "int" | "real" | "bool" | "enum" | "memory" | "time" | "string";
+  min?: number;
+  max?: number;
+  enum?: string[];
+  restart?: boolean;
+  addon?: string;
+  description: string;
 }
 
 /** WAL archiving and base backups to S3 (Phase 13c). */
@@ -81,6 +135,9 @@ export interface DatabaseEngine {
   scheme: string;
   tlsScheme: string;
   features: string[];
+  /** PostgreSQL */
+  addons?: PgAddon[];
+  parameters?: PgParam[];
 }
 
 export type DatabaseHealth =

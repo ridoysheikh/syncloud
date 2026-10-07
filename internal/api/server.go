@@ -457,6 +457,8 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/databases/{database}/pg/query", h: s.handleRunPgQuery},
 		{Method: "POST", Path: "/api/v1/databases/{database}/pg/execute", h: s.handleExecutePgQuery},
 		{Method: "GET", Path: "/api/v1/databases/{database}/pg/sessions", h: s.handleListPgSessions},
+		{Method: "GET", Path: "/api/v1/databases/{database}/pg/settings", h: s.handleListPgSettings},
+		{Method: "GET", Path: "/api/v1/databases/{database}/pg/replication", h: s.handleGetPgReplication},
 		{Method: "POST", Path: "/api/v1/databases/{database}/pg/sessions/{pid}/cancel", h: s.handleCancelPgSession},
 		{Method: "POST", Path: "/api/v1/databases/{database}/pg/sessions/{pid}/terminate", h: s.handleTerminatePgSession},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments", h: s.handleListEnvironments},

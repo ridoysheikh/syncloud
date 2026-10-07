@@ -424,6 +424,34 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
+// ── configuration (§13c2) ───────────────────────────────────────────────────
+
+func (s *Server) handleListPgSettings(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.postgres(w, r)
+	if !ok {
+		return
+	}
+	out, err := s.databases.PgSettings(r.Context(), d)
+	if err != nil {
+		s.pgErr(w, "read settings", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "addons": dbs.PgAddons})
+}
+
+func (s *Server) handleGetPgReplication(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.postgres(w, r)
+	if !ok {
+		return
+	}
+	out, err := s.databases.PgReplicationStatus(r.Context(), d)
+	if err != nil {
+		s.pgErr(w, "read replication", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // ── sessions ────────────────────────────────────────────────────────────────
 
 func (s *Server) handleListPgSessions(w http.ResponseWriter, r *http.Request) {

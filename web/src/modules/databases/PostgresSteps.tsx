@@ -1,6 +1,12 @@
 import { useNodes } from "@/lib/nodes";
 import { useS3Buckets, useS3Endpoints } from "@/lib/pg";
-import { Field, Input, Toggle } from "@/ui/controls";
+import { Field, Input } from "@/ui/controls";
+import {
+  PgAddonsField,
+  PgParamsField,
+  PgReplicationField,
+  usePgCatalog,
+} from "./pg/Config";
 import {
   CountSelect,
   Section,
@@ -10,25 +16,12 @@ import {
   type SetFn,
 } from "./NewDatabaseWizard";
 
-/** Extensions in the PostgreSQL image, enabled per database. */
-export const PG_EXTENSIONS: [string, string][] = [
-  ["vector", "pgvector: embeddings and similarity search"],
-  ["timescaledb", "TimescaleDB (Apache): hypertables and time functions"],
-  ["pg_duckdb", "DuckDB analytics engine; reads Parquet on S3"],
-  ["postgis", "PostGIS: geospatial types and indexes"],
-  ["pg_partman", "Automatic partition creation and retention"],
-  ["pg_cron", "Scheduled SQL jobs"],
-  ["pg_stat_statements", "Query statistics"],
-  ["hypopg", "Hypothetical indexes"],
-  ["pg_trgm, pgcrypto, hstore, …", "The standard contrib modules"],
-];
-
 /** Capacity of a PostgreSQL cluster: member size, replicas, durability. */
 export function PgCapacityStep({
   f,
   set,
 }: {
-  f: Pick<Form, "memMin" | "repMin" | "cpu" | "synchronous">;
+  f: Pick<Form, "memMin" | "repMin" | "cpu" | "pg">;
   set: SetFn;
 }) {
   return (
@@ -56,7 +49,20 @@ export function PgCapacityStep({
       <Section title="Replicas and failover">
         <Field label="Read replicas">
           <div className="max-w-40">
-            <CountSelect value={f.repMin} onChange={(v) => set("repMin", v)} />
+            <CountSelect
+              value={f.repMin}
+              onChange={(v) => {
+                set("repMin", v);
+                const r = f.pg.replication;
+                if (v === 0 && r.mode !== "async")
+                  set("pg", { ...f.pg, replication: { ...r, mode: "async" } });
+                else if (r.syncReplicas > Math.max(1, v))
+                  set("pg", {
+                    ...f.pg,
+                    replication: { ...r, syncReplicas: Math.max(1, v) },
+                  });
+              }}
+            />
           </div>
         </Field>
         <p className="text-faint">
@@ -64,30 +70,33 @@ export function PgCapacityStep({
             ? "One server, no failover: if its node goes down the database is down until it returns."
             : "Replicas stream from the primary on other nodes and serve the read-only endpoint. Patroni promotes the most up-to-date replica within about 30 seconds if the primary fails, even while the controller is down."}
         </p>
-        <Toggle
-          checked={f.synchronous}
-          disabled={f.repMin === 0}
-          onChange={(v) => set("synchronous", v)}
-          label="Synchronous replication"
-          hint="Each commit waits until a replica has it, so a failover never loses a committed transaction. Commits are slower by one network round trip."
+        <PgReplicationField
+          value={f.pg.replication}
+          onChange={(v) => set("pg", { ...f.pg, replication: v })}
+          replicas={f.repMin}
         />
       </Section>
     </div>
   );
 }
 
-/** Extensions included, backups and where members run. */
+/** Add-ons, parameters, backups and where members run. */
 export function PgDataStep({
   f,
   set,
   backups,
+  config,
 }: {
   f: Pick<Form, "nodes" | "name"> &
-    Partial<Pick<Form, "backupEndpoint" | "backupBucket">>;
+    Partial<Pick<Form, "backupEndpoint" | "backupBucket" | "pg">>;
   set: SetFn;
   /** Offer WAL-G backups (the wizard; afterwards they live on the Backups tab). */
   backups?: boolean;
+  /** Offer add-ons and parameters (the wizard; afterwards on the Configuration tab). */
+  config?: boolean;
 }) {
+  const catalog = usePgCatalog();
+  const pg = f.pg;
   const { data: nodes = [] } = useNodes();
   const endpoints = useS3Endpoints();
   const buckets = useS3Buckets(f.backupEndpoint ?? "");
@@ -103,16 +112,39 @@ export function PgDataStep({
           Data lives on node-local volumes with page checksums.
         </p>
       </Section>
-      <Section title="Extensions included">
-        <ul className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2">
-          {PG_EXTENSIONS.map(([name, help]) => (
-            <li key={name}>
-              <code className="font-mono">{name}</code>
-              <span className="text-muted"> — {help}</span>
-            </li>
-          ))}
-        </ul>
-      </Section>
+      {config && pg && (
+        <>
+          <Section title="Add-ons">
+            <PgAddonsField
+              addons={catalog.addons}
+              value={pg.extensions}
+              onChange={(v) => {
+                // Parameters of a disabled add-on go with it.
+                const params = Object.fromEntries(
+                  Object.entries(pg.parameters).filter(([k]) => {
+                    const a = catalog.params.find((p) => p.name === k)?.addon;
+                    return !a || v.includes(a);
+                  }),
+                );
+                set("pg", { ...pg, extensions: v, parameters: params });
+              }}
+            />
+          </Section>
+          <Section title="Parameters (optional)">
+            <p className="text-muted">
+              The platform tunes memory settings from the member size; set only
+              what you need. Everything here can be changed later on the
+              Configuration tab.
+            </p>
+            <PgParamsField
+              catalog={catalog.params}
+              value={pg.parameters}
+              onChange={(v) => set("pg", { ...pg, parameters: v })}
+              addons={pg.extensions}
+            />
+          </Section>
+        </>
+      )}
       {backups && (
         <Section title="Backups and point-in-time recovery">
           <p className="text-muted">

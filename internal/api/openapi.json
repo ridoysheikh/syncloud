@@ -3848,6 +3848,100 @@
         }
       }
     },
+    "/api/v1/databases/{database}/pg/settings": {
+      "get": {
+        "operationId": "listPgSettings",
+        "tags": [
+          "databases"
+        ],
+        "summary": "PostgreSQL: the changeable parameters with their live values, and the add-ons",
+        "parameters": [
+          {
+            "name": "database",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "addons": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/databases/{database}/pg/replication": {
+      "get": {
+        "operationId": "getPgReplication",
+        "tags": [
+          "databases"
+        ],
+        "summary": "PostgreSQL: replication status (replicas, lag, slots, members)",
+        "parameters": [
+          {
+            "name": "database",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/v1/databases/{database}/pg/sessions/{pid}/cancel": {
       "post": {
         "operationId": "cancelPgSession",
@@ -18517,6 +18611,58 @@
                     "type": "integer",
                     "default": 7,
                     "description": "how far back a restore can go"
+                  }
+                }
+              },
+              "extensions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "enabled add-ons (timescaledb, pg_duckdb, pg_cron, vector, postgis, pg_partman, hypopg); none by default"
+              },
+              "parameters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "PostgreSQL settings from the curated catalog (GET \u2026/pg/settings)"
+              },
+              "replication": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "async",
+                      "sync",
+                      "strict"
+                    ]
+                  },
+                  "syncReplicas": {
+                    "type": "integer"
+                  },
+                  "maxLagOnFailover": {
+                    "type": "integer",
+                    "description": "MiB"
+                  },
+                  "failoverTtl": {
+                    "type": "integer",
+                    "description": "seconds"
+                  },
+                  "slots": {
+                    "type": "boolean"
+                  },
+                  "hotStandbyFeedback": {
+                    "type": "boolean"
+                  },
+                  "walKeepSize": {
+                    "type": "integer",
+                    "description": "MiB"
+                  },
+                  "maxSlotWalKeepSize": {
+                    "type": "integer",
+                    "description": "MiB, 0 = unlimited"
                   }
                 }
               }

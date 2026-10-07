@@ -171,6 +171,10 @@ type State struct {
 	// Database overrides the app database's name (a restored cluster
 	// keeps its source's).
 	Database string `json:"database,omitempty"`
+	// BootstrapDCS is PostgreSQL's first dynamic configuration, frozen at
+	// creation; DCSHash is the last one applied through Patroni (§13c2).
+	BootstrapDCS string `json:"bootstrapDcs,omitempty"`
+	DCSHash      string `json:"dcsHash,omitempty"`
 }
 
 // Secrets are sealed in the database row.

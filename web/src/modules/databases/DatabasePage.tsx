@@ -27,6 +27,7 @@ import { CapacityStep, DataStep, specOf } from "./NewDatabaseWizard";
 import { Console, Explorer } from "./Explorer";
 import { PgDataStep } from "./PostgresSteps";
 import { PgBackupsTab } from "./pg/Backups";
+import { PgConfigTab, PgReplicationTab } from "./pg/Config";
 import { PgConsole } from "./pg/Console";
 import { PgDatabases, PgSessions } from "./pg/Databases";
 import { PgExplorer } from "./pg/Explorer";
@@ -43,6 +44,8 @@ type Tab =
   | "console"
   | "sessions"
   | "backups"
+  | "replication"
+  | "configuration"
   | "autoscaling"
   | "logs"
   | "settings";
@@ -66,7 +69,9 @@ const postgresTabs: Tab[] = [
   "explorer",
   "console",
   "sessions",
+  "replication",
   "backups",
+  "configuration",
   "logs",
   "settings",
 ];
@@ -175,6 +180,8 @@ export function DatabasePage() {
         ))}
       {tab === "sessions" && pg && <PgSessions path={path} />}
       {tab === "backups" && pg && <PgBackupsTab d={d} path={path} />}
+      {tab === "replication" && pg && <PgReplicationTab path={path} />}
+      {tab === "configuration" && pg && <PgConfigTab d={d} path={path} />}
       {tab === "autoscaling" && !pg && <Autoscaling d={d} path={path} />}
       {tab === "logs" && <LogsView filter={{ database: d.name }} />}
       {tab === "settings" && <Settings d={d} path={path} />}
@@ -269,7 +276,12 @@ function PgOverview({ d, path }: { d: Database; path: string }) {
           label="Replication lag"
           value={bytes(maxLag)}
           tone={maxLag > 64 << 20 ? "warn" : undefined}
-          hint={d.spec.postgres?.synchronous ? "synchronous" : "asynchronous"}
+          hint={
+            (d.spec.postgres?.replication?.mode ??
+              (d.spec.postgres?.synchronous ? "sync" : "async")) === "async"
+              ? "asynchronous"
+              : "synchronous"
+          }
         />
         <StatTile
           label="Size"
@@ -919,7 +931,6 @@ function Settings({ d, path }: { d: Database; path: string }) {
           cpu: String(d.spec.cpu),
           cpuTarget: String(d.spec.autoscaling.cpuTarget),
           engine: d.engine,
-          synchronous: d.spec.postgres?.synchronous,
           postgres: d.spec.postgres,
           ...f,
         }),

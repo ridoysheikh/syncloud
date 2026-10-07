@@ -419,13 +419,22 @@ type PgExtension struct {
 	InstalledVersion string `json:"installedVersion,omitempty"`
 	Schema           string `json:"schema,omitempty"`
 	Comment          string `json:"comment"`
-	Preloaded        bool   `json:"preloaded"` // needs shared_preload_libraries (already set)
+	Preloaded        bool   `json:"preloaded"`       // its library is loaded (add-ons that need one)
+	Addon            string `json:"addon,omitempty"` // the add-on that offers it ("" = PostgreSQL's own)
+	Enabled          bool   `json:"enabled"`         // installable: PostgreSQL's own, or an enabled add-on
 }
 
 // PgExtensions lists the offered extensions and which are installed in db.
 func (m *Manager) PgExtensions(ctx context.Context, d store.Database, db string) ([]PgExtension, error) {
 	var out []PgExtension
+	spec, _ := parseSpec(d.Spec)
+	spec.ForEngine(d.Engine)
+	addons := enabledAddons(*spec.Postgres)
 	err := m.pgAdmin(ctx, d, db, func(c *pgx.Conn) error {
+		var loaded string
+		if err := c.QueryRow(ctx, `SELECT current_setting('shared_preload_libraries')`).Scan(&loaded); err != nil {
+			return err
+		}
 		rows, err := c.Query(ctx, `
 SELECT a.name, coalesce(a.default_version, ''), coalesce(e.extversion, ''), coalesce(n.nspname, ''), coalesce(a.comment, '')
 FROM pg_available_extensions a LEFT JOIN pg_extension e ON e.extname = a.name LEFT JOIN pg_namespace n ON n.oid = e.extnamespace
@@ -438,7 +447,11 @@ WHERE a.name = ANY($1) ORDER BY e.extname IS NULL, a.name`, pgExtensionAllowList
 			if err := rows.Scan(&x.Name, &x.DefaultVersion, &x.InstalledVersion, &x.Schema, &x.Comment); err != nil {
 				return err
 			}
-			x.Preloaded = slices.Contains(PreloadLibraries, x.Name)
+			x.Addon = addonOf(x.Name)
+			x.Enabled = x.Addon == "" || slices.Contains(addons, x.Addon)
+			if a, ok := pgAddon(x.Addon); ok && a.Preload != "" {
+				x.Preloaded = slices.Contains(strings.Split(strings.ReplaceAll(loaded, " ", ""), ","), a.Preload)
+			}
 			out = append(out, x)
 		}
 		return rows.Err()
@@ -463,6 +476,14 @@ func (m *Manager) ChangePgExtension(ctx context.Context, d store.Database, db st
 		return invalidf("pg_cron runs in the cluster's own database (%s); schedule jobs in other databases with cron.schedule_in_database", PgDatabase(d))
 	}
 	var stmt string
+	addon, _ := pgAddon(addonOf(ch.Name))
+	if ch.Action == "install" && addon.Name != "" {
+		spec, _ := parseSpec(d.Spec)
+		spec.ForEngine(d.Engine)
+		if !slices.Contains(enabledAddons(*spec.Postgres), addon.Name) {
+			return invalidf("%s is an add-on that is not enabled on %s: enable it in the database's settings first (synctl db addon enable %s %s)", addon.Title, d.Name, d.Name, addon.Name)
+		}
+	}
 	switch ch.Action {
 	case "install":
 		stmt = "CREATE EXTENSION IF NOT EXISTS " + qi(ch.Name)
@@ -486,6 +507,15 @@ func (m *Manager) ChangePgExtension(ctx context.Context, d store.Database, db st
 		return invalidf("action %q: use install, update or drop", ch.Action)
 	}
 	return m.pgAdmin(ctx, d, db, func(c *pgx.Conn) error {
+		if ch.Action == "install" && addon.Preload != "" {
+			var loaded string
+			if err := c.QueryRow(ctx, `SELECT current_setting('shared_preload_libraries')`).Scan(&loaded); err != nil {
+				return err
+			}
+			if !slices.Contains(strings.Split(strings.ReplaceAll(loaded, " ", ""), ","), addon.Preload) {
+				return invalidf("%s is enabled, and its library loads once the members restart (they do so one at a time): try again in a minute", addon.Title)
+			}
+		}
 		_, err := c.Exec(ctx, stmt)
 		return err
 	})
