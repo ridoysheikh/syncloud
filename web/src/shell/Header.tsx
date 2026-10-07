@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, ChevronDown, LogOut, Search, SquareTerminal, TriangleAlert } from "lucide-react";
+import { Bell, ChevronDown, LogOut, Menu, Search, SquareTerminal, TriangleAlert, X } from "lucide-react";
 import { backupQuery } from "@/lib/backups";
 import { api, type User } from "@/lib/api";
 import { stopStream, useStreamState } from "@/lib/stream";
@@ -9,10 +9,28 @@ import { IconButton } from "@/ui/controls";
 import { cn } from "@/ui/cn";
 import { useActiveAlerts } from "@/modules/monitoring/AlertsPage";
 
-export function Header({ user, onToggleDrawer, drawerOpen }: { user: User; onToggleDrawer: () => void; drawerOpen: boolean }) {
+export function Header({
+  user,
+  onToggleDrawer,
+  drawerOpen,
+  onToggleMenu,
+  menuOpen,
+}: {
+  user: User;
+  onToggleDrawer: () => void;
+  drawerOpen: boolean;
+  /** Set on phone-sized screens, where the nav is a menu. */
+  onToggleMenu?: () => void;
+  menuOpen?: boolean;
+}) {
   return (
-    <header className="bg-surface border-line flex h-10 shrink-0 items-center gap-2 border-b px-2 md:px-3">
-      <div className="flex w-[11.5rem] shrink-0 items-center gap-2">
+    <header className="bg-surface border-line flex h-10 shrink-0 items-center gap-1 border-b px-2 sm:gap-2 md:px-3">
+      {onToggleMenu && (
+        <IconButton label={menuOpen ? "Close menu" : "Open menu"} onClick={onToggleMenu} aria-expanded={menuOpen}>
+          {menuOpen ? <X className="size-4" /> : <Menu className="size-4" />}
+        </IconButton>
+      )}
+      <div className="flex shrink-0 items-center gap-2 lg:w-[11.5rem]">
         <img src="/favicon.svg" alt="" className="size-5" />
         <span className="font-semibold tracking-tight">SynCloud</span>
       </div>
@@ -21,7 +39,7 @@ export function Header({ user, onToggleDrawer, drawerOpen }: { user: User; onTog
       <button
         disabled
         title="Projects arrive in Phase 2"
-        className="border-line text-muted hidden h-7 items-center gap-1.5 rounded-sm border px-2 text-xs md:flex"
+        className="border-line text-muted hidden h-7 items-center gap-1.5 rounded-sm border px-2 text-xs lg:flex"
       >
         <span>default</span>
         <span className="text-faint">/</span>
@@ -29,7 +47,7 @@ export function Header({ user, onToggleDrawer, drawerOpen }: { user: User; onTog
         <ChevronDown className="size-3" />
       </button>
 
-      <div className="flex flex-1 justify-center">
+      <div className="flex min-w-0 flex-1 justify-center">
         <button
           disabled
           title="Global search and the ⌘K command palette arrive with the first resources"
@@ -90,9 +108,10 @@ function BackupWarning() {
       to={backupsPath}
       className="border-warn/40 bg-warn/10 text-warn hidden h-7 items-center gap-1.5 rounded-sm border px-2 text-xs font-medium md:flex"
       title={failing ? data.status.lastError : "The controller is not backed up. Configure an S3 destination."}
+      aria-label={failing ? "Backup failing" : "Backups are off"}
     >
       <TriangleAlert className="size-3.5" />
-      {failing ? "Backup failing" : "Backups are off"}
+      <span className="hidden lg:inline">{failing ? "Backup failing" : "Backups are off"}</span>
     </Link>
   );
 }

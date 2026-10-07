@@ -18,6 +18,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { RangePicker, refetchFor, type Range } from "@/ui/RangePicker";
 
 interface Series {
   key: string;
@@ -52,12 +53,9 @@ interface TrafficData {
   windowSeconds: number;
 }
 
-const ranges = ["15m", "1h", "6h", "24h", "7d"] as const;
-type Range = (typeof ranges)[number];
-
 const css = (n: string) =>
   getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const statusColors = () => ({
+export const statusColors = () => ({
   "2xx": css("--color-ok"),
   "3xx": css("--color-accent"),
   "4xx": css("--color-warn"),
@@ -77,31 +75,6 @@ const fmtPct = (part: number, total: number) =>
     ? "—"
     : `${((100 * part) / total).toFixed(part / total < 0.1 ? 1 : 0)}%`;
 const fmtRate = (v: number) => `${formatBytes(v)}/s`;
-
-function RangePicker({
-  range,
-  setRange,
-}: {
-  range: Range;
-  setRange: (r: Range) => void;
-}) {
-  return (
-    <div className="border-line flex rounded-sm border">
-      {ranges.map((r) => (
-        <button
-          key={r}
-          onClick={() => setRange(r)}
-          className={cn(
-            "px-2 py-0.5 text-xs",
-            r === range ? "bg-raised text-fg" : "text-muted hover:text-fg",
-          )}
-        >
-          {r}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function RouteLink({ r }: { r: RouteTraffic }) {
   if (!r.serviceId) {
@@ -143,7 +116,7 @@ export function TrafficPanel({
   const { data, error, isLoading } = useQuery({
     queryKey: ["traffic", path, range],
     queryFn: () => api<TrafficData>("GET", `${path}?range=${range}`),
-    refetchInterval: range === "15m" || range === "1h" ? 10_000 : 60_000,
+    refetchInterval: refetchFor(range),
     retry: false,
   });
   const start = data ? Date.parse(data.start) : 0;

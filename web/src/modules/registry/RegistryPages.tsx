@@ -14,6 +14,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, IconButton, StatusBadge } from "@/ui/controls";
 import { LifecyclePanel } from "./LifecyclePanel";
 import { cn, gap } from "@/ui/cn";
+import { Tabs } from "@/ui/Tabs";
 
 interface Repository {
   name: string;
@@ -438,28 +439,19 @@ export function RepositoriesPage() {
         </Panel>
         <div className={cn("flex min-w-0 flex-col", gap)}>
           {current && (
-            <div className="border-line flex gap-3 border-b text-xs">
-              {(["images", "activity", "lifecycle"] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTab(t)}
-                  className={cn(
-                    "-mb-px border-b-2 px-1 pb-1.5",
-                    tab === t
-                      ? "border-accent text-fg"
-                      : "text-muted hover:text-fg border-transparent",
-                  )}
-                >
-                  {
-                    {
-                      images: "Images",
-                      activity: "Activity",
-                      lifecycle: "Lifecycle policy",
-                    }[t]
-                  }
-                </button>
-              ))}
-            </div>
+            <Tabs
+              tabs={["images", "activity", "lifecycle"] as const}
+              value={tab}
+              onChange={setTab}
+              capitalize={false}
+              label={(t) =>
+                ({
+                  images: "Images",
+                  activity: "Activity",
+                  lifecycle: "Lifecycle policy",
+                })[t]
+              }
+            />
           )}
           {tab === "lifecycle" && current ? (
             <LifecyclePanel key={current} repo={current} />

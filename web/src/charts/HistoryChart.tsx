@@ -39,6 +39,8 @@ export function HistoryChart({
   markLine,
   colors,
   stack,
+  max,
+  integer,
 }: {
   series: HistorySeries[];
   start: number;
@@ -52,6 +54,10 @@ export function HistoryChart({
   colors?: Record<string, string>;
   /** Stack the series (areas add up to the total). */
   stack?: boolean;
+  /** Fixed top of the value axis (e.g. 100 for percentages). */
+  max?: number;
+  /** Whole-number axis ticks (counts). */
+  integer?: boolean;
 }) {
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<echarts.ECharts | null>(null);
@@ -73,7 +79,7 @@ export function HistoryChart({
     chart.current?.setOption(
       {
         legend: { show: series.length > 1, type: "scroll" },
-        grid: { top: series.length > 1 ? 24 : 12, left: 52 },
+        grid: { top: series.length > 1 ? 24 : 12, left: 52, right: 16 },
         tooltip: {
           trigger: "axis",
           valueFormatter: (v: unknown) =>
@@ -84,6 +90,10 @@ export function HistoryChart({
           type: "value",
           splitNumber: 3,
           min: 0,
+          max,
+          // A fixed top gets even quarters, so its label never crowds the last tick.
+          interval: max !== undefined ? max / 4 : undefined,
+          minInterval: integer ? 1 : undefined,
           axisLabel: { formatter: (v: number) => format(v) },
         },
         series: series.map((s, i) => ({
@@ -110,7 +120,7 @@ export function HistoryChart({
       },
       { notMerge: true },
     );
-  }, [series, start, end, format, area, markLine, colors, stack]);
+  }, [series, start, end, format, area, markLine, colors, stack, max, integer]);
 
   return <div ref={el} style={{ height }} className="w-full" />;
 }

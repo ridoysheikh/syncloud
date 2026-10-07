@@ -37,6 +37,7 @@ import { LogsView } from "@/modules/logs/LogsView";
 import { RequestsTail, TrafficPanel } from "@/modules/traffic/Traffic";
 import { ServiceSecurityPanel } from "@/modules/network/SecurityGroups";
 import { AutoscalingPanel } from "./AutoscalingPanel";
+import { Tabs } from "@/ui/Tabs";
 
 interface Revision {
   revision: number;
@@ -243,37 +244,24 @@ export function ServicePage() {
           .filter((p) => (p.protocol ?? "http") === "http")
           .map((p) => p.name ?? String(p.container))}
       />
-      <div className="border-line flex gap-3 border-b text-xs">
-        {(
-          [
-            "metrics",
-            "traffic",
-            "autoscaling",
-            "security",
-            "logs",
-            "tasks",
-            "deployments",
-            "builds",
-            "variables",
-            "s3",
-            "revisions",
-            "spec",
-          ] as Tab[]
-        ).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={cn(
-              "-mb-px border-b-2 px-1 pb-1.5 capitalize",
-              tab === t
-                ? "border-accent text-fg"
-                : "text-muted hover:text-fg border-transparent",
-            )}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={[
+          "metrics",
+          "traffic",
+          "autoscaling",
+          "security",
+          "logs",
+          "tasks",
+          "deployments",
+          "builds",
+          "variables",
+          "s3",
+          "revisions",
+          "spec",
+        ] as Tab[]}
+        value={tab}
+        onChange={setTab}
+      />
       {tab === "metrics" && (
         <MetricsPanel
           path={path}

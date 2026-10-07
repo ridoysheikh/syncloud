@@ -29,6 +29,7 @@ import {
   varsError,
   type VarRow,
 } from "./VarsEditor";
+import { Tabs } from "@/ui/Tabs";
 
 type Tab =
   "services" | "metrics" | "traffic" | "logs" | "variables" | "settings";
@@ -77,9 +78,10 @@ export function ProjectPage() {
       {p.description && (
         <p className="text-muted -mt-1 text-xs">{p.description}</p>
       )}
-      <div className="border-line flex flex-wrap items-center justify-between gap-2 border-b">
-        <div className="flex gap-3 text-xs">
-          {(
+      <div className="flex flex-wrap-reverse items-end justify-between gap-x-2 gap-y-1">
+        <Tabs
+          className="flex-1"
+          tabs={
             [
               "services",
               "metrics",
@@ -88,22 +90,12 @@ export function ProjectPage() {
               "variables",
               "settings",
             ] as Tab[]
-          ).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={cn(
-                "-mb-px border-b-2 px-1 pb-1.5 capitalize",
-                tab === t
-                  ? "border-accent text-fg"
-                  : "text-muted hover:text-fg border-transparent",
-              )}
-            >
-              {t === "variables" ? "Shared variables" : t}
-            </button>
-          ))}
-        </div>
-        <div className="mb-1 flex items-center gap-1">
+          }
+          value={tab}
+          onChange={setTab}
+          label={(t) => (t === "variables" ? "Shared variables" : t)}
+        />
+        <div className="flex items-center gap-1 pb-1 sm:shadow-[inset_0_-1px_0_var(--color-line)]">
           <span className="text-faint text-xs">Environment</span>
           {p.environments.map((e) => {
             const to: string = `/projects/${p.name}/${e}`;

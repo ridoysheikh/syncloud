@@ -7,16 +7,24 @@ const css = (name: string) =>
 
 export const THEME = "syncloud";
 
-/** Series palette, in order. */
+/**
+ * Categorical series palette, assigned in this fixed order. Validated against
+ * the dark surface (#111418) for lightness, chroma, colorblind separation
+ * and contrast; status colors (ok/warn/bad) stay reserved for states.
+ */
+export const SERIES = [
+  "#3987e5", // blue
+  "#d95926", // orange
+  "#199e70", // aqua
+  "#c98500", // yellow
+  "#d55181", // magenta
+  "#008300", // green
+  "#9085e9", // violet
+  "#e66767", // red
+];
+
 export function palette() {
-  return [
-    css("--color-accent"),
-    "#a371f7",
-    "#3fb9a0",
-    css("--color-warn"),
-    "#db61a2",
-    css("--color-ok"),
-  ];
+  return SERIES;
 }
 
 let registered = false;
@@ -39,7 +47,12 @@ export function registerTheme() {
     grid: { left: 36, right: 8, top: 12, bottom: 20, containLabel: false },
     categoryAxis: axis,
     valueAxis: axis,
-    timeAxis: { ...axis, splitLine: { show: false } },
+    // Narrow charts drop time labels that would collide instead of overprinting them.
+    timeAxis: {
+      ...axis,
+      axisLabel: { ...axis.axisLabel, hideOverlap: true },
+      splitLine: { show: false },
+    },
     line: { symbol: "none", lineStyle: { width: 1.5 }, smooth: false },
     legend: {
       show: false,

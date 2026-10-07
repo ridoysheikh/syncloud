@@ -351,6 +351,7 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/system/health", Public: true, h: s.handleHealth},
 		{Method: "GET", Path: "/api/v1/metrics/query", h: s.handleExploreMetrics},
 		{Method: "GET", Path: "/api/v1/metrics/names", h: s.handleMetricNames},
+		{Method: "GET", Path: "/api/v1/metrics/overview", h: s.handleOverviewMetrics},
 		{Method: "GET", Path: "/api/v1/s3/endpoints", h: s.handleListS3Endpoints},
 		{Method: "POST", Path: "/api/v1/s3/endpoints", h: s.handleCreateS3Endpoint},
 		{Method: "GET", Path: "/api/v1/s3/endpoints/{endpoint}", h: s.handleGetS3Endpoint},

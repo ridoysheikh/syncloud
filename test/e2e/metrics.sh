@@ -50,4 +50,27 @@ PAT=$(api localhost:7070/api/v1/iam/tokens -d '{"name":"e2e"}' | grep -o '"token
 out=$(x -e SYNCLOUD_TOKEN="$PAT" sc-e2e-ctl /opt/sc/synctl --endpoint http://127.0.0.1:7070 metrics -p shop --range 15m)
 echo "$out" | grep -q '^burner' || fail "synctl metrics: $out"
 echo "  ✓ synctl metrics"
+
+echo "== overview"
+# Node gauges and the controller's own stats arrive every 10s.
+o=""
+for _ in $(seq 1 30); do
+  o=$(api "localhost:7070/api/v1/metrics/overview?range=15m")
+  echo "$o" | python3 -c 'import json,sys; c=json.load(sys.stdin)["charts"]; sys.exit(0 if len(c["cpu"])>=3 and len(c["memory"])>=3 and c["tasks"] and c["controllerHeap"] and c["controllerGoroutines"] else 1)' && break
+  sleep 2
+done
+echo "$o" | python3 -c '
+import json,sys
+c=json.load(sys.stdin)["charts"]
+nodes={s["key"] for s in c["cpu"]}
+assert len(nodes)>=3, f"cpu series per node: {nodes}"
+mem=[p[1] for s in c["memory"] for p in s["points"]]
+assert mem and all(0<v<=100 for v in mem), f"memory percent: {mem[:5]}"
+tasks=max(p[1] for s in c["tasks"] for p in s["points"])
+assert tasks>=1, f"tasks per node: {tasks}"
+heap=max(p[1] for s in c["controllerHeap"] for p in s["points"])
+assert heap>1<<20, f"controller heap: {heap}"
+for k in ("disk","load","network","requests","latency","controllerGoroutines"): assert k in c, k
+print(f"  ✓ overview: {len(nodes)} nodes, memory {min(mem):.0f}-{max(mem):.0f}%, up to {tasks:.0f} tasks per node, controller heap {heap/2**20:.0f} MiB")
+' || fail "overview metrics: $o"
 echo "PASS"

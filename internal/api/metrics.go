@@ -134,3 +134,22 @@ func (s *Server) handleMetricNames(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": names})
 }
+
+// handleOverviewMetrics charts the whole cluster for the Overview: nodes,
+// requests, latency and the controller itself (§10.2).
+func (s *Server) handleOverviewMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "metrics are not enabled")
+		return
+	}
+	rng, ok := metricsRange(w, r)
+	if !ok {
+		return
+	}
+	res, err := s.metrics.Overview(r.Context(), metrics.Ranges[rng], s.now())
+	if err != nil {
+		s.metricsErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}

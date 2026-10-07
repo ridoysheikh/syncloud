@@ -630,7 +630,7 @@ func serve(args []string) error {
 			"file", filepath.Join(cfg.DataDir, recoveryKeyFile))
 	}
 
-	go publishControllerStats(ctx, bus)
+	go publishControllerStats(ctx, bus, metricStore)
 	go cleanupSessions(ctx, st, log)
 
 	errc := make(chan error, 1)
@@ -681,17 +681,22 @@ type ControllerStats struct {
 	UptimeSec  int64   `json:"uptimeSec"`
 }
 
-func publishControllerStats(ctx context.Context, bus *events.Bus) {
+// publishControllerStats streams the controller's own stats every 2s and
+// stores them every 10s for the Overview's history.
+func publishControllerStats(ctx context.Context, bus *events.Bus, ms *metrics.Store) {
 	start := time.Now()
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
 	var m runtime.MemStats
-	for {
+	for n := 0; ; n++ {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 			runtime.ReadMemStats(&m)
+			if n%5 == 0 {
+				_ = ms.RecordController(ctx, m.HeapAlloc, runtime.NumGoroutine())
+			}
 			bus.Publish("controller.stats", ControllerStats{
 				Goroutines: runtime.NumGoroutine(),
 				HeapMB:     float64(m.HeapAlloc) / (1 << 20),

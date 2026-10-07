@@ -106,8 +106,8 @@ export function ApiPage() {
                     <div key={key} className="border-line border-b last:border-b-0">
                       <button onClick={() => setOpen(isOpen ? null : key)} className="hover:bg-hover flex w-full items-center gap-2 px-1 py-1 text-left text-xs">
                         <StatusBadge tone={methodTone[o.method] ?? "neutral"}>{o.method}</StatusBadge>
-                        <span className="font-mono">{o.path}</span>
-                        <span className="text-muted truncate">{o.summary}</span>
+                        <span className="min-w-0 font-mono break-all">{o.path}</span>
+                        <span className="text-muted hidden truncate sm:inline">{o.summary}</span>
                       </button>
                       {isOpen && (
                         <div className="flex flex-col gap-1 px-1 pb-2 text-xs">

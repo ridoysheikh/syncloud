@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Outlet } from "@tanstack/react-router";
+import { Outlet, useRouterState } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { meQuery } from "@/lib/auth";
@@ -14,8 +14,13 @@ import { SideNav } from "./SideNav";
 /** Signed-in layout: header, modular side nav, page, bottom drawer (§10). */
 export function AppShell() {
   const { data: user } = useSuspenseQuery(meQuery);
-  const [collapsed, setCollapsed] = useState(() => readPref("nav.collapsed", window.innerWidth < 768)); // narrow screens start collapsed
+  const [collapsed, setCollapsed] = useState(() => readPref("nav.collapsed", window.innerWidth < 1024)); // tablets start with the icon rail
   const [drawer, setDrawer] = useState(false);
+  // Below md the nav is an off-canvas menu instead of a rail beside the page.
+  const narrow = useNarrow();
+  const [menu, setMenu] = useState(false);
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  useEffect(() => setMenu(false), [path, narrow]);
 
   useEffect(() => {
     startStream();
@@ -25,15 +30,32 @@ export function AppShell() {
 
   return (
     <div className="flex h-full flex-col">
-      <Header user={user} drawerOpen={drawer} onToggleDrawer={() => setDrawer((d) => !d)} />
-      <div className="flex min-h-0 flex-1">
-        <SideNav
-          collapsed={collapsed}
-          onToggle={() => {
-            setCollapsed(!collapsed);
-            writePref("nav.collapsed", !collapsed);
-          }}
-        />
+      <Header
+        user={user}
+        drawerOpen={drawer}
+        onToggleDrawer={() => setDrawer((d) => !d)}
+        onToggleMenu={narrow ? () => setMenu((m) => !m) : undefined}
+        menuOpen={menu}
+      />
+      <div className="relative flex min-h-0 flex-1">
+        {narrow ? (
+          menu && (
+            <>
+              <div className="fixed inset-0 top-10 z-30 bg-black/50" onClick={() => setMenu(false)} aria-hidden />
+              <div className="fixed top-10 bottom-0 left-0 z-40 flex shadow-xl">
+                <SideNav collapsed={false} onToggle={() => setMenu(false)} />
+              </div>
+            </>
+          )
+        ) : (
+          <SideNav
+            collapsed={collapsed}
+            onToggle={() => {
+              setCollapsed(!collapsed);
+              writePref("nav.collapsed", !collapsed);
+            }}
+          />
+        )}
         <div className="flex min-w-0 flex-1 flex-col">
           <main className={`min-h-0 flex-1 overflow-y-auto ${pad}`}>
             <Outlet />
@@ -55,4 +77,18 @@ export function AppShell() {
       </div>
     </div>
   );
+}
+
+const narrowQuery = "(max-width: 767px)";
+
+/** Whether the viewport is phone-sized (below Tailwind's md). */
+function useNarrow() {
+  const [narrow, setNarrow] = useState(() => window.matchMedia(narrowQuery).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(narrowQuery);
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return narrow;
 }

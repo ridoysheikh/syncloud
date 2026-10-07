@@ -65,6 +65,13 @@ func (s *Store) AddNode(node string, hb *agentv1.Heartbeat) {
 	m := hb.GetMetrics()
 	fmt.Fprintf(&b, "syncloud_node_net_rx_bytes_total{node=%q} %d %d\n", node, m.GetNetRxBytes(), ts)
 	fmt.Fprintf(&b, "syncloud_node_net_tx_bytes_total{node=%q} %d %d\n", node, m.GetNetTxBytes(), ts)
+	// Gauges for the Overview's history (§10.2).
+	fmt.Fprintf(&b, "syncloud_node_cpu_percent{node=%q} %s %d\n", node, strconv.FormatFloat(m.GetCpuPercent(), 'f', 2, 64), ts)
+	fmt.Fprintf(&b, "syncloud_node_load1{node=%q} %s %d\n", node, strconv.FormatFloat(m.GetLoad1(), 'f', 2, 64), ts)
+	fmt.Fprintf(&b, "syncloud_node_memory_used_bytes{node=%q} %d %d\n", node, m.GetMemoryUsedBytes(), ts)
+	fmt.Fprintf(&b, "syncloud_node_memory_total_bytes{node=%q} %d %d\n", node, m.GetMemoryTotalBytes(), ts)
+	fmt.Fprintf(&b, "syncloud_node_disk_used_bytes{node=%q} %d %d\n", node, m.GetDiskUsedBytes(), ts)
+	fmt.Fprintf(&b, "syncloud_node_disk_total_bytes{node=%q} %d %d\n", node, m.GetDiskTotalBytes(), ts)
 	if ns := hb.GetNetwork(); ns != nil {
 		var rx, tx uint64
 		for _, p := range ns.GetPeers() {

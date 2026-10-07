@@ -876,10 +876,10 @@ function SimulatorPanel() {
           </select>
         </Field>
         <Field label="Action">
-          <Input list="iam-actions" value={action} onChange={(e) => setAction(e.target.value)} className="w-72 font-mono" />
+          <Input list="iam-actions" value={action} onChange={(e) => setAction(e.target.value)} className="w-72 max-w-[calc(100vw-3rem)] font-mono" />
         </Field>
         <Field label="Resource">
-          <Input value={resource} onChange={(e) => setResource(e.target.value)} className="w-[32rem] font-mono" />
+          <Input value={resource} onChange={(e) => setResource(e.target.value)} className="w-[32rem] max-w-[calc(100vw-3rem)] font-mono" />
         </Field>
         <label className="flex h-8 items-center gap-1.5 text-xs">
           <input type="checkbox" checked={mfa} onChange={(e) => setMfa(e.target.checked)} /> with MFA

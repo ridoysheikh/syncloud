@@ -7,6 +7,7 @@ import { Panel } from "@/ui/Panel";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { RangePicker, refetchFor, type Range } from "@/ui/RangePicker";
 
 interface MetricSeries {
   key: string;
@@ -23,9 +24,6 @@ interface Metrics {
     MetricSeries[]
   >;
 }
-
-const ranges = ["15m", "1h", "6h", "24h", "7d"] as const;
-type Range = (typeof ranges)[number];
 
 export function formatBytes(v: number) {
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -60,7 +58,7 @@ export function MetricsPanel({
   const { data, error, isLoading } = useQuery({
     queryKey: ["metrics", path, range],
     queryFn: () => api<Metrics>("GET", `${path}/metrics?range=${range}`),
-    refetchInterval: range === "15m" || range === "1h" ? 15_000 : 60_000,
+    refetchInterval: refetchFor(range),
     retry: false,
   });
   const start = data ? Date.parse(data.start) : 0;
@@ -98,20 +96,7 @@ export function MetricsPanel({
             : "One line per service (all its tasks added up)"}
           {data && ` · ${data.stepSeconds}s resolution`}
         </span>
-        <div className="border-line flex rounded-sm border">
-          {ranges.map((r) => (
-            <button
-              key={r}
-              onClick={() => setRange(r)}
-              className={cn(
-                "px-2 py-0.5 text-xs",
-                r === range ? "bg-raised text-fg" : "text-muted hover:text-fg",
-              )}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
+        <RangePicker range={range} setRange={setRange} />
       </div>
       {error && (
         <Alert tone="warn">

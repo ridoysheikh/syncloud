@@ -19,6 +19,7 @@ import {
   StatusBadge,
 } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { Tabs } from "@/ui/Tabs";
 
 export type Severity = "info" | "warning" | "critical";
 
@@ -155,22 +156,11 @@ export function AlertsPage() {
         <StatTile label="Rules" value={rules.data?.items.length ?? 0} />
         <StatTile label="Channels" value={channels.data?.length ?? 0} />
       </div>
-      <div className="border-line flex gap-3 border-b text-xs">
-        {(["active", "rules", "channels", "history"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={cn(
-              "-mb-px border-b-2 px-1 pb-1.5 capitalize",
-              tab === t
-                ? "border-accent text-fg"
-                : "text-muted hover:text-fg border-transparent",
-            )}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={["active", "rules", "channels", "history"] as Tab[]}
+        value={tab}
+        onChange={setTab}
+      />
       {tab === "active" && (
         <ActiveTab rows={active.data ?? []} loading={active.isLoading} />
       )}

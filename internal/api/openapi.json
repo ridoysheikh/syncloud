@@ -11358,6 +11358,53 @@
           }
         }
       }
+    },
+    "/api/v1/metrics/overview": {
+      "get": {
+        "operationId": "getOverviewMetrics",
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Cluster history for the Overview: node CPU, memory, disk, load and tasks, network, requests, latency and the controller process",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h",
+                "6h",
+                "24h",
+                "7d"
+              ],
+              "default": "1h"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Metrics"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
