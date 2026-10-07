@@ -19,6 +19,7 @@ import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { selectClass } from "../NewDatabaseWizard";
 import { ago, errText } from "./shared";
+import { confirmAction } from "@/ui/dialogs";
 
 const restoreTo = (name: string, backup?: string) =>
   `/databases/${encodeURIComponent(name)}/restore${backup ? `?backup=${encodeURIComponent(backup)}` : ""}`;
@@ -429,9 +430,9 @@ function BackupSettings({
                 type="button"
                 variant="danger"
                 disabled={save.isPending}
-                onClick={() => {
+                onClick={async () => {
                   if (
-                    confirm(
+                    await confirmAction(
                       "Turn backups off? Archiving stops and no restore past this moment will be possible. What is already in S3 stays.",
                     )
                   )

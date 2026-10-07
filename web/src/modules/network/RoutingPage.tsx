@@ -10,6 +10,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { confirmAction } from "@/ui/dialogs";
 
 type PresetType =
   | "ip-allowlist"
@@ -136,7 +137,7 @@ export function RoutingPage() {
                       <Pencil className="size-3.5" />
                     </IconButton>
                   </Link>
-                  <IconButton label="Delete" onClick={() => confirm(`Delete middleware ${m.project}/${m.name}?`) && del.mutate(m)}>
+                  <IconButton label="Delete" onClick={async () => (await confirmAction(`Delete middleware ${m.project}/${m.name}?`)) && del.mutate(m)}>
                     <Trash2 className="size-3.5" />
                   </IconButton>
                 </div>

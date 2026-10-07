@@ -377,9 +377,12 @@ func (s *Store) AddDatabaseEvent(ctx context.Context, e DatabaseEvent) error {
 	return err
 }
 
-func (s *Store) DatabaseEvents(ctx context.Context, databaseID string, limit int) ([]DatabaseEvent, error) {
+// DatabaseEvents returns the newest events, older than the event before
+// names when set.
+func (s *Store) DatabaseEvents(ctx context.Context, databaseID string, limit int, before string) ([]DatabaseEvent, error) {
+	b := idCursor(before)
 	rows, err := s.R.QueryContext(ctx, `SELECT id, at, kind, from_value, to_value, reason, actor FROM database_events
-		WHERE database_id = ? ORDER BY id DESC LIMIT ?`, databaseID, limit)
+		WHERE database_id = ? AND (? = 0 OR id < ?) ORDER BY id DESC LIMIT ?`, databaseID, b, b, limit)
 	if err != nil {
 		return nil, err
 	}

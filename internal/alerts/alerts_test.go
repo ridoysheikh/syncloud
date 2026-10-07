@@ -106,7 +106,7 @@ func TestFiringAndResolved(t *testing.T) {
 	if !strings.Contains(got[1], "[RESOLVED] busy") {
 		t.Errorf("resolved payload %s", got[1])
 	}
-	evs, _ := st.ListAlertEvents(ctx, 10)
+	evs, _ := st.ListAlertEvents(ctx, 10, "")
 	if len(evs) != 2 || evs[0].Kind != "resolved" || evs[1].Kind != "firing" {
 		t.Fatalf("events %+v", evs)
 	}

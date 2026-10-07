@@ -196,9 +196,12 @@ func (s *Store) SetAlertDelivery(ctx context.Context, id int64, delivery string)
 	return err
 }
 
-func (s *Store) ListAlertEvents(ctx context.Context, limit int) ([]AlertEvent, error) {
+// ListAlertEvents returns the newest events, older than the event before
+// names when set (cursor pagination).
+func (s *Store) ListAlertEvents(ctx context.Context, limit int, before string) ([]AlertEvent, error) {
+	b := idCursor(before)
 	rows, err := s.R.QueryContext(ctx, `SELECT id, rule_id, rule_name, severity, kind, key, label, message, value, delivery, at
-		FROM alert_events ORDER BY id DESC LIMIT ?`, limit)
+		FROM alert_events WHERE (? = 0 OR id < ?) ORDER BY id DESC LIMIT ?`, b, b, limit)
 	if err != nil {
 		return nil, err
 	}

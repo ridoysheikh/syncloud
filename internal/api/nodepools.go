@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -347,12 +348,16 @@ func (s *Server) handleNodePoolEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such node pool")
 		return
 	}
-	es, err := s.store.ListPoolEvents(r.Context(), p.ID, 200)
+	limit, before, ok := pageParams(w, r, 100, 500)
+	if !ok {
+		return
+	}
+	es, err := s.store.ListPoolEvents(r.Context(), p.ID, limit, before)
 	if err != nil {
 		s.internalError(w, "pool events", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": es})
+	writePage(w, es, limit, func(e store.PoolEvent) string { return strconv.FormatInt(e.ID, 10) })
 }
 
 // handlePoolJoinCommand returns the one-line join for a manual pool.

@@ -118,6 +118,8 @@ func (s *Server) handleDeleteGitSource(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func buildID(b store.Build) string { return b.ID }
+
 func (s *Server) handleServiceBuilds(w http.ResponseWriter, r *http.Request) {
 	if !s.requireBuilds(w) {
 		return
@@ -126,12 +128,16 @@ func (s *Server) handleServiceBuilds(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	bs, err := s.store.ServiceBuilds(r.Context(), sv.ID, 50)
+	limit, before, ok := pageParams(w, r, 50, 500)
+	if !ok {
+		return
+	}
+	bs, err := s.store.ServiceBuilds(r.Context(), sv.ID, limit, before)
 	if err != nil {
 		s.internalError(w, "list builds", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": s.buildViews(r, bs)})
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.buildViews(r, bs), "next": nextCursor(bs, limit, buildID)})
 }
 
 func (s *Server) handleStartBuild(w http.ResponseWriter, r *http.Request) {
@@ -175,12 +181,17 @@ func (s *Server) handleRecentBuilds(w http.ResponseWriter, r *http.Request) {
 	if !s.requireBuilds(w) {
 		return
 	}
-	bs, err := s.store.RecentBuilds(r.Context(), 100)
+	limit, before, ok := pageParams(w, r, 100, 500)
+	if !ok {
+		return
+	}
+	bs, err := s.store.RecentBuilds(r.Context(), limit, before)
 	if err != nil {
 		s.internalError(w, "list builds", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, s.buildViews(r, bs), itemServiceField)})
+	// The cursor follows the unfiltered page, so hidden builds never end it early.
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, s.buildViews(r, bs), itemServiceField), "next": nextCursor(bs, limit, buildID)})
 }
 
 func (s *Server) handleDeployBuild(w http.ResponseWriter, r *http.Request) {

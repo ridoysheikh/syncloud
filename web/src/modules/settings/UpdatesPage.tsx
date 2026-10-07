@@ -7,6 +7,7 @@ import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { confirmAction } from "@/ui/dialogs";
 
 interface UpgradeState {
   from: string;
@@ -104,7 +105,7 @@ export function UpdatesPage() {
             <Button
               variant="primary"
               disabled={!!running || start.isPending || (!version && !u?.available)}
-              onClick={() => confirm(`Upgrade the controller to ${version || u?.latest}? It restarts; tasks keep running.`) && start.mutate()}
+              onClick={async () => (await confirmAction(`Upgrade the controller to ${version || u?.latest}? It restarts; tasks keep running.`)) && start.mutate()}
             >
               <ArrowUpCircle className="size-3.5" /> Upgrade
             </Button>

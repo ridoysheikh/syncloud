@@ -11,6 +11,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { DropLogPanel } from "./SecurityGroups";
+import { confirmAction } from "@/ui/dialogs";
 
 interface Rule {
   id?: string;
@@ -115,7 +116,7 @@ export function FirewallPage() {
                       <Pencil className="size-3.5" />
                     </IconButton>
                   </Link>
-                  <IconButton label="Delete" onClick={() => confirm(`Delete policy ${p.name}? Its ports close on every node it targets.`) && del.mutate(p.id)}>
+                  <IconButton label="Delete" onClick={async () => (await confirmAction(`Delete policy ${p.name}? Its ports close on every node it targets.`)) && del.mutate(p.id)}>
                     <Trash2 className="size-3.5" />
                   </IconButton>
                 </div>

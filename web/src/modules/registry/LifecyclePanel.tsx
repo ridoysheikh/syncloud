@@ -7,6 +7,7 @@ import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { Alert, Button, IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { confirmAction } from "@/ui/dialogs";
 
 export interface Rule {
   priority: number;
@@ -156,9 +157,10 @@ export function LifecyclePanel({ repo }: { repo: string }) {
             {policy.data && (
               <Button
                 variant="ghost"
-                onClick={() =>
-                  confirm(`Remove the lifecycle policy of ${repo}?`) &&
-                  remove.mutate()
+                onClick={async () =>
+                  (await confirmAction(
+                    `Remove the lifecycle policy of ${repo}?`,
+                  )) && remove.mutate()
                 }
               >
                 Remove

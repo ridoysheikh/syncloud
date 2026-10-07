@@ -11,6 +11,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { confirmAction } from "@/ui/dialogs";
 
 interface BackupObject {
   name: string;
@@ -107,7 +108,7 @@ export function BackupsPage() {
                 <Button variant="ghost" onClick={() => setEditing(true)}>
                   Edit
                 </Button>
-                <Button variant="danger" onClick={() => confirm("Turn backups off? Stored backups are kept.") && disable.mutate()}>
+                <Button variant="danger" onClick={async () => (await confirmAction("Turn backups off? Stored backups are kept.")) && disable.mutate()}>
                   Disable
                 </Button>
               </>

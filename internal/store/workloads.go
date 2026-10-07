@@ -721,8 +721,12 @@ func (s *Store) ActiveDeployment(ctx context.Context, serviceID string) (Deploym
 	return d, err
 }
 
-func (s *Store) ListDeployments(ctx context.Context, serviceID string, limit int) ([]Deployment, error) {
-	rows, err := s.R.QueryContext(ctx, deploymentCols+` WHERE service_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`, serviceID, limit)
+// ListDeployments returns a service's newest deployments, older than the
+// deployment before names when set.
+func (s *Store) ListDeployments(ctx context.Context, serviceID string, limit int, before string) ([]Deployment, error) {
+	rows, err := s.R.QueryContext(ctx, deploymentCols+` WHERE service_id = ?
+		AND (? = '' OR (started_at, rowid) < (SELECT started_at, rowid FROM deployments WHERE id = ?))
+		ORDER BY started_at DESC, rowid DESC LIMIT ?`, serviceID, before, before, limit)
 	if err != nil {
 		return nil, err
 	}

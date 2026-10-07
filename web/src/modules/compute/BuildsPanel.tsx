@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GitBranch, Hammer, Rocket, Unplug } from "lucide-react";
+import { usePaged } from "@/lib/paged";
 import { api, ApiError } from "@/lib/api";
 import { since } from "@/lib/nodes";
 import { Panel } from "@/ui/Panel";
@@ -16,6 +17,7 @@ import {
   RepoPicker,
   useGitConnections,
 } from "@/modules/integrations/RepoPicker";
+import { confirmAction } from "@/ui/dialogs";
 
 export type Builder = "auto" | "dockerfile" | "nixpacks" | "static";
 
@@ -351,10 +353,10 @@ function SourcePanel({ path, src }: { path: string; src: GitSource }) {
           </Button>
           <Button
             variant="ghost"
-            onClick={() =>
-              confirm(
+            onClick={async () =>
+              (await confirmAction(
                 "Stop building this service from Git? Builds and images stay.",
-              ) && disconnect.mutate()
+              )) && disconnect.mutate()
             }
           >
             <Unplug className="size-3.5" /> Disconnect
@@ -477,19 +479,18 @@ function SourcePanel({ path, src }: { path: string; src: GitSource }) {
 }
 
 /** Polls faster while a build is queued or running. */
-export const buildsRefetch = (q: { state: { data?: Build[] } }) =>
-  q.state.data?.some((b) => b.status === "queued" || b.status === "building")
+export const buildsRefetch = (builds: Build[]) =>
+  builds.some((b) => b.status === "queued" || b.status === "building")
     ? 2000
     : 10_000;
 
 function BuildList({ path }: { path: string }) {
-  const { data = [], isLoading } = useQuery({
-    queryKey: ["builds", path],
-    queryFn: async () =>
-      (await api<{ items: Build[] }>("GET", `${path}/builds`)).items,
+  const q = usePaged<Build>(["builds", path], `${path}/builds`, {
     refetchInterval: buildsRefetch,
   });
-  return <BuildsTable builds={data} loading={isLoading} />;
+  return (
+    <BuildsTable builds={q.items} loading={q.isLoading} paging={q.table} />
+  );
 }
 
 /** Builds with their logs, Deploy and Cancel; showService for cluster-wide lists. */
@@ -497,10 +498,13 @@ export function BuildsTable({
   builds: data,
   loading: isLoading,
   showService,
+  paging,
 }: {
   builds: Build[];
   loading: boolean;
   showService?: boolean;
+  /** Cursor paging (usePaged's table). */
+  paging?: { hasMore: boolean; onLoadMore: () => void; loadingMore: boolean };
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState<string>();
@@ -527,6 +531,7 @@ export function BuildsTable({
           </div>
         )}
         <DataTable
+          {...paging}
           rows={data}
           rowKey={(b) => b.id}
           empty={
@@ -625,9 +630,10 @@ export function BuildsTable({
                     <Button
                       variant="ghost"
                       disabled={cancel.isPending}
-                      onClick={() =>
-                        confirm(`Cancel the build of ${b.sha.slice(0, 12)}?`) &&
-                        cancel.mutate(b.runId)
+                      onClick={async () =>
+                        (await confirmAction(
+                          `Cancel the build of ${b.sha.slice(0, 12)}?`,
+                        )) && cancel.mutate(b.runId)
                       }
                     >
                       Cancel
@@ -637,10 +643,10 @@ export function BuildsTable({
                     <Button
                       variant="ghost"
                       disabled={deploy.isPending}
-                      onClick={() =>
-                        confirm(
+                      onClick={async () =>
+                        (await confirmAction(
                           `Deploy ${b.sha.slice(0, 12)} as a new revision?`,
-                        ) && deploy.mutate(b.id)
+                        )) && deploy.mutate(b.id)
                       }
                     >
                       <Rocket className="size-3.5" /> Deploy

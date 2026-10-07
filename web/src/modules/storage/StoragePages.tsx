@@ -9,6 +9,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { confirmAction } from "@/ui/dialogs";
 
 interface Endpoint {
   id: string;
@@ -227,7 +228,7 @@ export function EndpointPage() {
                 <Pencil className="size-3.5" />
               </IconButton>
             </Link>
-            <IconButton label="Delete" onClick={() => confirm(`Delete the S3 endpoint ${endpoint}? Buckets and their data are not touched.`) && del.mutate()}>
+            <IconButton label="Delete" onClick={async () => (await confirmAction(`Delete the S3 endpoint ${endpoint}? Buckets and their data are not touched.`)) && del.mutate()}>
               <Trash2 className="size-3.5" />
             </IconButton>
           </>
@@ -463,8 +464,8 @@ export function BucketPage() {
                   )}
                   <IconButton
                     label="Delete"
-                    onClick={() =>
-                      confirm(o.folder ? `Delete everything under ${o.key}?` : `Delete ${o.key}?`) && del.mutate(o.key)
+                    onClick={async () =>
+                      (await confirmAction(o.folder ? `Delete everything under ${o.key}?` : `Delete ${o.key}?`)) && del.mutate(o.key)
                     }
                   >
                     <Trash2 className="size-3.5" />

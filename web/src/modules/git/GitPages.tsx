@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { GitBranch, Plug } from "lucide-react";
+import { usePaged } from "@/lib/paged";
 import { api } from "@/lib/api";
 import { since } from "@/lib/nodes";
 import { serviceUrl } from "@/lib/workloads";
@@ -182,12 +183,10 @@ export function GitSourcesPage() {
 
 /** Recent builds of every service: queue, history and logs (§5.8). */
 export function BuildsPage() {
-  const { data = [], isLoading } = useQuery({
-    queryKey: ["builds", "recent"],
-    queryFn: async () =>
-      (await api<{ items: Build[] }>("GET", "/builds")).items,
+  const q = usePaged<Build>(["builds", "recent"], "/builds", {
     refetchInterval: buildsRefetch,
   });
+  const { items: data, isLoading } = q;
   const count = (st: Build["status"]) =>
     data.filter((b) => b.status === st).length;
   return (

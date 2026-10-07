@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Pause, Play, ScrollText } from "lucide-react";
+import { History, Loader2, Pause, Play, ScrollText } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { Panel } from "@/ui/Panel";
 import { EmptyState } from "@/ui/EmptyState";
@@ -28,7 +28,11 @@ export interface LogFilter {
   database?: string;
 }
 
-const MAX_LINES = 3000;
+const MAX_LINES = 5000;
+const PAGE = 500;
+
+/** Seconds in a range such as "15m" or "168h". */
+const secondsOf = (r: string) => Number(r.slice(0, -1)) * (r.endsWith("m") ? 60 : 3600);
 const taskColors = ["text-sky-400", "text-violet-400", "text-teal-400", "text-amber-400", "text-pink-400", "text-lime-400"];
 const levelColor: Record<string, string> = { fatal: "text-bad", error: "text-bad", warn: "text-warn", debug: "text-faint" };
 
@@ -63,6 +67,46 @@ export function LogsView({ filter, showSource = true }: { filter: LogFilter; sho
     retry: false,
   });
 
+  // Older lines, a page at a time (§14): each request covers the selected
+  // range ending just before the oldest line shown; an empty range moves
+  // the cursor back one range.
+  const [older, setOlder] = useState<LogLine[]>([]);
+  const [cursor, setCursor] = useState<string>();
+  const [olderBusy, setOlderBusy] = useState(false);
+  const [olderNote, setOlderNote] = useState("");
+  const [olderErr, setOlderErr] = useState("");
+  useEffect(() => {
+    setOlder([]);
+    setCursor(undefined);
+    setOlderNote("");
+    setOlderErr("");
+  }, [params, since]);
+  const anchor = useRef<number | null>(null); // scrollHeight before prepending
+  const loadOlder = async () => {
+    if (olderBusy) return;
+    const first = older[0] ?? history.data?.[0];
+    const before = cursor ?? first?.time ?? new Date(Date.now() - secondsOf(since) * 1000).toISOString();
+    setOlderBusy(true);
+    setOlderErr("");
+    try {
+      const page = (await api<{ items: LogLine[] }>("GET", `/logs?${params}&since=${since}&limit=${PAGE}&before=${encodeURIComponent(before)}`)).items;
+      anchor.current = box.current?.scrollHeight ?? null;
+      if (page.length === 0) {
+        const back = new Date(new Date(before).getTime() - secondsOf(since) * 1000);
+        setCursor(back.toISOString());
+        setOlderNote(`No lines between ${back.toLocaleString()} and ${new Date(before).toLocaleString()}.`);
+      } else {
+        setCursor(page[0]!.time);
+        setOlderNote("");
+        setOlder((prev) => [...page, ...prev].slice(0, MAX_LINES));
+      }
+    } catch (e) {
+      setOlderErr(e instanceof ApiError ? e.message : "Could not load older lines");
+    } finally {
+      setOlderBusy(false);
+    }
+  };
+
   useEffect(() => {
     setTail([]);
     if (!live) return;
@@ -77,8 +121,18 @@ export function LogsView({ filter, showSource = true }: { filter: LogFilter; sho
   const lines = useMemo(() => {
     const hist = history.data ?? [];
     const last = hist.at(-1)?.time ?? "";
-    return [...hist, ...tail.filter((l) => l.time > last)].slice(-MAX_LINES);
-  }, [history.data, tail]);
+    const newest = [...hist, ...tail.filter((l) => l.time > last)];
+    return [...older.slice(0, Math.max(0, MAX_LINES - newest.length)), ...newest].slice(-MAX_LINES);
+  }, [history.data, tail, older]);
+
+  // Keep the reader's place when older lines are prepended.
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (el && anchor.current !== null) {
+      el.scrollTop += el.scrollHeight - anchor.current;
+      anchor.current = null;
+    }
+  }, [older]);
 
   // Follow the bottom while tailing, unless the user scrolled up.
   const stick = useRef(true);
@@ -130,9 +184,24 @@ export function LogsView({ filter, showSource = true }: { filter: LogFilter; sho
         onScroll={(e) => {
           const el = e.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          // Scrolled to the top: fetch older lines (once per page that had any).
+          if (el.scrollTop < 24 && !olderBusy && !olderNote && !olderErr && lines.length > 0) void loadOlder();
         }}
         className="h-[60vh] overflow-auto px-2 py-1 font-mono text-[11px] leading-[1.45]"
       >
+        {(lines.length > 0 || olderNote) && (
+          <div className="text-faint flex flex-wrap items-center justify-center gap-2 py-1 font-sans text-xs">
+            {olderNote && <span>{olderNote}</span>}
+            {olderErr && <span className="text-bad">{olderErr}</span>}
+            {olderBusy ? (
+              <Loader2 className="size-3.5 animate-spin" aria-label="Loading older lines" />
+            ) : (
+              <Button variant="ghost" onClick={() => void loadOlder()}>
+                <History className="size-3.5" /> Load older
+              </Button>
+            )}
+          </div>
+        )}
         {lines.length === 0 && !history.isLoading ? (
           <EmptyState icon={ScrollText} title="No log lines">
             Lines from every task of every node appear here as they are written.

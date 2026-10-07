@@ -10,6 +10,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { confirmAction } from "@/ui/dialogs";
 
 // ── types and hooks ─────────────────────────────────────────────────────────
 
@@ -288,7 +289,7 @@ function UserKeys({ userId }: { userId: string }) {
             <span className="font-mono">{k.id}</span>
             <span className="text-muted">{k.description}</span>
             <span className="text-faint">last used {when(k.lastUsedAt)}</span>
-            <IconButton label="Delete" onClick={() => confirm(`Delete ${k.id}?`) && del.mutate(k.id)}>
+            <IconButton label="Delete" onClick={async () => (await confirmAction(`Delete ${k.id}?`)) && del.mutate(k.id)}>
               <Trash2 className="size-3.5" />
             </IconButton>
           </div>
@@ -343,7 +344,7 @@ export function UserPage() {
         title={u.kind === "service" ? u.name : u.email}
         actions={
           !u.isRoot && (
-            <Button variant="ghost" onClick={() => confirm(`Delete ${u.email}? Their keys and sessions stop working.`) && del.mutate()}>
+            <Button variant="ghost" onClick={async () => (await confirmAction(`Delete ${u.email}? Their keys and sessions stop working.`)) && del.mutate()}>
               <Trash2 className="size-3.5" /> Delete
             </Button>
           )
@@ -360,7 +361,7 @@ export function UserPage() {
           {!u.isRoot && (
             <div className="flex flex-wrap items-center gap-1.5">
               <Button onClick={() => update.mutate({ disabled: !u.disabled })}>{u.disabled ? "Enable" : "Disable"}</Button>
-              {u.mfaEnabled && <Button onClick={() => confirm("Turn MFA off for this user (lost device)?") && resetMfa.mutate()}>Reset MFA</Button>}
+              {u.mfaEnabled && <Button onClick={async () => (await confirmAction("Turn MFA off for this user (lost device)?")) && resetMfa.mutate()}>Reset MFA</Button>}
               {u.kind === "user" && (
                 <>
                   <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="new password" className="h-7 max-w-48" autoComplete="new-password" />
@@ -479,7 +480,7 @@ export function GroupPage() {
         actions={
           <>
             {!isNew && (
-              <Button variant="ghost" onClick={() => confirm(`Delete group ${g?.name}?`) && del.mutate()}>
+              <Button variant="ghost" onClick={async () => (await confirmAction(`Delete group ${g?.name}?`)) && del.mutate()}>
                 <Trash2 className="size-3.5" /> Delete
               </Button>
             )}
@@ -618,7 +619,7 @@ export function RolePage() {
         actions={
           <>
             {!isNew && (
-              <Button variant="ghost" onClick={() => confirm(`Delete role ${r?.name}?`) && del.mutate()}>
+              <Button variant="ghost" onClick={async () => (await confirmAction(`Delete role ${r?.name}?`)) && del.mutate()}>
                 <Trash2 className="size-3.5" /> Delete
               </Button>
             )}
@@ -791,7 +792,7 @@ export function PolicyPage() {
           !readOnly && (
             <>
               {!isNew && (
-                <Button variant="ghost" onClick={() => confirm(`Delete policy ${p?.name}? It is detached everywhere.`) && del.mutate()}>
+                <Button variant="ghost" onClick={async () => (await confirmAction(`Delete policy ${p?.name}? It is detached everywhere.`)) && del.mutate()}>
                   <Trash2 className="size-3.5" /> Delete
                 </Button>
               )}

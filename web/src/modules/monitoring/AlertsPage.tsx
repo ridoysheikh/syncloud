@@ -2,6 +2,7 @@ import { useCallback, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { BellRing, Plus, Send, Trash2 } from "lucide-react";
+import { usePaged } from "@/lib/paged";
 import { api, ApiError } from "@/lib/api";
 import { since } from "@/lib/nodes";
 import { useStreamTopic } from "@/lib/stream";
@@ -20,6 +21,7 @@ import {
 } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { Tabs } from "@/ui/Tabs";
+import { confirmAction } from "@/ui/dialogs";
 
 export type Severity = "info" | "warning" | "critical";
 
@@ -342,8 +344,9 @@ function RulesTab() {
                 </Button>
                 <IconButton
                   label="Delete"
-                  onClick={() =>
-                    confirm(`Delete the rule ${r.name}?`) && del.mutate(r.id)
+                  onClick={async () =>
+                    (await confirmAction(`Delete the rule ${r.name}?`)) &&
+                    del.mutate(r.id)
                   }
                 >
                   <Trash2 className="size-3.5" />
@@ -487,8 +490,8 @@ function ChannelsTab() {
                   </Button>
                   <IconButton
                     label="Delete"
-                    onClick={() =>
-                      confirm(`Delete the channel ${c.name}?`) &&
+                    onClick={async () =>
+                      (await confirmAction(`Delete the channel ${c.name}?`)) &&
                       del.mutate(c.id)
                     }
                   >
@@ -559,16 +562,15 @@ function ChannelsTab() {
 }
 
 function HistoryTab() {
-  const { data = [], isLoading } = useQuery({
-    queryKey: ["alerts", "events"],
-    queryFn: async () =>
-      (await api<{ items: AlertEvent[] }>("GET", "/alerts/events?limit=200"))
-        .items,
+  const q = usePaged<AlertEvent>(["alerts", "events"], "/alerts/events", {
+    limit: 100,
     refetchInterval: 30_000,
   });
+  const { items: data, isLoading } = q;
   return (
     <Panel title="Notifications" flush>
       <DataTable
+        {...q.table}
         rows={data}
         rowKey={(e) => String(e.id)}
         empty={

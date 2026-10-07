@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
@@ -73,4 +74,10 @@ func (s *Store) migrate(ctx context.Context) error {
 func (s *Store) Close() error {
 	s.R.Close()
 	return s.W.Close()
+}
+
+// idCursor parses a page cursor that names an integer ID (0 = none).
+func idCursor(before string) int64 {
+	n, _ := strconv.ParseInt(before, 10, 64)
+	return max(n, 0)
 }

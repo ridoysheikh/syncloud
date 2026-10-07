@@ -275,9 +275,10 @@ func (m *Manager) Credentials(ctx context.Context, d store.Database) (Credential
 	return c, nil
 }
 
-// Events lists a database's scaling and failover events, newest first.
-func (m *Manager) Events(ctx context.Context, id string) ([]store.DatabaseEvent, error) {
-	ev, err := m.st.DatabaseEvents(ctx, id, 200)
+// Events lists a database's scaling and failover events, newest first,
+// older than the event before names when set.
+func (m *Manager) Events(ctx context.Context, id string, limit int, before string) ([]store.DatabaseEvent, error) {
+	ev, err := m.st.DatabaseEvents(ctx, id, limit, before)
 	if ev == nil {
 		ev = []store.DatabaseEvent{}
 	}

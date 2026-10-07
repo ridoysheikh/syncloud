@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { Cloud, Copy, Globe, Layers, Pencil, Plus, Trash2 } from "lucide-react";
+import { usePaged } from "@/lib/paged";
+import { LoadMore } from "@/ui/LoadMore";
 import { api, ApiError } from "@/lib/api";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
@@ -10,6 +12,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Meter } from "@/ui/Meter";
 import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { confirmAction } from "@/ui/dialogs";
 
 interface PoolSpec {
   region?: string;
@@ -82,9 +85,8 @@ export function NodePoolsPage() {
 function PoolPanel({ pool: p }: { pool: Pool }) {
   const qc = useQueryClient();
   const [join, setJoin] = useState("");
-  const events = useQuery({
-    queryKey: ["node-pools", p.name, "events"],
-    queryFn: async () => (await api<{ items: { id: number; at: string; kind: string; message: string }[] }>("GET", `/node-pools/${p.name}/events`)).items,
+  const events = usePaged<{ id: number; at: string; kind: string; message: string }>(["node-pools", p.name, "events"], `/node-pools/${p.name}/events`, {
+    limit: 20,
     enabled: !!p.id,
     refetchInterval: 10_000,
   });
@@ -112,7 +114,7 @@ function PoolPanel({ pool: p }: { pool: Pool }) {
                 <Pencil className="size-3.5" />
               </IconButton>
             </Link>
-            <IconButton label="Delete" onClick={() => confirm(`Delete pool ${p.name}? It must be empty.`) && del.mutate()}>
+            <IconButton label="Delete" onClick={async () => (await confirmAction(`Delete pool ${p.name}? It must be empty.`)) && del.mutate()}>
               <Trash2 className="size-3.5" />
             </IconButton>
           </>
@@ -188,16 +190,17 @@ function PoolPanel({ pool: p }: { pool: Pool }) {
             ))}
           </div>
         )}
-        {(events.data?.length ?? 0) > 0 && (
+        {events.items.length > 0 && (
           <details>
             <summary className="text-muted cursor-pointer">Scaling history</summary>
             <div className="mt-1 flex flex-col gap-0.5">
-              {events.data!.slice(0, 20).map((e) => (
-                <span key={e.id}>
+              {events.items.map((e) => (
+                <span key={e.id} className="break-words">
                   <span className="text-faint">{new Date(e.at).toLocaleString()}</span>{" "}
                   <StatusBadge tone={e.kind === "failed" ? "bad" : e.kind === "info" ? "neutral" : "info"}>{e.kind}</StatusBadge> {e.message}
                 </span>
               ))}
+              <LoadMore more={events.hasMore} loading={events.isFetchingNextPage} onMore={events.loadMore} label="Older events" />
             </div>
           </details>
         )}
@@ -234,7 +237,7 @@ function ProvidersPanel() {
             <span className="font-medium">{p.name}</span>
             <span className="text-muted">{p.type}</span>
             <span className="text-faint font-mono">{p.summary}</span>
-            <IconButton label="Delete" onClick={() => confirm(`Delete provider ${p.name}?`) && del.mutate(p.id)}>
+            <IconButton label="Delete" onClick={async () => (await confirmAction(`Delete provider ${p.name}?`)) && del.mutate(p.id)}>
               <Trash2 className="size-3.5" />
             </IconButton>
           </div>

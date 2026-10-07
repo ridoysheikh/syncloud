@@ -33,6 +33,7 @@ import {
 import { cn, gap } from "@/ui/cn";
 import { selectClass } from "../NewDatabaseWizard";
 import { duration, errText } from "./shared";
+import { confirmAction } from "@/ui/dialogs";
 
 /** The cluster's databases: list, create, rename, change owner, drop. */
 export function PgDatabases({
@@ -447,9 +448,9 @@ export function PgSessions({ path }: { path: string }) {
                   <IconButton
                     label={`End session ${s.pid}`}
                     disabled={busy === s.pid}
-                    onClick={() => {
+                    onClick={async () => {
                       if (
-                        window.confirm(
+                        await confirmAction(
                           `End session ${s.pid} (${s.user})? Its open transaction is rolled back.`,
                         )
                       ) {

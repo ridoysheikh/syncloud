@@ -35,7 +35,7 @@ func (m *Manager) JobView(ctx context.Context, j store.Job) JobView {
 			v.NextRunAt = &next
 		}
 	}
-	if runs, err := m.st.JobRuns(ctx, j.ID, 1); err == nil && len(runs) == 1 {
+	if runs, err := m.st.JobRuns(ctx, j.ID, 1, ""); err == nil && len(runs) == 1 {
 		rv := m.View(ctx, runs[0])
 		v.LastRun = &rv
 	}

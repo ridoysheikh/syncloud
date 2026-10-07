@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, Boxes, Check, Copy, Eraser, Trash2 } from "lucide-react";
+import { usePaged } from "@/lib/paged";
 import { api, ApiError } from "@/lib/api";
 import { useStreamTopic } from "@/lib/stream";
 import { serviceUrl } from "@/lib/workloads";
@@ -15,6 +16,7 @@ import { Alert, Button, IconButton, StatusBadge } from "@/ui/controls";
 import { LifecyclePanel } from "./LifecyclePanel";
 import { cn, gap } from "@/ui/cn";
 import { Tabs } from "@/ui/Tabs";
+import { confirmAction } from "@/ui/dialogs";
 
 interface Repository {
   name: string;
@@ -99,23 +101,20 @@ const actionTone = { push: "ok", pull: "info", delete: "bad" } as const;
 /** Recent pushes, pulls and deletes (§5.9 event tracking). */
 function ActivityPanel({ repo }: { repo?: string }) {
   const {
-    data = [],
+    items: data,
     isLoading,
     error,
-  } = useQuery({
-    queryKey: ["registry", "events", repo ?? ""],
-    queryFn: async () =>
-      (
-        await api<{ items: RegistryEvent[] }>(
-          "GET",
-          `/registry/events?limit=${repo ? 100 : 15}${repo ? `&repository=${encodeURIComponent(repo)}` : ""}`,
-        )
-      ).items,
-  });
+    table,
+  } = usePaged<RegistryEvent>(
+    ["registry", "events", repo ?? ""],
+    `/registry/events${repo ? `?repository=${encodeURIComponent(repo)}` : ""}`,
+    { limit: repo ? 50 : 15 },
+  );
   if (error) return null;
   return (
     <Panel title={repo ? `Activity: ${repo}` : "Recent activity"} flush>
       <DataTable
+        {...table}
         rows={data}
         rowKey={(e) => String(e.id)}
         empty={
@@ -281,10 +280,10 @@ function Cleanup() {
       flush
       actions={
         <Button
-          onClick={() =>
-            confirm(
+          onClick={async () =>
+            (await confirmAction(
               "Apply lifecycle policies and collect garbage now? Pushes are refused for the minute it runs; pulls keep working.",
-            ) && start.mutate()
+            )) && start.mutate()
           }
           disabled={data?.running || start.isPending}
         >
@@ -549,10 +548,10 @@ export function RepositoriesPage() {
                     cell: (i) => (
                       <IconButton
                         label="Delete tag"
-                        onClick={() =>
-                          confirm(
+                        onClick={async () =>
+                          (await confirmAction(
                             `Delete ${current}:${i.tag}? Tags with the same digest are deleted too.`,
-                          ) && del.mutate(i.tag)
+                          )) && del.mutate(i.tag)
                         }
                       >
                         <Trash2 className="size-3.5" />

@@ -44,6 +44,7 @@ import {
   SqlBlock,
   inlineSelect,
 } from "./shared";
+import { confirmAction } from "@/ui/dialogs";
 
 type Selection =
   | { kind: "database" }
@@ -417,9 +418,9 @@ function Extensions({ path, db }: { path: string; db: string }) {
                   <Button
                     variant="ghost"
                     disabled={change.isPending}
-                    onClick={() => {
+                    onClick={async () => {
                       if (
-                        window.confirm(
+                        await confirmAction(
                           `Drop the extension ${e.name} from ${db}? Objects that use it must be dropped first.`,
                         )
                       )

@@ -12,6 +12,11 @@ func TestLogsQLQuotesUserInput(t *testing.T) {
 	if got != want {
 		t.Fatalf("\n got %s\nwant %s", got, want)
 	}
+	f = Filter{Service: "web", Before: time.Date(2026, 10, 8, 12, 0, 0, 500, time.UTC)}
+	want = `_time:[2026-10-08T11:00:00.0000005Z, 2026-10-08T12:00:00.0000005Z) service:="web" -stream:in("access", "firewall")`
+	if got := f.LogsQL(time.Hour); got != want {
+		t.Fatalf("\n got %s\nwant %s", got, want)
+	}
 	f = Filter{Service: "web", Stream: StreamAccess, Status: "5", Client: "1.2.3.4"}
 	want = `_time:3600s service:="web" stream:="access" status:~"^5" client:="1.2.3.4"`
 	if got := f.LogsQL(time.Hour); got != want {

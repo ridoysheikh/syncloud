@@ -302,12 +302,16 @@ func (s *Server) handleDatabaseEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ev, err := s.databases.Events(r.Context(), d.ID)
+	limit, before, ok := pageParams(w, r, 100, 500)
+	if !ok {
+		return
+	}
+	ev, err := s.databases.Events(r.Context(), d.ID, limit, before)
 	if err != nil {
 		s.internalError(w, "database events", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": ev})
+	writePage(w, ev, limit, func(e store.DatabaseEvent) string { return strconv.FormatInt(e.ID, 10) })
 }
 
 // ── explorer ────────────────────────────────────────────────────────────────

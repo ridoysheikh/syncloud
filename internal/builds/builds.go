@@ -928,7 +928,7 @@ func (m *Manager) sendStatus(r statusReport) {
 // newerDeployed reports whether a build of the same ref queued after b is
 // already deployed.
 func (m *Manager) newerDeployed(ctx context.Context, b store.Build) bool {
-	recent, err := m.st.ServiceBuilds(ctx, b.ServiceID, 50)
+	recent, err := m.st.ServiceBuilds(ctx, b.ServiceID, 50, "")
 	if err != nil {
 		return false
 	}

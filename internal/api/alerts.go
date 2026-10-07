@@ -209,19 +209,14 @@ func (s *Server) handleAlertEvents(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAlerts(w) {
 		return
 	}
-	limit := 100
-	if v := r.URL.Query().Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > 1000 {
-			writeError(w, http.StatusBadRequest, CodeBadRequest, "limit must be 1–1000")
-			return
-		}
-		limit = n
+	limit, before, ok := pageParams(w, r, 100, 1000)
+	if !ok {
+		return
 	}
-	evs, err := s.store.ListAlertEvents(r.Context(), limit)
+	evs, err := s.store.ListAlertEvents(r.Context(), limit, before)
 	if err != nil {
 		s.internalError(w, "alert events", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": evs})
+	writePage(w, evs, limit, func(e store.AlertEvent) string { return strconv.FormatInt(e.ID, 10) })
 }

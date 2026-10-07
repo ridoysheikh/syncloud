@@ -86,12 +86,13 @@ func (s *Store) RecordRegistryEvents(ctx context.Context, evs []RegistryEvent) (
 }
 
 // ListRegistryEvents returns the newest events, of one repository when repo
-// is set.
-func (s *Store) ListRegistryEvents(ctx context.Context, repo string, limit int) ([]RegistryEvent, error) {
-	q := `SELECT id, at, action, repository, tag, digest, actor, addr, user_agent FROM registry_events`
-	args := []any{}
+// is set, older than the event before names when set.
+func (s *Store) ListRegistryEvents(ctx context.Context, repo string, limit int, before string) ([]RegistryEvent, error) {
+	b := idCursor(before)
+	q := `SELECT id, at, action, repository, tag, digest, actor, addr, user_agent FROM registry_events WHERE (? = 0 OR id < ?)`
+	args := []any{b, b}
 	if repo != "" {
-		q += ` WHERE repository = ?`
+		q += ` AND repository = ?`
 		args = append(args, repo)
 	}
 	q += ` ORDER BY id DESC LIMIT ?`

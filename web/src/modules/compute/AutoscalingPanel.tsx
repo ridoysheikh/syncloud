@@ -17,6 +17,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { confirmAction } from "@/ui/dialogs";
 
 type Metric = "cpu" | "memory" | "rps" | "latency";
 
@@ -199,10 +200,10 @@ export function AutoscalingPanel({
                 </Button>
                 <Button
                   variant="ghost"
-                  onClick={() =>
-                    confirm(
+                  onClick={async () =>
+                    (await confirmAction(
                       "Stop autoscaling? The task count stays where it is.",
-                    ) && off.mutate()
+                    )) && off.mutate()
                   }
                 >
                   Turn off

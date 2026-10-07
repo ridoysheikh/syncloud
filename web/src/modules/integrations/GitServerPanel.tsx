@@ -7,6 +7,7 @@ import { Panel } from "@/ui/Panel";
 import { Alert, Button, StatusBadge, Toggle } from "@/ui/controls";
 import { GiteaIcon, GitHubIcon, GitLabIcon } from "@/ui/brands";
 import { useGitConnections } from "./RepoPicker";
+import { confirmAction } from "@/ui/dialogs";
 
 interface GitServer {
   enabled: boolean;
@@ -62,8 +63,8 @@ export function GitServerPanel() {
           <Toggle
             checked={!!g?.enabled}
             disabled={!g || toggle.isPending}
-            onChange={(on) => {
-              if (!on && !confirm("Turn the built-in Git server off? Its repositories are kept and come back when you turn it on again.")) return;
+            onChange={async (on) => {
+              if (!on && !(await confirmAction("Turn the built-in Git server off? Its repositories are kept and come back when you turn it on again."))) return;
               toggle.mutate(on);
             }}
             label="Host Git repositories on this cluster (Forgejo)"

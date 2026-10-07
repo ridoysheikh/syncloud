@@ -242,8 +242,11 @@ func (s *Store) BuildByID(ctx context.Context, id string) (Build, error) {
 	return b, err
 }
 
-func (s *Store) ServiceBuilds(ctx context.Context, serviceID string, limit int) ([]Build, error) {
-	return s.queryBuilds(ctx, `WHERE service_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`, serviceID, limit)
+// ServiceBuilds returns a service's newest builds, older than the build
+// before names when set.
+func (s *Store) ServiceBuilds(ctx context.Context, serviceID string, limit int, before string) ([]Build, error) {
+	return s.queryBuilds(ctx, `WHERE service_id = ? AND (? = '' OR (created_at, rowid) < (SELECT created_at, rowid FROM builds WHERE id = ?))
+		ORDER BY created_at DESC, rowid DESC LIMIT ?`, serviceID, before, before, limit)
 }
 
 func (s *Store) BuildsByStatus(ctx context.Context, statuses ...string) ([]Build, error) {
@@ -258,8 +261,11 @@ func (s *Store) BuildsByStatus(ctx context.Context, statuses ...string) ([]Build
 	return s.queryBuilds(ctx, q+`) ORDER BY created_at`, args...)
 }
 
-func (s *Store) RecentBuilds(ctx context.Context, limit int) ([]Build, error) {
-	return s.queryBuilds(ctx, `ORDER BY created_at DESC, rowid DESC LIMIT ?`, limit)
+// RecentBuilds returns the newest builds, older than the build before
+// names when set.
+func (s *Store) RecentBuilds(ctx context.Context, limit int, before string) ([]Build, error) {
+	return s.queryBuilds(ctx, `WHERE (? = '' OR (created_at, rowid) < (SELECT created_at, rowid FROM builds WHERE id = ?))
+		ORDER BY created_at DESC, rowid DESC LIMIT ?`, before, before, limit)
 }
 
 func (s *Store) queryBuilds(ctx context.Context, where string, args ...any) ([]Build, error) {

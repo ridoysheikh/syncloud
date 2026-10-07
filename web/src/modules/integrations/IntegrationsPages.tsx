@@ -27,6 +27,7 @@ import { cn, gap } from "@/ui/cn";
 import { GiteaIcon, GitHubIcon, GitLabIcon } from "@/ui/brands";
 import { GitServerPanel } from "./GitServerPanel";
 import { kindLabel, useGitConnections, useRepos, type GitConnection, type GitKind } from "./RepoPicker";
+import { confirmAction } from "@/ui/dialogs";
 
 const providers: { kind: GitKind; title: string; icon: typeof GitHubIcon; blurb: string; recommended?: boolean }[] = [
   {
@@ -390,7 +391,7 @@ export function GitConnectionPage() {
             variant="danger"
             disabled={c.services.length > 0 || del.isPending}
             title={c.services.length > 0 ? "Disconnect its services first" : undefined}
-            onClick={() => confirm(`Remove the connection ${c.name}?`) && del.mutate()}
+            onClick={async () => (await confirmAction(`Remove the connection ${c.name}?`)) && del.mutate()}
           >
             <Trash2 className="size-3.5" /> Remove
           </Button>
@@ -400,11 +401,11 @@ export function GitConnectionPage() {
       {del.error && <Alert>{errText(del.error, "Could not remove")}</Alert>}
       <div className={cn("grid grid-cols-1 lg:grid-cols-3", gap)}>
         <Panel title="Connection">
-          <dl className="grid grid-cols-[6rem_1fr] gap-y-1.5 text-xs">
+          <dl className="grid grid-cols-[6rem_minmax(0,1fr)] gap-y-1.5 text-xs">
             <dt className="text-muted">Type</dt>
             <dd>{kindLabel[c.kind]}</dd>
             <dt className="text-muted">Account</dt>
-            <dd className="font-mono">{c.account}</dd>
+            <dd className="font-mono break-all">{c.account}</dd>
             <dt className="text-muted">Server</dt>
             <dd className="font-mono break-all">{c.webUrl}</dd>
             <dt className="text-muted">Added</dt>
@@ -412,7 +413,7 @@ export function GitConnectionPage() {
             {c.kind === "github-app" && (
               <>
                 <dt className="text-muted">Installed on</dt>
-                <dd className="font-mono">{c.installations?.length ? c.installations.join(", ") : "nowhere yet"}</dd>
+                <dd className="font-mono break-all">{c.installations?.length ? c.installations.join(", ") : "nowhere yet"}</dd>
               </>
             )}
           </dl>

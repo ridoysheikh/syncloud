@@ -11,6 +11,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { confirmAction } from "@/ui/dialogs";
 
 export interface SGRule {
   protocol: "tcp" | "udp" | "icmp" | "any";
@@ -165,7 +166,7 @@ export function SecurityGroupsPage() {
                   {!g.default && (
                     <IconButton
                       label="Delete"
-                      onClick={() => confirm(`Delete ${g.project}/${g.name}? Its services fall back to the default group unless they have another.`) && del.mutate(g)}
+                      onClick={async () => (await confirmAction(`Delete ${g.project}/${g.name}? Its services fall back to the default group unless they have another.`)) && del.mutate(g)}
                     >
                       <Trash2 className="size-3.5" />
                     </IconButton>

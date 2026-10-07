@@ -378,7 +378,7 @@ func (m *Manager) meter(ctx context.Context, from, to time.Time) {
 		cancel()
 	}
 	// Build minutes: builds that finished in this window.
-	if bs, err := m.st.RecentBuilds(ctx, 200); err == nil {
+	if bs, err := m.st.RecentBuilds(ctx, 200, ""); err == nil {
 		for _, b := range bs {
 			if b.FinishedAt == nil || b.StartedAt == nil || !b.FinishedAt.After(from) || b.FinishedAt.After(to) {
 				continue

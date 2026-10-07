@@ -78,6 +78,9 @@ type Filter struct {
 	// NoProject selects only lines outside any project (standalone
 	// databases); Project must be "".
 	NoProject bool
+	// Before pages back (§14): the window then ends just before it
+	// instead of now.
+	Before time.Time
 }
 
 func (f Filter) match(l Line) bool {
@@ -381,6 +384,10 @@ func quote(s string) string {
 // LogsQL builds the query for f over the last `since`.
 func (f Filter) LogsQL(since time.Duration) string {
 	parts := []string{fmt.Sprintf("_time:%ds", int(since.Seconds()))}
+	if !f.Before.IsZero() {
+		end := f.Before.UTC()
+		parts[0] = fmt.Sprintf("_time:[%s, %s)", end.Add(-since).Format(time.RFC3339Nano), end.Format(time.RFC3339Nano))
+	}
 	for _, kv := range [][2]string{{"project", f.Project}, {"environment", f.Environment}, {"service", f.Service}, {"task_id", f.TaskID}, {"node", f.Node}} {
 		if kv[1] != "" {
 			parts = append(parts, kv[0]+":="+quote(kv[1]))

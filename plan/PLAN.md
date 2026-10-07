@@ -2018,6 +2018,61 @@ One image runs every role, chosen by its command: Patroni-managed Postgres, PgBo
   - **Not in this step:** a leader with pending settings restarts in place (a few seconds without writes) rather than switching over first.
 - ⬜ 13b2, 13d, 13e.
 
+### Phase 14: UI/UX — dialogs, lazy loading, overflow (user request, 2026-10-08)
+
+**Dialogs:** no native `confirm()`, `alert()` or `prompt()` anywhere.
+- `web/src/ui/dialogs.tsx` provides promise-based `confirmDialog({title, message, confirmLabel, tone, typeToConfirm})` and `alertDialog({title, message, tone})`, rendered by one `<DialogHost/>` at the app root. It uses the existing `<dialog>` component: focus trap, Esc to cancel, Enter to confirm.
+- Destructive actions use the danger tone. Deleting a database (or anything that names the data) requires typing its name.
+- All 42 `confirm()` sites and the one `prompt()` site move to it. A lint check (a unit test that greps `src/`) keeps native dialogs out.
+
+**Lazy loading:**
+- **Client side:** `DataTable` renders 50 rows, then 50 more each time a sentinel row scrolls into view (IntersectionObserver), with a "Show more (N left)" button as a fallback. Every table in the app gets this.
+- **Server side:** history endpoints take `limit` and `before` (the ID of the last item seen) and return `{items, next}`, where `next` is the cursor, or empty at the end.
+  - The endpoints: database events, alert events, registry events, node-pool events, job runs, builds, deployments and audit (which already takes `before`).
+  - The store compares `(created_at, rowid)` against the row the cursor names (integer IDs where the table has them), so pages are stable while new rows arrive.
+  - The web uses `usePaged()` (`useInfiniteQuery`) and the table's footer loads the next page as it scrolls into view.
+- **Logs:** `/logs` takes `before`. "Load older" fetches the previous window (the selected range) ending at the oldest line shown, so every query stays bounded. Live tail continues at the bottom, and the view keeps at most 5,000 lines.
+
+**Overflow and responsiveness:**
+- A Playwright sweep visits every route, both index and detail pages with seeded long names, at 390 px and 1440 px. It flags:
+  - page-level horizontal scroll;
+  - elements whose content overflows their box without being a scroll container.
+- Fixes go into the shared components where possible:
+  - `PageHeader` titles truncate;
+  - detail rows wrap long values (`break-all` for IDs and URLs);
+  - table cells cap width and truncate, with a title tooltip;
+  - flex children get `min-w-0`;
+  - code blocks scroll inside their box.
+- The sweep runs again after the fixes.
+
+**Progress:** ✅ 2026-10-08.
+- **Dialogs:**
+  - `ui/dialogs.tsx` provides `confirmDialog`, `alertDialog`, and `confirmAction`, which builds a dialog from one sentence: question, details, verb-based label and tone. It is rendered by `<DialogHost/>` in `main.tsx`.
+  - All 42 `confirm()` sites and the `prompt()` site are converted.
+  - Deleting a database requires typing its name.
+  - `internal/web/nodialogs_test.go` fails on any native dialog in `web/src`.
+- **Lazy loading:**
+  - `ui/LoadMore` (IntersectionObserver plus a button).
+  - `DataTable` renders 50 rows at a time and takes `hasMore`/`onLoadMore`.
+  - `lib/paged.ts` provides `usePaged` (`useInfiniteQuery`; the refetch interval may depend on the loaded items).
+  - `limit`/`before` and `{items, next}` on database, alert, registry and node-pool events, job runs, service and recent builds, and deployments. The cursors are integer IDs, or `(created_at, rowid)` comparisons against the row the cursor names (`TestCursorPages`). The OpenAPI spec documents them.
+  - Logs: `before` on `/logs` (`Filter.Before` becomes a `_time:[start, end)` window). The log view's "Load older" button, and scrolling to the top, page back one range at a time, keep the reader's place, and report empty ranges. At most 5,000 lines are kept.
+- **Overflow:**
+  - The sweep (`scratchpad/pw/sweep.mjs`): crawl from the desktop nav (106 routes), then the same routes at 390 px. The page scroller (`main`) counts as the page.
+  - It found the quotas header actions (page scroll on phones) and the service endpoint list (long URLs).
+  - Fixed in shared components:
+    - `PageHeader` actions and status wrap;
+    - `Panel` header actions wrap (`min-h-8`);
+    - detail lists use `minmax(0, 1fr)` with `break-all`;
+    - tab rows fade at the right edge on narrow screens and keep the selected tab in view.
+  - Also fixed the "1 tasks" plural.
+  - The sweep afterwards: 0 issues at both widths.
+  - Verified in the browser:
+    - a confirmation dialog, with Cancel and Esc;
+    - type-to-confirm (disabled until the exact name);
+    - no native dialogs fired;
+    - logs over a 5-minute range: 62 → 121 → 240 lines, with button and scroll loading.
+
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)
 

@@ -1882,6 +1882,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "page size",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "cursor: the next value of the previous page (the ID of its last item)",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1897,6 +1915,10 @@
                       "items": {
                         "type": "object"
                       }
+                    },
+                    "next": {
+                      "type": "string",
+                      "description": "cursor of the next page; empty at the end"
                     }
                   }
                 }
@@ -4787,6 +4809,16 @@
               "type": "string"
             },
             "description": "request lines from this client IP"
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "page back: the window ends just before this time (the oldest line already shown, RFC 3339)",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
           }
         ],
         "responses": {
@@ -5236,6 +5268,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "page size",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "cursor: the next value of the previous page (the ID of its last item)",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5251,6 +5301,10 @@
                       "items": {
                         "$ref": "#/components/schemas/Deployment"
                       }
+                    },
+                    "next": {
+                      "type": "string",
+                      "description": "cursor of the next page; empty at the end"
                     }
                   }
                 }
@@ -5598,6 +5652,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "page size",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "cursor: the next value of the previous page (the ID of its last item)",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5613,6 +5685,10 @@
                       "items": {
                         "$ref": "#/components/schemas/JobRun"
                       }
+                    },
+                    "next": {
+                      "type": "string",
+                      "description": "cursor of the next page; empty at the end"
                     }
                   }
                 }
@@ -6232,6 +6308,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "page size",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "cursor: the next value of the previous page (the ID of its last item)",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -6247,6 +6341,10 @@
                       "items": {
                         "$ref": "#/components/schemas/Build"
                       }
+                    },
+                    "next": {
+                      "type": "string",
+                      "description": "cursor of the next page; empty at the end"
                     }
                   }
                 }
@@ -6349,13 +6447,37 @@
                       "items": {
                         "$ref": "#/components/schemas/Build"
                       }
+                    },
+                    "next": {
+                      "type": "string",
+                      "description": "cursor of the next page; empty at the end"
                     }
                   }
                 }
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "page size",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "cursor: the next value of the previous page (the ID of its last item)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/v1/builds/{id}/deploy": {
@@ -7529,6 +7651,15 @@
               "type": "integer"
             },
             "description": "1-1000, default 100"
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "cursor: the next value of the previous page (the ID of its last item)",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7544,6 +7675,10 @@
                       "items": {
                         "$ref": "#/components/schemas/RegistryEvent"
                       }
+                    },
+                    "next": {
+                      "type": "string",
+                      "description": "cursor of the next page; empty at the end"
                     }
                   }
                 }
@@ -8508,6 +8643,15 @@
               "type": "integer"
             },
             "description": "1-1000, default 100"
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "cursor: the next value of the previous page (the ID of its last item)",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -8523,6 +8667,10 @@
                       "items": {
                         "$ref": "#/components/schemas/AlertEvent"
                       }
+                    },
+                    "next": {
+                      "type": "string",
+                      "description": "cursor of the next page; empty at the end"
                     }
                   }
                 }
@@ -12890,6 +13038,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "page size",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "cursor: the next value of the previous page (the ID of its last item)",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -12923,6 +13089,10 @@
                           }
                         }
                       }
+                    },
+                    "next": {
+                      "type": "string",
+                      "description": "cursor of the next page; empty at the end"
                     }
                   }
                 }

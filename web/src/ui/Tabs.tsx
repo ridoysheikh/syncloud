@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "./cn";
 
 /** The 1px rule under a tab row, drawn as a shadow so it survives the scroller's clipping. */
@@ -23,11 +23,20 @@ export function Tabs<T extends string>({
   capitalize?: boolean;
   className?: string;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Keep the selected tab in view when the row scrolls (narrow screens).
+  useEffect(() => {
+    ref.current
+      ?.querySelector<HTMLElement>("[aria-selected=true]")
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [value]);
   return (
     <div
+      ref={ref}
       role="tablist"
       className={cn(
-        "flex min-w-0 gap-3 overflow-x-auto overflow-y-hidden text-xs [scrollbar-width:none]",
+        // On narrow screens the right edge fades: more tabs scroll in.
+        "flex min-w-0 gap-3 overflow-x-auto overflow-y-hidden pr-4 text-xs [scrollbar-width:none] max-md:[mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]",
         tabRule,
         className,
       )}

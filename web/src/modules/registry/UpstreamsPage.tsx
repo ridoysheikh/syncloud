@@ -9,6 +9,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { confirmAction } from "@/ui/dialogs";
 
 interface Credential {
   id: string;
@@ -97,10 +98,10 @@ export function UpstreamsPage() {
                 cell: (c) => (
                   <IconButton
                     label="Delete"
-                    onClick={() =>
-                      confirm(
+                    onClick={async () =>
+                      (await confirmAction(
                         `Delete the credential for ${c.host}? Pulls become anonymous.`,
-                      ) && del.mutate(c.id)
+                      )) && del.mutate(c.id)
                     }
                   >
                     <Trash2 className="size-3.5" />

@@ -161,7 +161,11 @@ func (s *Server) handleJobRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	runs, err := s.store.JobRuns(r.Context(), j.ID, 100)
+	limit, before, ok := pageParams(w, r, 50, 500)
+	if !ok {
+		return
+	}
+	runs, err := s.store.JobRuns(r.Context(), j.ID, limit, before)
 	if err != nil {
 		s.internalError(w, "list runs", err)
 		return
@@ -170,7 +174,7 @@ func (s *Server) handleJobRuns(w http.ResponseWriter, r *http.Request) {
 	for _, x := range runs {
 		out = append(out, s.jobs.View(r.Context(), x))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "next": nextCursor(runs, limit, func(x store.JobRun) string { return x.ID })})
 }
 
 // handleRunService starts an ad-hoc run of a service's task definition.

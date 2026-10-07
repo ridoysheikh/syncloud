@@ -218,8 +218,11 @@ func (s *Store) ActiveRuns(ctx context.Context) ([]JobRun, error) {
 	return s.queryRuns(ctx, `WHERE status IN ('pending', 'running') ORDER BY created_at`)
 }
 
-func (s *Store) JobRuns(ctx context.Context, jobID string, limit int) ([]JobRun, error) {
-	return s.queryRuns(ctx, `WHERE job_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`, jobID, limit)
+// JobRuns returns a job's newest runs, older than the run before names
+// when set.
+func (s *Store) JobRuns(ctx context.Context, jobID string, limit int, before string) ([]JobRun, error) {
+	return s.queryRuns(ctx, `WHERE job_id = ? AND (? = '' OR (created_at, rowid) < (SELECT created_at, rowid FROM job_runs WHERE id = ?))
+		ORDER BY created_at DESC, rowid DESC LIMIT ?`, jobID, before, before, limit)
 }
 
 func (s *Store) RunsIn(ctx context.Context, environmentID string, limit int) ([]JobRun, error) {

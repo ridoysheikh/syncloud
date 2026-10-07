@@ -109,16 +109,11 @@ func (s *Server) handleRegistryEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "repository must be a registry path like shop/api")
 		return
 	}
-	limit := 100
-	if v := q.Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > 1000 {
-			writeError(w, http.StatusBadRequest, CodeBadRequest, "limit must be 1-1000")
-			return
-		}
-		limit = n
+	limit, before, ok := pageParams(w, r, 100, 1000)
+	if !ok {
+		return
 	}
-	evs, err := s.store.ListRegistryEvents(r.Context(), repo, limit)
+	evs, err := s.store.ListRegistryEvents(r.Context(), repo, limit, before)
 	if err != nil {
 		s.internalError(w, "list registry events", err)
 		return
@@ -136,5 +131,5 @@ func (s *Server) handleRegistryEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		evs[i].Actor = name
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": evs})
+	writePage(w, evs, limit, func(e store.RegistryEvent) string { return strconv.FormatInt(e.ID, 10) })
 }

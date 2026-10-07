@@ -34,12 +34,13 @@ export function Panel({
       {(title || actions) && (
         <header
           className={cn(
-            "flex items-center justify-between gap-2",
-            nested ? "h-6" : "border-line h-8 border-b px-2 md:px-3",
+            // Actions wrap under the title on narrow screens instead of overflowing.
+            "flex flex-wrap items-center justify-between gap-x-2 gap-y-1",
+            nested ? "min-h-6" : "border-line min-h-8 border-b px-2 py-0.5 md:px-3",
           )}
         >
-          <h2 className="text-muted truncate text-xs font-medium tracking-wide uppercase">{title}</h2>
-          {actions && <div className="flex items-center gap-1">{actions}</div>}
+          <h2 className="text-muted min-w-0 truncate text-xs font-medium tracking-wide uppercase">{title}</h2>
+          {actions && <div className="flex min-w-0 flex-wrap items-center gap-1">{actions}</div>}
         </header>
       )}
       <NestedContext.Provider value={!flush || nested}>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Minus, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { usePaged } from "@/lib/paged";
 import { api, ApiError } from "@/lib/api";
 import {
   deploymentTone,
@@ -40,6 +41,7 @@ import { ServiceSecurityPanel } from "@/modules/network/SecurityGroups";
 import { AutoscalingPanel } from "./AutoscalingPanel";
 import { Tabs } from "@/ui/Tabs";
 import { ServicePlacementPanel } from "@/modules/projects/NodeLimits";
+import { confirmAction } from "@/ui/dialogs";
 
 interface Revision {
   revision: number;
@@ -138,7 +140,7 @@ export function ServicePage() {
                 className="w-14 text-center font-mono text-xs"
                 title="desired tasks"
               >
-                {svc.desiredCount} tasks
+                {svc.desiredCount} {svc.desiredCount === 1 ? "task" : "tasks"}
               </span>
               <IconButton
                 label="Scale up"
@@ -150,8 +152,8 @@ export function ServicePage() {
             </div>
             <Button
               variant="danger"
-              onClick={() =>
-                confirm(`Delete ${name}? All its tasks stop.`) && del.mutate()
+              onClick={async () =>
+                (await confirmAction(`Delete ${name}? All its tasks stop.`)) && del.mutate()
               }
             >
               <Trash2 className="size-3.5" /> Delete
@@ -207,7 +209,7 @@ export function ServicePage() {
       </div>
       {(svc.endpoints.length > 0 || svc.vip) && (
         <Panel title="Endpoints">
-          <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-xs">
+          <dl className="grid grid-cols-[6rem_minmax(0,1fr)] gap-y-1 text-xs">
             {svc.endpoints.length > 0 && (
               <>
                 <dt className="text-muted">Public</dt>
@@ -218,9 +220,10 @@ export function ServicePage() {
                       href={e}
                       target="_blank"
                       rel="noreferrer"
-                      className="hover:text-accent inline-flex items-center gap-1 font-mono"
+                      className="hover:text-accent inline-flex min-w-0 items-center gap-1 font-mono"
                     >
-                      {e} <ExternalLink className="size-3" />
+                      <span className="break-all">{e}</span>{" "}
+                      <ExternalLink className="size-3 shrink-0" />
                     </a>
                   ))}
                 </dd>
@@ -229,7 +232,7 @@ export function ServicePage() {
             {svc.vip && (
               <>
                 <dt className="text-muted">Internal</dt>
-                <dd className="font-mono">
+                <dd className="font-mono break-all">
                   {svc.dnsName} <span className="text-faint">→ {svc.vip}</span>
                   <div className="text-faint font-sans">
                     Other services in {svc.project}/{svc.environment} can use{" "}
@@ -334,15 +337,14 @@ function ServiceTasks({ id, path }: { id: string; path: string }) {
 }
 
 function Deployments({ path }: { path: string }) {
-  const { data = [] } = useQuery({
-    queryKey: ["deployments", path],
-    queryFn: async () =>
-      (await api<{ items: Deployment[] }>("GET", `${path}/deployments`)).items,
+  const q = usePaged<Deployment>(["deployments", path], `${path}/deployments`, {
     refetchInterval: 5000,
   });
+  const data = q.items;
   return (
     <Panel flush>
       <DataTable
+        {...q.table}
         rows={data}
         rowKey={(d) => d.id}
         columns={[
@@ -436,8 +438,8 @@ function Revisions({ path }: { path: string }) {
               !r.current && (
                 <Button
                   variant="ghost"
-                  onClick={() =>
-                    confirm(`Roll out revision ${r.revision} again?`) &&
+                  onClick={async () =>
+                    (await confirmAction(`Roll out revision ${r.revision} again?`)) &&
                     rollback.mutate(r.revision)
                   }
                 >

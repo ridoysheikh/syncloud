@@ -98,7 +98,7 @@ func (m *Manager) serviceView(ctx context.Context, sv store.Service) (ServiceVie
 		v.Endpoints = []string{}
 	}
 	v.VIP, v.DNSName = Discovery(sv)
-	if ds, err := m.st.ListDeployments(ctx, sv.ID, 1); err == nil && len(ds) == 1 {
+	if ds, err := m.st.ListDeployments(ctx, sv.ID, 1, ""); err == nil && len(ds) == 1 {
 		v.Deployment = &ds[0]
 	}
 	tasks, err := m.st.ServiceTasks(ctx, sv.ID, 0)

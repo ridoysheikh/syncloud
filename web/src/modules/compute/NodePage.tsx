@@ -24,6 +24,7 @@ import { Tabs } from "@/ui/Tabs";
 import { Terminal } from "@/ui/Terminal";
 import { Alert, Button, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { confirmAction } from "@/ui/dialogs";
 
 const CONTROLLER = "ctl-0";
 const nodesPath: string = "/compute/nodes";
@@ -173,10 +174,10 @@ function ScheduleActions({ node }: { node: Node }) {
         Cordon
       </Button>
       <Button
-        onClick={() =>
-          confirm(
+        onClick={async () =>
+          (await confirmAction(
             `Drain ${node.name}? Its tasks move to other nodes as replacements become healthy.`,
-          ) && act.mutate("drain")
+          )) && act.mutate("drain")
         }
         disabled={act.isPending}
       >

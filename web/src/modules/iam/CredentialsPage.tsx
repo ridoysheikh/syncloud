@@ -9,6 +9,7 @@ import { Dialog } from "@/ui/Dialog";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { confirmAction } from "@/ui/dialogs";
 
 interface AccessKey {
   id: string;
@@ -93,7 +94,7 @@ function AccessKeysPanel() {
             cell: (k) => (
               <IconButton
                 label={`Delete ${k.id}`}
-                onClick={() => confirm(`Delete access key ${k.id}? Anything using it stops working immediately.`) && del.mutate(k.id)}
+                onClick={async () => (await confirmAction(`Delete access key ${k.id}? Anything using it stops working immediately.`)) && del.mutate(k.id)}
               >
                 <Trash2 className="size-3.5" />
               </IconButton>
@@ -168,7 +169,7 @@ function TokensPanel() {
           {
             header: "",
             cell: (t) => (
-              <IconButton label={`Delete ${t.name}`} onClick={() => confirm(`Delete token "${t.name}"?`) && del.mutate(t.id)}>
+              <IconButton label={`Delete ${t.name}`} onClick={async () => (await confirmAction(`Delete token "${t.name}"?`)) && del.mutate(t.id)}>
                 <Trash2 className="size-3.5" />
               </IconButton>
             ),

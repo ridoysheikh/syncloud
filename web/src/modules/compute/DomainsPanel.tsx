@@ -6,6 +6,7 @@ import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, IconButton, Input, StatusBadge } from "@/ui/controls";
+import { confirmAction } from "@/ui/dialogs";
 
 interface DomainCheck {
   host: string;
@@ -154,8 +155,9 @@ export function DomainsPanel({
             cell: (d) => (
               <IconButton
                 label="Remove domain"
-                onClick={() =>
-                  confirm(`Stop routing ${d.host}?`) && remove.mutate(d.host)
+                onClick={async () =>
+                  (await confirmAction(`Stop routing ${d.host}?`)) &&
+                  remove.mutate(d.host)
                 }
               >
                 <Trash2 className="size-3.5" />

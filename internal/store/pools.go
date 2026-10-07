@@ -191,8 +191,11 @@ func (s *Store) AddPoolEvent(ctx context.Context, e PoolEvent) error {
 	return err
 }
 
-func (s *Store) ListPoolEvents(ctx context.Context, poolID string, limit int) ([]PoolEvent, error) {
-	rows, err := s.R.QueryContext(ctx, `SELECT id, pool_id, at, kind, message FROM pool_events WHERE pool_id = ? ORDER BY id DESC LIMIT ?`, poolID, limit)
+// ListPoolEvents returns the newest events, older than the event before
+// names when set.
+func (s *Store) ListPoolEvents(ctx context.Context, poolID string, limit int, before string) ([]PoolEvent, error) {
+	b := idCursor(before)
+	rows, err := s.R.QueryContext(ctx, `SELECT id, pool_id, at, kind, message FROM pool_events WHERE pool_id = ? AND (? = 0 OR id < ?) ORDER BY id DESC LIMIT ?`, poolID, b, b, limit)
 	if err != nil {
 		return nil, err
 	}

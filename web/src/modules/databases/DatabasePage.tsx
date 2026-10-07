@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { Check, Copy, Eye, EyeOff, RefreshCw, Trash2 } from "lucide-react";
+import { usePaged } from "@/lib/paged";
 import { api, ApiError } from "@/lib/api";
 import { bytes, since } from "@/lib/nodes";
 import {
@@ -33,6 +34,7 @@ import { PgDatabases, PgSessions } from "./pg/Databases";
 import { PgExplorer } from "./pg/Explorer";
 import { PgRoles } from "./pg/Roles";
 import { AccessEditor, allowList, PublicFields } from "./Network";
+import { confirmAction, confirmDialog } from "@/ui/dialogs";
 
 type Tab =
   | "overview"
@@ -202,10 +204,10 @@ function FailoverButton({ d, path }: { d: Database; path: string }) {
       )}
       <Button
         disabled={fo.isPending}
-        onClick={() =>
-          confirm(
+        onClick={async () =>
+          (await confirmAction(
             `Fail over ${d.name}? A replica becomes primary; clients reconnect within seconds.`,
-          ) && fo.mutate()
+          )) && fo.mutate()
         }
       >
         <RefreshCw className="size-3.5" /> Failover
@@ -785,10 +787,7 @@ interface DbEvent {
 
 function Autoscaling({ d, path }: { d: Database; path: string }) {
   const qc = useQueryClient();
-  const events = useQuery({
-    queryKey: ["db-events", path],
-    queryFn: async () =>
-      (await api<{ items: DbEvent[] }>("GET", `${path}/events`)).items,
+  const events = usePaged<DbEvent>(["db-events", path], `${path}/events`, {
     refetchInterval: 10_000,
   });
   const init = useMemo(
@@ -893,7 +892,8 @@ function Autoscaling({ d, path }: { d: Database; path: string }) {
         <Panel title="Events" flush>
           <DataTable
             columns={columns}
-            rows={events.data ?? []}
+            {...events.table}
+            rows={events.items}
             rowKey={(e) => String(e.id)}
             empty={
               <p className="text-faint px-2 py-3 text-xs md:px-3">
@@ -986,10 +986,14 @@ function Settings({ d, path }: { d: Database; path: string }) {
             <Button
               variant="danger"
               disabled={del.isPending}
-              onClick={() =>
-                prompt(
-                  `Type ${d.name} to delete the database and all its data`,
-                ) === d.name && del.mutate()
+              onClick={async () =>
+                (await confirmDialog({
+                  title: `Delete ${d.name}?`,
+                  message:
+                    "Every member stops and its data volumes are deleted. Backups in S3 stay. This cannot be undone.",
+                  tone: "danger",
+                  typeToConfirm: d.name,
+                })) && del.mutate()
               }
             >
               <Trash2 className="size-3.5" /> Delete

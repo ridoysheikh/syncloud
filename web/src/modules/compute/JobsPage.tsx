@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Play, Square } from "lucide-react";
+import { usePaged } from "@/lib/paged";
 import { api, ApiError } from "@/lib/api";
 import { subscribe } from "@/lib/stream";
 import { since } from "@/lib/nodes";
@@ -195,12 +196,14 @@ export function JobsPage() {
 
 function JobDialog({ job, onClose }: { job: Job; onClose: () => void }) {
   const qc = useQueryClient();
-  const { data: runs = [] } = useQuery({
-    queryKey: ["jobs", job.id, "runs"],
-    queryFn: async () =>
-      (await api<{ items: JobRun[] }>("GET", `${jobPath(job)}/runs`)).items,
-    refetchInterval: 3000,
-  });
+  const runsQ = usePaged<JobRun>(
+    ["jobs", job.id, "runs"],
+    `${jobPath(job)}/runs`,
+    {
+      refetchInterval: 3000,
+    },
+  );
+  const runs = runsQ.items;
   const [selected, setSelected] = useState<string | null>(null);
   const cancel = useMutation({
     mutationFn: (id: string) => api("POST", `/runs/${id}/cancel`),
@@ -218,6 +221,7 @@ function JobDialog({ job, onClose }: { job: Job; onClose: () => void }) {
         </div>
         <div className="border-line max-h-60 overflow-auto rounded-sm border">
           <DataTable
+            {...runsQ.table}
             rows={runs}
             rowKey={(r) => r.id}
             columns={[

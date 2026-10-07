@@ -25,12 +25,16 @@ export function PageHeader({
             ))}
           </div>
         )}
-        <div className="flex items-center gap-2">
-          <h1 className="truncate text-base font-semibold">{title}</h1>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <h1 className="min-w-0 truncate text-base font-semibold">{title}</h1>
           {status}
         </div>
       </div>
-      {actions && <div className="flex items-center gap-1.5">{actions}</div>}
+      {actions && (
+        <div className="flex max-w-full min-w-0 flex-wrap items-center gap-1.5">
+          {actions}
+        </div>
+      )}
     </div>
   );
 }

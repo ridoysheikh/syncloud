@@ -77,6 +77,14 @@ func (s *Server) handleQueryLogs(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if v := q.Get("before"); v != "" {
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, CodeBadRequest, "before must be an RFC 3339 time (a line's time)")
+			return
+		}
+		f.Before = t
+	}
 	dbRes, ok := s.databaseLogFilter(w, r, &f)
 	if !ok || !s.logScope(w, r, f, dbRes) {
 		return

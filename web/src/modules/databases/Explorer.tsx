@@ -19,6 +19,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { selectClass } from "./NewDatabaseWizard";
+import { confirmAction } from "@/ui/dialogs";
 
 interface KeyInfo {
   key: string;
@@ -288,7 +289,9 @@ function KeyView({
           </IconButton>
           <IconButton
             label="Delete key"
-            onClick={() => confirm(`Delete ${keyName}?`) && del.mutate()}
+            onClick={async () =>
+              (await confirmAction(`Delete ${keyName}?`)) && del.mutate()
+            }
           >
             <Trash2 className="size-3.5" />
           </IconButton>
@@ -377,8 +380,8 @@ function ValueEditor({
     },
   });
   const cell = "border-line border-b px-2 py-1 align-top";
-  const del = (args: string[]) =>
-    confirm(`Run ${args.join(" ")}?`) && run(args);
+  const del = async (args: string[]) =>
+    (await confirmAction(`Run ${args.join(" ")}?`)) && run(args);
   const addRow = (label: [string, string?], onAdd: () => void) => (
     <form
       className="flex flex-wrap items-end gap-1.5"

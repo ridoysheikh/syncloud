@@ -10,6 +10,7 @@ import { Dialog } from "@/ui/Dialog";
 import { Alert, Button, Field, IconButton } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { NodesTable } from "./NodesTable";
+import { confirmAction } from "@/ui/dialogs";
 
 interface JoinToken {
   id: string;
@@ -86,10 +87,10 @@ export function NodesPage() {
           nodes={nodes}
           loading={isLoading}
           onSchedule={(n, action) => schedule.mutate({ id: n.id, action })}
-          onDelete={(n) =>
-            confirm(
+          onDelete={async (n) =>
+            (await confirmAction(
               `Remove node ${n.name}? Its certificate stops working immediately and it must join again.`,
-            ) && remove.mutate(n.id)
+            )) && remove.mutate(n.id)
           }
         />
       </Panel>

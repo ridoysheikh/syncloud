@@ -563,13 +563,14 @@ func (s *Server) handleServiceDeployments(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	ds, err := s.store.ListDeployments(r.Context(), sv.ID, 50)
+	limit, before, ok := pageParams(w, r, 50, 500)
+	if !ok {
+		return
+	}
+	ds, err := s.store.ListDeployments(r.Context(), sv.ID, limit, before)
 	if err != nil {
 		s.internalError(w, "list deployments", err)
 		return
 	}
-	if ds == nil {
-		ds = []store.Deployment{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": ds})
+	writePage(w, ds, limit, func(d store.Deployment) string { return d.ID })
 }

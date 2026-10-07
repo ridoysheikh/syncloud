@@ -33,6 +33,7 @@ import { Tabs } from "@/ui/Tabs";
 import { ProjectNodesPanel } from "./NodeLimits";
 import { DatabasesTable } from "@/modules/databases/DatabasesPage";
 import { useDatabases } from "@/lib/databases";
+import { confirmAction } from "@/ui/dialogs";
 
 type Tab =
   | "services"
@@ -402,8 +403,9 @@ function ProjectSettings({
                     variant="ghost"
                     disabled={n > 0 || environments.length === 1}
                     title={n > 0 ? "Delete its services first" : undefined}
-                    onClick={() =>
-                      confirm(`Delete environment ${e}?`) && delEnv.mutate(e)
+                    onClick={async () =>
+                      (await confirmAction(`Delete environment ${e}?`)) &&
+                      delEnv.mutate(e)
                     }
                   >
                     <Trash2 className="size-3.5" />
@@ -437,8 +439,9 @@ function ProjectSettings({
           <Button
             variant="danger"
             disabled={services.length > 0 || delProject.isPending}
-            onClick={() =>
-              confirm(`Delete project ${project}?`) && delProject.mutate()
+            onClick={async () =>
+              (await confirmAction(`Delete project ${project}?`)) &&
+              delProject.mutate()
             }
           >
             <Trash2 className="size-3.5" /> Delete project

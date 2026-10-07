@@ -141,7 +141,7 @@ func TestRegistryEventsCountOnePullPerPull(t *testing.T) {
 	if st, _ := s.ImageStatsFor(ctx, "shop/api"); len(st) != 0 {
 		t.Errorf("stats kept after delete: %v", st)
 	}
-	evs, _ := s.ListRegistryEvents(ctx, "shop/api", 10)
+	evs, _ := s.ListRegistryEvents(ctx, "shop/api", 10, "")
 	if len(evs) != 4 || evs[0].Action != "delete" {
 		t.Errorf("events %+v", evs)
 	}
