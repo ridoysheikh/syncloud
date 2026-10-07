@@ -131,12 +131,27 @@ func (s *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 		Environment string      `json:"environment"`
 		Spec        dbs.Spec    `json:"spec"`
 		Network     dbs.Network `json:"network"`
+		// Restore creates a PostgreSQL cluster from another one's backups.
+		Restore *dbs.PgRestore `json:"restore"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	cr := dbs.CreateRequest{Name: req.Name, Engine: req.Engine, Version: req.Version, Spec: req.Spec, Network: req.Network, Exists: s.dbPeerExists(r)}
+	cr := dbs.CreateRequest{Name: req.Name, Engine: req.Engine, Version: req.Version, Spec: req.Spec, Network: req.Network, Exists: s.dbPeerExists(r), Restore: req.Restore}
+	if req.Restore != nil {
+		// A restore copies the source's data and passwords: it takes the
+		// right to read the source's credentials.
+		src, err := s.store.DatabaseByName(r.Context(), req.Restore.From)
+		if err != nil {
+			writeError(w, http.StatusNotFound, CodeNotFound, "no database "+req.Restore.From)
+			return
+		}
+		if d := s.decide(r, "database:GetDatabaseCredentials", dbSRN(src)); !d.Allowed {
+			s.denied(w, r, "database:GetDatabaseCredentials", dbSRN(src), d.Reason)
+			return
+		}
+	}
 	if req.Project != "" || req.Environment != "" {
 		if req.Project == "" || req.Environment == "" {
 			writeError(w, http.StatusBadRequest, CodeBadRequest, "give both project and environment, or neither for a standalone database")
@@ -166,7 +181,7 @@ func (s *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 		s.databaseErr(w, "create database", err)
 		return
 	}
-	s.audit(r, u.ID, "database:Create", res, map[string]any{"engine": v.Engine, "memory": v.Spec.Memory, "replicas": v.Spec.Replicas, "public": v.Network.Public.Enabled})
+	s.audit(r, u.ID, "database:Create", res, map[string]any{"engine": v.Engine, "memory": v.Spec.Memory, "replicas": v.Spec.Replicas, "public": v.Network.Public.Enabled, "restore": req.Restore})
 	writeJSON(w, http.StatusCreated, v)
 }
 

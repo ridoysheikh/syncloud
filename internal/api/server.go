@@ -436,6 +436,8 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/databases/{database}/command", h: s.handleDatabaseCommand},
 		{Method: "GET", Path: "/api/v1/databases/{database}/info", h: s.handleDatabaseInfo},
 		{Method: "GET", Path: "/api/v1/databases/{database}/slowlog", h: s.handleDatabaseSlowlog},
+		{Method: "GET", Path: "/api/v1/databases/{database}/backups", h: s.handleListDatabaseBackups},
+		{Method: "POST", Path: "/api/v1/databases/{database}/backups", h: s.handleStartDatabaseBackup},
 		{Method: "GET", Path: "/api/v1/databases/{database}/pg/databases", h: s.handleListPgDatabases},
 		{Method: "POST", Path: "/api/v1/databases/{database}/pg/databases", h: s.handleCreatePgDatabase},
 		{Method: "PUT", Path: "/api/v1/databases/{database}/pg/databases/{db}", h: s.handleAlterPgDatabase},

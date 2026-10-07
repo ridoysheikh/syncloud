@@ -1,9 +1,11 @@
 import { useNodes } from "@/lib/nodes";
+import { useS3Buckets, useS3Endpoints } from "@/lib/pg";
 import { Field, Input, Toggle } from "@/ui/controls";
 import {
   CountSelect,
   Section,
   SizeSelect,
+  selectClass,
   type Form,
   type SetFn,
 } from "./NewDatabaseWizard";
@@ -74,15 +76,21 @@ export function PgCapacityStep({
   );
 }
 
-/** Extensions included and where members run. */
+/** Extensions included, backups and where members run. */
 export function PgDataStep({
   f,
   set,
+  backups,
 }: {
-  f: Pick<Form, "nodes" | "name">;
+  f: Pick<Form, "nodes" | "name"> &
+    Partial<Pick<Form, "backupEndpoint" | "backupBucket">>;
   set: SetFn;
+  /** Offer WAL-G backups (the wizard; afterwards they live on the Backups tab). */
+  backups?: boolean;
 }) {
   const { data: nodes = [] } = useNodes();
+  const endpoints = useS3Endpoints();
+  const buckets = useS3Buckets(f.backupEndpoint ?? "");
   return (
     <div className="flex flex-col gap-4 text-xs">
       <Section title="Database">
@@ -105,6 +113,54 @@ export function PgDataStep({
           ))}
         </ul>
       </Section>
+      {backups && (
+        <Section title="Backups and point-in-time recovery">
+          <p className="text-muted">
+            WAL-G archives every change to S3 within a minute and takes a daily
+            base backup, encrypted; any moment of the last 7 days can be
+            restored into a new database. Schedule and retention can be changed
+            later on the Backups tab.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="S3 endpoint">
+              <select
+                className={selectClass}
+                value={f.backupEndpoint ?? ""}
+                onChange={(e) => {
+                  set("backupEndpoint", e.target.value);
+                  set("backupBucket", "");
+                }}
+              >
+                <option value="">Off</option>
+                {(endpoints.data ?? []).map((e) => (
+                  <option key={e.id} value={e.name}>
+                    {e.name} — {e.url}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {f.backupEndpoint && (
+              <Field label="Bucket">
+                <select
+                  className={selectClass}
+                  value={f.backupBucket ?? ""}
+                  onChange={(e) => set("backupBucket", e.target.value)}
+                >
+                  <option value="">choose…</option>
+                  {(buckets.data ?? []).map((b) => (
+                    <option key={b.name}>{b.name}</option>
+                  ))}
+                </select>
+              </Field>
+            )}
+          </div>
+          {endpoints.data?.length === 0 && (
+            <p className="text-faint">
+              No S3 endpoint is registered yet; add one under Storage.
+            </p>
+          )}
+        </Section>
+      )}
       <Section title="Nodes">
         <p className="text-muted">
           Optional: keep members on some nodes. Members always go on different

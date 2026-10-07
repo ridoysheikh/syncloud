@@ -18,7 +18,6 @@ P=localhost:7070/api/v1/projects/shop
 ENV=$P/environments/production
 DBS=localhost:7070/api/v1/databases
 DB=$DBS/orders
-PG_IMAGE=$(sed -n 's/.*ImagePostgres *= *"\(.*\)"/\1/p' internal/system/manifest.go)
 py() { python3 -c "import json,sys; d=json.load(sys.stdin); $1"; }
 wait_for() { # description, condition (shell)
   local d=$1; shift

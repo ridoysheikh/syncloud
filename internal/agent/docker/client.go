@@ -177,6 +177,16 @@ type CreateRequest struct {
 	Labels       map[string]string   `json:"Labels,omitempty"`
 	ExposedPorts map[string]struct{} `json:"ExposedPorts,omitempty"`
 	HostConfig   HostConfig          `json:"HostConfig"`
+	// NetworkingConfig sets the container's aliases on its network.
+	NetworkingConfig *NetworkingConfig `json:"NetworkingConfig,omitempty"`
+}
+
+type NetworkingConfig struct {
+	EndpointsConfig map[string]EndpointSettings `json:"EndpointsConfig"`
+}
+
+type EndpointSettings struct {
+	Aliases []string `json:"Aliases,omitempty"`
 }
 
 type HostConfig struct {

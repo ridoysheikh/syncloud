@@ -63,6 +63,9 @@ export interface Form {
   allow: string;
   /** PostgreSQL: commits wait for a replica. */
   synchronous: boolean;
+  /** PostgreSQL: WAL-G backups to this S3 endpoint and bucket ("" = off). */
+  backupEndpoint: string;
+  backupBucket: string;
 }
 
 export function specOf(f: {
@@ -77,6 +80,10 @@ export function specOf(f: {
   nodes: string[];
   engine?: string;
   synchronous?: boolean;
+  /** PostgreSQL settings kept as they are (backups, connection limit). */
+  postgres?: DatabaseSpec["postgres"];
+  backupEndpoint?: string;
+  backupBucket?: string;
 }): Partial<DatabaseSpec> {
   if (f.engine === "postgres") {
     // Fixed size and replica count for now (autoscaling comes with 13d).
@@ -86,7 +93,22 @@ export function specOf(f: {
       cpu: Number(f.cpu) || 0.5,
       nodes: f.nodes,
       autoscaling: { cpuTarget: Number(f.cpuTarget) || 60, memoryHigh: 85 },
-      postgres: { synchronous: !!f.synchronous, maxConnections: 0 },
+      postgres: {
+        maxConnections: 0,
+        ...f.postgres,
+        synchronous: !!f.synchronous,
+        ...(f.backupEndpoint && f.backupBucket
+          ? {
+              backup: {
+                endpoint: f.backupEndpoint,
+                bucket: f.backupBucket,
+                everyHours: 24,
+                retainFull: 7,
+                retainDays: 7,
+              },
+            }
+          : {}),
+      },
     };
   }
   return {
@@ -133,6 +155,8 @@ export function NewDatabaseWizard() {
     public: false,
     allow: "",
     synchronous: false,
+    backupEndpoint: "",
+    backupBucket: "",
   });
   const set = <K extends keyof Form>(k: K, v: Form[K]) =>
     setF((x) => ({ ...x, [k]: v }));
@@ -386,7 +410,7 @@ export function NewDatabaseWizard() {
               ))}
             {step === "Data" &&
               (f.engine === "postgres" ? (
-                <PgDataStep f={f} set={set} />
+                <PgDataStep f={f} set={set} backups />
               ) : (
                 <DataStep f={f} set={set} />
               ))}
@@ -752,6 +776,12 @@ function Review({
             <span className="font-mono">{f.name.replace(/-/g, "_")}</span>,
           ],
           ["User", <span className="font-mono">app</span>],
+          [
+            "Backups",
+            f.backupEndpoint && f.backupBucket
+              ? `WAL-G to ${f.backupEndpoint}/${f.backupBucket}: WAL continuously, a base backup daily, 7 days of point-in-time recovery`
+              : "off (turn on later under Backups)",
+          ],
         ] as [string, ReactNode][])
       : ([
           [

@@ -10,12 +10,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -382,9 +384,9 @@ func serve(args []string) error {
 	dbMgr = dbs.New(st, gw, workloads, registry, box, bus, log)
 	dbMgr.Metrics = metricStore
 	dbMgr.BaseDomain = domains.Base
-	dbMgr.PostgresImage = cfg.PostgresImage
-	if dbMgr.PostgresImage == "" {
-		dbMgr.PostgresImage = system.ImagePostgres
+	dbMgr.PostgresImages, err = postgresImages(cfg.PostgresImage)
+	if err != nil {
+		return err
 	}
 	dbMgr.OnChange = disco.Kick
 	dbMgr.OnNetworkChange = func() {
@@ -430,6 +432,10 @@ func serve(args []string) error {
 	pools.Pin = func() string { return certMgr.Pin(domains.Endpoints().BaseDomain) }
 	workloads.NodePool = pools.PoolOf
 	s3Mgr := s3.New(st, box)
+	dbMgr.S3 = func(ctx context.Context, ref string) (dbs.S3Access, error) {
+		c, err := s3Mgr.Credentials(ctx, ref)
+		return dbs.S3Access{URL: c.URL, Region: c.Region, AccessKeyID: c.AccessKeyID, SecretAccessKey: c.SecretAccessKey, PathStyle: c.PathStyle}, err
+	}
 	workloads.S3Bindings = func(ctx context.Context, serviceID string) ([]workload.S3Ref, error) {
 		bs, err := st.ServiceS3Bindings(ctx, serviceID)
 		if err != nil {
@@ -938,4 +944,21 @@ func serveOnMesh(ctx context.Context, listen string, srv *http.Server, log *slog
 		case <-time.After(5 * time.Second):
 		}
 	}
+}
+
+// postgresImages is the release's PostgreSQL image per major version, with
+// overrides from --postgres-image ("18=img,17=img").
+func postgresImages(override string) (map[string]string, error) {
+	images := maps.Clone(system.PostgresImages)
+	for _, kv := range strings.Split(override, ",") {
+		if kv = strings.TrimSpace(kv); kv == "" {
+			continue
+		}
+		v, img, ok := strings.Cut(kv, "=")
+		if _, known := images[v]; !ok || !known || img == "" {
+			return nil, fmt.Errorf("--postgres-image: %q is not VERSION=IMAGE for a version of %s", kv, strings.Join(slices.Sorted(maps.Keys(images)), ", "))
+		}
+		images[v] = img
+	}
+	return images, nil
 }

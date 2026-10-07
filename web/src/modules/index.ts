@@ -21,6 +21,7 @@ import { DatabasesPage } from "./databases/DatabasesPage";
 import { DatabasePage } from "./databases/DatabasePage";
 import { NewDatabaseWizard } from "./databases/NewDatabaseWizard";
 import { PgRolePage } from "./databases/pg/Roles";
+import { PgRestorePage } from "./databases/pg/Restore";
 import { CredentialsPage } from "./iam/CredentialsPage";
 import {
   AuditPage,
@@ -166,6 +167,7 @@ export const modules: DashboardModule[] = [
       { path: "/projects/$project/$env/new-database", label: "New database", component: NewDatabaseWizard, hidden: true },
       { path: "/databases/$name", label: "Database", component: DatabasePage, hidden: true },
       { path: "/databases/$name/roles/new", label: "New role", component: PgRolePage, hidden: true },
+      { path: "/databases/$name/restore", label: "Restore", component: PgRestorePage, hidden: true },
       { path: "/databases/$name/roles/$role", label: "Role", component: PgRolePage, hidden: true },
     ],
   },

@@ -180,8 +180,8 @@ func TestPostgresSpecAndConfig(t *testing.T) {
 		!strings.Contains(params["shared_preload_libraries"].(string), "timescaledb") {
 		t.Errorf("parameters: %v", params)
 	}
-	ts := pgTaskSpec("img", d, s, st, sec, mb, nil, nil, nil)
-	if ts.Command[0] != "patroni" || ts.Env["PATRONI_CONFIG_B64"] == "" || ts.MemoryLimitBytes != 1024<<20 || ts.Mounts[0].Source != "syncloud-db-abc-m1" {
+	ts := pgTaskSpec("img", d, s, st, sec, mb, nil, nil, nil, map[string]string{"WALG_S3_PREFIX": "s3://b/p"})
+	if ts.Command[0] != "patroni" || ts.Env["PATRONI_CONFIG_B64"] == "" || ts.Env["WALG_S3_PREFIX"] != "s3://b/p" || ts.MemoryLimitBytes != 1024<<20 || ts.Mounts[0].Source != "syncloud-db-abc-m1" {
 		t.Errorf("task spec: %+v", ts)
 	}
 }

@@ -14,7 +14,7 @@ write() { # file, base64 content
 case "${1:-patroni}" in
   patroni)
     write /etc/syncloud/patroni.yml "$PATRONI_CONFIG_B64"
-    mkdir -p /data/pgdata && chmod 0700 /data/pgdata
+    mkdir -p /data/pgdata /data/run && chmod 0700 /data/pgdata /data/run
     exec patroni /etc/syncloud/patroni.yml
     ;;
   etcd)

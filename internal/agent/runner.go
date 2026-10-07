@@ -146,6 +146,27 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 	}
 
 	mode := spec.NetworkMode
+	if peer, ok := strings.CutPrefix(mode, "task:"); ok {
+		// A sidecar (a database backup) joins a running task's network
+		// namespace: same address, same firewall rules, same resolver.
+		peers, err := r.docker.List(ctx, LabelTaskID+"="+peer)
+		if err != nil {
+			fail(err)
+			return
+		}
+		mode = ""
+		for _, c := range peers {
+			if c.State == "running" {
+				mode = "container:" + c.ID
+			}
+		}
+		if mode == "" {
+			fail(fmt.Errorf("task %s is not running on this node", peer))
+			return
+		}
+		spec = proto.Clone(spec).(*agentv1.TaskSpec)
+		spec.NetworkMode, spec.DnsServers, spec.DnsSearch, spec.ExtraHosts = mode, nil, nil, nil
+	}
 	if mode == TaskNetwork && r.NetworkReady != nil {
 		// On mesh nodes the agent creates this network with the node's subnet.
 		if err := r.NetworkReady(); err != nil {
@@ -153,7 +174,7 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 			return
 		}
 	}
-	if mode != "" && mode != "host" && mode != "bridge" && mode != "none" {
+	if mode != "" && mode != "host" && mode != "bridge" && mode != "none" && !strings.HasPrefix(mode, "container:") {
 		if err := r.docker.EnsureNetwork(ctx, mode, map[string]string{LabelManaged: "true"}); err != nil {
 			fail(err)
 			return
@@ -339,6 +360,9 @@ func createRequest(spec *agentv1.TaskSpec, hash string) docker.CreateRequest {
 			// Bounded local logs until centralized logging ships (§9.2).
 			LogConfig: docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 		},
+	}
+	if mode := spec.NetworkMode; len(spec.NetworkAliases) > 0 && mode != "" && mode != "host" && mode != "none" && !strings.HasPrefix(mode, "container:") {
+		req.NetworkingConfig = &docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{mode: {Aliases: spec.NetworkAliases}}}
 	}
 	for _, p := range spec.Ports {
 		proto := p.Protocol

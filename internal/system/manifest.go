@@ -20,9 +20,14 @@ const (
 	ImageVictoriaLogs    = "victoriametrics/victoria-logs:v1.53.0"
 	ImageRegistry        = "registry:3.1.2"
 	ImageForgejo         = "codeberg.org/forgejo/forgejo:13.0.5-rootless"
-	// ImagePostgres is built from images/postgres (make postgres-image).
-	ImagePostgres = "ghcr.io/syncloud/postgres:17-r1"
+	// ImagePostgres17 and ImagePostgres18 are built from images/postgres
+	// (make postgres-image), one per major version.
+	ImagePostgres17 = "ghcr.io/syncloud/postgres:17-r2"
+	ImagePostgres18 = "ghcr.io/syncloud/postgres:18-r1"
 )
+
+// PostgresImages maps each offered PostgreSQL major version to its image.
+var PostgresImages = map[string]string{"17": ImagePostgres17, "18": ImagePostgres18}
 
 // GitServerAddr is where the built-in Git server listens (host network,
 // loopback): Traefik and the controller reach it there.

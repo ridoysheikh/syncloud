@@ -1,0 +1,10 @@
+#!/bin/sh
+# Patroni replica creation method: start from the cluster's latest base
+# backup. Exits non-zero when there is none, so Patroni falls back to
+# pg_basebackup; the replica then streams (and fetches older WAL from the
+# archive with restore_command).
+set -eu
+datadir=
+for a in "$@"; do case "$a" in --datadir=*) datadir=${a#--datadir=} ;; esac; done
+[ -n "$datadir" ] || { echo "walg-replica: no --datadir" >&2; exit 1; }
+exec wal-g backup-fetch "$datadir" LATEST

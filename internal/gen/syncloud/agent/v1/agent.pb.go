@@ -1427,9 +1427,13 @@ type TaskSpec struct {
 	Entrypoint       []string               `protobuf:"bytes,20,rep,name=entrypoint,proto3" json:"entrypoint,omitempty"`                                        // overrides the image ENTRYPOINT when set
 	// registry_ca is a certificate to trust for the image's registry, when the
 	// platform registry only has a self-signed one (§5.9; not part of the spec hash).
-	RegistryCa    string `protobuf:"bytes,21,opt,name=registry_ca,json=registryCa,proto3" json:"registry_ca,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	RegistryCa string `protobuf:"bytes,21,opt,name=registry_ca,json=registryCa,proto3" json:"registry_ca,omitempty"`
+	// network_aliases are names the container answers to on its Docker
+	// network, so peers on the same node resolve them without the discovery
+	// DNS (a node outside the mesh).
+	NetworkAliases []string `protobuf:"bytes,22,rep,name=network_aliases,json=networkAliases,proto3" json:"network_aliases,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *TaskSpec) Reset() {
@@ -1607,6 +1611,13 @@ func (x *TaskSpec) GetRegistryCa() string {
 		return x.RegistryCa
 	}
 	return ""
+}
+
+func (x *TaskSpec) GetNetworkAliases() []string {
+	if x != nil {
+		return x.NetworkAliases
+	}
+	return nil
 }
 
 type PortBinding struct {
@@ -3943,7 +3954,7 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\x9c\a\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xc5\a\n" +
 	"\bTaskSpec\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -3974,7 +3985,8 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"entrypoint\x18\x14 \x03(\tR\n" +
 	"entrypoint\x12\x1f\n" +
 	"\vregistry_ca\x18\x15 \x01(\tR\n" +
-	"registryCa\x1a6\n" +
+	"registryCa\x12'\n" +
+	"\x0fnetwork_aliases\x18\x16 \x03(\tR\x0enetworkAliases\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a9\n" +

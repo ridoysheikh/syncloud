@@ -18,10 +18,11 @@ agent:
 synctl:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/synctl ./cmd/synctl
 
-## postgres-image: the managed PostgreSQL image (Patroni, WAL-G, etcd, extensions), tagged as pinned in internal/system
-POSTGRES_IMAGE := $(shell sed -n 's/.*ImagePostgres *= *"\(.*\)"/\1/p' internal/system/manifest.go)
-postgres-image:
-	docker build -t $(POSTGRES_IMAGE) images/postgres
+## postgres-image: the managed PostgreSQL images (Patroni, WAL-G, etcd, extensions), one per major version, tagged as pinned in internal/system
+POSTGRES_MAJORS := $(shell sed -n 's/.*ImagePostgres\([0-9]*\) *= *".*/\1/p' internal/system/manifest.go)
+postgres-image: $(addprefix postgres-image-,$(POSTGRES_MAJORS))
+postgres-image-%:
+	docker build --build-arg PG_MAJOR=$* -t $(shell sed -n 's/.*ImagePostgres$* *= *"\(.*\)"/\1/p' internal/system/manifest.go) images/postgres
 
 web: web/node_modules
 	cd web && pnpm run build

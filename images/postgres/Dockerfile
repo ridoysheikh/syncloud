@@ -1,10 +1,13 @@
 # SynCloud managed PostgreSQL (Phase 13): one image for every role of a
 # cluster — Patroni-managed Postgres, PgBouncer and WAL-G.
 #
-# Base: official Postgres 17 (Debian bookworm, PGDG) with pg_duckdb.
-# Extensions are permissively licensed; TimescaleDB is the Apache-only
-# ("oss") build, which may be offered as a database service.
-FROM pgduckdb/pgduckdb:17-v1.1.1
+# Base: official Postgres (Debian bookworm, PGDG) with pg_duckdb; one image
+# per major version (PG_MAJOR: 17 or 18). Extensions are permissively
+# licensed; TimescaleDB is the Apache-only ("oss") build, which may be
+# offered as a database service.
+ARG PG_MAJOR=18
+FROM pgduckdb/pgduckdb:${PG_MAJOR}-v1.1.1
+ARG PG_MAJOR
 
 ARG WALG_VERSION=v3.0.9
 ARG ETCD_VERSION=v3.7.2
@@ -19,12 +22,12 @@ RUN set -eux; \
     echo "deb [signed-by=/usr/share/keyrings/timescaledb.gpg] https://packagecloud.io/timescale/timescaledb/debian/ bookworm main" > /etc/apt/sources.list.d/timescaledb.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        postgresql-17-pgvector \
-        postgresql-17-partman \
-        postgresql-17-cron \
-        postgresql-17-hypopg \
-        postgresql-17-postgis-3 \
-        timescaledb-2-oss-postgresql-17 \
+        postgresql-${PG_MAJOR}-pgvector \
+        postgresql-${PG_MAJOR}-partman \
+        postgresql-${PG_MAJOR}-cron \
+        postgresql-${PG_MAJOR}-hypopg \
+        postgresql-${PG_MAJOR}-postgis-3 \
+        timescaledb-2-oss-postgresql-${PG_MAJOR} \
         patroni python3-etcd python3-psycopg2 \
         pgbouncer; \
     # WAL-G (Apache 2): continuous archiving and backups to S3.
@@ -41,9 +44,10 @@ RUN set -eux; \
     mkdir -p /data /etc/syncloud; chown -R postgres:postgres /data /etc/syncloud
 
 COPY entrypoint.sh /usr/local/bin/syncloud-pg
-RUN chmod 0755 /usr/local/bin/syncloud-pg
+COPY walg-bootstrap walg-restore-wal walg-replica /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/syncloud-pg /usr/local/bin/walg-bootstrap /usr/local/bin/walg-restore-wal /usr/local/bin/walg-replica
 
 USER postgres
-ENV PATH=/usr/lib/postgresql/17/bin:$PATH
+ENV PATH=/usr/lib/postgresql/${PG_MAJOR}/bin:$PATH
 ENTRYPOINT ["/usr/local/bin/syncloud-pg"]
 CMD ["patroni"]

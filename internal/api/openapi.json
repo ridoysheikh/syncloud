@@ -1457,6 +1457,24 @@
                   },
                   "network": {
                     "$ref": "#/components/schemas/DatabaseNetwork"
+                  },
+                  "restore": {
+                    "type": "object",
+                    "description": "PostgreSQL: create the database from another one's backups (needs database:GetDatabaseCredentials on the source)",
+                    "properties": {
+                      "from": {
+                        "type": "string"
+                      },
+                      "backup": {
+                        "type": "string",
+                        "description": "default: the newest that finished before targetTime"
+                      },
+                      "targetTime": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "recover to this moment; omit to replay the whole archive"
+                      }
+                    }
                   }
                 }
               }
@@ -2383,6 +2401,81 @@
                 }
               }
             }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/databases/{database}/backups": {
+      "get": {
+        "operationId": "listDatabaseBackups",
+        "tags": [
+          "databases"
+        ],
+        "summary": "PostgreSQL: base backups in S3, backup runs, WAL archiving and the restore window",
+        "parameters": [
+          {
+            "name": "database",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "startDatabaseBackup",
+        "tags": [
+          "databases"
+        ],
+        "summary": "PostgreSQL: take a base backup now",
+        "parameters": [
+          {
+            "name": "database",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
           },
           "404": {
             "$ref": "#/components/responses/Error"
@@ -18396,6 +18489,36 @@
               },
               "maxConnections": {
                 "type": "integer"
+              },
+              "backup": {
+                "type": "object",
+                "description": "WAL archiving and base backups to S3 (point-in-time recovery)",
+                "properties": {
+                  "endpoint": {
+                    "type": "string",
+                    "description": "a registered S3 endpoint (name or ID)"
+                  },
+                  "bucket": {
+                    "type": "string"
+                  },
+                  "prefix": {
+                    "type": "string",
+                    "description": "default syncloud-pg/<database ID>"
+                  },
+                  "everyHours": {
+                    "type": "integer",
+                    "default": 24
+                  },
+                  "retainFull": {
+                    "type": "integer",
+                    "default": 7
+                  },
+                  "retainDays": {
+                    "type": "integer",
+                    "default": 7,
+                    "description": "how far back a restore can go"
+                  }
+                }
               }
             }
           }

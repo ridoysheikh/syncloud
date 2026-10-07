@@ -61,13 +61,17 @@ type Manager struct {
 	// OnNetworkChange runs when the set of public endpoints or access lists
 	// changes (certificates, host firewall, security policy).
 	OnNetworkChange func()
-	// PostgresImage runs PostgreSQL members, PgBouncer and the platform etcd.
-	PostgresImage string
+	// PostgresImages maps each PostgreSQL major version to the image of its
+	// members and backups; the default version's image also runs the
+	// platform etcd.
+	PostgresImages map[string]string
 	// BaseDomain returns the platform's base domain ("" = none, so no
 	// public endpoints).
 	BaseDomain func() string
 	// Metrics stores member samples (nil = none).
 	Metrics Recorder
+	// S3 resolves a registered S3 endpoint (by name or ID) for WAL-G.
+	S3 func(ctx context.Context, endpoint string) (S3Access, error)
 
 	queue  chan string
 	qmu    sync.Mutex
@@ -144,6 +148,8 @@ type CreateRequest struct {
 	// Exists checks access-list references (nil: not checked).
 	Exists func(p secgroup.Peer) bool
 	Actor  string
+	// Restore creates a PostgreSQL cluster from another one's archive.
+	Restore *PgRestore
 }
 
 // Create stores a database and starts its members.
@@ -177,8 +183,34 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
 	}
 	spec := req.Spec
 	spec.ForEngine(eng.Name)
+	var restore *RestoreState
+	var source store.Database
+	if req.Restore != nil {
+		if eng.Name != EnginePostgres {
+			return View{}, ErrInvalid{errors.New("restoring from a backup is for PostgreSQL databases")}
+		}
+		src, rs, err := m.planRestore(ctx, *req.Restore)
+		if err != nil {
+			return View{}, err
+		}
+		source, restore = src, &rs
+		// Data files only open with the major version that wrote them.
+		if req.Version != "" && req.Version != src.Version {
+			return View{}, ErrInvalid{fmt.Errorf("a restore keeps the source's version (%s)", src.Version)}
+		}
+		version = src.Version
+		// The new cluster archives to the same endpoint and bucket, under
+		// its own prefix.
+		srcSpec, _ := parseSpec(src.Spec)
+		b := *srcSpec.Postgres.Backup
+		b.Prefix = ""
+		spec.Postgres.Backup = &b
+	}
 	if err := spec.Normalize(); err != nil {
 		return View{}, ErrInvalid{err}
+	}
+	if err := m.checkBackupEndpoint(ctx, spec); err != nil {
+		return View{}, err
 	}
 	now := m.now().UTC().Truncate(time.Second)
 	d := store.Database{ID: auth.NewID("db_"), Name: name, Engine: eng.Name, Version: version, CreatedAt: now}
@@ -204,7 +236,19 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
 	st := State{MemoryMiB: spec.Memory.Min, Replicas: spec.Replicas.Min, LimitMiB: spec.Memory.Max}
 	if eng.Name == EnginePostgres {
 		secrets.ReplicationPassword, secrets.RestPassword, secrets.EtcdPassword = randomPassword(), randomPassword(), randomPassword()
+		secrets.WalgKey = newWalgKey()
 		st.LimitMiB = spec.Memory.Min // the container's size (vertical scaling restarts members)
+	}
+	if restore != nil {
+		// The restored data holds the source's roles: keep their passwords,
+		// so Patroni, replicas and apps sign in as before.
+		ss, err := m.secrets(source)
+		if err != nil {
+			return View{}, err
+		}
+		secrets.Password, secrets.AdminPassword, secrets.ReplicationPassword = ss.Password, ss.AdminPassword, ss.ReplicationPassword
+		secrets.RestoreWalgKey = ss.WalgKey
+		st.Restore, st.Database = restore, PgDatabase(source)
 	}
 	sec, _ := json.Marshal(secrets)
 	d.Secrets = m.box.Seal(sec, aad(d.ID))
@@ -216,6 +260,13 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
 		return View{}, err
 	}
 	m.event(ctx, d.ID, "created", "", fmt.Sprintf("%d MiB, %d replicas", spec.Memory.Min, spec.Replicas.Min), "", req.Actor)
+	if restore != nil {
+		target := "the end of the archive"
+		if restore.TargetTime != nil {
+			target = restore.TargetTime.Format(time.RFC3339)
+		}
+		m.event(ctx, d.ID, "restore", restore.SourceName, d.Name, "from backup "+restore.Backup+" to "+target, req.Actor)
+	}
 	m.Enqueue(d.ID)
 	m.networkChanged()
 	full, err := m.st.DatabaseByID(ctx, d.ID)
@@ -236,6 +287,9 @@ func (m *Manager) Update(ctx context.Context, id string, spec Spec, actor string
 	spec.ForEngine(d.Engine)
 	if err := spec.Normalize(); err != nil {
 		return View{}, ErrInvalid{err}
+	}
+	if err := m.checkBackupEndpoint(ctx, spec); err != nil {
+		return View{}, err
 	}
 	if !d.Standalone() {
 		e, err := m.st.EnvironmentByID(ctx, d.EnvironmentID)
@@ -259,6 +313,9 @@ func (m *Manager) Update(ctx context.Context, id string, spec Spec, actor string
 	}
 	if err := m.st.SetDatabaseState(ctx, id, encode(st)); err != nil {
 		return View{}, err
+	}
+	if b, ob := backupSummary(spec), backupSummary(old); b != ob {
+		m.event(ctx, id, "backups", ob, b, "", actor)
 	}
 	if old.Memory != spec.Memory || old.Replicas != spec.Replicas {
 		m.event(ctx, id, "settings", fmt.Sprintf("memory %d–%d MiB, replicas %d–%d", old.Memory.Min, old.Memory.Max, old.Replicas.Min, old.Replicas.Max),
@@ -386,6 +443,9 @@ func (m *Manager) probeAll(ctx context.Context) {
 		m.reconcile(ctx, d.ID)
 		if d.Engine == EngineValkey {
 			m.autoscale(ctx, d.ID)
+		}
+		if d.Engine == EnginePostgres {
+			m.backupTick(ctx, d)
 		}
 	}
 }
@@ -650,7 +710,11 @@ func (m *Manager) taskSpec(d store.Database, spec Spec, st State, sec Secrets, m
 		dns, search = m.DNS(mb.NodeID, d.Project, d.Environment)
 	}
 	if d.Engine == EnginePostgres {
-		return pgTaskSpec(m.PostgresImage, d, spec, st, sec, mb, m.EtcdHosts(context.Background()), dns, search)
+		walg, err := m.walgEnv(context.Background(), d, spec, st, sec)
+		if err != nil {
+			m.log.Warn("WAL-G settings", "database", d.Name, "err", err)
+		}
+		return pgTaskSpec(m.pgImage(d.Version), d, spec, st, sec, mb, m.EtcdHosts(context.Background()), dns, search, walg)
 	}
 	return taskSpec(d, spec, st, sec, mb, dns, search)
 }
@@ -741,6 +805,10 @@ func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
 		m.onEtcdStatus(node, s)
 		return
 	}
+	if strings.HasPrefix(s.GetTaskId(), BackupPrefix) {
+		m.onBackupStatus(node, s)
+		return
+	}
 	if !isMember(s.GetTaskId()) {
 		return
 	}
@@ -806,6 +874,10 @@ func (m *Manager) onConnect(c agentgw.Conn) {
 		if strings.HasPrefix(s.GetTaskId(), EtcdPrefix) {
 			etcdSeen[s.GetTaskId()] = true
 			m.onEtcdStatus(c.Node, s)
+			continue
+		}
+		if strings.HasPrefix(s.GetTaskId(), BackupPrefix) {
+			m.onBackupStatus(c.Node, s)
 			continue
 		}
 		if !isMember(s.GetTaskId()) {

@@ -1,0 +1,4 @@
+#!/bin/sh
+# restore_command of a cluster being restored: WAL from the source's archive.
+export WALG_S3_PREFIX="$WALG_RESTORE_S3_PREFIX" WALG_LIBSODIUM_KEY="$WALG_RESTORE_LIBSODIUM_KEY"
+exec wal-g wal-fetch "$1" "$2"

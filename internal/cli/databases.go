@@ -368,6 +368,53 @@ func (a *app) databasesCmd() *cobra.Command {
 		},
 	}
 
+	var rTime, rBackup string
+	var rStandalone bool
+	restore := &cobra.Command{
+		Use: "restore SOURCE NAME", Short: "Create a PostgreSQL database from SOURCE's backups, as of a moment (point-in-time recovery)",
+		Long: "Restores into a new database; SOURCE is never changed. Without --time the whole archive is replayed (a clone of the latest state). See the window with: synctl db backups SOURCE",
+		Example: `  synctl db restore orders orders-before-migration --time 2026-10-07T14:05:00Z
+  synctl db restore orders orders-copy -p staging`,
+		Args: cobra.ExactArgs(2), Annotations: op("createDatabase"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var src struct {
+				Spec        map[string]any `json:"spec"`
+				Project     string         `json:"project"`
+				Environment string         `json:"environment"`
+			}
+			if err := a.do(cmd, "GET", dbItem(args[0]), nil, &src); err != nil {
+				return err
+			}
+			r := map[string]any{"from": args[0], "backup": rBackup}
+			if rTime != "" {
+				t, err := time.Parse(time.RFC3339, rTime)
+				if err != nil {
+					return errors.New("--time takes RFC 3339, e.g. 2026-10-07T14:05:00Z")
+				}
+				r["targetTime"] = t
+			}
+			body := map[string]any{"name": args[1], "engine": "postgres", "spec": src.Spec, "restore": r}
+			switch {
+			case s.project != "" && !rStandalone:
+				body["project"], body["environment"] = s.project, s.env
+			case src.Project != "" && !rStandalone:
+				body["project"], body["environment"] = src.Project, src.Environment
+			}
+			var v dbView
+			if err := a.do(cmd, "POST", "/api/v1/databases", body, &v); err != nil {
+				return err
+			}
+			if a.output == "json" {
+				return a.printer().json(v)
+			}
+			fmt.Fprintf(a.out, "Restoring %s into %s (%s); it is ready when its health is healthy: synctl db get %s\n", args[0], v.Name, v.owner(), v.Name)
+			return nil
+		},
+	}
+	restore.Flags().StringVar(&rTime, "time", "", "recover to this moment (RFC 3339); default: the end of the archive")
+	restore.Flags().StringVar(&rBackup, "backup", "", "start from this base backup (default: the newest before --time)")
+	restore.Flags().BoolVar(&rStandalone, "standalone", false, "create it outside any project (default: the source's project, or -p)")
+
 	var uf dbSpecFlags
 	update := &cobra.Command{
 		Use: "update NAME", Aliases: []string{"set"}, Short: "Change memory, replicas, persistence, eviction or nodes", Args: cobra.ExactArgs(1),
@@ -667,6 +714,7 @@ func (a *app) databasesCmd() *cobra.Command {
 		creds,
 		simple("failover", "Promote a replica to primary", "POST", "/failover", "failoverDatabase", "Failover of %s requested"),
 		metricsCmd, events, keys, keyCmd, run, info, slow)
+	db.AddCommand(restore)
 	db.AddCommand(pgCommands(a)...)
 	return db
 }

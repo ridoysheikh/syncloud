@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -825,7 +826,161 @@ func pgCommands(a *app) []*cobra.Command {
 		})
 	}
 
-	return []*cobra.Command{sqlCmd, databases, database, roles, role, grant, revoke, privileges, schema, describe, rowsCmd, extensions, extension, sessions, session}
+	// ── backups ──
+	backups := &cobra.Command{
+		Use: "backups NAME", Short: "Base backups in S3, recent runs, WAL archiving and the restore window", Args: cobra.ExactArgs(1),
+		Annotations: op("listDatabaseBackups"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var out struct {
+				Configured bool   `json:"configured"`
+				Location   string `json:"location"`
+				Error      string `json:"error"`
+				Backups    []struct {
+					Name           string    `json:"name"`
+					FinishTime     time.Time `json:"finishTime"`
+					CompressedSize int64     `json:"compressedSize"`
+					StartLSN       string    `json:"startLsn"`
+				} `json:"backups"`
+				Runs []struct {
+					Member    string    `json:"member"`
+					Trigger   string    `json:"trigger"`
+					State     string    `json:"state"`
+					Error     string    `json:"error"`
+					StartedAt time.Time `json:"startedAt"`
+				} `json:"runs"`
+				Window *struct {
+					From time.Time `json:"from"`
+					To   time.Time `json:"to"`
+				} `json:"window"`
+				Archiver *struct {
+					LastAt      *time.Time `json:"lastArchivedAt"`
+					FailedCount int64      `json:"failedCount"`
+				} `json:"archiver"`
+			}
+			if err := a.do(cmd, "GET", dbItem(args[0])+"/backups", nil, &out); err != nil {
+				return err
+			}
+			if a.output == "json" {
+				return a.printer().json(out)
+			}
+			if !out.Configured {
+				fmt.Fprintf(a.out, "Backups are off. Turn them on with: synctl db backup config %s --endpoint E --bucket B\n", args[0])
+				return nil
+			}
+			fmt.Fprintf(a.out, "Archive:  %s\n", out.Location)
+			if out.Archiver != nil {
+				last := "nothing yet"
+				if out.Archiver.LastAt != nil {
+					last = out.Archiver.LastAt.Local().Format(time.RFC3339)
+				}
+				fmt.Fprintf(a.out, "WAL:      last archived %s, %d failures\n", last, out.Archiver.FailedCount)
+			}
+			if out.Window != nil {
+				fmt.Fprintf(a.out, "Restore:  any moment from %s to %s\n", out.Window.From.Format(time.RFC3339), out.Window.To.Format(time.RFC3339))
+			}
+			if out.Error != "" {
+				fmt.Fprintf(a.out, "S3:       %s\n", out.Error)
+			}
+			rows := [][]string{}
+			for _, b := range out.Backups {
+				rows = append(rows, []string{b.Name, b.FinishTime.Format(time.RFC3339), humanBytes(b.CompressedSize), b.StartLSN})
+			}
+			fmt.Fprintln(a.out)
+			printer{w: a.out, format: "table"}.table(nil, []string{"BACKUP", "FINISHED", "SIZE", "START LSN"}, rows) //nolint:errcheck
+			if len(out.Runs) > 0 {
+				fmt.Fprintln(a.out)
+				rows = [][]string{}
+				for i, r := range out.Runs {
+					if i == 5 {
+						break
+					}
+					rows = append(rows, []string{r.StartedAt.Local().Format(time.RFC3339), r.Trigger, r.Member, r.State, r.Error})
+				}
+				printer{w: a.out, format: "table"}.table(nil, []string{"RUN", "TRIGGER", "FROM", "STATE", "ERROR"}, rows) //nolint:errcheck
+			}
+			return nil
+		},
+	}
+	backup := &cobra.Command{Use: "backup", Short: "Take a base backup now, or set up backups"}
+	backupNow := &cobra.Command{
+		Use: "now NAME", Short: "Take a base backup now", Args: cobra.ExactArgs(1), Annotations: op("startDatabaseBackup"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var out struct {
+				ID     string `json:"id"`
+				Member string `json:"member"`
+			}
+			if err := a.do(cmd, "POST", dbItem(args[0])+"/backups", nil, &out); err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "Base backup started from %s (%s); follow it with: synctl db backups %s\n", out.Member, out.ID, args[0])
+			return nil
+		},
+	}
+	var bc struct {
+		endpoint, bucket, prefix string
+		every, full, days        int
+		off                      bool
+	}
+	backupConfig := &cobra.Command{
+		Use: "config NAME", Short: "Turn on WAL archiving and base backups to an S3 endpoint (or --off)", Args: cobra.ExactArgs(1),
+		Example: `  synctl db backup config orders --endpoint minio --bucket pg-backups
+  synctl db backup config orders --every 6 --retain-days 14
+  synctl db backup config orders --off`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var cur struct {
+				Spec map[string]any `json:"spec"`
+			}
+			if err := a.do(cmd, "GET", dbItem(args[0]), nil, &cur); err != nil {
+				return err
+			}
+			pg, _ := cur.Spec["postgres"].(map[string]any)
+			if pg == nil {
+				return errors.New(args[0] + " is not a PostgreSQL database")
+			}
+			if bc.off {
+				delete(pg, "backup")
+			} else {
+				b, _ := pg["backup"].(map[string]any)
+				if b == nil {
+					b = map[string]any{}
+				}
+				f := cmd.Flags()
+				for flag, key := range map[string]string{"endpoint": "endpoint", "bucket": "bucket", "prefix": "prefix"} {
+					if f.Changed(flag) {
+						v, _ := f.GetString(flag)
+						b[key] = v
+					}
+				}
+				for flag, key := range map[string]string{"every": "everyHours", "retain-full": "retainFull", "retain-days": "retainDays"} {
+					if f.Changed(flag) {
+						v, _ := f.GetInt(flag)
+						b[key] = v
+					}
+				}
+				pg["backup"] = b
+			}
+			if err := a.do(cmd, "PUT", dbItem(args[0]), map[string]any{"spec": cur.Spec}, nil); err != nil {
+				return err
+			}
+			if bc.off {
+				fmt.Fprintf(a.out, "Backups of %s are off (members restart one at a time; what is in S3 stays)\n", args[0])
+			} else {
+				fmt.Fprintf(a.out, "Backups of %s are on (members restart one at a time to start archiving)\n", args[0])
+			}
+			return nil
+		},
+	}
+	f2 := backupConfig.Flags()
+	f2.StringVar(&bc.endpoint, "endpoint", "", "S3 endpoint (synctl s3 endpoints)")
+	f2.StringVar(&bc.bucket, "bucket", "", "bucket")
+	f2.StringVar(&bc.prefix, "prefix", "", "prefix in the bucket (default syncloud-pg/<database ID>)")
+	f2.IntVar(&bc.every, "every", 24, "hours between base backups")
+	f2.IntVar(&bc.full, "retain-full", 7, "base backups to keep")
+	f2.IntVar(&bc.days, "retain-days", 7, "also keep every backup of the last N days (how far back a restore can go)")
+	f2.BoolVar(&bc.off, "off", false, "stop archiving and base backups")
+	backup.AddCommand(backupNow, backupConfig)
+
+	return []*cobra.Command{sqlCmd, databases, database, roles, role, grant, revoke, privileges, schema, describe, rowsCmd, extensions, extension, sessions, session, backups, backup}
 }
 
 // pgRoleView is a role as the CLI lists it.

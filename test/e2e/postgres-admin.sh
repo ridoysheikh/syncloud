@@ -19,7 +19,6 @@ P=localhost:7070/api/v1/projects/shop
 ENV=$P/environments/production
 DB=localhost:7070/api/v1/databases/shopdb
 PG=$DB/pg
-PG_IMAGE=$(sed -n 's/.*ImagePostgres *= *"\(.*\)"/\1/p' internal/system/manifest.go)
 apie() { x sc-e2e-ctl curl -sS -b /tmp/jar -H 'content-type: application/json' -H 'Origin: http://localhost:7070' "$@"; } # body even on errors
 py() { python3 -c "import json,sys; d=json.load(sys.stdin); $1"; }
 wait_for() { # description, condition (shell)

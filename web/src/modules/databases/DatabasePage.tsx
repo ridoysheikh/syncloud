@@ -26,6 +26,7 @@ import { fmtOps } from "./DatabasesPage";
 import { CapacityStep, DataStep, specOf } from "./NewDatabaseWizard";
 import { Console, Explorer } from "./Explorer";
 import { PgDataStep } from "./PostgresSteps";
+import { PgBackupsTab } from "./pg/Backups";
 import { PgConsole } from "./pg/Console";
 import { PgDatabases, PgSessions } from "./pg/Databases";
 import { PgExplorer } from "./pg/Explorer";
@@ -41,6 +42,7 @@ type Tab =
   | "explorer"
   | "console"
   | "sessions"
+  | "backups"
   | "autoscaling"
   | "logs"
   | "settings";
@@ -64,6 +66,7 @@ const postgresTabs: Tab[] = [
   "explorer",
   "console",
   "sessions",
+  "backups",
   "logs",
   "settings",
 ];
@@ -171,6 +174,7 @@ export function DatabasePage() {
           <Console path={path} />
         ))}
       {tab === "sessions" && pg && <PgSessions path={path} />}
+      {tab === "backups" && pg && <PgBackupsTab d={d} path={path} />}
       {tab === "autoscaling" && !pg && <Autoscaling d={d} path={path} />}
       {tab === "logs" && <LogsView filter={{ database: d.name }} />}
       {tab === "settings" && <Settings d={d} path={path} />}
@@ -916,6 +920,7 @@ function Settings({ d, path }: { d: Database; path: string }) {
           cpuTarget: String(d.spec.autoscaling.cpuTarget),
           engine: d.engine,
           synchronous: d.spec.postgres?.synchronous,
+          postgres: d.spec.postgres,
           ...f,
         }),
       }),

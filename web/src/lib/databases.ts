@@ -17,7 +17,21 @@ export interface DatabaseSpec {
   nodes?: string[];
   autoscaling: { cpuTarget: number; memoryHigh: number };
   /** PostgreSQL only. */
-  postgres?: { synchronous: boolean; maxConnections: number };
+  postgres?: {
+    synchronous: boolean;
+    maxConnections: number;
+    backup?: PgBackupSpec;
+  };
+}
+
+/** WAL archiving and base backups to S3 (Phase 13c). */
+export interface PgBackupSpec {
+  endpoint: string;
+  bucket: string;
+  prefix?: string;
+  everyHours: number;
+  retainFull: number;
+  retainDays: number;
 }
 
 export interface DatabaseMember {

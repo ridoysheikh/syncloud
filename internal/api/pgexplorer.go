@@ -472,3 +472,32 @@ func (s *Server) signalPg(w http.ResponseWriter, r *http.Request, terminate bool
 	s.pgAudit(r, action, d, map[string]any{"pid": pid})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
+
+// ── backups (Phase 13c) ─────────────────────────────────────────────────────
+
+func (s *Server) handleListDatabaseBackups(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.postgres(w, r)
+	if !ok {
+		return
+	}
+	out, err := s.databases.Backups(r.Context(), d)
+	if err != nil {
+		s.pgErr(w, "list backups", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleStartDatabaseBackup(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.postgres(w, r)
+	if !ok {
+		return
+	}
+	run, err := s.databases.StartBackup(r.Context(), d)
+	if err != nil {
+		s.pgErr(w, "start backup", err)
+		return
+	}
+	s.pgAudit(r, "database:StartDatabaseBackup", d, map[string]any{"run": run.ID, "member": run.Member})
+	writeJSON(w, http.StatusAccepted, map[string]any{"id": run.ID, "member": run.Member, "startedAt": run.StartedAt})
+}

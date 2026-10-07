@@ -166,6 +166,11 @@ type State struct {
 	LimitMiB int `json:"limitMiB"`
 	// Bootstrapped: the PostgreSQL app user and database exist.
 	Bootstrapped bool `json:"bootstrapped,omitempty"`
+	// Restore: a PostgreSQL cluster created from another one's archive.
+	Restore *RestoreState `json:"restore,omitempty"`
+	// Database overrides the app database's name (a restored cluster
+	// keeps its source's).
+	Database string `json:"database,omitempty"`
 }
 
 // Secrets are sealed in the database row.
@@ -176,6 +181,10 @@ type Secrets struct {
 	ReplicationPassword string `json:"replicationPassword,omitempty"`
 	RestPassword        string `json:"restPassword,omitempty"`
 	EtcdPassword        string `json:"etcdPassword,omitempty"`
+	// WalgKey encrypts the cluster's archive (hex, 32 bytes);
+	// RestoreWalgKey reads the source's archive of a restored cluster.
+	WalgKey        string `json:"walgKey,omitempty"`
+	RestoreWalgKey string `json:"restoreWalgKey,omitempty"`
 }
 
 func parseSpec(raw string) (Spec, error) {

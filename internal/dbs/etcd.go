@@ -69,6 +69,7 @@ func etcdTaskSpec(image string, mb store.EtcdMember, dns, search []string) *agen
 			"--auto-compaction-retention=1h", "--quota-backend-bytes=1073741824",
 		},
 		Env:              map[string]string{"ETCD_SELF": EtcdHost(mb.Ordinal)},
+		NetworkAliases:   []string{EtcdHost(mb.Ordinal)},
 		MemoryLimitBytes: 256 << 20,
 		DnsServers:       dns, DnsSearch: search,
 		Labels: map[string]string{"syncloud.service": "etcd", "syncloud.service_id": EtcdServiceID, "syncloud.etcd_member": name},
@@ -256,7 +257,7 @@ func (m *Manager) etcdSend(ctx context.Context, mb *store.EtcdMember) {
 	if m.DNS != nil {
 		dns, search = m.DNS(mb.NodeID, "", "")
 	}
-	ts := etcdTaskSpec(m.PostgresImage, *mb, dns, search)
+	ts := etcdTaskSpec(m.pgImage(pgDefaultVersion), *mb, dns, search)
 	mb.SpecHash = specHash(ts)
 	_ = m.st.UpdateEtcdMember(ctx, *mb, m.now().UTC())
 	err := m.gw.Send(mb.NodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_RunTask{RunTask: &agentv1.RunTask{Spec: ts}}})

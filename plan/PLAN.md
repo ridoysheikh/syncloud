@@ -1789,6 +1789,41 @@ One image runs every role, chosen by its command: Patroni-managed Postgres, PgBo
 - **Clones:** the same restore gives "clone from latest", e.g. for staging copies.
 - **Dashboard:** a backup list (time, size, WAL range, duration), an RPO indicator showing the age of the last archived WAL, and an alert when archiving fails.
 
+**13c implementation (user request 2026-10-07: "WAL-G with S3 configuration that enables point-in-time recovery"):**
+- **Configuration:**
+  - `spec.postgres.backup` = `{endpoint, bucket, prefix, everyHours (24), retainFull (7), retainDays (7)}`.
+  - `endpoint` names a registered S3 endpoint (§16), so its credentials stay sealed there.
+  - `prefix` defaults to `syncloud-pg/<db-id>`.
+  - Backups can be turned on when a cluster is created or later. Changing them restarts members one at a time, switching over before the primary.
+  - Turning backups off stops archiving. What is already in S3 stays there.
+- **Members:**
+  - WAL-G gets its settings from the member's environment: `WALG_S3_PREFIX`, the AWS variables from the endpoint, `WALG_COMPRESSION_METHOD=zstd` and `WALG_LIBSODIUM_KEY`. The key is a sealed 32-byte key per cluster, so the backups are encrypted.
+  - `archive_mode` is always on, and `archive_command` is `wal-g wal-push %p` (`/bin/true` while backups are off). `archive_timeout` is 60 s, so no more than about a minute of writes is at risk.
+  - Replicas set `restore_command` to `wal-g wal-fetch %f %p`, so they can catch up from the archive.
+  - When a base backup exists, new replicas clone from it first (`create_replica_methods: [walg, basebackup]`, image script `walg-replica`). Without one they fall back to `pg_basebackup`.
+- **Base backups:**
+  - The controller runs a one-shot task (`dbk_…`, restart policy no) on a streaming replica's node, or on the primary's when there is no replica. The task mounts that member's volume read-only and connects to it as the superuser.
+  - The task runs `wal-g backup-push`, then `wal-g delete retain FULL <retainFull> --after <now − retainDays> --confirm`.
+  - A backup runs every `everyHours`, or on demand (`POST …/backups`). Its outcome becomes an event, and its logs are the database's logs.
+  - Only one backup runs at a time per cluster.
+- **Status:** the API reads the bucket directly through the S3 endpoint:
+  - backups from `basebackups_005/*_backup_stop_sentinel.json` (name, start and finish times, LSNs, sizes);
+  - the last WAL upload from `wal_005/`;
+  - the restore window, from the oldest backup's start to the last WAL upload;
+  - from the primary, `pg_stat_archiver` (last archived, failures).
+  - An alert fires when nothing has been archived for 15 minutes while archiving is on (wired with 13d's alerts).
+- **Restore:** `POST /databases` with `restore: {from, backup?, targetTime?}` creates a new cluster and never touches the source.
+  - The new cluster gets the source's database name, passwords and S3 endpoint, and its own prefix and encryption key.
+  - Patroni bootstraps it with `bootstrap.method: walg` (image script `walg-bootstrap`, which runs `backup-fetch` of the chosen or latest backup before the target).
+  - It recovers with `restore_command` reading the source's archive (`walg-restore-wal`), `recovery_target_time` (or to the end of the archive) and `recovery_target_action: promote`.
+  - Then it starts its own timeline and archive. A clone of the latest state is the same restore without a target time.
+- **Image:** `17-r2` adds the three scripts.
+- **e2e** (`test/e2e/postgres-backup.sh`, MinIO as a task):
+  - write rows; take a backup; write more and note the time; write a row that should not survive;
+  - restore to the noted time into a new cluster: its rows are exactly the ones before the time;
+  - the backup list and window are shown, and a scheduled backup runs;
+  - a new replica clones from WAL-G.
+
 **Autoscaling** (every 15 s, with each change logged with its reason):
 - **Read replicas** (min to max), on the read pool's average CPU or the active connections per replica: one more after 1 minute above the target, one fewer after 10 minutes below half of it. New replicas clone from WAL-G when a recent backup exists.
 - **Vertical** (CPU and memory between min and max, as steps), on the primary's CPU (> 80 % for 10 minutes), memory pressure, or connections near `max_connections`:
@@ -1831,6 +1866,46 @@ One image runs every role, chosen by its command: Patroni-managed Postgres, PgBo
   - `metrics`, `events`.
 - **CLI:** `synctl db …` gains `psql`-style `sql`, `users`, `backups`, `restore`, `switchover` and `extensions`.
 - **IAM:** actions stay in the `database:*` namespace.
+
+**PostgreSQL 18 (user request, 2026-10-08):**
+- **Image:** one Dockerfile per major version (`PG_MAJOR` build argument), pinned as `ImagePostgres17` and `ImagePostgres18` in the manifest. Every component ships for 18: pg_duckdb 1.1.1, pgvector, partman, cron, hypopg, PostGIS 3.6, TimescaleDB 2.30 (Apache), Patroni 4.1.5 and WAL-G 3.0.9.
+- **Versions:** the engine offers `18` (default) and `17`. Members use the image and `bin_dir` of the database's version.
+- **Restores:** a restore always uses the source's major version.
+- **Major upgrades (17 → 18):** not in this step. A later step will use `pg_upgrade` in a clone, or logical replication into a new cluster.
+- **Nodes outside the mesh:** etcd and Patroni members address each other by discovery name, and a node outside the mesh (single-node dev) has no discovery DNS. `TaskSpec.network_aliases` gives each container its discovery name as a Docker network alias, so the names resolve on one node through Docker's own DNS. Fixes "waiting for the platform etcd".
+
+**13c2. Configuration, optional extensions, replication (user request, 2026-10-08):**
+- **Defaults:** a new cluster is plain PostgreSQL plus WAL-G. `pg_stat_statements` is the only preloaded library, because it ships with PostgreSQL.
+- **Optional extensions:** `spec.postgres.extensions` lists the enabled add-ons: `timescaledb`, `pg_duckdb`, `pg_cron`, `vector`, `postgis`, `pg_partman` and `hypopg`.
+  - Enabling one sets its preload library, if it has one. Only then can the explorer install it.
+  - Disabling one is refused while it is installed in any database.
+  - The contrib extensions that ship with PostgreSQL (`pg_trgm`, `pgcrypto`, …) stay installable at any time.
+  - Clusters created before this slice have no `extensions` key. They keep every add-on enabled, so nothing changes under them.
+- **Parameters:** `spec.postgres.parameters` is a map of curated settings. Each has a type (int, real, bool, enum, memory, time), a range, and a context (reload or restart). The controller validates them.
+  - Memory-derived tuning is the default, and a user value wins.
+  - Settings the platform owns are refused: archiving, `wal_level`, listening, hba, preload, `max_wal_senders`.
+- **Replication:** `spec.postgres.replication` holds:
+  - `mode`: `async`, `sync` or `strict`. `strict` means writes stop rather than run without a synchronous replica.
+  - `syncReplicas`: `synchronous_node_count`.
+  - `maxLagOnFailover` (MiB): a replica further behind than this is not promoted.
+  - `failoverTtl` (s): the leader lease; `loop_wait` and `retry_timeout` follow from it.
+  - `slots`, `hotStandbyFeedback`, `walKeepSize`, `maxSlotWalKeepSize`.
+  - The old `synchronous: true` maps to `mode: sync`.
+- **Applying to a running cluster:** settings are dynamic Patroni configuration, not container configuration, so changing them does not recreate members.
+  - `bootstrap.dcs` is frozen at creation in `State.BootstrapDCS`, which keeps the spec hash stable.
+  - The controller keeps the desired dynamic configuration (parameters, preload, replication) in sync through `PATCH /config` on the leader. Removed keys are sent as null. The applied hash is kept in `State.DCSHash`.
+  - Reloadable settings apply at once.
+  - For settings that need a restart, the controller restarts members flagged `pending_restart` one at a time: replicas first, then the leader. Each restart waits until the member streams again, and each is recorded as an event.
+  - Vertical scaling also re-tunes memory this way. Before, the tuning was only applied at the first bootstrap.
+- **UI:** the wizard's PostgreSQL step gets extensions (toggles), replication (mode, sync count, failover lag) and an "advanced parameters" editor. The Settings tab edits the same fields on a running cluster and shows which ones need a restart.
+  - A **Replication** tab shows `pg_stat_replication`: each replica's state, sync state, send/write/flush/replay lag and bytes behind, plus the replication slots and the timeline.
+- **API / CLI:** the spec fields come through the existing `PUT /databases/{name}`; `GET /databases/{name}/pg/replication`; `GET /databases/pg/parameters` (the catalog). CLI: `synctl db replication`, `synctl db config set|unset KEY[=VALUE]`, `synctl db extensions enable|disable NAME` (cluster-level).
+- **e2e:**
+  - create a cluster with one extension and custom parameters, then check `SHOW`;
+  - install a disabled extension (refused), enable it (rolling restart), then install it;
+  - change a reload parameter (no restart) and a restart parameter (pending restart, then restarted, with events);
+  - switch replication to sync and see `sync` in the Replication tab;
+  - a single-node cluster outside the mesh runs etcd and Postgres (aliases).
 
 **Slices:**
 - **13a.** Image and `make postgres-image`; the platform etcd; the Patroni operator (create, replicas, failover and switchover, rw/ro endpoints, members on distinct nodes); `engine: postgres` available; credentials and URLs; e2e:
@@ -1880,7 +1955,31 @@ One image runs every role, chosen by its command: Patroni-managed Postgres, PgBo
     - `app` gets CREATEDB, CREATEROLE and `pg_monitor`, plus SET (not inherit) on the roles created through the API.
   - **Verified:** `test/e2e/postgres-admin.sh`, plus UI flows in a browser.
   - **Fix:** roles with `VALID UNTIL 'infinity'` broke the role list. The query now maps infinity to NULL.
-- ⬜ 13c (next, per the user), 13b2, 13d, 13e.
+- ✅ 13c (2026-10-08):
+  - **Configuration:** `spec.postgres.backup` names a registered S3 endpoint and bucket. Members get WAL-G's settings in their environment. `archive_command` is `wal-g wal-push %p` with a 60 s `archive_timeout`, and replicas set `restore_command` and clone from WAL-G with a fallback to `pg_basebackup`. Each cluster has its own libsodium key.
+  - **Base backups:** one-shot `dbk_` tasks. They run as a sidecar that joins the member's network namespace (a new agent network mode, `task:<id>`) and reads its volume read-only over the Unix socket in `/data/run`. Runs are recorded in `database_backups` (migration 00036), and retention runs after each backup.
+  - **Status:** read from S3 (the backup sentinels and the newest WAL) and from `pg_stat_archiver`.
+  - **Restore:** `restore: {from, backup?, targetTime?}` on create. The new cluster bootstraps with Patroni's custom method (`walg-bootstrap`, `walg-restore-wal`, image `17-r2`) and keeps the source's database name and passwords.
+  - **API, CLI and dashboard:**
+    - API: `GET/POST /databases/{name}/backups`.
+    - CLI: `synctl db backups`, `db backup now|config`, `db restore`.
+    - Dashboard: a Backups tab, a full-page Restore form, and backups in the wizard.
+  - **Verified:** `test/e2e/postgres-backup.sh`:
+    - a scheduled backup; continuous archiving;
+    - a restore to a noted moment holds exactly the earlier rows, and the source is untouched;
+    - a manual backup, one at a time;
+    - a WAL-G replica clone; a latest-state clone through the CLI.
+  - **Found by the e2e:**
+    - The backup sidecar could not reach S3 from its own address, which is why it joins the member's namespace.
+    - A standalone restore cannot reach an in-cluster S3 service that only admits its own environment (documented).
+  - **Note:** MinIO images are no longer freely pullable, so the backup e2e uses VersityGW. `test/e2e/storage.sh` still uses MinIO and needs the same change.
+- ✅ PostgreSQL 18 and network aliases (2026-10-08):
+  - **Images:** `images/postgres` builds per major version (`PG_MAJOR`): `ghcr.io/syncloud/postgres:18-r1` and `17-r2`. `make postgres-image` builds both; `postgres-image-18` builds one.
+  - **Versions:** `system.PostgresImages` maps each version to its image. `--postgres-image 18=img,17=img` overrides them. The engine offers 18 (the default) and 17; `bin_dir` and the backup sidecar's image follow the database's version, and the platform etcd runs from the default version's image.
+  - **Restores:** a restore keeps the source's version, and asking for another one is refused.
+  - **Aliases:** `TaskSpec.network_aliases` (proto field 22). The agent sets them through `NetworkingConfig`. etcd and Patroni members carry their discovery names, which fixes "waiting for the platform etcd" on a node outside the mesh; checked in DinD with no discovery DNS.
+  - **e2e:** `PG_VERSIONS` (default `18`) picks the images the nodes load. The backup e2e passes on 18 (server version check, restore version refusal). The CLI stage takes the controller URL from the environment, because `db backup config --endpoint` is the S3 endpoint.
+- ⬜ 13c2: configuration, optional extensions, replication settings and status (user request, 2026-10-08), then 13b2, 13d, 13e.
 
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)

@@ -25,16 +25,25 @@ import (
 // the leader, and creates the app user and database.
 
 const (
-	PostgresPort    = 5432
-	patroniPort     = 8008
-	pgSuperuser     = "syncloud_admin"
-	pgReplication   = "replicator"
-	pgAppUser       = "app"
-	pgVersion       = "17"
-	pgNamespace     = "/syncloud/pg/"
-	minPgMemoryMiB  = 256
-	defaultPgMemory = 512
+	PostgresPort  = 5432
+	patroniPort   = 8008
+	pgSuperuser   = "syncloud_admin"
+	pgReplication = "replicator"
+	pgAppUser     = "app"
+	// pgDefaultVersion is the major version new databases get.
+	pgDefaultVersion = "18"
+	pgNamespace      = "/syncloud/pg/"
+	minPgMemoryMiB   = 256
+	defaultPgMemory  = 512
 )
+
+// pgVersions are the offered major versions, newest first.
+var pgVersions = []string{"18", "17"}
+
+// pgImage is the image of a major version's members.
+func (m *Manager) pgImage(version string) string {
+	return m.PostgresImages[version]
+}
 
 // PreloadLibraries are loaded by every member (changing them restarts Postgres).
 var PreloadLibraries = []string{"pg_stat_statements", "timescaledb", "pg_cron", "pg_duckdb"}
@@ -46,6 +55,8 @@ type PostgresSpec struct {
 	Synchronous bool `json:"synchronous"`
 	// MaxConnections defaults from memory.
 	MaxConnections int `json:"maxConnections"`
+	// Backup turns on WAL archiving and base backups to S3 (Phase 13c).
+	Backup *PgBackupSpec `json:"backup,omitempty"`
 }
 
 func (s *Spec) normalizePostgres() error {
@@ -78,6 +89,11 @@ func (s *Spec) normalizePostgres() error {
 	if p.MaxConnections < 20 || p.MaxConnections > 5000 {
 		return errors.New("postgres.maxConnections must be between 20 and 5000")
 	}
+	if p.Backup != nil {
+		if err := p.Backup.normalize(); err != nil {
+			return err
+		}
+	}
 	if s.Autoscaling.CPUTarget == 0 {
 		s.Autoscaling.CPUTarget = 60
 	}
@@ -91,8 +107,14 @@ func (s *Spec) normalizePostgres() error {
 // about one connection per 8 MiB, between 50 and 500.
 func defaultMaxConnections(memMiB int) int { return min(500, max(50, memMiB/8)) }
 
-// PgDatabase is the app database's name (the cluster name, as an identifier).
-func PgDatabase(d store.Database) string { return strings.ReplaceAll(d.Name, "-", "_") }
+// PgDatabase is the app database's name: the cluster name as an
+// identifier, or the source's for a restored cluster.
+func PgDatabase(d store.Database) string {
+	if st := parseState(d.State); st.Database != "" {
+		return st.Database
+	}
+	return strings.ReplaceAll(d.Name, "-", "_")
+}
 
 // pgTuning derives memory settings from the container size.
 func pgTuning(memMiB, maxConn int) map[string]string {
@@ -139,7 +161,7 @@ func patroniConfig(d store.Database, spec Spec, st State, sec Secrets, mb store.
 		},
 		"postgresql": map[string]any{
 			"listen": fmt.Sprintf("0.0.0.0:%d", PostgresPort), "connect_address": fmt.Sprintf("%s:%d", self, PostgresPort),
-			"data_dir": "/data/pgdata", "bin_dir": "/usr/lib/postgresql/" + pgVersion + "/bin",
+			"data_dir": "/data/pgdata", "bin_dir": "/usr/lib/postgresql/" + d.Version + "/bin",
 			"parameters": map[string]any{"unix_socket_directories": "/tmp"},
 			"authentication": map[string]any{
 				"superuser":   map[string]string{"username": pgSuperuser, "password": sec.AdminPassword},
@@ -154,23 +176,28 @@ func patroniConfig(d store.Database, spec Spec, st State, sec Secrets, mb store.
 		},
 		"tags": map[string]bool{"nofailover": false, "noloadbalance": false, "clonefrom": true},
 	}
+	archiveConfig(cfg, spec, st)
 	b, _ := json.MarshalIndent(cfg, "", "  ")
 	return b
 }
 
 // pgTaskSpec is what the agent runs for a PostgreSQL member.
-func pgTaskSpec(image string, d store.Database, spec Spec, st State, sec Secrets, mb store.DatabaseMember, etcdHosts, dns, search []string) *agentv1.TaskSpec {
+func pgTaskSpec(image string, d store.Database, spec Spec, st State, sec Secrets, mb store.DatabaseMember, etcdHosts, dns, search []string, walg map[string]string) *agentv1.TaskSpec {
 	short := memberName(mb)
 	ts := &agentv1.TaskSpec{
 		TaskId: mb.ID, Image: image, NetworkMode: workload.Network,
 		Restart:    agentv1.RestartPolicy_RESTART_POLICY_UNLESS_STOPPED,
 		Mounts:     []*agentv1.Mount{{Type: agentv1.Mount_TYPE_VOLUME, Source: Volume(d, mb.Kind, mb.Ordinal), Target: "/data"}},
 		DnsServers: dns, DnsSearch: search,
-		Command: []string{"patroni"},
+		NetworkAliases: []string{memberHost(d, mb.Kind, mb.Ordinal)},
+		Command:        []string{"patroni"},
 		Env: map[string]string{
 			"PATRONI_CONFIG_B64": base64.StdEncoding.EncodeToString(patroniConfig(d, spec, st, sec, mb, etcdHosts)),
 		},
 		MemoryLimitBytes: int64(st.LimitMiB) << 20,
+	}
+	for k, v := range walg {
+		ts.Env[k] = v
 	}
 	ts.Name = fmt.Sprintf("%s-%s-db-%s-%s", d.Project, d.Environment, d.Name, short)
 	if d.Standalone() {

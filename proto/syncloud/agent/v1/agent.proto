@@ -168,6 +168,10 @@ message TaskSpec {
   // registry_ca is a certificate to trust for the image's registry, when the
   // platform registry only has a self-signed one (§5.9; not part of the spec hash).
   string registry_ca = 21;
+  // network_aliases are names the container answers to on its Docker
+  // network, so peers on the same node resolve them without the discovery
+  // DNS (a node outside the mesh).
+  repeated string network_aliases = 22;
 }
 
 message PortBinding {

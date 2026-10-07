@@ -55,9 +55,16 @@ if [ "${WITH_TRAEFIK:-0}" = 1 ]; then
 fi
 
 if [ "${WITH_POSTGRES:-0}" = 1 ]; then
-  PG_IMAGE=$(sed -n 's/.*ImagePostgres *= *"\(.*\)"/\1/p' internal/system/manifest.go)
-  docker image inspect "$PG_IMAGE" >/dev/null 2>&1 || make -s postgres-image >/dev/null
-  docker save "$PG_IMAGE" -o "$BIN/postgres.tar"
+  # PG_VERSIONS: the major versions whose images the nodes get (the first
+  # one is $PG_IMAGE); the platform etcd runs from the default version's.
+  PG_IMAGES=()
+  for v in ${PG_VERSIONS:-18}; do
+    img=$(sed -n "s/.*ImagePostgres$v *= *\"\(.*\)\"/\1/p" internal/system/manifest.go)
+    docker image inspect "$img" >/dev/null 2>&1 || make -s "postgres-image-$v" >/dev/null
+    PG_IMAGES+=("$img")
+  done
+  PG_IMAGE=${PG_IMAGES[0]}
+  docker save "${PG_IMAGES[@]}" -o "$BIN/postgres.tar"
 fi
 
 echo "== nodes"

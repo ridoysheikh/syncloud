@@ -5,7 +5,7 @@ SynCloud runs dedicated managed databases. Each one gets its own containers, vol
 There are two engines (`synctl db engines` lists them):
 
 - **Valkey**, the BSD-licensed continuation of Redis: same protocol, same commands, same client libraries.
-- **PostgreSQL 17** with Patroni failover and extensions for vectors, time series, geospatial and analytics (see [PostgreSQL](#postgresql)).
+- **PostgreSQL 18 or 17** with Patroni failover and extensions for vectors, time series, geospatial and analytics (see [PostgreSQL](#postgresql)).
 
 The sections up to [Placement](#placement) describe Valkey and what both engines share.
 
@@ -157,7 +157,11 @@ synctl db create orders --engine postgres -p shop --memory 1024 --replicas 1
 synctl db credentials orders
 ```
 
-Each member runs PostgreSQL 17 under [Patroni](https://patroni.readthedocs.io). The members run on different nodes. One is the primary, and the others stream from it.
+Each member runs PostgreSQL under [Patroni](https://patroni.readthedocs.io). The members run on different nodes. One is the primary, and the others stream from it.
+
+New databases get PostgreSQL 18. Pick 17 with `--version 17` or in the wizard. Every extension below ships for both. A restore keeps its source's major version. Upgrading a database from 17 to 18 isn't offered yet.
+
+Members and the platform etcd address each other by name. On a node outside the private network (for example a single-node development setup) those names resolve through Docker's own DNS on the node.
 
 ### Extensions
 
@@ -250,4 +254,40 @@ synctl db sessions orders
 synctl db session cancel orders 4242
 ```
 
-Coming next: PgBouncer pooling, the public STARTTLS endpoint, parameters, WAL-G backups to S3 with point-in-time restore, metrics, replica autoscaling, and pg_duckdb reading from S3.
+### Backups and point-in-time recovery
+
+PostgreSQL databases are backed up with [WAL-G](https://github.com/wal-g/wal-g) to any S3 endpoint registered under **Storage**: AWS S3, R2, B2, MinIO, and others. Turn backups on from the database's **Backups** tab, or from the CLI:
+
+```sh
+synctl db backup config orders --endpoint r2 --bucket pg-backups      # every 24 h, keep 7 + 7 days
+synctl db backup config orders --every 6 --retain-full 14 --retain-days 30
+```
+
+- **Continuous archiving:** every member ships each WAL segment to S3 as it fills, and at least once a minute (`archive_timeout` 60 s). So no more than about a minute of committed writes is at risk.
+- **Base backups:** a short-lived task takes a full copy on a schedule, and you can start one with **Back up now** or `synctl db backup now orders`.
+  - The task copies from a streaming replica when there is one, so the primary does not pay for it.
+  - It runs next to that member, using the member's volume (read-only) and network.
+  - Old backups are pruned: the newest *N* are kept, and so is everything from the last *D* days.
+- **Encryption:** backups are encrypted with a key that only this database's members hold.
+- **Replicas:** new replicas start from the latest base backup instead of copying the primary.
+- **Status:** the tab shows the base backups, recent runs, the last archived WAL (with a warning when archiving fails), and the **restore window**. That window runs from the oldest base backup to the newest archived WAL.
+
+**Restore** always creates a **new** database; the source is never touched. Choose a moment in the window (or the latest state, a clone):
+
+```sh
+synctl db backups orders                                           # the window
+synctl db restore orders orders-before-migration --time 2026-10-07T14:05:00Z
+synctl db restore orders orders-copy --standalone                  # latest state
+```
+
+The new database:
+
+- starts from the newest base backup that finished before that moment and replays the archived WAL up to it, then opens for writes on a new timeline;
+- keeps the source's database name, roles and passwords, so apps can switch to it by changing only the host;
+- archives to the same bucket under its own prefix.
+
+The members and the restored database must be able to reach the S3 endpoint. For an S3 service inside the cluster (MinIO, Garage, …), that means its security group must let in the database: its project environment, or for a standalone database, the database itself.
+
+Turning backups off stops archiving, but what is in S3 stays. Changing backup settings restarts the members one at a time (with a switchover).
+
+Coming next: PgBouncer pooling, the public STARTTLS endpoint, parameters, metrics, replica autoscaling, and pg_duckdb reading from S3.

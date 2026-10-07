@@ -29,7 +29,8 @@ type Controller struct {
 	// PublicPostgres is Traefik's entrypoint for public PostgreSQL databases
 	// (STARTTLS, routed by SNI; Phase 13).
 	PublicPostgres string
-	// PostgresImage runs PostgreSQL members and the platform etcd.
+	// PostgresImage overrides PostgreSQL images per major version
+	// ("18=img,17=img").
 	PostgresImage string
 	// TraefikAdmin serves Traefik's ping and metrics on loopback.
 	TraefikAdmin string
@@ -95,7 +96,7 @@ func LoadController(args []string) (Controller, error) {
 	fs.StringVar(&c.PublicHTTPS, "public-https", env("SYNCLOUD_PUBLIC_HTTPS", ""), "Traefik HTTPS entrypoint (default :443, dev 127.0.0.1:8443)")
 	fs.StringVar(&c.PublicValkey, "public-valkey", env("SYNCLOUD_PUBLIC_VALKEY", ""), "Traefik entrypoint of public Valkey databases (default :6379, dev 127.0.0.1:16379)")
 	fs.StringVar(&c.PublicPostgres, "public-postgres", env("SYNCLOUD_PUBLIC_POSTGRES", ""), "Traefik entrypoint of public PostgreSQL databases (default :5432, dev 127.0.0.1:15432)")
-	fs.StringVar(&c.PostgresImage, "postgres-image", env("SYNCLOUD_POSTGRES_IMAGE", ""), "image of PostgreSQL members and the platform etcd (default: the release's pinned image)")
+	fs.StringVar(&c.PostgresImage, "postgres-image", env("SYNCLOUD_POSTGRES_IMAGE", ""), "PostgreSQL images per major version, as VERSION=IMAGE[,VERSION=IMAGE] (default: the release's pinned images)")
 	fs.StringVar(&c.TraefikAdmin, "traefik-admin", env("SYNCLOUD_TRAEFIK_ADMIN", "127.0.0.1:8082"), "Traefik ping/metrics address (loopback)")
 	fs.BoolVar(&c.SystemTasks, "system-tasks", env("SYNCLOUD_SYSTEM_TASKS", "1") == "1", "run platform components (Traefik, metrics, logs) on the local node")
 	fs.StringVar(&c.BaseDomain, "base-domain", env("SYNCLOUD_BASE_DOMAIN", ""), "initial base domain (default <public-ip>.sslip.io outside dev mode)")

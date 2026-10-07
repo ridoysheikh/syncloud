@@ -1,0 +1,12 @@
+#!/bin/sh
+# Patroni custom bootstrap for a restored cluster: fetch a base backup from
+# the source cluster's archive. Patroni then recovers it with
+# walg-restore-wal up to the target time and promotes it.
+#   WALG_RESTORE_S3_PREFIX, WALG_RESTORE_LIBSODIUM_KEY  the source's archive
+#   WALG_RESTORE_BACKUP                                  a backup name (default LATEST)
+set -eu
+datadir=
+for a in "$@"; do case "$a" in --datadir=*) datadir=${a#--datadir=} ;; esac; done
+[ -n "$datadir" ] || { echo "walg-bootstrap: no --datadir" >&2; exit 1; }
+export WALG_S3_PREFIX="$WALG_RESTORE_S3_PREFIX" WALG_LIBSODIUM_KEY="$WALG_RESTORE_LIBSODIUM_KEY"
+exec wal-g backup-fetch "$datadir" "${WALG_RESTORE_BACKUP:-LATEST}"

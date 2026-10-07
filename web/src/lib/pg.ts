@@ -323,3 +323,88 @@ export function usePgSessions(path: string, all: boolean) {
 }
 
 export const pgUrl = withDb;
+
+// ── backups (Phase 13c) ──
+
+export interface PgBaseBackup {
+  name: string;
+  startTime: string;
+  finishTime: string;
+  startLsn: string;
+  finishLsn: string;
+  compressedSize: number;
+  uncompressedSize: number;
+  permanent: boolean;
+}
+
+export interface PgBackupRun {
+  id: string;
+  member: string;
+  trigger: "schedule" | "manual";
+  state: "running" | "ok" | "failed";
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+}
+
+export interface PgBackups {
+  configured: boolean;
+  config?: import("./databases").PgBackupSpec;
+  location?: string;
+  backups: PgBaseBackup[];
+  runs: PgBackupRun[];
+  archiver?: {
+    archivedCount: number;
+    lastArchived: string;
+    lastArchivedAt: string | null;
+    failedCount: number;
+    lastFailed: string;
+    lastFailedAt: string | null;
+  };
+  window?: { from: string; to: string };
+  error?: string;
+  restoredFrom?: {
+    sourceName: string;
+    backup: string;
+    targetTime?: string;
+  };
+  nextRun?: string;
+}
+
+export function usePgBackups(path: string, enabled = true) {
+  return useQuery({
+    queryKey: ["pg", path, "backups"],
+    queryFn: () => api<PgBackups>("GET", `${path}/backups`),
+    refetchInterval: 10000,
+    enabled,
+  });
+}
+
+export interface S3EndpointRef {
+  id: string;
+  name: string;
+  url: string;
+}
+
+/** Registered S3 endpoints (shared with the Storage pages). */
+export function useS3Endpoints() {
+  return useQuery({
+    queryKey: ["s3-endpoints"],
+    queryFn: async () =>
+      (await api<{ items: S3EndpointRef[] }>("GET", "/s3/endpoints")).items,
+  });
+}
+
+export function useS3Buckets(endpoint: string) {
+  return useQuery({
+    queryKey: ["s3-buckets", endpoint],
+    queryFn: async () =>
+      (
+        await api<{ items: { name: string }[] }>(
+          "GET",
+          `/s3/endpoints/${encodeURIComponent(endpoint)}/buckets`,
+        )
+      ).items,
+    enabled: !!endpoint,
+  });
+}
