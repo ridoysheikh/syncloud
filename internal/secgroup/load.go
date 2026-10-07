@@ -71,9 +71,29 @@ func Load(ctx context.Context, st *store.Store) (*Model, error) {
 			ips[mb.DatabaseID] = append(ips[mb.DatabaseID], mb.IP)
 		}
 	}
+	var pgIPs []string
 	for _, d := range dbs {
 		m.Services = append(m.Services, Service{ID: d.ID, Project: d.Project, Env: d.Environment, Name: d.Name, IPs: ips[d.ID]})
 		m.Groups = append(m.Groups, DatabaseGroup(d))
+		if d.Engine == "postgres" {
+			pgIPs = append(pgIPs, ips[d.ID]...)
+		}
+	}
+	// The platform etcd (Phase 13): its members talk to each other, and
+	// PostgreSQL members (Patroni) reach its client port.
+	ems, err := st.EtcdMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(ems) > 0 {
+		var eips []string
+		for _, e := range ems {
+			if e.IP != "" {
+				eips = append(eips, e.IP)
+			}
+		}
+		m.Services = append(m.Services, Service{ID: EtcdServiceID, Name: "etcd", IPs: eips})
+		m.Groups = append(m.Groups, EtcdGroup(pgIPs))
 	}
 	groups, err := st.ListSecurityGroups(ctx)
 	if err != nil {
@@ -106,6 +126,25 @@ func DatabaseGroup(d store.Database) Group {
 	}
 	return Group{ID: "dbsg_" + d.ID, Project: d.Project, Name: "database-" + d.Name, Inbound: in,
 		Outbound: []Rule{{Protocol: "any", Peers: []string{KindAny}, Description: "all outbound traffic"}}, Services: []string{d.ID}}
+}
+
+// EtcdServiceID matches the platform etcd's containers (label
+// syncloud.service_id).
+const EtcdServiceID = "etcd"
+
+// EtcdGroup is the platform etcd's group: its members on any port, and the
+// PostgreSQL members on the client port.
+func EtcdGroup(pgIPs []string) Group {
+	in := []Rule{{Protocol: "any", Peers: []string{KindSelf}, Description: "etcd members"}}
+	if len(pgIPs) > 0 {
+		var peers []string
+		for _, ip := range pgIPs {
+			peers = append(peers, ip+"/32")
+		}
+		in = append(in, Rule{Protocol: "tcp", Ports: "2379", Peers: peers, Description: "PostgreSQL members (Patroni)"})
+	}
+	return Group{ID: "sg_etcd", Name: "platform-etcd", Inbound: in,
+		Outbound: []Rule{{Protocol: "any", Peers: []string{KindAny}, Description: "all outbound traffic"}}, Services: []string{EtcdServiceID}}
 }
 
 // FromStore parses a stored group's rules.

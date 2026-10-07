@@ -1,8 +1,10 @@
 package dbs
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"syncloud/internal/secgroup"
 	"syncloud/internal/store"
@@ -132,5 +134,74 @@ func TestNetwork(t *testing.T) {
 	missing := Network{Access: []string{"project:ghost"}}
 	if err := NormalizeNetwork(&missing, func(secgroup.Peer) bool { return false }); err == nil {
 		t.Error("accepted a missing project")
+	}
+}
+
+func TestPostgresSpecAndConfig(t *testing.T) {
+	s := Spec{}
+	s.ForEngine(EnginePostgres)
+	if err := s.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	if s.Memory != (Range{512, 512}) || s.CPU != 0.5 || s.Postgres.MaxConnections != 64 || s.Persistence != "" || s.HasSentinels() {
+		t.Errorf("defaults: %+v %+v", s, s.Postgres)
+	}
+	bad := Spec{Postgres: &PostgresSpec{Synchronous: true}}
+	if err := bad.Normalize(); err == nil {
+		t.Error("synchronous without a replica was accepted")
+	}
+	v := Spec{Postgres: &PostgresSpec{}}
+	v.ForEngine(EngineValkey)
+	if v.Postgres != nil {
+		t.Error("a Valkey spec kept a postgres section")
+	}
+
+	d := store.Database{ID: "db_abc", Name: "order-db", Engine: EnginePostgres}
+	sec := Secrets{Password: "p", AdminPassword: "a", ReplicationPassword: "r", RestPassword: "rest", EtcdPassword: "e"}
+	st := State{MemoryMiB: 1024, LimitMiB: 1024, Replicas: 1}
+	mb := store.DatabaseMember{ID: "dbm_1", Kind: KindData, Ordinal: 1}
+	var cfg map[string]any
+	if err := json.Unmarshal(patroniConfig(d, s, st, sec, mb, []string{"e0.etcd.syncloud.internal:2379"}), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg["scope"] != "db_abc" || cfg["namespace"] != "/syncloud/pg/" || cfg["name"] != "m1" {
+		t.Errorf("identity: %v", cfg)
+	}
+	etcd := cfg["etcd3"].(map[string]any)
+	if etcd["username"] != "pg_abc" || etcd["password"] != "e" {
+		t.Errorf("etcd: %v", etcd)
+	}
+	pgc := cfg["postgresql"].(map[string]any)
+	if pgc["connect_address"] != "m1.order-db.db.syncloud.internal:5432" {
+		t.Errorf("connect address: %v", pgc["connect_address"])
+	}
+	params := cfg["bootstrap"].(map[string]any)["dcs"].(map[string]any)["postgresql"].(map[string]any)["parameters"].(map[string]any)
+	if params["shared_buffers"] != "256MB" || params["effective_cache_size"] != "768MB" || params["cron.database_name"] != "order_db" ||
+		!strings.Contains(params["shared_preload_libraries"].(string), "timescaledb") {
+		t.Errorf("parameters: %v", params)
+	}
+	ts := pgTaskSpec("img", d, s, st, sec, mb, nil, nil, nil)
+	if ts.Command[0] != "patroni" || ts.Env["PATRONI_CONFIG_B64"] == "" || ts.MemoryLimitBytes != 1024<<20 || ts.Mounts[0].Source != "syncloud-db-abc-m1" {
+		t.Errorf("task spec: %+v", ts)
+	}
+}
+
+func TestPgHealth(t *testing.T) {
+	d := store.Database{CreatedAt: time.Now().Add(-time.Hour)}
+	st := State{Replicas: 1, Bootstrapped: true}
+	lead := Member{Kind: KindData, State: store.TaskRunning, Role: "primary", LinkUp: true}
+	rep := Member{Kind: KindData, State: store.TaskRunning, Role: "replica", LinkUp: true}
+	if h := pgHealth(d, st, []Member{lead, rep}, d.CreatedAt); h != "healthy" {
+		t.Error(h)
+	}
+	rep.LinkUp = false
+	if h := pgHealth(d, st, []Member{lead, rep}, d.CreatedAt); h != "degraded" {
+		t.Error(h)
+	}
+	if h := pgHealth(d, st, []Member{rep}, d.CreatedAt); h != "down" {
+		t.Error(h)
+	}
+	if h := pgHealth(d, State{Replicas: 1}, []Member{rep}, time.Now()); h != "starting" {
+		t.Error(h)
 	}
 }

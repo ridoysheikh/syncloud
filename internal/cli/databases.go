@@ -415,7 +415,7 @@ func (a *app) databasesCmd() *cobra.Command {
 			if a.output == "json" {
 				return a.printer().json(c)
 			}
-			for _, k := range []string{"url", "readUrl", "publicUrl", "publicReadUrl", "host", "readHost", "port", "username", "password"} {
+			for _, k := range []string{"url", "readUrl", "haUrl", "publicUrl", "publicReadUrl", "host", "readHost", "port", "database", "username", "password"} {
 				if v, ok := c[k]; ok {
 					fmt.Fprintf(a.out, "%-14s %v\n", k+":", v)
 				}

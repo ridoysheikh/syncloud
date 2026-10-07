@@ -22,6 +22,7 @@ import {
   PublicFields,
   useBaseDomain,
 } from "./Network";
+import { PgCapacityStep, PgDataStep } from "./PostgresSteps";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,27}[a-z0-9])?$/;
 const steps = [
@@ -40,7 +41,7 @@ export const selectClass =
 /** Sizes offered in the wizard (MiB). */
 const SIZES = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
 
-interface Form {
+export interface Form {
   engine: string;
   version: string;
   standalone: boolean;
@@ -60,6 +61,8 @@ interface Form {
   access: string[] | null;
   public: boolean;
   allow: string;
+  /** PostgreSQL: commits wait for a replica. */
+  synchronous: boolean;
 }
 
 export function specOf(f: {
@@ -72,7 +75,20 @@ export function specOf(f: {
   persistence: DatabaseSpec["persistence"];
   eviction: string;
   nodes: string[];
+  engine?: string;
+  synchronous?: boolean;
 }): Partial<DatabaseSpec> {
+  if (f.engine === "postgres") {
+    // Fixed size and replica count for now (autoscaling comes with 13d).
+    return {
+      memory: { min: f.memMin, max: f.memMin },
+      replicas: { min: f.repMin, max: f.repMin },
+      cpu: Number(f.cpu) || 0.5,
+      nodes: f.nodes,
+      autoscaling: { cpuTarget: Number(f.cpuTarget) || 60, memoryHigh: 85 },
+      postgres: { synchronous: !!f.synchronous, maxConnections: 0 },
+    };
+  }
   return {
     memory: { min: f.memMin, max: f.memMax },
     replicas: { min: f.repMin, max: f.repMax },
@@ -116,6 +132,7 @@ export function NewDatabaseWizard() {
     access: null,
     public: false,
     allow: "",
+    synchronous: false,
   });
   const set = <K extends keyof Form>(k: K, v: Form[K]) =>
     setF((x) => ({ ...x, [k]: v }));
@@ -232,6 +249,10 @@ export function NewDatabaseWizard() {
                       onClick={() => {
                         set("engine", e.name);
                         set("version", e.defaultVersion ?? "");
+                        // Engine-sized defaults.
+                        set("memMin", e.name === "postgres" ? 1024 : 256);
+                        set("memMax", 1024);
+                        set("cpu", e.name === "postgres" ? "0.5" : "0.1");
                       }}
                       className={cn(
                         "flex flex-col gap-1 rounded-sm border p-3 text-left",
@@ -357,8 +378,18 @@ export function NewDatabaseWizard() {
                 </p>
               </div>
             )}
-            {step === "Capacity" && <CapacityStep f={f} set={set} />}
-            {step === "Data" && <DataStep f={f} set={set} />}
+            {step === "Capacity" &&
+              (f.engine === "postgres" ? (
+                <PgCapacityStep f={f} set={set} />
+              ) : (
+                <CapacityStep f={f} set={set} />
+              ))}
+            {step === "Data" &&
+              (f.engine === "postgres" ? (
+                <PgDataStep f={f} set={set} />
+              ) : (
+                <DataStep f={f} set={set} />
+              ))}
             {step === "Network" && (
               <div className="flex flex-col gap-4 text-xs">
                 <Section title="Inside the cluster: who may connect">
@@ -441,9 +472,9 @@ export function NewDatabaseWizard() {
   );
 }
 
-type SetFn = <K extends keyof Form>(k: K, v: Form[K]) => void;
+export type SetFn = <K extends keyof Form>(k: K, v: Form[K]) => void;
 
-function SizeSelect({
+export function SizeSelect({
   value,
   onChange,
 }: {
@@ -465,7 +496,7 @@ function SizeSelect({
   );
 }
 
-function CountSelect({
+export function CountSelect({
   value,
   onChange,
 }: {
@@ -487,7 +518,13 @@ function CountSelect({
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-muted text-xs font-medium">{title}</h3>
@@ -700,24 +737,42 @@ function Review({
         "off"
       ),
     ],
-    [
-      "Memory",
-      f.memMin === f.memMax
-        ? mib(f.memMin)
-        : `${mib(f.memMin)} → up to ${mib(f.memMax)} (autoscaled)`,
-    ],
-    [
-      "Replicas",
-      f.repMin === f.repMax
-        ? `${f.repMin}`
-        : `${f.repMin} → up to ${f.repMax} (autoscaled above ${f.cpuTarget}% read CPU)`,
-    ],
-    [
-      "Failover",
-      f.repMax > 0 ? "Sentinel (3 instances)" : "none (single server)",
-    ],
-    ["Persistence", f.persistence],
-    ["Eviction", f.eviction],
+    ...(f.engine === "postgres"
+      ? ([
+          ["Memory", `${mib(f.memMin)} per member, ${f.cpu} CPU`],
+          ["Replicas", `${f.repMin}`],
+          [
+            "Failover",
+            f.repMin > 0
+              ? `Patroni${f.synchronous ? ", synchronous (no data loss)" : ", asynchronous"}`
+              : "none (single server)",
+          ],
+          [
+            "Database",
+            <span className="font-mono">{f.name.replace(/-/g, "_")}</span>,
+          ],
+          ["User", <span className="font-mono">app</span>],
+        ] as [string, ReactNode][])
+      : ([
+          [
+            "Memory",
+            f.memMin === f.memMax
+              ? mib(f.memMin)
+              : `${mib(f.memMin)} → up to ${mib(f.memMax)} (autoscaled)`,
+          ],
+          [
+            "Replicas",
+            f.repMin === f.repMax
+              ? `${f.repMin}`
+              : `${f.repMin} → up to ${f.repMax} (autoscaled above ${f.cpuTarget}% read CPU)`,
+          ],
+          [
+            "Failover",
+            f.repMax > 0 ? "Sentinel (3 instances)" : "none (single server)",
+          ],
+          ["Persistence", f.persistence],
+          ["Eviction", f.eviction],
+        ] as [string, ReactNode][])),
     ["Nodes", f.nodes.length ? f.nodes.join(", ") : "any allowed node"],
   ];
   return (

@@ -35,6 +35,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
 
+  postgres-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make postgres-image
+
   binaries:
     runs-on: ubuntu-latest
     needs: [go, web]

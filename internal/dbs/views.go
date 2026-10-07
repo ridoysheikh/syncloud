@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strings"
 	"time"
 
 	"syncloud/internal/store"
@@ -87,7 +88,7 @@ func (m *Manager) View(ctx context.Context, d store.Database) View {
 	spec, _ := parseSpec(d.Spec)
 	st := parseState(d.State)
 	v := View{ID: d.ID, Project: d.Project, Environment: d.Environment, Name: d.Name, Engine: d.Engine, Version: d.Version,
-		Spec: spec, State: st, Status: d.Status, Deleting: d.Deleting, Host: Host(d), ReadHost: ReadHost(d), Port: Port,
+		Spec: spec, State: st, Status: d.Status, Deleting: d.Deleting, Host: Host(d), ReadHost: ReadHost(d), Port: portOf(d),
 		Standalone: d.Standalone(), Network: d.ParseNetwork(), Public: m.public(d),
 		Members: []Member{}, Autoscale: m.Autoscale(d.ID), CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}
 	members, _ := m.st.DatabaseMembers(ctx, d.ID)
@@ -134,11 +135,29 @@ func (m *Manager) View(ctx context.Context, d store.Database) View {
 					}
 				}
 			}
+			if d.Engine == EnginePostgres && l != nil && l.Error == "" {
+				x.Role, x.LinkUp, x.LagBytes = "replica", l.LinkUp, l.LagBytes
+				if l.Role == "master" {
+					x.Role, x.LinkUp = "primary", true
+					primaryUp = mb.State == store.TaskRunning
+				}
+			}
 			if l != nil && l.Error != "" && x.Error == "" {
 				x.Error = l.Error
 			}
 		}
 		v.Members = append(v.Members, x)
+	}
+	if d.Engine == EnginePostgres {
+		var data []Member
+		for _, x := range v.Members {
+			if x.Kind == KindData {
+				data = append(data, x)
+			}
+		}
+		v.Health = pgHealth(d, st, data, d.CreatedAt)
+		v.FailoverReady = st.Replicas > 0 && v.Health == "healthy"
+		return v
 	}
 	wantSent := 0
 	if spec.HasSentinels() {
@@ -207,12 +226,17 @@ type Credentials struct {
 	Port     int    `json:"port"`
 	Username string `json:"username"`
 	Password string `json:"password"`
-	URL      string `json:"url"`     // redis://default:…@host:6379
-	ReadURL  string `json:"readUrl"` // read-only endpoint
+	Database string `json:"database,omitempty"` // PostgreSQL
+	URL      string `json:"url"`                // redis://default:…@host:6379
+	ReadURL  string `json:"readUrl"`            // read-only endpoint
 	// PublicURL and PublicReadURL reach the database from outside the
 	// cluster over TLS (only while the public endpoint is on).
 	PublicURL     string `json:"publicUrl,omitempty"`
 	PublicReadURL string `json:"publicReadUrl,omitempty"`
+	// HAURL (PostgreSQL) lists every member: libpq-compatible clients find
+	// the primary themselves, so they follow a failover even while the
+	// controller (which moves the endpoints) is down.
+	HAURL string `json:"haUrl,omitempty"`
 }
 
 // Credentials returns the app user's connection details.
@@ -221,15 +245,32 @@ func (m *Manager) Credentials(ctx context.Context, d store.Database) (Credential
 	if err != nil {
 		return Credentials{}, err
 	}
-	c := Credentials{Host: Host(d), ReadHost: ReadHost(d), Port: Port, Username: "default", Password: sec.Password}
+	c := Credentials{Host: Host(d), ReadHost: ReadHost(d), Port: portOf(d), Username: "default", Password: sec.Password}
 	eng, _ := EngineByName(d.Engine)
+	path, publicQuery := "", ""
+	if d.Engine == EnginePostgres {
+		c.Username, c.Database = pgAppUser, PgDatabase(d)
+		path, publicQuery = "/"+c.Database, "?sslmode=require"
+	}
 	userinfo := url.UserPassword(c.Username, sec.Password).String()
 	build := func(scheme, host string) string {
-		return scheme + "://" + userinfo + "@" + net.JoinHostPort(host, fmt.Sprint(eng.Port))
+		return scheme + "://" + userinfo + "@" + net.JoinHostPort(host, fmt.Sprint(eng.Port)) + path
 	}
 	c.URL, c.ReadURL = build(eng.Scheme, c.Host), build(eng.Scheme, c.ReadHost)
+	if d.Engine == EnginePostgres {
+		members, _ := m.st.DatabaseMembers(ctx, d.ID)
+		var hosts []string
+		for _, mb := range members {
+			if mb.Kind == KindData {
+				hosts = append(hosts, net.JoinHostPort(memberHost(d, mb.Kind, mb.Ordinal), fmt.Sprint(PostgresPort)))
+			}
+		}
+		if len(hosts) > 0 {
+			c.HAURL = eng.Scheme + "://" + userinfo + "@" + strings.Join(hosts, ",") + path + "?target_session_attrs=read-write"
+		}
+	}
 	if p := m.public(d); p.Enabled && p.Available {
-		c.PublicURL, c.PublicReadURL = build(eng.TLSScheme, p.Host), build(eng.TLSScheme, p.ReadHost)
+		c.PublicURL, c.PublicReadURL = build(eng.TLSScheme, p.Host)+publicQuery, build(eng.TLSScheme, p.ReadHost)+publicQuery
 	}
 	return c, nil
 }

@@ -2,7 +2,12 @@
 
 SynCloud runs dedicated managed databases. Each one gets its own containers, volumes and password, and nothing is shared with other databases.
 
-The first engine is **Valkey**, the BSD-licensed continuation of Redis: same protocol, same commands, same client libraries. PostgreSQL is planned, and `synctl db engines` lists what is available.
+There are two engines (`synctl db engines` lists them):
+
+- **Valkey**, the BSD-licensed continuation of Redis: same protocol, same commands, same client libraries.
+- **PostgreSQL 17** with Patroni failover and extensions for vectors, time series, geospatial and analytics (see [PostgreSQL](#postgresql)).
+
+The sections up to [Placement](#placement) describe Valkey and what both engines share.
 
 A database is either:
 
@@ -144,3 +149,45 @@ Data lives in node-local volumes (`syncloud-db-<id>-m<n>`). Deleting a database 
 ## Placement
 
 Members of one database always run on different nodes. A project database follows its project's allowed nodes. A standalone database may use any node. Either can be limited further under **Settings → Nodes** (see [Nodes](nodes.md)). Database reservations count when the scheduler places services. A member reserves its CPU and about 1.2× its current memory.
+
+## PostgreSQL
+
+```sh
+synctl db create orders --engine postgres -p shop --memory 1024 --replicas 1
+synctl db credentials orders
+```
+
+Each member runs PostgreSQL 17 under [Patroni](https://patroni.readthedocs.io). The members run on different nodes. One is the primary, and the others stream from it.
+
+### Extensions
+
+The image `ghcr.io/syncloud/postgres` includes the extensions below. Enable one with `CREATE EXTENSION` in your database.
+
+| Extension | For |
+| --- | --- |
+| `vector` | pgvector: embeddings and similarity search |
+| `timescaledb` | TimescaleDB, Apache-licensed edition: hypertables and time functions |
+| `pg_duckdb` | the DuckDB engine for analytical queries and Parquet files |
+| `postgis` | geospatial types and indexes |
+| `pg_partman`, `pg_cron`, `hypopg`, `pg_stat_statements` | partitions, scheduled jobs, hypothetical indexes, query statistics |
+| contrib modules | `pg_trgm`, `pgcrypto`, `hstore` and the rest |
+
+The libraries `pg_stat_statements`, `timescaledb`, `pg_cron` and `pg_duckdb` are preloaded. Memory sets the tuning: `shared_buffers` is 25% of it, `effective_cache_size` is 75%, and `max_connections` is about one per 8 MiB, between 50 and 500.
+
+### Endpoints and users
+
+| URL | Goes to |
+| --- | --- |
+| `url`: `orders.<env>.<project>.syncloud.internal:5432` | the primary |
+| `readUrl`: `orders-ro.…:5432` | the replicas, or the primary when there are none |
+| `haUrl`: `m0.orders…,m1.orders…` with `target_session_attrs=read-write` | each member; the client picks the one that accepts writes |
+
+Applications connect as `app`, which owns the database `orders`. A hyphen in the name becomes `_`. `app` is not a superuser, but it is granted `pg_monitor`, so it can read settings and query statistics. The platform keeps the superuser for itself.
+
+### Failover
+
+Patroni keeps its leader lock in the platform etcd. SynCloud runs that etcd itself on up to three nodes, with one user per database. When the primary stops responding, Patroni promotes the replica that is furthest ahead, normally within about 30 seconds. This does not need the controller. The controller follows the new leader and moves the `url` and `readUrl` addresses to it. While the controller is down, the `haUrl` still finds the new primary. The old primary rejoins as a replica, using `pg_rewind` when needed.
+
+**Failover** on the database page, or `POST /api/v1/databases/<name>/failover`, performs a planned switchover to a healthy replica. With **synchronous replication** on, each commit waits until a replica has it, so a failover never loses a committed transaction.
+
+Coming next: PgBouncer pooling, the public STARTTLS endpoint, WAL-G backups to S3 with point-in-time restore, metrics, replica autoscaling, and pg_duckdb reading from S3.

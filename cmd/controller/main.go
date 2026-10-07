@@ -243,7 +243,7 @@ func serve(args []string) error {
 			GitServer:       gitServer.Config(),
 			TraefikSettings: traefikExtras.Settings(),
 			ControllerURL:   controllerURL, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS,
-			AdminAddr: cfg.TraefikAdmin, TraefikToken: traefikToken, DatabaseEntrypoints: map[string]string{"valkey": cfg.PublicValkey},
+			AdminAddr: cfg.TraefikAdmin, TraefikToken: traefikToken, DatabaseEntrypoints: map[string]string{"valkey": cfg.PublicValkey, "postgres": cfg.PublicPostgres},
 			RegistryRealm: ep.DashboardURL + "/api/v1/registry/token", RegistryTokenCert: regIssuer.CertPath,
 		}
 	}
@@ -266,7 +266,7 @@ func serve(args []string) error {
 	}
 	// Public databases open their engine's port on the controller and edges.
 	var dbMgr *dbs.Manager // set below
-	dbPorts := map[string]string{dbs.EngineValkey: portOf(cfg.PublicValkey)}
+	dbPorts := map[string]string{dbs.EngineValkey: portOf(cfg.PublicValkey), dbs.EnginePostgres: portOf(cfg.PublicPostgres)}
 	publicPorts := func() []string {
 		if dbMgr == nil {
 			return nil
@@ -382,6 +382,10 @@ func serve(args []string) error {
 	dbMgr = dbs.New(st, gw, workloads, registry, box, bus, log)
 	dbMgr.Metrics = metricStore
 	dbMgr.BaseDomain = domains.Base
+	dbMgr.PostgresImage = cfg.PostgresImage
+	if dbMgr.PostgresImage == "" {
+		dbMgr.PostgresImage = system.ImagePostgres
+	}
 	dbMgr.OnChange = disco.Kick
 	dbMgr.OnNetworkChange = func() {
 		certMgr.SetHosts(certHosts(domains.Endpoints()))
@@ -536,7 +540,7 @@ func serve(args []string) error {
 		}
 		return out
 	}, edge.Config{Image: system.ImageTraefik, TraefikToken: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: meshControllerURL,
-		Edges: pools.EdgeNodes, Settings: traefikExtras.Settings, DatabaseEntrypoints: map[string]string{"valkey": ":6379"}}, log)
+		Edges: pools.EdgeNodes, Settings: traefikExtras.Settings, DatabaseEntrypoints: map[string]string{"valkey": ":6379", "postgres": ":5432"}}, log)
 	gw.AddHooks(edges.Hooks())
 	go edges.Run(ctx)
 	traefikProvider := &traefik.Provider{

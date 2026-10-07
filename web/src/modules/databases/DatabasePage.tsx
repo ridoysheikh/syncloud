@@ -25,6 +25,7 @@ import { cn, gap } from "@/ui/cn";
 import { fmtOps } from "./DatabasesPage";
 import { CapacityStep, DataStep, specOf } from "./NewDatabaseWizard";
 import { Console, Explorer } from "./Explorer";
+import { PgDataStep } from "./PostgresSteps";
 import { AccessEditor, allowList, PublicFields } from "./Network";
 
 type Tab =
@@ -108,10 +109,10 @@ export function DatabasePage() {
             "settings",
           ] as Tab[]
         ).filter(
-          // The key tools and autoscaling are Valkey's.
+          // The key tools, autoscaling and (for now) metrics are Valkey's.
           (t) =>
             d.engine === "valkey" ||
-            !["explorer", "console", "autoscaling"].includes(t),
+            !["explorer", "console", "autoscaling", "metrics"].includes(t),
         )}
         value={tab}
         onChange={setTab}
@@ -154,6 +155,7 @@ function FailoverButton({ d, path }: { d: Database; path: string }) {
 }
 
 function Overview({ d, path }: { d: Database; path: string }) {
+  if (d.engine === "postgres") return <PgOverview d={d} path={path} />;
   const u = d.usage;
   const memPct = u.maxMemoryBytes
     ? (100 * u.usedMemoryBytes) / u.maxMemoryBytes
@@ -183,6 +185,43 @@ function Overview({ d, path }: { d: Database; path: string }) {
           label="Replicas"
           value={d.state.replicas}
           hint={`${d.spec.replicas.min}–${d.spec.replicas.max} · up ${formatUptime(u.uptimeSeconds)}`}
+        />
+      </div>
+      <Connection d={d} path={path} />
+      <Members d={d} />
+    </>
+  );
+}
+
+/** A PostgreSQL cluster's overview: topology and replication. */
+function PgOverview({ d, path }: { d: Database; path: string }) {
+  const data = d.members.filter((m) => m.kind === "data");
+  const leader = data.find((m) => m.role === "primary");
+  const maxLag = Math.max(0, ...data.map((m) => m.lagBytes));
+  return (
+    <>
+      <div className={cn("grid grid-cols-2 sm:grid-cols-4", gap)}>
+        <StatTile
+          label="Leader"
+          value={leader ? leader.name : "—"}
+          tone={leader ? undefined : "bad"}
+          hint={leader ? `on ${leader.node}` : "no leader"}
+        />
+        <StatTile
+          label="Replicas"
+          value={`${data.filter((m) => m.role === "replica" && m.linkUp).length}/${d.state.replicas}`}
+          hint="streaming"
+        />
+        <StatTile
+          label="Replication lag"
+          value={bytes(maxLag)}
+          tone={maxLag > 64 << 20 ? "warn" : undefined}
+          hint={d.spec.postgres?.synchronous ? "synchronous" : "asynchronous"}
+        />
+        <StatTile
+          label="Size"
+          value={`${d.state.memoryMiB} MiB`}
+          hint={`${d.spec.cpu} CPU · ${d.spec.postgres?.maxConnections ?? 0} connections`}
         />
       </div>
       <Connection d={d} path={path} />
@@ -250,6 +289,7 @@ interface Credentials {
   password: string;
   url: string;
   readUrl: string;
+  haUrl?: string;
   publicUrl?: string;
   publicReadUrl?: string;
 }
@@ -264,6 +304,11 @@ function Connection({ d, path }: { d: Database; path: string }) {
   });
   const c = creds.data;
   const hidden = "•".repeat(16);
+  const pg = d.engine === "postgres";
+  const url = (host = "", port = d.port, tls = false) =>
+    pg
+      ? `postgresql://app:${hidden}@${host}:${port}/${d.name.replace(/-/g, "_")}${tls ? "?sslmode=require" : ""}`
+      : `${tls ? "rediss" : "redis"}://default:${hidden}@${host}:${port}`;
   return (
     <Panel
       title="Connect"
@@ -281,7 +326,8 @@ function Connection({ d, path }: { d: Database; path: string }) {
       <div className="flex flex-col gap-1.5">
         <Line label="Read-write" value={`${d.host}:${d.port}`} />
         <Line label="Read-only" value={`${d.readHost}:${d.port}`} />
-        <Line label="Username" value="default" />
+        <Line label="Username" value={pg ? "app" : "default"} />
+        {pg && <Line label="Database" value={d.name.replace(/-/g, "_")} />}
         <Line
           label="Password"
           value={show && c ? c.password : hidden}
@@ -289,18 +335,29 @@ function Connection({ d, path }: { d: Database; path: string }) {
         />
         <Line
           label="URL"
-          value={show && c ? c.url : `redis://default:${hidden}@${d.host}:6379`}
+          value={show && c ? c.url : url(d.host)}
           copy={show && !!c}
         />
         <Line
           label="Read URL"
-          value={
-            show && c
-              ? c.readUrl
-              : `redis://default:${hidden}@${d.readHost}:6379`
-          }
+          value={show && c ? c.readUrl : url(d.readHost)}
           copy={show && !!c}
         />
+        {pg && (
+          <Line
+            label="HA URL"
+            value={
+              show && c?.haUrl
+                ? c.haUrl
+                : "postgresql://app:" +
+                  hidden +
+                  "@m0…,m1…/" +
+                  d.name.replace(/-/g, "_") +
+                  "?target_session_attrs=read-write"
+            }
+            copy={show && !!c?.haUrl}
+          />
+        )}
         {d.public.enabled && d.public.available && (
           <>
             <Line
@@ -308,7 +365,7 @@ function Connection({ d, path }: { d: Database; path: string }) {
               value={
                 show && c?.publicUrl
                   ? c.publicUrl
-                  : `rediss://default:${hidden}@${d.public.host}:${d.public.port}`
+                  : url(d.public.host, d.public.port, true)
               }
               copy={show && !!c?.publicUrl}
             />
@@ -317,7 +374,7 @@ function Connection({ d, path }: { d: Database; path: string }) {
               value={
                 show && c?.publicReadUrl
                   ? c.publicReadUrl
-                  : `rediss://default:${hidden}@${d.public.readHost}:${d.public.port}`
+                  : url(d.public.readHost, d.public.port, true)
               }
               copy={show && !!c?.publicReadUrl}
             />
@@ -328,11 +385,14 @@ function Connection({ d, path }: { d: Database; path: string }) {
           Inside the cluster, the services on the access list connect over the
           private network ({accessSummary(d)}).
           {d.public.enabled && d.public.available
-            ? " From outside, use the public URL: TLS is required (rediss://, or redis-cli --tls)."
+            ? pg
+              ? " From outside, use the public URL: TLS is required (sslmode=require)."
+              : " From outside, use the public URL: TLS is required (rediss://, or redis-cli --tls)."
             : " Turn on the public endpoint under Connectivity to connect from outside the cluster."}{" "}
-          Any Redis client works. Send writes to the read-write host; the
-          read-only host spreads reads over the replicas. Revealing the password
-          is recorded in the audit log.
+          {pg
+            ? "Any PostgreSQL driver works. Send writes to the read-write host; the read-only host spreads reads over the replicas. The HA URL lists every member, so the driver finds the primary even while the controller is down."
+            : "Any Redis client works. Send writes to the read-write host; the read-only host spreads reads over the replicas."}{" "}
+          Revealing the password is recorded in the audit log.
         </p>
       </div>
     </Panel>
@@ -489,25 +549,36 @@ function Members({ d }: { d: Database }) {
         </StatusBadge>
       ),
     },
-    {
-      header: "Memory",
-      cell: (m) => (m.kind === "data" ? bytes(m.usedMemoryBytes) : "—"),
-    },
-    {
-      header: "Ops/s",
-      cell: (m) => (m.kind === "data" ? fmtOps(m.opsPerSec) : "—"),
-    },
-    {
-      header: "CPU",
-      cell: (m) => (m.kind === "data" ? `${m.cpuPercent.toFixed(1)}%` : "—"),
-    },
-    { header: "Clients", cell: (m) => (m.kind === "data" ? m.clients : "—") },
+    // Live stats come from the Valkey probe; PostgreSQL metrics are Phase 13d.
+    ...(d.engine === "valkey"
+      ? ([
+          {
+            header: "Memory",
+            cell: (m) => (m.kind === "data" ? bytes(m.usedMemoryBytes) : "—"),
+          },
+          {
+            header: "Ops/s",
+            cell: (m) => (m.kind === "data" ? fmtOps(m.opsPerSec) : "—"),
+          },
+          {
+            header: "CPU",
+            cell: (m) =>
+              m.kind === "data" ? `${m.cpuPercent.toFixed(1)}%` : "—",
+          },
+          {
+            header: "Clients",
+            cell: (m) => (m.kind === "data" ? m.clients : "—"),
+          },
+        ] as Column<DatabaseMember>[])
+      : []),
     {
       header: "Replication",
       cell: (m) =>
         m.role === "replica" ? (
           <span className={m.linkUp ? "text-muted" : "text-warn"}>
-            {m.linkUp ? `in sync · lag ${bytes(m.lagBytes)}` : "link down"}
+            {m.linkUp
+              ? `${d.engine === "postgres" ? "streaming" : "in sync"} · lag ${bytes(m.lagBytes)}`
+              : "link down"}
           </span>
         ) : (
           "—"
@@ -794,6 +865,8 @@ function Settings({ d, path }: { d: Database; path: string }) {
           repMax: d.spec.replicas.max,
           cpu: String(d.spec.cpu),
           cpuTarget: String(d.spec.autoscaling.cpuTarget),
+          engine: d.engine,
+          synchronous: d.spec.postgres?.synchronous,
           ...f,
         }),
       }),
@@ -811,7 +884,11 @@ function Settings({ d, path }: { d: Database; path: string }) {
     <div className={cn("grid grid-cols-1 items-start lg:grid-cols-2", gap)}>
       <Panel title="Data and placement">
         <div className="flex flex-col gap-3">
-          <DataStep f={f} set={set as never} />
+          {d.engine === "postgres" ? (
+            <PgDataStep f={{ ...f, name: d.name }} set={set as never} />
+          ) : (
+            <DataStep f={f} set={set as never} />
+          )}
           {save.error && <Alert>{errText(save.error)}</Alert>}
           <div className="flex items-center gap-2">
             <Button

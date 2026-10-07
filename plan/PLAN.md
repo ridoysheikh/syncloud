@@ -1682,6 +1682,193 @@ The user wants a database to work like an AWS-managed one: it gets a URL that is
     - the allow-list is enforced, and the public endpoint follows a failover (writes resumed 13 s after the primary froze);
     - the existing steps all pass.
 
+### Phase 13: Managed PostgreSQL (replicated, autoscaled, with WAL-G and analytics extensions)
+
+User decisions (2026-10-07):
+- **HA: Patroni + etcd.** Failover must keep working while the controller is down, as with Valkey's Sentinel.
+- **Scale: read replicas + vertical resizing.** Write scale-out (Citus sharding) is out of scope.
+- **Time series: TimescaleDB Apache edition.** The TSL edition forbids offering it as a database service.
+- **Analytics: pg_duckdb with the cluster's S3 endpoints.**
+
+PostgreSQL is the second engine of the Phase 12 core (§12e). It shares:
+- global names and both kinds of owner (standalone or project);
+- the access list and the public endpoint;
+- placement with anti-affinity, member reservations and lost-member replacement;
+- events, logs and the dashboard shell.
+
+**Image** (`images/postgres/Dockerfile`, pinned as `ImagePostgres` and published by the release pipeline; dev and e2e build it locally with `make postgres-image`):
+- based on `pgduckdb/pgduckdb:17-v1.x` (official Postgres 17 on Debian, plus pg_duckdb);
+- from the PGDG and Timescale apt repositories:
+  - **extensions:** `pgvector`, `pg_partman`, `pg_cron`, `timescaledb-2-oss` (Apache only), `postgis`, `hypopg`, plus the contrib modules (`pg_stat_statements`, `pgcrypto`, `hstore`, `pg_trgm`, `btree_gin`/`btree_gist`, `postgres_fdw`, `uuid-ossp`, `tablefunc`);
+  - **tools:** `patroni` with `python3-etcd`, and `pgbouncer`;
+- the `wal-g` binary (Apache 2).
+
+One image runs every role, chosen by its command: Patroni-managed Postgres, PgBouncer, or the WAL-G helper.
+
+**Coordination: the platform etcd.** One small etcd cluster serves every Postgres cluster:
+- **Members:** 3 system members on distinct nodes (1 while the cluster has fewer than 3 nodes). Each has node-local data, a peer and client listener on the mesh, and auth with a sealed root password.
+- **Patroni access:** each Postgres cluster gets its own etcd user and a key prefix `/syncloud/pg/<db-id>/`.
+- **Membership changes:** a lost member's node gone for 10 minutes means the member is removed and added on another node. Changes go one at a time, and quorum is kept.
+- **Controller outages:** etcd runs on nodes, so failover keeps working while the controller is down.
+
+**Cluster model** (engine `postgres`, members `dbm_`):
+- **Data members:** `m<n>`, each a Patroni plus Postgres container pinned to its node, with a node-local volume `syncloud-db-<id>-m<n>`. Names follow the database's internal zone, e.g. `m0.<db>.db.syncloud.internal`.
+- **Replication:** Patroni bootstraps the primary, and replicas clone with `pg_basebackup`, or from the latest WAL-G backup when one exists.
+- **Durability:** asynchronous by default. Optional `synchronous: on` sets `synchronous_mode` (on) with `synchronous_node_count` 1 and needs at least one replica.
+- **Failover:** `ttl` 30 s, `loop_wait` 10 s. Patroni promotes the most up-to-date replica, and `maximum_lag_on_failover` is 1 MiB unless synchronous.
+- **Switchover:** used for maintenance and rolling restarts, through Patroni's REST API on the mesh (`:8008`, with a password).
+- **Endpoints** (the same model as Valkey; the probe asks every member's Patroni `/cluster` and VIPs follow its leader):
+  - `<db>…:5432` is read-write on the leader;
+  - `<db>-ro…:5432` reads from the replicas that are in sync and in the read pool.
+- **Pooling:** PgBouncer is on by default. Two small pooler containers per cluster run on distinct nodes in transaction mode, with session mode on another port.
+  - The pooled endpoints are `<db>-pool…:6432` and `<db>-pool-ro…:6432`.
+  - Pool sizes follow `max_connections`.
+  - App users are mirrored into `auth_query` through a `pgbouncer` lookup function, so no user list needs syncing.
+- **Analytics replica (optional):**
+  - one extra replica tagged `nofailover` and `noloadbalance`, kept out of the read pool;
+  - higher `work_mem` and `max_parallel_workers_per_gather`, pg_duckdb on, `hot_standby_feedback` off;
+  - endpoint `<db>-analytics…:5432`;
+  - heavy warehouse queries never touch the primary or the app's read pool.
+
+**Users, databases, extensions** (managed by the controller through the leader as the `syncloud_admin` superuser, which apps never get):
+- **Initial setup:** an owner role `app` with a password and a database named after the cluster.
+- **Management:** more roles (login, password, `CONNECTION LIMIT`, read-only or read-write grants per database) and more databases.
+- **Extensions:** the allowed list above, enabled per database with `CREATE EXTENSION`. `shared_preload_libraries` holds `pg_stat_statements`, `timescaledb`, `pg_cron` and `pg_duckdb`; changing it restarts the members in a rolling way.
+- **Parameters:** a validated allow-list (e.g. `work_mem`, `statement_timeout`, `log_min_duration_statement`) applied through Patroni's dynamic configuration. Settings that need a restart are marked as such.
+
+**Explorer and administration (user request, 2026-10-07: "real exploration of the DB, like a web admin: list databases and users, walk table schemas, alter roles and privileges").** This is a pgAdmin-style page in the dashboard, served by the controller.
+- **Connection:**
+  - The controller connects to the leader over the mesh as `syncloud_admin`, with a short-lived connection per request and a pool of at most 4 per cluster, `statement_timeout` 30 s and `application_name=syncloud-explorer`. Browsing never goes through the client endpoints, and replicas are not used.
+  - Every identifier passes through `pgx.Identifier`, and every value is a bind parameter. Privileges and role attributes are checked against fixed lists.
+- **Protected objects:**
+  - `syncloud_admin`, `replicator`, `pg_*` roles and the `postgres`/`template*` databases can be viewed but not changed or dropped.
+  - `SUPERUSER`, `REPLICATION` and `BYPASSRLS` cannot be granted. As on RDS, the highest non-platform role is `CREATEROLE` + `CREATEDB`, and `app` has that.
+- **Databases:** list (owner, size, encoding, collation, connections, `datallowconn`); create (name, owner, template `template1`); rename; change owner; drop (with a typed-name confirmation, which terminates the database's sessions first).
+- **Roles:**
+  - List: login, attributes, connection limit, `valid until`, member of, and the databases each role owns.
+  - Create and alter: password (generated or typed; SCRAM; never returned), `LOGIN`, `CREATEDB`, `CREATEROLE`, `INHERIT`, connection limit, `valid until`, and membership in other roles (grant and revoke, with `ADMIN OPTION`).
+  - Drop: chooses a role that takes over the dropped role's objects (`REASSIGN OWNED BY … TO …; DROP OWNED BY …` in each database), then drops it.
+- **Schema browser** (per database):
+  - The tree is schemas → tables, views, materialized views, sequences, functions and types. System schemas are hidden behind a toggle.
+  - A table shows its columns (type, nullable, default, identity or generated, comment), constraints (PK, FK with target, unique, check), indexes (definition, size, scans), triggers, its size, row estimate, last vacuum/analyze, and the reconstructed `CREATE TABLE` DDL.
+  - **Data tab:** pages of 100 rows (up to 1000), sorting by a column, simple column filters with bound values, and a row count on request. It is read-only; edits go through the console.
+- **Privileges:**
+  - For any database, schema, table, view, sequence or function, a role × privilege grid built from `aclexplode` (with grantor and `WITH GRANT OPTION`), plus default privileges (`pg_default_acl`) per schema.
+  - **Editing** applies one change set in a transaction: GRANT or REVOKE of named privileges to a role, optionally `WITH GRANT OPTION`, on one object, on all tables, sequences or functions in a schema, or as `ALTER DEFAULT PRIVILEGES … IN SCHEMA`.
+  - **Presets** (a role on a database): read-only (CONNECT, USAGE on schemas, SELECT on all tables and sequences, plus default privileges), read-write (adds INSERT, UPDATE, DELETE, TRUNCATE and sequence USAGE), and owner-like (membership in the owner).
+  - **Effective view:** for a role, everything it can do on an object through membership, via `has_table_privilege` and its siblings.
+- **Extensions** per database: available versus installed, with version. Install (`CREATE EXTENSION … CASCADE` into a chosen schema), update, and drop. Only the image's allow-list is offered.
+- **SQL console:**
+  - A database picker and a run-as role picker. The default role is `app`. Any role except the protected ones can be chosen, applied with `SET ROLE`, so the console never runs as the superuser.
+  - **Read-only by default:** queries run in `BEGIN READ ONLY`. A write toggle runs in a normal transaction and is audited with the statement text.
+  - Several statements per run; the result of each is shown with its column types, at most 1000 rows, the command tag and the duration. `EXPLAIN (ANALYZE, FORMAT JSON)` is shown as a plan tree. Errors include the SQLSTATE and position.
+  - Recent queries are kept per viewer in the browser.
+- **Sessions:** `pg_stat_activity` (user, database, client, state, wait event, query, duration, blocked by), with cancel and terminate. Platform sessions are hidden.
+- **API** (Postgres only; other engines get 400): under `/api/v1/databases/{name}/pg/`:
+  - `databases` (GET, POST), `databases/{db}` (PATCH, DELETE);
+  - `roles` (GET, POST), `roles/{role}` (GET, PATCH, DELETE);
+  - `schema?db=` (tree), `table?db=&schema=&name=` (detail and DDL), `rows?db=&schema=&table=` (data);
+  - `privileges?db=&kind=&schema=&name=` (GET), `privileges` (POST: change set or preset);
+  - `extensions?db=` (GET, POST, DELETE);
+  - `query` (POST);
+  - `sessions` (GET), `sessions/{pid}/cancel` and `/terminate` (POST).
+- **IAM:** each operation is its own `database:*` action, so read access (browse, read-only query) can be granted without admin (roles, privileges, write queries). Every change is audited.
+- **CLI:** `synctl db sql <name> [--db] [--as] [--write] "<sql>"`, `synctl db roles|role create|alter|drop`, `synctl db grant|revoke`, `synctl db pg-databases`.
+- **Dashboard:**
+  - The **Explorer** tab has a tree on the left and object tabs on the right (Columns, Data, Indexes, Constraints, Privileges, DDL).
+  - The **Roles** tab has a list. Create and edit are full-page forms (`/databases/$name/roles/new`, `/roles/$role`), each with a membership and per-database privilege section.
+  - The other tabs are **Console** and **Sessions**.
+
+**Backups (WAL-G to an S3 endpoint, §16):**
+- **Archiving:** `archive_command` with `wal-g wal-push` runs continuously, with the archive timeout at 60 s.
+- **Base backups:** `wal-g backup-push` runs from a replica (the primary when there is none), on a schedule (default daily) and on demand.
+- **Retention:** `retain N` full backups plus a time window, applied by `delete retain FULL`.
+- **Storage:** the prefix `s3://<bucket>/<prefix>/syncloud-pg/<db-id>/`, with the S3 credentials sealed and given to members as secrets.
+- **Encryption:** client-side libsodium with a sealed key per cluster.
+- **Restore:** to any time within the window, or to a named backup, always into a new cluster. Patroni's `bootstrap.method: walg` uses `backup-fetch` plus `restore_command` and `recovery_target_time`. The source cluster is never touched.
+- **Clones:** the same restore gives "clone from latest", e.g. for staging copies.
+- **Dashboard:** a backup list (time, size, WAL range, duration), an RPO indicator showing the age of the last archived WAL, and an alert when archiving fails.
+
+**Autoscaling** (every 15 s, with each change logged with its reason):
+- **Read replicas** (min to max), on the read pool's average CPU or the active connections per replica: one more after 1 minute above the target, one fewer after 10 minutes below half of it. New replicas clone from WAL-G when a recent backup exists.
+- **Vertical** (CPU and memory between min and max, as steps), on the primary's CPU (> 80 % for 10 minutes), memory pressure, or connections near `max_connections`:
+  - the members restart one at a time with the new limits and tuned settings: `shared_buffers` 25 %, `effective_cache_size` 75 %, `work_mem` from connections, `max_connections` from memory;
+  - replicas go first, then a switchover, then the old primary;
+  - writes pause only for the switchover, about 2–5 s;
+  - scaling down needs 6 hours under 30 %;
+  - the scheduler must have room on the members' nodes; otherwise a member is moved by cloning a replica on another node and switching over to it.
+- **Storage:** volume use is watched, with alerts at 80 % and 90 %. Node-local disks cannot grow online. A member short of room is replaced by a clone on a node with room, after a switchover if it is the primary.
+
+**Metrics** (the controller queries every member, the same model as Valkey's probe, as `syncloud_pg_*`):
+- TPS (commits and rollbacks), connections by state, cache hit ratio;
+- replication lag in bytes and seconds, WAL rate, database sizes, deadlocks, temp bytes;
+- the longest running transaction, checkpoint timing, and the age of the last WAL archive;
+- top queries from `pg_stat_statements`.
+
+**Dashboard:**
+- **Wizard:** engine, owner, capacity (CPU and memory min/max, storage note, replicas min/max, analytics replica, synchronous), backups (S3 endpoint, schedule, retention), extensions, and network.
+- **Database page:**
+  - Overview: endpoints, the pooler, members with role, lag and timeline;
+  - Connectivity: access list and public endpoint;
+  - Metrics;
+  - SQL console: read-only by default, with a write toggle that is audited and a row limit;
+  - Schema browser: databases, schemas, tables with sizes and row estimates, indexes, a data preview;
+  - Queries: top statements, running queries with cancel and terminate;
+  - Users & databases; Extensions; Backups & restore; Autoscaling; Logs;
+  - Settings: parameters, maintenance switchover, deletion.
+- **Analytics:** pg_duckdb S3 secrets are created from a bound S3 endpoint, so `read_parquet('s3://…')` and `COPY … TO 's3://….parquet'` work from the SQL console and from apps.
+
+**Public endpoint:**
+- Traefik gets a `postgres` entrypoint on `:5432`, using its Postgres STARTTLS support and routing by `HostSNI` to the leader (or the pooler).
+- The URL is `postgresql://app:…@<db>.db.<base>:5432/<db>?sslmode=require`.
+- The read-only and analytics hosts work the same way.
+- Inside the cluster, connections are plain over the private network, as for Valkey.
+
+**API / CLI / IAM:**
+- **Resource API:** under `/databases/{name}`, engine-specific parts return 400 for other engines:
+  - `users`, `databases`, `extensions`, `parameters`, `backups` (list, create, `restore` → a new database), `switchover`;
+  - `sql` (console), `schema`, `queries` (with cancel);
+  - `metrics`, `events`.
+- **CLI:** `synctl db …` gains `psql`-style `sql`, `users`, `backups`, `restore`, `switchover` and `extensions`.
+- **IAM:** actions stay in the `database:*` namespace.
+
+**Slices:**
+- **13a.** Image and `make postgres-image`; the platform etcd; the Patroni operator (create, replicas, failover and switchover, rw/ro endpoints, members on distinct nodes); `engine: postgres` available; credentials and URLs; e2e:
+  - a 3-node cluster;
+  - writes through rw, reads on ro;
+  - a frozen primary fails over and writes resume;
+  - the old primary rejoins;
+  - failover still works with the controller stopped.
+- **13b.** Explorer and administration (above): databases, roles, schema browser, privileges and presets, extensions, SQL console, sessions; e2e: create a role, grant read-only on a database, connect as it (SELECT works, INSERT refused), revoke, alter it, and drop it with reassign; browse schema, columns and DDL; run a console query as `app`; refuse protected roles and SUPERUSER.
+- **13b2.** PgBouncer; public STARTTLS endpoint; parameters.
+- **13c.** WAL-G archiving and scheduled backups to S3 (MinIO in e2e), the backups UI, PITR restore and clone into a new cluster.
+- **13d.** Metrics and the dashboard charts; read-replica and vertical autoscaling; the analytics replica; storage alerts.
+- **13e.** pg_duckdb S3 integration and warehouse UX (Parquet read/export, analytics endpoint); TimescaleDB, pgvector and partman checks in e2e; docs.
+
+**Progress**
+- ✅ 13a (2026-10-07):
+  - **Image:** `ghcr.io/syncloud/postgres:17-r1` (`images/postgres`, `make postgres-image`, a CI job). It is built on `pgduckdb/pgduckdb:17-v1.1.1` and adds pgvector, TimescaleDB (Apache), PostGIS, pg_partman, pg_cron, hypopg, Patroni 4.1.5, PgBouncer, WAL-G v3.0.9 and etcd v3.7.2. The entrypoint roles are `patroni`, `etcd` and `pgbouncer`.
+  - **Platform etcd:** `etcd_members` (migration 00034).
+    - Bootstraps 3 members once 3 nodes are ready (otherwise 1), grows one at a time, and replaces a member lost for 10 minutes.
+    - Root auth uses a sealed password. Each database gets an etcd user whose role covers `/syncloud/pg/<id>/`.
+    - A synthesized security group allows only members and Postgres members to reach port 2379.
+  - **Operator:**
+    - Member configuration: Patroni config from the spec (memory-derived tuning, preload libraries, pg_hba, `use_pg_rewind`, slots).
+    - The member start waits until the database's etcd user exists.
+    - Probing: the controller probes `GET /patroni`, moves the VIPs to the leader and records failovers.
+    - First boot creates the `app` role (granted `pg_monitor`) and database. App users are never superusers.
+    - Switchover goes through Patroni's REST API. Rolling restarts switch over before restarting the leader.
+  - **API, CLI and UI:**
+    - Credentials include `database` and an `haUrl` (multi-host, `target_session_attrs=read-write`) that keeps working while the controller is down.
+    - The wizard has PostgreSQL capacity steps (synchronous replication) and data steps (extension list).
+    - The database page shows Leader, Replicas, Lag and Size tiles. Valkey-only tabs and columns are hidden.
+  - **Verified:** `test/e2e/postgres.sh` (3 DinD nodes): writes on rw, reads on ro, ro refuses writes, `app` is not a superuser, extensions are preloaded, a frozen leader fails over and the old one rejoins, API switchover, and failover with the controller stopped through the HA URL; all rows are kept.
+  - **Fixes found by the e2e** (both engines):
+    - Removing a member on a node that cannot be told leaked its volume. Removals now record the volume in `database_orphans` (migration 00035), and the node removes it when it reports in.
+    - After a controller restart, a member whose node had not reconnected yet looked changed, because its resolver was missing from the spec, and it was restarted. Spec-change restarts now wait for the member's node to connect.
+  - **Docs:** a PostgreSQL section in docs/databases.md.
+- ⬜ 13b, 13b2, 13c–13e.
+
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)
 

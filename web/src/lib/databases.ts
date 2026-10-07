@@ -16,6 +16,8 @@ export interface DatabaseSpec {
   evictionPolicy: string;
   nodes?: string[];
   autoscaling: { cpuTarget: number; memoryHigh: number };
+  /** PostgreSQL only. */
+  postgres?: { synchronous: boolean; maxConnections: number };
 }
 
 export interface DatabaseMember {

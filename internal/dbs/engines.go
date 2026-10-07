@@ -39,9 +39,10 @@ var Engines = []EngineInfo{
 		Entrypoint: "valkey", Features: []string{"explorer", "console", "failover", "memoryAutoscaling", "replicaAutoscaling"},
 	},
 	{
-		Name: EnginePostgres, Title: "PostgreSQL",
-		Description: "Planned: streaming replicas, WAL backups to S3 and point-in-time restore.",
-		Versions:    []string{}, Port: 5432, Scheme: "postgresql", TLSScheme: "postgresql", Entrypoint: "postgres", Features: []string{},
+		Name: EnginePostgres, Title: "PostgreSQL", Available: true,
+		Description: "PostgreSQL 17 with Patroni failover and streaming replicas; pgvector, TimescaleDB (Apache), pg_duckdb, PostGIS, pg_partman and pg_cron.",
+		Versions:    []string{pgVersion}, DefaultVersion: pgVersion, Port: PostgresPort, Scheme: "postgresql", TLSScheme: "postgresql",
+		Entrypoint: "postgres", Features: []string{"failover"},
 	},
 }
 

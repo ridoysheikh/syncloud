@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"syncloud/internal/store"
 	"syncloud/internal/workload"
 )
 
@@ -58,6 +59,8 @@ type Spec struct {
 	Nodes []string `json:"nodes,omitempty"`
 	// Autoscaling settings.
 	Autoscaling Autoscaling `json:"autoscaling"`
+	// Postgres is set for PostgreSQL databases (and only for them).
+	Postgres *PostgresSpec `json:"postgres,omitempty"`
 }
 
 // Autoscaling tunes the autoscaler; a dimension scales only when its
@@ -69,8 +72,24 @@ type Autoscaling struct {
 	MemoryHigh float64 `json:"memoryHigh"`
 }
 
-// Normalize fills in defaults and validates.
+// ForEngine prepares a spec for an engine: PostgreSQL specs carry their
+// own section, Valkey specs never do.
+func (s *Spec) ForEngine(engine string) {
+	if engine == EnginePostgres && s.Postgres == nil {
+		s.Postgres = &PostgresSpec{}
+	} else if engine != EnginePostgres {
+		s.Postgres = nil
+	}
+}
+
+// Normalize fills in defaults and validates (call ForEngine first).
 func (s *Spec) Normalize() error {
+	if s.Postgres != nil {
+		if err := s.normalizePostgres(); err != nil {
+			return err
+		}
+		return s.normalizeNodes()
+	}
 	if s.Memory.Min == 0 {
 		s.Memory.Min = 256
 	}
@@ -102,13 +121,9 @@ func (s *Spec) Normalize() error {
 	if !slices.Contains(EvictionPolicies, s.EvictionPolicy) {
 		return errors.New("evictionPolicy must be one of " + strings.Join(EvictionPolicies, ", "))
 	}
-	for _, n := range s.Nodes {
-		if !workload.ValidNodeName(n) {
-			return fmt.Errorf("nodes: %q is not a node name", n)
-		}
+	if err := s.normalizeNodes(); err != nil {
+		return err
 	}
-	slices.Sort(s.Nodes)
-	s.Nodes = slices.Compact(s.Nodes)
 	if s.Autoscaling.CPUTarget == 0 {
 		s.Autoscaling.CPUTarget = 60
 	}
@@ -124,9 +139,20 @@ func (s *Spec) Normalize() error {
 	return nil
 }
 
-// HasSentinels reports whether the database runs Sentinel: whenever it can
-// have replicas.
-func (s Spec) HasSentinels() bool { return s.Replicas.Max > 0 }
+func (s *Spec) normalizeNodes() error {
+	for _, n := range s.Nodes {
+		if !workload.ValidNodeName(n) {
+			return fmt.Errorf("nodes: %q is not a node name", n)
+		}
+	}
+	slices.Sort(s.Nodes)
+	s.Nodes = slices.Compact(s.Nodes)
+	return nil
+}
+
+// HasSentinels reports whether the database runs Sentinel: a Valkey
+// database that can have replicas.
+func (s Spec) HasSentinels() bool { return s.Postgres == nil && s.Replicas.Max > 0 }
 
 // State is what the operator decided and observed.
 type State struct {
@@ -138,12 +164,18 @@ type State struct {
 	Primary int `json:"primary"`
 	// LimitMiB is the container memory limit the members were created with.
 	LimitMiB int `json:"limitMiB"`
+	// Bootstrapped: the PostgreSQL app user and database exist.
+	Bootstrapped bool `json:"bootstrapped,omitempty"`
 }
 
 // Secrets are sealed in the database row.
 type Secrets struct {
 	Password      string `json:"password"`      // the app user ("default")
-	AdminPassword string `json:"adminPassword"` // "syncloud": replication, Sentinel, the controller
+	AdminPassword string `json:"adminPassword"` // "syncloud": replication, Sentinel, the controller (Postgres: the superuser)
+	// PostgreSQL: the replication user, Patroni's REST API and its etcd user.
+	ReplicationPassword string `json:"replicationPassword,omitempty"`
+	RestPassword        string `json:"restPassword,omitempty"`
+	EtcdPassword        string `json:"etcdPassword,omitempty"`
 }
 
 func parseSpec(raw string) (Spec, error) {
@@ -170,3 +202,20 @@ func containerLimit(maxMiB int) int { return maxMiB*5/4 + 64 }
 // reservation is what the scheduler counts for a data member at the
 // current memory.
 func reservation(memMiB int) int { return memMiB*6/5 + 32 }
+
+// memberReservation is a data member's reservation for its engine: a
+// PostgreSQL member's memory is its container size.
+func memberReservation(spec Spec, st State) int {
+	if spec.Postgres != nil {
+		return st.MemoryMiB
+	}
+	return reservation(st.MemoryMiB)
+}
+
+// portOf is the engine's client port.
+func portOf(d store.Database) int {
+	if d.Engine == EnginePostgres {
+		return PostgresPort
+	}
+	return Port
+}

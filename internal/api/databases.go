@@ -248,7 +248,7 @@ func (s *Server) handleDatabaseCredentials(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleFailoverDatabase(w http.ResponseWriter, r *http.Request) {
-	d, ok := s.valkey(w, r)
+	d, ok := s.database(w, r)
 	if !ok {
 		return
 	}

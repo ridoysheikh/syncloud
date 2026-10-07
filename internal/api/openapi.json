@@ -16928,6 +16928,18 @@
                 "type": "number"
               }
             }
+          },
+          "postgres": {
+            "type": "object",
+            "description": "PostgreSQL only",
+            "properties": {
+              "synchronous": {
+                "type": "boolean"
+              },
+              "maxConnections": {
+                "type": "integer"
+              }
+            }
           }
         }
       },

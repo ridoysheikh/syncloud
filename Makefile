@@ -1,4 +1,4 @@
-.PHONY: all build controller agent synctl web proto test vet fmt dev dev-controller dev-agent dev-web clean release e2e
+.PHONY: all build controller agent synctl web proto test vet fmt dev dev-controller dev-agent dev-web clean release e2e postgres-image
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 LDFLAGS := -s -w -X syncloud/internal/version.Version=$(VERSION)
@@ -17,6 +17,11 @@ agent:
 
 synctl:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/synctl ./cmd/synctl
+
+## postgres-image: the managed PostgreSQL image (Patroni, WAL-G, etcd, extensions), tagged as pinned in internal/system
+POSTGRES_IMAGE := $(shell sed -n 's/.*ImagePostgres *= *"\(.*\)"/\1/p' internal/system/manifest.go)
+postgres-image:
+	docker build -t $(POSTGRES_IMAGE) images/postgres
 
 web: web/node_modules
 	cd web && pnpm run build

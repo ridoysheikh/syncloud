@@ -20,6 +20,8 @@ const (
 	ImageVictoriaLogs    = "victoriametrics/victoria-logs:v1.53.0"
 	ImageRegistry        = "registry:3.1.2"
 	ImageForgejo         = "codeberg.org/forgejo/forgejo:13.0.5-rootless"
+	// ImagePostgres is built from images/postgres (make postgres-image).
+	ImagePostgres = "ghcr.io/syncloud/postgres:17-r1"
 )
 
 // GitServerAddr is where the built-in Git server listens (host network,

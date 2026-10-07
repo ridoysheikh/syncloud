@@ -11,15 +11,17 @@ BIN=$(mktemp -d)
 
 cleanup() {
   [ "${KEEP:-0}" = 1 ] && { echo "nodes kept: ${NODES[*]}"; return; }
-  docker rm -f "${NODES[@]}" >/dev/null 2>&1 || true
+  # -v: each node's Docker data root is an anonymous volume (GBs of images).
+  docker rm -fv "${NODES[@]}" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
+  rm -rf "$BIN"
 }
 trap cleanup EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 x() { docker exec "$@"; }
 
 setup_cluster() {
-docker rm -f "${NODES[@]}" >/dev/null 2>&1 || true
+docker rm -fv "${NODES[@]}" >/dev/null 2>&1 || true
 docker network rm "$NET" >/dev/null 2>&1 || true
 echo "== build"
 for c in controller agent synctl; do
@@ -52,6 +54,12 @@ if [ "${WITH_TRAEFIK:-0}" = 1 ]; then
   docker save victoriametrics/victoria-logs:v1.53.0 -o "$BIN/vlogs.tar"
 fi
 
+if [ "${WITH_POSTGRES:-0}" = 1 ]; then
+  PG_IMAGE=$(sed -n 's/.*ImagePostgres *= *"\(.*\)"/\1/p' internal/system/manifest.go)
+  docker image inspect "$PG_IMAGE" >/dev/null 2>&1 || make -s postgres-image >/dev/null
+  docker save "$PG_IMAGE" -o "$BIN/postgres.tar"
+fi
+
 echo "== nodes"
 docker network create "$NET" >/dev/null
 for n in "${NODES[@]}"; do
@@ -61,6 +69,7 @@ done
 for n in "${NODES[@]}"; do
   for _ in $(seq 1 60); do x "$n" docker info >/dev/null 2>&1 && break; sleep 1; done
   x "$n" docker load -q -i /opt/sc/busybox.tar >/dev/null
+  if [ "${WITH_POSTGRES:-0}" = 1 ]; then x "$n" docker load -q -i /opt/sc/postgres.tar >/dev/null; fi
 done
 CTL_IP=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" sc-e2e-ctl)
 

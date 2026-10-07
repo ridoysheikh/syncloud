@@ -30,6 +30,11 @@ func (m *Manager) probe(ctx context.Context, d store.Database) {
 	if err != nil {
 		return
 	}
+	if d.Engine == EnginePostgres {
+		_ = spec
+		m.probePostgres(ctx, d, st, sec, members)
+		return
+	}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 	now := m.now()

@@ -61,6 +61,8 @@ type Manager struct {
 	// OnNetworkChange runs when the set of public endpoints or access lists
 	// changes (certificates, host firewall, security policy).
 	OnNetworkChange func()
+	// PostgresImage runs PostgreSQL members, PgBouncer and the platform etcd.
+	PostgresImage string
 	// BaseDomain returns the platform's base domain ("" = none, so no
 	// public endpoints).
 	BaseDomain func() string
@@ -72,9 +74,10 @@ type Manager struct {
 	queued map[string]bool
 	cl     clients
 
-	mu   sync.Mutex
-	live map[string]*Live // member ID -> last probe
-	auto map[string]*autoState
+	mu        sync.Mutex
+	live      map[string]*Live // member ID -> last probe
+	auto      map[string]*autoState
+	etcdUsers map[string]bool // PostgreSQL clusters whose etcd user exists
 }
 
 // Recorder imports Prometheus text samples.
@@ -97,7 +100,7 @@ type Live struct {
 
 func New(st *store.Store, gw *agentgw.Gateway, wl *workload.Manager, reg *nodes.Registry, box *secrets.Box, bus *events.Bus, log *slog.Logger) *Manager {
 	return &Manager{st: st, gw: gw, wl: wl, nodes: reg, box: box, bus: bus, log: log, now: time.Now,
-		queue: make(chan string, 256), queued: map[string]bool{}, live: map[string]*Live{}, auto: map[string]*autoState{}}
+		queue: make(chan string, 256), queued: map[string]bool{}, live: map[string]*Live{}, auto: map[string]*autoState{}, etcdUsers: map[string]bool{}}
 }
 
 // Hooks follow member containers on the agent stream.
@@ -168,10 +171,11 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
 	if version == "" {
 		version = eng.DefaultVersion
 	}
-	if Images[version] == "" {
+	if !slices.Contains(eng.Versions, version) {
 		return View{}, ErrInvalid{fmt.Errorf("version must be one of %s", strings.Join(eng.Versions, ", "))}
 	}
 	spec := req.Spec
+	spec.ForEngine(eng.Name)
 	if err := spec.Normalize(); err != nil {
 		return View{}, ErrInvalid{err}
 	}
@@ -195,10 +199,16 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
 	}
 	nb, _ := json.Marshal(n)
 	d.Network = string(nb)
-	sec, _ := json.Marshal(Secrets{Password: randomPassword(), AdminPassword: randomPassword()})
+	secrets := Secrets{Password: randomPassword(), AdminPassword: randomPassword()}
+	st := State{MemoryMiB: spec.Memory.Min, Replicas: spec.Replicas.Min, LimitMiB: spec.Memory.Max}
+	if eng.Name == EnginePostgres {
+		secrets.ReplicationPassword, secrets.RestPassword, secrets.EtcdPassword = randomPassword(), randomPassword(), randomPassword()
+		st.LimitMiB = spec.Memory.Min // the container's size (vertical scaling restarts members)
+	}
+	sec, _ := json.Marshal(secrets)
 	d.Secrets = m.box.Seal(sec, aad(d.ID))
 	d.Spec = encode(spec)
-	d.State = encode(State{MemoryMiB: spec.Memory.Min, Replicas: spec.Replicas.Min, LimitMiB: spec.Memory.Max})
+	d.State = encode(st)
 	if err := m.st.CreateDatabase(ctx, d); errors.Is(err, store.ErrNameTaken) {
 		return View{}, ErrInvalid{fmt.Errorf("the name %s is taken (database names are unique in the cluster, and a project database cannot share its name with a service)", name)}
 	} else if err != nil {
@@ -222,6 +232,7 @@ func (m *Manager) Update(ctx context.Context, id string, spec Spec, actor string
 	if err != nil {
 		return View{}, err
 	}
+	spec.ForEngine(d.Engine)
 	if err := spec.Normalize(); err != nil {
 		return View{}, ErrInvalid{err}
 	}
@@ -294,6 +305,13 @@ func (m *Manager) Failover(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if d.Engine == EnginePostgres {
+		if err := m.pgSwitchover(ctx, d, sec); err != nil {
+			return err
+		}
+		m.event(ctx, id, "failover", "m"+strconv.Itoa(st.Primary), "", "switchover requested", "user")
+		return nil
+	}
 	members, err := m.st.DatabaseMembers(ctx, id)
 	if err != nil {
 		return err
@@ -361,10 +379,13 @@ func (m *Manager) probeAll(ctx context.Context) {
 		m.log.Error("list databases", "err", err)
 		return
 	}
+	m.reconcileEtcd(ctx)
 	for _, d := range dbs {
 		m.probe(ctx, d)
 		m.reconcile(ctx, d.ID)
-		m.autoscale(ctx, d.ID)
+		if d.Engine == EngineValkey {
+			m.autoscale(ctx, d.ID)
+		}
 	}
 }
 
@@ -396,11 +417,13 @@ func (m *Manager) reconcile(ctx context.Context, id string) {
 	changed := false
 
 	if d.Deleting {
+		if d.Engine == EnginePostgres {
+			m.dropEtcdUser(ctx, d)
+		}
 		for _, mb := range members {
-			if n, ok := m.nodes.Get(mb.NodeID); ok && n.Connected {
-				m.sendStop(mb, []string{Volume(d, mb.Kind, mb.Ordinal)})
-			}
-			// A node that is gone cleans the container up when it returns (onConnect).
+			// A node that cannot be told now removes the container and
+			// volume when it reports in again (onConnect).
+			m.sendStop(mb, []string{Volume(d, mb.Kind, mb.Ordinal)})
 			_ = m.st.DeleteDatabaseMember(ctx, mb.ID)
 		}
 		if err := m.st.DeleteDatabase(ctx, id, now); err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -422,6 +445,19 @@ func (m *Manager) reconcile(ctx context.Context, id string) {
 
 	if st.LimitMiB == 0 {
 		st.LimitMiB = spec.Memory.Max
+	}
+	if d.Engine == EnginePostgres && !m.etcdUserReady(id) {
+		// Patroni needs its etcd user before any member starts.
+		if err := m.ensureEtcdUser(ctx, d, sec); err != nil {
+			if why := "waiting for the platform etcd: " + err.Error(); why != d.Status {
+				_ = m.st.SetDatabaseStatus(ctx, id, why)
+				m.publish(ctx, id)
+			}
+			return
+		}
+		m.mu.Lock()
+		m.etcdUsers[id] = true
+		m.mu.Unlock()
 	}
 	var data, sents []store.DatabaseMember
 	for _, mb := range members {
@@ -445,7 +481,7 @@ func (m *Manager) reconcile(ctx context.Context, id string) {
 	status := ""
 	place := func(kind string, ordinal int, avoid []string) bool {
 		res := spec.CPU
-		mem := reservation(st.MemoryMiB)
+		mem := memberReservation(spec, st)
 		if kind == KindSentinel {
 			res, mem = 0.02, 16
 		}
@@ -541,12 +577,17 @@ func (m *Manager) reconcile(ctx context.Context, id string) {
 		switch {
 		case mb.SpecHash == "", mb.State == store.TaskPending && now.Sub(mb.UpdatedAt) > pendingResend:
 			m.send(ctx, d, spec, st, sec, &mb)
+		case mb.SpecHash != h && !m.connected(mb.NodeID):
+			// Part of the spec (the node's resolver) is only known while the
+			// node is connected, e.g. not yet after a controller restart;
+			// a restart could not be sent anyway.
+			continue
 		case mb.SpecHash != h && !rolling:
 			if !m.allRunning(data, sents, mb.ID) {
 				rolling = true // wait for the cluster to be whole again
 				continue
 			}
-			if mb.Kind == KindData && mb.Ordinal == st.Primary && len(data) > 1 && len(sents) > 0 {
+			if mb.Kind == KindData && mb.Ordinal == st.Primary && len(data) > 1 && (len(sents) > 0 || d.Engine == EnginePostgres) {
 				if err := m.Failover(ctx, id); err != nil {
 					m.log.Warn("failover before restarting the primary", "database", d.Name, "err", err)
 				}
@@ -597,10 +638,18 @@ func (m *Manager) projectNodes(ctx context.Context, envID string) []string {
 	return p.Nodes
 }
 
+func (m *Manager) connected(nodeID string) bool {
+	n, ok := m.nodes.Get(nodeID)
+	return ok && n.Connected
+}
+
 func (m *Manager) taskSpec(d store.Database, spec Spec, st State, sec Secrets, mb store.DatabaseMember) *agentv1.TaskSpec {
 	var dns, search []string
 	if m.DNS != nil {
 		dns, search = m.DNS(mb.NodeID, d.Project, d.Environment)
+	}
+	if d.Engine == EnginePostgres {
+		return pgTaskSpec(m.PostgresImage, d, spec, st, sec, mb, m.EtcdHosts(context.Background()), dns, search)
 	}
 	return taskSpec(d, spec, st, sec, mb, dns, search)
 }
@@ -632,6 +681,14 @@ func (m *Manager) remove(ctx context.Context, d store.Database, mb store.Databas
 }
 
 func (m *Manager) sendStop(mb store.DatabaseMember, volumes []string) {
+	// The volume is recorded until the node reports the task removed, so a
+	// stop that never arrives is repeated when the node reconnects.
+	for _, v := range volumes {
+		o := store.DatabaseOrphan{TaskID: mb.ID, NodeID: mb.NodeID, Volume: v, CreatedAt: m.now().UTC()}
+		if err := m.st.AddDatabaseOrphan(context.Background(), o); err != nil {
+			m.log.Warn("record member volume", "member", mb.ID, "err", err)
+		}
+	}
 	err := m.gw.Send(mb.NodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_StopTask{StopTask: &agentv1.StopTask{
 		TaskId: mb.ID, TimeoutSeconds: 20, Remove: true, RemoveVolumes: volumes}}})
 	if err != nil && !errors.Is(err, agentgw.ErrNotConnected) {
@@ -679,17 +736,32 @@ func stateOf(s agentv1.TaskState) string {
 }
 
 func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
+	if strings.HasPrefix(s.GetTaskId(), EtcdPrefix) {
+		m.onEtcdStatus(node, s)
+		return
+	}
 	if !isMember(s.GetTaskId()) {
 		return
 	}
 	ctx := context.Background()
 	mb, err := m.st.DatabaseMemberByID(ctx, s.GetTaskId())
 	if errors.Is(err, store.ErrNotFound) {
-		if s.GetState() != agentv1.TaskState_TASK_STATE_REMOVED {
-			// Left over from a removed member or database: remove it. Its
-			// volume stays unless the operator removed it on purpose.
-			_ = m.gw.Send(node.ID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_StopTask{StopTask: &agentv1.StopTask{TaskId: s.GetTaskId(), TimeoutSeconds: 10, Remove: true}}})
+		orphan, oerr := m.st.DatabaseOrphanByTask(ctx, s.GetTaskId())
+		if s.GetState() == agentv1.TaskState_TASK_STATE_REMOVED {
+			if oerr == nil {
+				_ = m.st.DeleteDatabaseOrphan(ctx, orphan.TaskID)
+			}
+			return
 		}
+		// Left over from a removed member or database: remove it, with its
+		// volume when the removal recorded one. Otherwise the volume stays
+		// unless the operator removes it on purpose.
+		var volumes []string
+		if oerr == nil {
+			volumes = []string{orphan.Volume}
+		}
+		_ = m.gw.Send(node.ID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_StopTask{StopTask: &agentv1.StopTask{
+			TaskId: s.GetTaskId(), TimeoutSeconds: 10, Remove: true, RemoveVolumes: volumes}}})
 		return
 	} else if err != nil {
 		return
@@ -728,12 +800,31 @@ func (m *Manager) onConnect(c agentgw.Conn) {
 		known[mb.ID] = true
 	}
 	seen := map[string]bool{}
+	etcdSeen := map[string]bool{}
 	for _, s := range c.Hello.GetTasks() {
+		if strings.HasPrefix(s.GetTaskId(), EtcdPrefix) {
+			etcdSeen[s.GetTaskId()] = true
+			m.onEtcdStatus(c.Node, s)
+			continue
+		}
 		if !isMember(s.GetTaskId()) {
 			continue
 		}
 		seen[s.GetTaskId()] = true
 		m.onTaskStatus(c.Node, s)
+	}
+	if orphans, err := m.st.NodeDatabaseOrphans(ctx, c.Node.ID); err == nil {
+		for _, o := range orphans {
+			if seen[o.TaskID] {
+				continue // stopped with its volume above
+			}
+			// The container is already gone; remove the volume left behind.
+			err := m.gw.Send(c.Node.ID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_StopTask{StopTask: &agentv1.StopTask{
+				TaskId: o.TaskID, TimeoutSeconds: 10, Remove: true, RemoveVolumes: []string{o.Volume}}}})
+			if err == nil {
+				_ = m.st.DeleteDatabaseOrphan(ctx, o.TaskID)
+			}
+		}
 	}
 	for _, mb := range mine {
 		if !seen[mb.ID] {
@@ -741,6 +832,14 @@ func (m *Manager) onConnect(c agentgw.Conn) {
 			mb.SpecHash = ""
 			_ = m.st.UpdateDatabaseMember(ctx, mb, m.now().UTC())
 			m.Enqueue(mb.DatabaseID)
+		}
+	}
+	if ems, err := m.st.EtcdMembers(ctx); err == nil {
+		for _, em := range ems {
+			if em.NodeID == c.Node.ID && !etcdSeen[em.ID] {
+				em.SpecHash = "" // resent by the next etcd reconcile
+				_ = m.st.UpdateEtcdMember(ctx, em, m.now().UTC())
+			}
 		}
 	}
 }
@@ -775,7 +874,7 @@ func (m *Manager) Usage(ctx context.Context) map[string]workload.Usage {
 		} else {
 			spec, _ := parseSpec(d.Spec)
 			u.CPU += spec.CPU
-			u.MemoryMiB += reservation(parseState(d.State).MemoryMiB)
+			u.MemoryMiB += memberReservation(spec, parseState(d.State))
 		}
 		out[mb.NodeID] = u
 	}
@@ -792,6 +891,13 @@ func (m *Manager) Directory(ctx context.Context, vip func(index int) string, poo
 		return nil, nil
 	}
 	now := m.now()
+	if ems, err := m.st.EtcdMembers(ctx); err == nil {
+		for _, em := range ems {
+			if em.IP != "" && em.State == store.TaskRunning {
+				recs = append(recs, &agentv1.DNSRecord{Name: EtcdHost(em.Ordinal), Ips: []string{em.IP}})
+			}
+		}
+	}
 	for _, d := range dbs {
 		if d.Deleting {
 			continue
@@ -814,13 +920,14 @@ func (m *Manager) Directory(ctx context.Context, vip func(index int) string, poo
 		rwIP, roIP := vip(rw), vip(ro)
 		recs = append(recs, &agentv1.DNSRecord{Name: Host(d), Ips: []string{rwIP}}, &agentv1.DNSRecord{Name: ReadHost(d), Ips: []string{roIP}})
 		short := strings.TrimPrefix(d.ID, "db_")
-		w := &agentv1.VirtualPort{Protocol: "tcp", Port: Port}
+		port := portOf(d)
+		w := &agentv1.VirtualPort{Protocol: "tcp", Port: uint32(port)}
 		if primary != "" {
-			w.Backends = []string{addr(primary, Port)}
+			w.Backends = []string{addr(primary, port)}
 		}
-		r := &agentv1.VirtualPort{Protocol: "tcp", Port: Port}
+		r := &agentv1.VirtualPort{Protocol: "tcp", Port: uint32(port)}
 		for _, ip := range replicas {
-			r.Backends = append(r.Backends, addr(ip, Port))
+			r.Backends = append(r.Backends, addr(ip, port))
 		}
 		if len(r.Backends) == 0 {
 			r.Backends = w.Backends // no replica: reads go to the primary
@@ -830,6 +937,12 @@ func (m *Manager) Directory(ctx context.Context, vip func(index int) string, poo
 			&agentv1.VirtualService{Id: "dbr" + short, Vip: roIP, Ports: []*agentv1.VirtualPort{r}})
 	}
 	return svcs, recs
+}
+
+func (m *Manager) etcdUserReady(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.etcdUsers[id]
 }
 
 func (m *Manager) liveOf(id string) *Live {
