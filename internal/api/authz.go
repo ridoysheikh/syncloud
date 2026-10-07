@@ -24,7 +24,7 @@ var tagPrefix = map[string]string{
 	"projects": "project", "registry": "registry", "services": "service", "settings": "settings", "system": "system", "tasks": "task",
 	"traefik": "traefik", "traffic": "traffic", "quotas": "quota", "usage": "usage", "audit": "audit", "sts": "sts", "shell": "shell",
 	"docs": "docs", "nodepools": "nodepool", "storage": "s3",
-	"integrations": "integration", "gitserver": "gitserver",
+	"integrations": "integration", "gitserver": "gitserver", "databases": "database",
 }
 
 type opInfo struct{ id, tag string }
@@ -88,7 +88,7 @@ var listOps = map[string]bool{
 	"health:ListServiceHealth": true, "health:ListIncidents": true, "logs:QueryLogs": true, "logs:TailLogs": true,
 	"traffic:GetTraffic": true, "traffic:GetTrafficMap": true, "project:ListProjects": true, "project:CreateProject": true,
 	"registry:ListRepositories": true, "quota:ListQuotas": true, "usage:GetUsage": true,
-	"usage:ExportUsage": true, "network:CheckReachability": true,
+	"usage:ExportUsage": true, "network:CheckReachability": true, "database:ListAllDatabases": true,
 }
 
 // Resource names.
@@ -112,6 +112,8 @@ func (s *Server) resourceOf(r *http.Request, action string) string {
 				res += "/service/" + pv("service")
 			case pv("job") != "":
 				res += "/job/" + pv("job")
+			case pv("database") != "":
+				res += "/database/" + pv("database")
 			}
 		}
 		switch {
@@ -400,6 +402,7 @@ const (
 	itemMiddleware   = "middleware"
 	itemRepo         = "repo"          // name
 	itemProjectField = "project-field" // project (and environment)
+	itemDatabase     = "database"      // project, environment, name
 )
 
 // filterItems keeps the list items the principal may see with the list's
@@ -423,6 +426,8 @@ func (s *Server) filterItems(r *http.Request, items any, kind string) any {
 		switch kind {
 		case itemService:
 			res = serviceSRN(str(m, "project"), str(m, "environment"), str(m, "name"))
+		case itemDatabase:
+			res = envSRN(str(m, "project"), str(m, "environment")) + "/database/" + str(m, "name")
 		case itemJob:
 			res = envSRN(str(m, "project"), str(m, "environment")) + "/job/" + str(m, "name")
 		case itemProject:

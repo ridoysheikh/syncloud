@@ -99,6 +99,15 @@ type Placement struct {
 
 	// project holds the project's allowed nodes while placing; never stored.
 	project []string
+	// avoid lists nodes to keep away from (anti-affinity); never stored.
+	avoid []string
+}
+
+// Avoiding returns spec kept off the named nodes (e.g. a database's other
+// members). Never stored.
+func (s Spec) Avoiding(nodes []string) Spec {
+	s.Placement.avoid = nodes
+	return s
 }
 
 // WithProjectNodes returns spec limited to a project's allowed nodes as
@@ -111,7 +120,8 @@ func (s Spec) WithProjectNodes(nodes []string) Spec {
 
 // Allows reports whether a task may run on the named node.
 func (p Placement) Allows(node string) bool {
-	return (p.Node == "" || p.Node == node) &&
+	return !slices.Contains(p.avoid, node) &&
+		(p.Node == "" || p.Node == node) &&
 		(len(p.Nodes) == 0 || slices.Contains(p.Nodes, node)) &&
 		(len(p.project) == 0 || slices.Contains(p.project, node))
 }

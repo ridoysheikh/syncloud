@@ -302,7 +302,10 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 				go runner.Run(ctx, m.RunTask.GetSpec())
 			case *agentv1.ConnectResponse_StopTask:
 				st := m.StopTask
-				go runner.Stop(ctx, st.GetTaskId(), time.Duration(st.GetTimeoutSeconds())*time.Second, st.GetRemove())
+				go func() {
+					runner.Stop(ctx, st.GetTaskId(), time.Duration(st.GetTimeoutSeconds())*time.Second, st.GetRemove())
+					runner.RemoveVolumes(ctx, st.GetRemoveVolumes())
+				}()
 			case *agentv1.ConnectResponse_Network:
 				a.net.Submit(m.Network)
 			case *agentv1.ConnectResponse_ExecInput:

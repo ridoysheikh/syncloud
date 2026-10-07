@@ -2,6 +2,7 @@ import {
   Activity,
   Boxes,
   Cpu,
+  Database,
   FolderKanban,
   GitBranch,
   HeartPulse,
@@ -16,6 +17,9 @@ import {
 } from "lucide-react";
 import type { DashboardModule } from "./types";
 import { OverviewPage } from "./overview/OverviewPage";
+import { DatabasesPage } from "./databases/DatabasesPage";
+import { DatabasePage } from "./databases/DatabasePage";
+import { NewDatabaseWizard } from "./databases/NewDatabaseWizard";
 import { CredentialsPage } from "./iam/CredentialsPage";
 import {
   AuditPage,
@@ -147,6 +151,18 @@ export const modules: DashboardModule[] = [
       { path: "/storage/endpoints/$endpoint/edit", label: "Edit S3 endpoint", component: EndpointFormPage, hidden: true },
       { path: "/storage/$endpoint", label: "S3 endpoint", component: EndpointPage, hidden: true },
       { path: "/storage/$endpoint/$bucket", label: "Bucket", component: BucketPage, hidden: true },
+    ],
+  },
+  {
+    id: "databases",
+    label: "Databases",
+    icon: Database,
+    order: 12,
+    permission: "database:ListAllDatabases",
+    pages: [
+      { path: "/databases", label: "Databases", component: DatabasesPage },
+      { path: "/projects/$project/$env/new-database", label: "New database", component: NewDatabaseWizard, hidden: true },
+      { path: "/projects/$project/$env/databases/$name", label: "Database", component: DatabasePage, hidden: true },
     ],
   },
   {

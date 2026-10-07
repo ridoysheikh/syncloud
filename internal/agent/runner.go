@@ -201,6 +201,19 @@ func (r *Runner) Stop(ctx context.Context, taskID string, timeout time.Duration,
 	}
 }
 
+// RemoveVolumes deletes database member volumes (only syncloud-db-*).
+func (r *Runner) RemoveVolumes(ctx context.Context, names []string) {
+	for _, v := range names {
+		if !strings.HasPrefix(v, "syncloud-db-") {
+			r.log.Warn("refusing to remove a volume that is not a database volume", "volume", v)
+			continue
+		}
+		if err := r.docker.RemoveVolume(ctx, v); err != nil {
+			r.log.Warn("remove volume", "volume", v, "err", err)
+		}
+	}
+}
+
 // Snapshot reports every managed container, sent in Hello after (re)connecting.
 func (r *Runner) Snapshot(ctx context.Context) []*agentv1.TaskStatus {
 	list, err := r.docker.List(ctx, LabelManaged+"=true")

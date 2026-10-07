@@ -207,6 +207,9 @@ message StopTask {
   string task_id = 2;
   int32 timeout_seconds = 3;    // before SIGKILL
   bool remove = 4;              // also remove the container
+  // Named volumes to delete after removing the container (a database
+  // member that is gone for good). Only syncloud-db-* volumes are removed.
+  repeated string remove_volumes = 5;
 }
 
 enum TaskState {

@@ -164,6 +164,26 @@ func (s *Store) labelsFor(taskID string) labels {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if strings.HasPrefix(taskID, "dbm_") || strings.HasPrefix(taskID, "dbs_") { // database members (Phase 12): service "db-<name>"
+		var project, env, name string
+		var ord int
+		var kind string
+		err := s.st.R.QueryRowContext(ctx, `SELECT p.name, e.name, d.name, m.kind, m.ordinal FROM database_members m
+			JOIN databases d ON d.id = m.database_id JOIN environments e ON e.id = d.environment_id JOIN projects p ON p.id = e.project_id
+			WHERE m.id = ?`, taskID).Scan(&project, &env, &name, &kind, &ord)
+		if err != nil {
+			return labels{service: "unknown"}
+		}
+		member := fmt.Sprintf("m%d", ord)
+		if kind == "sentinel" {
+			member = fmt.Sprintf("s%d", ord)
+		}
+		lb = labels{project: project, environment: env, service: "db-" + name, revision: member}
+		s.mu.Lock()
+		s.cache[taskID] = lb
+		s.mu.Unlock()
+		return lb
+	}
 	if strings.HasPrefix(taskID, "run_") { // job runs (§5.11): service "job-<name>" or "run-<service>"
 		var project, env, job, svc string
 		err := s.st.R.QueryRowContext(ctx, `SELECT p.name, e.name, coalesce(j.name, ''), coalesce(sv.name, '') FROM job_runs r

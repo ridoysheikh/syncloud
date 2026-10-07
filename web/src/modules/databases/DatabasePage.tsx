@@ -1,0 +1,732 @@
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Check, Copy, Eye, EyeOff, RefreshCw, Trash2 } from "lucide-react";
+import { api, ApiError } from "@/lib/api";
+import { bytes, since } from "@/lib/nodes";
+import {
+  dbPath,
+  healthTone,
+  useDatabases,
+  type Database,
+  type DatabaseMember,
+} from "@/lib/databases";
+import { HistoryChart, type HistorySeries } from "@/charts/HistoryChart";
+import { formatBytes } from "@/modules/projects/MetricsPanel";
+import { LogsView } from "@/modules/logs/LogsView";
+import { PageHeader } from "@/ui/PageHeader";
+import { Panel } from "@/ui/Panel";
+import { StatTile } from "@/ui/StatTile";
+import { DataTable, type Column } from "@/ui/DataTable";
+import { RangePicker, refetchFor, type Range } from "@/ui/RangePicker";
+import { Tabs } from "@/ui/Tabs";
+import { Alert, Button, IconButton, StatusBadge } from "@/ui/controls";
+import { cn, gap } from "@/ui/cn";
+import { fmtOps } from "./DatabasesPage";
+import { CapacityStep, DataStep, specOf } from "./NewDatabaseWizard";
+import { Console, Explorer } from "./Explorer";
+
+type Tab =
+  | "overview"
+  | "metrics"
+  | "explorer"
+  | "console"
+  | "autoscaling"
+  | "logs"
+  | "settings";
+
+const errText = (e: unknown) =>
+  e instanceof ApiError ? e.message : "Request failed";
+
+function formatUptime(sec: number) {
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+/** One managed database (Phase 12). */
+export function DatabasePage() {
+  const { project, env, name } = useParams({ strict: false }) as {
+    project: string;
+    env: string;
+    name: string;
+  };
+  const { data: all, isLoading } = useDatabases();
+  const d = all?.find(
+    (x) => x.project === project && x.environment === env && x.name === name,
+  );
+  const [tab, setTab] = useState<Tab>("overview");
+  const path = dbPath(project, env, name);
+  const projectTo: string = `/projects/${project}/${env}`;
+
+  if (!d) {
+    return isLoading ? null : (
+      <Alert tone="warn">
+        Database {project}/{env}/{name} not found.
+      </Alert>
+    );
+  }
+  return (
+    <div className={cn("flex flex-col", gap)}>
+      <PageHeader
+        crumbs={[
+          <Link to={"/databases" as string} className="hover:text-fg">
+            Databases
+          </Link>,
+          <Link to={projectTo} className="hover:text-fg">
+            {project} / {env}
+          </Link>,
+        ]}
+        title={d.name}
+        status={
+          <span className="flex items-center gap-1">
+            <StatusBadge tone={healthTone[d.health]}>{d.health}</StatusBadge>
+            <span className="text-faint text-xs">Valkey {d.version}</span>
+          </span>
+        }
+        actions={<FailoverButton d={d} path={path} />}
+      />
+      {d.status && <Alert tone="warn">{d.status}</Alert>}
+      <Tabs
+        tabs={
+          [
+            "overview",
+            "metrics",
+            "explorer",
+            "console",
+            "autoscaling",
+            "logs",
+            "settings",
+          ] as Tab[]
+        }
+        value={tab}
+        onChange={setTab}
+      />
+      {tab === "overview" && <Overview d={d} path={path} />}
+      {tab === "metrics" && <Metrics path={path} />}
+      {tab === "explorer" && <Explorer path={path} />}
+      {tab === "console" && <Console path={path} />}
+      {tab === "autoscaling" && <Autoscaling d={d} path={path} />}
+      {tab === "logs" && (
+        <LogsView
+          filter={{ project, environment: env, service: `db-${name}` }}
+        />
+      )}
+      {tab === "settings" && <Settings d={d} path={path} />}
+    </div>
+  );
+}
+
+function FailoverButton({ d, path }: { d: Database; path: string }) {
+  const fo = useMutation({ mutationFn: () => api("POST", `${path}/failover`) });
+  if (d.state.replicas === 0) return null;
+  return (
+    <div className="flex items-center gap-2">
+      {fo.error && (
+        <span className="text-bad text-xs">{errText(fo.error)}</span>
+      )}
+      {fo.isSuccess && (
+        <span className="text-ok text-xs">Failover requested</span>
+      )}
+      <Button
+        disabled={fo.isPending}
+        onClick={() =>
+          confirm(
+            `Fail over ${d.name}? A replica becomes primary; clients reconnect within seconds.`,
+          ) && fo.mutate()
+        }
+      >
+        <RefreshCw className="size-3.5" /> Failover
+      </Button>
+    </div>
+  );
+}
+
+function Overview({ d, path }: { d: Database; path: string }) {
+  const u = d.usage;
+  const memPct = u.maxMemoryBytes
+    ? (100 * u.usedMemoryBytes) / u.maxMemoryBytes
+    : 0;
+  return (
+    <>
+      <div
+        className={cn("grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6", gap)}
+      >
+        <StatTile
+          label="Memory"
+          value={memPct.toFixed(0)}
+          unit="%"
+          tone={memPct > 90 ? "bad" : memPct > 75 ? "warn" : undefined}
+          hint={`${bytes(u.usedMemoryBytes)} of ${d.state.memoryMiB} MiB`}
+        />
+        <StatTile label="Keys" value={u.keys.toLocaleString()} />
+        <StatTile label="Operations" value={fmtOps(u.opsPerSec)} unit="/s" />
+        <StatTile label="Clients" value={u.clients} />
+        <StatTile
+          label="Hit rate"
+          value={u.hitRate < 0 ? "—" : u.hitRate.toFixed(1)}
+          unit={u.hitRate < 0 ? undefined : "%"}
+          hint={u.hitRate < 0 ? "no lookups yet" : "of key lookups"}
+        />
+        <StatTile
+          label="Replicas"
+          value={d.state.replicas}
+          hint={`${d.spec.replicas.min}–${d.spec.replicas.max} · up ${formatUptime(u.uptimeSeconds)}`}
+        />
+      </div>
+      <Connection d={d} path={path} />
+      <Members d={d} />
+    </>
+  );
+}
+
+function CopyButton({ value }: { value: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <IconButton
+      label="Copy"
+      onClick={() =>
+        navigator.clipboard?.writeText(value).then(() => {
+          setDone(true);
+          setTimeout(() => setDone(false), 1500);
+        })
+      }
+    >
+      {done ? (
+        <Check className="text-ok size-3.5" />
+      ) : (
+        <Copy className="size-3.5" />
+      )}
+    </IconButton>
+  );
+}
+
+function Line({
+  label,
+  value,
+  mono = true,
+  copy = true,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  /** Off while a secret is hidden, so the dots are never copied. */
+  copy?: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 text-xs">
+      <span className="text-muted w-24 shrink-0">{label}</span>
+      <code
+        className={cn("min-w-0 flex-1 truncate", mono && "font-mono")}
+        title={value}
+      >
+        {value}
+      </code>
+      {copy ? (
+        <CopyButton value={value} />
+      ) : (
+        <span className="size-7 shrink-0" />
+      )}
+    </div>
+  );
+}
+
+interface Credentials {
+  host: string;
+  readHost: string;
+  port: number;
+  username: string;
+  password: string;
+  url: string;
+  readUrl: string;
+}
+
+function Connection({ d, path }: { d: Database; path: string }) {
+  const [show, setShow] = useState(false);
+  const creds = useQuery({
+    queryKey: ["db-credentials", path],
+    queryFn: () => api<Credentials>("GET", `${path}/credentials`),
+    enabled: show,
+    staleTime: Infinity,
+  });
+  const c = creds.data;
+  const hidden = "•".repeat(16);
+  return (
+    <Panel
+      title="Connect"
+      actions={
+        <Button variant="ghost" onClick={() => setShow((s) => !s)}>
+          {show ? (
+            <EyeOff className="size-3.5" />
+          ) : (
+            <Eye className="size-3.5" />
+          )}
+          {show ? "Hide password" : "Show password"}
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-1.5">
+        <Line label="Read-write" value={`${d.host}:${d.port}`} />
+        <Line label="Read-only" value={`${d.readHost}:${d.port}`} />
+        <Line label="Username" value="default" />
+        <Line
+          label="Password"
+          value={show && c ? c.password : hidden}
+          copy={show && !!c}
+        />
+        <Line
+          label="URL"
+          value={show && c ? c.url : `redis://default:${hidden}@${d.host}:6379`}
+          copy={show && !!c}
+        />
+        <Line
+          label="Read URL"
+          value={
+            show && c
+              ? c.readUrl
+              : `redis://default:${hidden}@${d.readHost}:6379`
+          }
+          copy={show && !!c}
+        />
+        {creds.error && <Alert>{errText(creds.error)}</Alert>}
+        <p className="text-faint text-xs">
+          Reachable from every service in the cluster over the private network
+          (the environment's security groups apply). Any Redis client works.
+          Send writes to the read-write host; the read-only host spreads reads
+          over the replicas. Revealing the password is recorded in the audit
+          log.
+        </p>
+      </div>
+    </Panel>
+  );
+}
+
+function Members({ d }: { d: Database }) {
+  const roleTone = {
+    primary: "ok",
+    replica: "info",
+    sentinel: "neutral",
+    "": "neutral",
+  } as const;
+  const columns: Column<DatabaseMember>[] = [
+    {
+      header: "Member",
+      cell: (m) => <span className="font-mono">{m.name}</span>,
+    },
+    {
+      header: "Role",
+      cell: (m) =>
+        m.role ? (
+          <StatusBadge tone={roleTone[m.role]}>{m.role}</StatusBadge>
+        ) : (
+          "—"
+        ),
+    },
+    {
+      header: "Node",
+      cell: (m) => (
+        <Link
+          to={`/compute/nodes/${m.node}` as string}
+          className="hover:text-accent"
+        >
+          {m.node || "—"}
+        </Link>
+      ),
+    },
+    {
+      header: "State",
+      cell: (m) => (
+        <StatusBadge
+          tone={
+            m.state === "running"
+              ? "ok"
+              : m.state === "pending" || m.state === "pulling"
+                ? "info"
+                : "warn"
+          }
+        >
+          {m.state}
+        </StatusBadge>
+      ),
+    },
+    {
+      header: "Memory",
+      cell: (m) => (m.kind === "data" ? bytes(m.usedMemoryBytes) : "—"),
+    },
+    {
+      header: "Ops/s",
+      cell: (m) => (m.kind === "data" ? fmtOps(m.opsPerSec) : "—"),
+    },
+    {
+      header: "CPU",
+      cell: (m) => (m.kind === "data" ? `${m.cpuPercent.toFixed(1)}%` : "—"),
+    },
+    { header: "Clients", cell: (m) => (m.kind === "data" ? m.clients : "—") },
+    {
+      header: "Replication",
+      cell: (m) =>
+        m.role === "replica" ? (
+          <span className={m.linkUp ? "text-muted" : "text-warn"}>
+            {m.linkUp ? `in sync · lag ${bytes(m.lagBytes)}` : "link down"}
+          </span>
+        ) : (
+          "—"
+        ),
+    },
+    {
+      header: "IP",
+      cell: (m) => <span className="text-muted font-mono">{m.ip || "—"}</span>,
+    },
+    { header: "Created", cell: (m) => since(m.createdAt) },
+  ];
+  return (
+    <Panel title={`Members (${d.members.length})`} flush>
+      <DataTable
+        columns={columns}
+        rows={[...d.members].sort((a, b) =>
+          a.kind === b.kind
+            ? a.name.localeCompare(b.name)
+            : a.kind === "data"
+              ? -1
+              : 1,
+        )}
+        rowKey={(m) => m.id}
+      />
+      {d.members.some((m) => m.error) && (
+        <div className="border-line border-t px-2 py-1.5 text-xs md:px-3">
+          {d.members
+            .filter((m) => m.error)
+            .map((m) => (
+              <div key={m.id} className="text-warn">
+                {m.name}: {m.error}
+              </div>
+            ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+interface History {
+  start: string;
+  end: string;
+  stepSeconds: number;
+  charts: Record<string, { key: string; points: [number, number][] }[]>;
+}
+
+const fmtPct = (v: number) => `${+v.toFixed(v < 10 ? 1 : 0)}%`;
+const fmtRate = (v: number) => `${formatBytes(v)}/s`;
+
+function Metrics({ path }: { path: string }) {
+  const [range, setRange] = useState<Range>("1h");
+  const { data, error } = useQuery({
+    queryKey: ["db-metrics", path, range],
+    queryFn: () => api<History>("GET", `${path}/metrics?range=${range}`),
+    refetchInterval: refetchFor(range),
+    retry: false,
+  });
+  const start = data ? Date.parse(data.start) : 0;
+  const end = data ? Date.parse(data.end) : 0;
+  const lines = (k: string): HistorySeries[] =>
+    (data?.charts[k] ?? []).map((s) => ({ name: s.key, points: s.points }));
+  const maxmem = data?.charts.maxmemory?.[0]?.points;
+  const limit = maxmem?.length ? maxmem[maxmem.length - 1]![1] : undefined;
+  const chart = (
+    title: string,
+    series: HistorySeries[],
+    format: (v: number) => string,
+    extra: {
+      max?: number;
+      integer?: boolean;
+      markLine?: { value: number; label: string };
+    } = {},
+  ) => (
+    <Panel title={title}>
+      {series.length === 0 ? (
+        <div className="text-faint flex h-[150px] items-center justify-center text-xs">
+          {data ? "No samples in this range yet" : "Loading…"}
+        </div>
+      ) : (
+        <HistoryChart
+          series={series}
+          start={start}
+          end={end}
+          format={format}
+          height={150}
+          {...extra}
+        />
+      )}
+    </Panel>
+  );
+  return (
+    <Panel
+      title="History"
+      actions={<RangePicker range={range} setRange={setRange} />}
+    >
+      {error ? (
+        <Alert tone="warn">{errText(error)}</Alert>
+      ) : (
+        <div
+          className={cn("grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3", gap)}
+        >
+          {chart("Operations per second", lines("ops"), (v) => fmtOps(v))}
+          {chart("Memory used", lines("memory"), formatBytes, {
+            markLine: limit
+              ? { value: limit, label: `maxmemory ${formatBytes(limit)}` }
+              : undefined,
+          })}
+          {chart("Keys", lines("keys"), (v) => Math.round(v).toLocaleString(), {
+            integer: true,
+          })}
+          {chart("Clients", lines("clients"), (v) => `${Math.round(v)}`, {
+            integer: true,
+          })}
+          {chart("Hit rate", lines("hitRate"), fmtPct, { max: 100 })}
+          {chart(
+            "Evicted and expired keys",
+            lines("evictions"),
+            (v) => `${v.toFixed(1)}/s`,
+          )}
+          {chart("Replication lag", lines("lag"), formatBytes)}
+          {chart("CPU (% of one core)", lines("cpu"), fmtPct)}
+          {chart("Network", lines("network"), fmtRate)}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+interface DbEvent {
+  id: number;
+  at: string;
+  kind: string;
+  from: string;
+  to: string;
+  reason: string;
+  actor: string;
+}
+
+function Autoscaling({ d, path }: { d: Database; path: string }) {
+  const qc = useQueryClient();
+  const events = useQuery({
+    queryKey: ["db-events", path],
+    queryFn: async () =>
+      (await api<{ items: DbEvent[] }>("GET", `${path}/events`)).items,
+    refetchInterval: 10_000,
+  });
+  const init = useMemo(
+    () => ({
+      memMin: d.spec.memory.min,
+      memMax: d.spec.memory.max,
+      repMin: d.spec.replicas.min,
+      repMax: d.spec.replicas.max,
+      cpu: String(d.spec.cpu),
+      cpuTarget: String(d.spec.autoscaling.cpuTarget),
+    }),
+    [d.spec],
+  );
+  const [f, setF] = useState(init);
+  useEffect(() => setF(init), [init]);
+  const set = (k: string, v: unknown) => setF((x) => ({ ...x, [k]: v }));
+  const save = useMutation({
+    mutationFn: () =>
+      api("PUT", path, {
+        spec: specOf({
+          ...f,
+          persistence: d.spec.persistence,
+          eviction: d.spec.evictionPolicy,
+          nodes: d.spec.nodes ?? [],
+        }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["databases"] }),
+  });
+  const dirty = JSON.stringify(f) !== JSON.stringify(init);
+  const a = d.autoscale;
+  const columns: Column<DbEvent>[] = [
+    {
+      header: "When",
+      cell: (e) => (
+        <span title={new Date(e.at).toLocaleString()}>{since(e.at)}</span>
+      ),
+    },
+    { header: "What", cell: (e) => e.kind },
+    {
+      header: "Change",
+      cell: (e) => (e.from || e.to ? `${e.from || "—"} → ${e.to || "—"}` : "—"),
+    },
+    {
+      header: "Why",
+      cell: (e) => <span className="text-muted">{e.reason || "—"}</span>,
+    },
+    { header: "By", cell: (e) => e.actor },
+  ];
+  return (
+    <>
+      <div className={cn("grid grid-cols-2 md:grid-cols-4", gap)}>
+        <StatTile
+          label="Memory in use"
+          value={a.memoryPercent.toFixed(0)}
+          unit="%"
+          hint={`grows above ${d.spec.autoscaling.memoryHigh}%, shrinks below 40%`}
+        />
+        <StatTile
+          label="Memory now"
+          value={d.state.memoryMiB}
+          unit="MiB"
+          hint={`${d.spec.memory.min}–${d.spec.memory.max} MiB`}
+        />
+        <StatTile
+          label="Read CPU"
+          value={a.readCpu.toFixed(0)}
+          unit="%"
+          hint={`target ${d.spec.autoscaling.cpuTarget}% of one core`}
+        />
+        <StatTile
+          label="Replicas now"
+          value={d.state.replicas}
+          hint={`${d.spec.replicas.min}–${d.spec.replicas.max}`}
+        />
+      </div>
+      {a.blocked && <Alert tone="warn">{a.blocked}</Alert>}
+      <div
+        className={cn(
+          "grid grid-cols-1 items-start xl:grid-cols-[28rem_1fr]",
+          gap,
+        )}
+      >
+        <Panel title="Limits">
+          <div className="flex flex-col gap-3">
+            <CapacityStep f={f} set={set as never} />
+            {save.error && <Alert>{errText(save.error)}</Alert>}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="primary"
+                disabled={!dirty || save.isPending}
+                onClick={() => save.mutate()}
+              >
+                Save
+              </Button>
+              <span className="text-faint text-xs">
+                Memory and replicas change online. A maximum above the size the
+                members were created for restarts them one at a time.
+              </span>
+            </div>
+          </div>
+        </Panel>
+        <Panel title="Events" flush>
+          <DataTable
+            columns={columns}
+            rows={events.data ?? []}
+            rowKey={(e) => String(e.id)}
+            empty={
+              <p className="text-faint px-2 py-3 text-xs md:px-3">
+                No events yet.
+              </p>
+            }
+          />
+        </Panel>
+      </div>
+    </>
+  );
+}
+
+function Settings({ d, path }: { d: Database; path: string }) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const init = useMemo(
+    () => ({
+      persistence: d.spec.persistence,
+      eviction: d.spec.evictionPolicy,
+      nodes: d.spec.nodes ?? [],
+    }),
+    [d.spec],
+  );
+  const [f, setF] = useState(init);
+  useEffect(() => setF(init), [init]);
+  const set = (k: string, v: unknown) => setF((x) => ({ ...x, [k]: v }));
+  const save = useMutation({
+    mutationFn: () =>
+      api("PUT", path, {
+        spec: specOf({
+          memMin: d.spec.memory.min,
+          memMax: d.spec.memory.max,
+          repMin: d.spec.replicas.min,
+          repMax: d.spec.replicas.max,
+          cpu: String(d.spec.cpu),
+          cpuTarget: String(d.spec.autoscaling.cpuTarget),
+          ...f,
+        }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["databases"] }),
+  });
+  const del = useMutation({
+    mutationFn: () => api("DELETE", path),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["databases"] });
+      void navigate({ to: "/databases" as string });
+    },
+  });
+  const dirty = JSON.stringify(f) !== JSON.stringify(init);
+  return (
+    <div className={cn("grid grid-cols-1 items-start lg:grid-cols-2", gap)}>
+      <Panel title="Data and placement">
+        <div className="flex flex-col gap-3">
+          <DataStep f={f} set={set as never} />
+          {save.error && <Alert>{errText(save.error)}</Alert>}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="primary"
+              disabled={!dirty || save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Save
+            </Button>
+            <span className="text-faint text-xs">
+              Restarts the members one at a time: replicas first, then the
+              primary after a failover.
+            </span>
+          </div>
+        </div>
+      </Panel>
+      <Panel title="Danger zone">
+        <div className="flex flex-col gap-2 text-xs">
+          <Detail
+            k="Database ID"
+            v={<span className="font-mono">{d.id}</span>}
+          />
+          <Detail k="Created" v={new Date(d.createdAt).toLocaleString()} />
+          <div className="flex items-center justify-between gap-2 pt-2">
+            <span className="text-muted">
+              Deleting stops every member and deletes its data volumes. This
+              cannot be undone.
+            </span>
+            <Button
+              variant="danger"
+              disabled={del.isPending}
+              onClick={() =>
+                prompt(
+                  `Type ${d.name} to delete the database and all its data`,
+                ) === d.name && del.mutate()
+              }
+            >
+              <Trash2 className="size-3.5" /> Delete
+            </Button>
+          </div>
+          {del.error && <Alert>{errText(del.error)}</Alert>}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function Detail({ k, v }: { k: string; v: ReactNode }) {
+  return (
+    <div className="flex gap-2">
+      <span className="text-muted w-24 shrink-0">{k}</span>
+      <span className="min-w-0 break-words">{v}</span>
+    </div>
+  );
+}

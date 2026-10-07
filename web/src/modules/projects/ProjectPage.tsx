@@ -31,9 +31,17 @@ import {
 } from "./VarsEditor";
 import { Tabs } from "@/ui/Tabs";
 import { ProjectNodesPanel } from "./NodeLimits";
+import { DatabasesTable } from "@/modules/databases/DatabasesPage";
+import { useDatabases } from "@/lib/databases";
 
 type Tab =
-  "services" | "metrics" | "traffic" | "logs" | "variables" | "settings";
+  | "services"
+  | "databases"
+  | "metrics"
+  | "traffic"
+  | "logs"
+  | "variables"
+  | "settings";
 
 /** One project: its environments, their services and shared variables. */
 export function ProjectPage() {
@@ -85,6 +93,7 @@ export function ProjectPage() {
           tabs={
             [
               "services",
+              "databases",
               "metrics",
               "traffic",
               "logs",
@@ -118,6 +127,7 @@ export function ProjectPage() {
         </div>
       </div>
       {tab === "services" && <ServiceGrid services={inEnv} newTo={newTo} />}
+      {tab === "databases" && <ProjectDatabases project={p.name} env={env} />}
       {tab === "metrics" && (
         <MetricsPanel key={env} path={envPath(p.name, env)} by="service" />
       )}
@@ -443,5 +453,28 @@ function ProjectSettings({
         </div>
       )}
     </div>
+  );
+}
+
+function ProjectDatabases({ project, env }: { project: string; env: string }) {
+  const { data = [], isLoading } = useDatabases();
+  const items = data.filter(
+    (d) => d.project === project && d.environment === env,
+  );
+  const newTo: string = `/projects/${project}/${env}/new-database`;
+  return (
+    <Panel
+      title={`Databases in ${env} (${items.length})`}
+      flush
+      actions={
+        <Link to={newTo}>
+          <Button variant="primary">
+            <Plus className="size-3.5" /> New database
+          </Button>
+        </Link>
+      }
+    >
+      <DatabasesTable items={items} loading={isLoading} showProject={false} />
+    </Panel>
   );
 }

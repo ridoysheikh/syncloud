@@ -339,6 +339,13 @@ func (s *Store) CreateService(ctx context.Context, sv Service, spec string, crea
 		return err
 	}
 	defer tx.Rollback()
+	var dbs int // services and databases share DNS names
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM databases WHERE environment_id = ? AND name = ?`, sv.EnvironmentID, sv.Name).Scan(&dbs); err != nil {
+		return err
+	}
+	if dbs > 0 {
+		return ErrNameTaken
+	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO services (id, environment_id, name, revision, desired_count, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, ?)`,
 		sv.ID, sv.EnvironmentID, sv.Name, sv.DesiredCount, sv.CreatedAt.Unix(), sv.CreatedAt.Unix()); isUnique(err) {
@@ -574,21 +581,10 @@ func (s *Store) EnsureServiceVIP(ctx context.Context, serviceID string, pool Ind
 		return 0, err
 	}
 	defer tx.Rollback()
-	taken := map[int]bool{}
-	rows, err := tx.QueryContext(ctx, `SELECT vip_index FROM services WHERE vip_index IS NOT NULL
-		UNION SELECT idx FROM ipam_released WHERE kind = 'vip' AND released_at > ?`, now.Add(-cooldown).Unix())
+	taken, err := takenVIPs(ctx, tx, cooldown, now) // shared with database VIPs
 	if err != nil {
 		return 0, err
 	}
-	for rows.Next() {
-		var i int
-		if err := rows.Scan(&i); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		taken[i] = true
-	}
-	rows.Close()
 	for i := pool.Min; i <= pool.Max; i++ {
 		if taken[i] || (pool.Skip != nil && pool.Skip(i)) {
 			continue

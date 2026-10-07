@@ -1803,8 +1803,11 @@ type StopTask struct {
 	TaskId         string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	TimeoutSeconds int32                  `protobuf:"varint,3,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"` // before SIGKILL
 	Remove         bool                   `protobuf:"varint,4,opt,name=remove,proto3" json:"remove,omitempty"`                                       // also remove the container
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Named volumes to delete after removing the container (a database
+	// member that is gone for good). Only syncloud-db-* volumes are removed.
+	RemoveVolumes []string `protobuf:"bytes,5,rep,name=remove_volumes,json=removeVolumes,proto3" json:"remove_volumes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StopTask) Reset() {
@@ -1863,6 +1866,13 @@ func (x *StopTask) GetRemove() bool {
 		return x.Remove
 	}
 	return false
+}
+
+func (x *StopTask) GetRemoveVolumes() []string {
+	if x != nil {
+		return x.RemoveVolumes
+	}
+	return nil
 }
 
 type TaskStatus struct {
@@ -3988,13 +3998,14 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\aRunTask\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12/\n" +
-	"\x04spec\x18\x02 \x01(\v2\x1b.syncloud.agent.v1.TaskSpecR\x04spec\"\x83\x01\n" +
+	"\x04spec\x18\x02 \x01(\v2\x1b.syncloud.agent.v1.TaskSpecR\x04spec\"\xaa\x01\n" +
 	"\bStopTask\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12'\n" +
 	"\x0ftimeout_seconds\x18\x03 \x01(\x05R\x0etimeoutSeconds\x12\x16\n" +
-	"\x06remove\x18\x04 \x01(\bR\x06remove\"\xb2\x02\n" +
+	"\x06remove\x18\x04 \x01(\bR\x06remove\x12%\n" +
+	"\x0eremove_volumes\x18\x05 \x03(\tR\rremoveVolumes\"\xb2\x02\n" +
 	"\n" +
 	"TaskStatus\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x122\n" +

@@ -55,11 +55,18 @@ type Manager struct {
 
 	// Security compiles security groups into the directory (§8.3).
 	Security bool
+	// Databases adds managed databases' VIPs and names (Phase 12); may be nil.
+	Databases Directory
 
 	mu   sync.Mutex
 	last *agentv1.Discovery
 	vips map[string]string // service ID -> VIP
 	kick chan struct{}
+}
+
+// Directory contributes VIPs and DNS records from outside services.
+type Directory interface {
+	Directory(ctx context.Context, vip func(index int) string, pool store.IndexPool, cooldown time.Duration) ([]*agentv1.VirtualService, []*agentv1.DNSRecord)
 }
 
 func NewManager(st *store.Store, gw *agentgw.Gateway, wl *workload.Manager, log *slog.Logger) *Manager {
@@ -240,6 +247,11 @@ func (m *Manager) Build(ctx context.Context) (*agentv1.Discovery, map[string]str
 			vs.Ports = append(vs.Ports, vp)
 		}
 		d.Services = append(d.Services, vs)
+	}
+	if m.Databases != nil {
+		svcs, recs := m.Databases.Directory(ctx, func(i int) string { return VIPAddr(i).String() }, vipPool, mesh.Cooldown)
+		d.Services = append(d.Services, svcs...)
+		d.Records = append(d.Records, recs...)
 	}
 	nets, err := m.st.ListNodeNetworks(ctx)
 	if err != nil {

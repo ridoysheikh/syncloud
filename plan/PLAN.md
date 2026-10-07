@@ -12,7 +12,7 @@ Status: **Draft v0.12** (2026-10-05)
 | D1 | The backend (controller, agent, CLI) is written in **Go**. The UI is **React + Vite** (TypeScript). | 2026-10-05 |
 | D2 | **No shared or replicated volumes.** Persistent object storage is **S3** (any external S3-compatible provider). Self-hosted S3 such as MinIO or Garage is deployed as an ordinary service, like any other app. Volumes are node-local only. | 2026-10-05 |
 | D3 | The controller can **optionally run apps**. To do so it runs the same agent as a worker, so it is also a normal (schedulable) worker node. This is off by default and can be toggled. | 2026-10-05 |
-| D4 | **Managed PostgreSQL and Redis are deferred.** They are a separate, large future track and are **not part of this plan or its phases**. They are only noted for awareness (§17). | 2026-10-05 |
+| D4 | **Managed PostgreSQL is deferred** (§17). **Managed Redis started 2026-10-07 as managed Valkey** (Phase 12): Valkey 8 (BSD, Redis-compatible), primary + replicas with Sentinel failover, memory and read-replica autoscaling. | 2026-10-05, updated 2026-10-07 |
 | D5 | **SynCloud's own state is stored in SQLite 3**, not PostgreSQL. The platform's data is small (config, IAM, desired and observed state, audit), so an embedded database inside the controller binary is enough. There is no separate DB server. Metrics stay in VictoriaMetrics. | 2026-10-05 |
 | D6 | **The controller owns service health and continuous app monitoring.** Agents run fast local checks, but the controller is the single authority for health state, uptime history, incidents and alerts (§5.6). | 2026-10-05 |
 | D7 | **The platform is ready on first start.** Installing or starting the controller brings up the self-hosted Docker registry, the Git connector and polling engine, and Traefik with its dynamic dashboard, all pre-configured. A fresh install can deploy from Git immediately (§5.0). | 2026-10-05 |
@@ -1584,6 +1584,36 @@ Because there is only one controller:
   - Allowed nodes: `projects.nodes` (migration 00031, `PUT /projects/{p}/nodes`, `synctl projects nodes`) and `placement.nodes` per service, which must stay within the project's list. Applied at placement, not stored in revisions; tasks on nodes no longer allowed are retired like a drain (replacement first); naming `ctl-0` places on the controller even when it takes no general workloads; jobs follow the project, builds do not. UI: project Settings → Allowed nodes; service Placement tab (nodes and spread/binpack).
   - Tests: unit (placement rules, controller override, validation, host shell PTY/pipe/refusal); e2e `test/e2e/placement.sh`.
 
+### Phase 12: Managed Valkey (Redis-compatible databases)
+User decisions (2026-10-07): **Valkey 8** (BSD; same protocol and clients as Redis); **Sentinel failover** (primary and replicas on different nodes); **autoscaling = memory online + read-replica count** (no cluster mode, so clients keep two plain endpoints).
+
+**Model.** A database belongs to a project environment, like a service, and shares its DNS namespace (a service and a database cannot have the same name). Each database is dedicated: its own containers, volumes and password. Stored in `databases` (sealed password, spec JSON, status) and `database_members` (one row per container).
+- **Data members** `dbm_…`: `valkey-server` pinned to a node with a node-local volume (`syncloud-db-<id>-<n>`), AOF `everysec` plus RDB snapshots (or RDB only, or none). Members announce stable internal names (`m<n>.<db>.<env>.<project>.syncloud.internal`) so restarts and new IPs never confuse replication or Sentinel.
+- **Sentinels** `dbs_…`: three small `valkey-sentinel` containers (quorum 2) on distinct nodes when the database has replicas; none for a single-member database.
+- **Anti-affinity**: members never share a node; sentinels are spread. Placement respects the project's and the database's allowed nodes (§6.3). Reservations count in the scheduler like service tasks.
+- **Endpoints**: `<db>.<env>.<project>.syncloud.internal:6379` (read-write, a VIP whose only backend is the current primary) and `<db>-ro.…:6379` (read-only, the replicas; the primary when there are none). Connection strings and `REDIS_URL`-style env vars are shown in the UI; a service can bind a database to get them injected.
+- **Security**: `requirepass` + `masterauth` (32 random bytes, sealed); dangerous commands renamed off (`FLUSHALL`, `CONFIG`, `DEBUG`, `SHUTDOWN`, `MODULE`, `REPLICAOF`… are only reachable by the controller's admin user via ACL); the database joins its environment's default security group.
+
+**Operator** (`internal/dbs`): reconciles members and sentinels like the workload manager, but stateful: a member is never moved while its node is merely slow. If a replica's or sentinel's node is not ready for 5 minutes it is replaced on another node (a replica resyncs from the primary); a lost single-member database waits for its node (or a restore). It polls each member every 5s (`ROLE`, `INFO`) over the private network: the primary is what Sentinel elected, and the read-write VIP follows it within seconds of a failover. Restarted old primaries rejoin as replicas.
+
+**Autoscaling** (every 15s):
+- **Memory**: `maxmemory` moves between min and max online (`CONFIG SET`, no restart). Up by 50% when used memory stays above 85% for 30s and the node has room; down by 25% after 30 minutes below 40% (never below 1.3× used). Container limits are set to max + overhead at creation; the scheduler reserves the current size.
+- **Read replicas**: count between min and max on replica CPU (target, default 60%) or ops/s per replica; out after 1 minute above target, in after 10 minutes below half of it. Every change is a scaling event with its reason.
+
+**Metrics**: per member from `INFO` (ops/s, memory used vs `maxmemory`, clients, keys, hit rate, evictions, expirations, replication offset lag, role) into VictoriaMetrics as `syncloud_db_*`, plus the container CPU/memory the agents already sample. Logs flow like task logs (service `db-<name>`).
+
+**API / CLI / IAM** (tag `databases` → `database:*`, resource `…/env/<e>/database/<name>`): CRUD under `/projects/{p}/environments/{e}/databases`, `credentials`, `metrics`, `members`, `failover`, autoscaling settings and events; explorer: `keys` (SCAN by pattern and type, with TTL and size), `keys/{key}` (typed view: string, hash, list, set, sorted set, stream; edit, TTL, delete), `command` (console, deny-listed admin commands), `info`, `slowlog`. `synctl db …` for all of it.
+
+**UI**: a project's **Databases** tab and a routed **New database** wizard (name, memory min/max, replicas min/max, persistence, eviction policy, nodes); a top-level **Databases** page listing all; a database page with Overview (endpoints, connection strings, members with role/node/lag), Metrics, Explorer (key tree, value editor, console), Autoscaling (settings and events), Logs and Settings.
+
+**Slices**: 12a operator, endpoints, failover, API/CLI; 12b metrics and autoscaling; 12c dashboard and explorer; 12d backups (RDB snapshots to S3 on a schedule, restore into a new database).
+
+**Progress**
+- ✅ Slices 12a–12c (2026-10-07): `internal/dbs` (operator, Sentinel, probe every 5s, memory and replica autoscaler, explorer), migration 00032 (`databases`, `database_members`, `database_events`), VIPs shared with services, member DNS names and endpoints in discovery, databases in security groups and logs, `StopTask.remove_volumes` (only `syncloud-db-*`), scheduler `ExtraUsage`/`Reserved`/anti-affinity, 18 API operations, `synctl db …`, dashboard (Databases list, project tab, wizard, database page: overview with connection and members, metrics, explorer, console, autoscaling, logs, settings), docs/databases.md.
+  - Health is `healthy` only when failover is possible (every sentinel knows every replica and its peers): the first e2e run showed a fresh replica Sentinel had not yet discovered.
+  - e2e `test/e2e/databases.sh`: members on distinct nodes; writes and reads through both endpoints from a task; explorer and console; a frozen primary fails over and writes resume within ~15s, the old primary rejoins as a replica with data intact; memory autoscales 64 → 128 MiB at 98% use; read load adds a replica; deletion removes volumes.
+- ⬜ Slice 12d: scheduled RDB snapshots to S3 and restore into a new database; binding a database to a service (inject `REDIS_URL`).
+
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)
 
@@ -1609,7 +1639,7 @@ Preview environments, blue/green and canary through weighted Traefik routing, lo
 
 Ideas to carry forward (the user will provide the full design):
 - **Managed PostgreSQL**: WAL-G backups to S3, custom replication and custom autoscaling, and a full administration UI.
-- **Managed Redis OSS**: autoscaling, multiple hosted plans, and a full administration UI.
+- **Managed Redis**: now Phase 12 (managed Valkey).
 
 Things the current phases should keep in mind, without building them:
 - Keep the scheduler able to take **anti-affinity** constraints (primary and replicas on different nodes).

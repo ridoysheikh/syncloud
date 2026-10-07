@@ -32,6 +32,7 @@ import (
 	"syncloud/internal/certs"
 	"syncloud/internal/cli"
 	"syncloud/internal/config"
+	"syncloud/internal/dbs"
 	"syncloud/internal/discovery"
 	"syncloud/internal/domain"
 	"syncloud/internal/edge"
@@ -359,6 +360,22 @@ func serve(args []string) error {
 	// Task resource samples ride on agent heartbeats (§9.1).
 	metricStore := metrics.New(cfg.VictoriaMetricsURL, log)
 	go metricStore.Run(ctx)
+	// Managed Valkey databases (Phase 12).
+	dbMgr := dbs.New(st, gw, workloads, registry, box, bus, log)
+	dbMgr.Metrics = metricStore
+	dbMgr.OnChange = disco.Kick
+	dbMgr.DNS = func(nodeID, project, env string) ([]string, []string) {
+		nn, err := st.NodeNetwork(context.Background(), nodeID)
+		if err != nil || !meshMgr.IsMember(nodeID) {
+			return nil, nil
+		}
+		return []string{mesh.Subnet(nn.SubnetIndex).Addr().Next().String()},
+			[]string{env + "." + project + "." + discovery.Zone, project + "." + discovery.Zone, discovery.Zone}
+	}
+	gw.AddHooks(dbMgr.Hooks())
+	disco.Databases = dbMgr
+	workloads.ExtraUsage = dbMgr.Usage
+	go dbMgr.Run(ctx)
 	gw.AddHooks(agentgw.Hooks{OnHeartbeat: func(node store.Node, hb *agentv1.Heartbeat) {
 		metricStore.Add(node.Name, hb.GetTasks())
 		metricStore.AddNode(node.Name, hb)
@@ -565,7 +582,7 @@ func serve(args []string) error {
 			"GET " + certs.ChallengePrefix:      certMgr,
 		},
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
-		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon,
+		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Databases: dbMgr, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon,
 		RegistryBrowser:  regBrowser,
 		RegistryMaint:    regMaint,
 		Upstreams:        upstreams,

@@ -80,6 +80,9 @@ type Manager struct {
 	// turns one into environment variables with credentials (§16).
 	S3Bindings func(ctx context.Context, serviceID string) ([]S3Ref, error)
 	S3Env      func(ctx context.Context, ref S3Ref) (map[string]string, error)
+	// ExtraUsage is per-node reservations outside service tasks (database
+	// members), counted when placing.
+	ExtraUsage func(ctx context.Context) map[string]Usage
 
 	queue    chan string
 	mu       sync.Mutex
@@ -586,6 +589,18 @@ func (m *Manager) place(ctx context.Context, spec Spec, serviceID string, rev in
 			u.svc++
 		}
 	}
+	if m.ExtraUsage != nil { // database members (Phase 12)
+		for nodeID, x := range m.ExtraUsage(ctx) {
+			u := used[nodeID]
+			if u == nil {
+				u = &usage{}
+				used[nodeID] = u
+			}
+			u.cpu += x.CPU
+			u.mem += x.MemoryMiB
+			u.all += x.Count
+		}
+	}
 	var cands []Candidate
 	for _, n := range m.nodes.List() {
 		cpu, mem := Allocatable(n.Info.CPUCores, n.Info.MemoryBytes)
@@ -721,6 +736,37 @@ func (m *Manager) RestrictToEnvironment(ctx context.Context, envID string, spec 
 		return spec
 	}
 	return spec.WithProjectNodes(p.Nodes)
+}
+
+// Reserved is every node's reservations: service tasks plus ExtraUsage.
+func (m *Manager) Reserved(ctx context.Context) map[string]Usage {
+	out := map[string]Usage{}
+	if all, err := m.st.ActiveTasks(ctx); err == nil {
+		for _, t := range all {
+			u := out[t.NodeID]
+			if s, err := m.SpecFor(ctx, t.ServiceID, t.Revision); err == nil {
+				u.CPU += s.Resources.CPU
+				u.MemoryMiB += s.Resources.Memory
+			}
+			u.Count++
+			out[t.NodeID] = u
+		}
+	}
+	if m.ExtraUsage != nil {
+		for id, x := range m.ExtraUsage(ctx) {
+			u := out[id]
+			u.CPU, u.MemoryMiB, u.Count = u.CPU+x.CPU, u.MemoryMiB+x.MemoryMiB, u.Count+x.Count
+			out[id] = u
+		}
+	}
+	return out
+}
+
+// Usage is resources reserved on a node outside service tasks.
+type Usage struct {
+	CPU       float64
+	MemoryMiB int
+	Count     int
 }
 
 // PlaceSpec picks a node for a one-off task with spec's resources.

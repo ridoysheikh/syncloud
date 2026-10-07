@@ -8,6 +8,7 @@ require (
 	github.com/miekg/dns v1.1.73
 	github.com/minio/minio-go/v7 v7.3.0
 	github.com/pressly/goose/v3 v3.28.0
+	github.com/redis/go-redis/v9 v9.23.0
 	github.com/spf13/cobra v1.10.2
 	github.com/vishvananda/netlink v1.3.1
 	go.yaml.in/yaml/v3 v3.0.5
@@ -47,6 +48,7 @@ require (
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
+	go.uber.org/atomic v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect

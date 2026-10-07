@@ -55,6 +55,24 @@ func Load(ctx context.Context, st *store.Store) (*Model, error) {
 	for _, sv := range svcs {
 		m.Services = append(m.Services, Service{ID: sv.ID, Project: sv.Project, Env: sv.Environment, Name: sv.Name, IPs: ips[sv.ID]})
 	}
+	// Managed databases (Phase 12) are members of their environment like a
+	// service: the default group covers them.
+	dbs, err := st.ListDatabases(ctx)
+	if err != nil {
+		return nil, err
+	}
+	members, err := st.AllDatabaseMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, mb := range members {
+		if mb.IP != "" {
+			ips[mb.DatabaseID] = append(ips[mb.DatabaseID], mb.IP)
+		}
+	}
+	for _, d := range dbs {
+		m.Services = append(m.Services, Service{ID: d.ID, Project: d.Project, Env: d.Environment, Name: d.Name, IPs: ips[d.ID]})
+	}
 	groups, err := st.ListSecurityGroups(ctx)
 	if err != nil {
 		return nil, err

@@ -16,6 +16,7 @@ import (
 	"syncloud/internal/backup"
 	"syncloud/internal/builds"
 	"syncloud/internal/certs"
+	"syncloud/internal/dbs"
 	"syncloud/internal/discovery"
 	"syncloud/internal/domain"
 	"syncloud/internal/edge"
@@ -71,6 +72,7 @@ type Server struct {
 	mesh                  *mesh.Manager
 	downloadsDir          string
 	workloads             *workload.Manager
+	databases             *dbs.Manager
 	logs                  *logs.Store
 	exec                  *execrelay.Relay
 	jobs                  *jobs.Manager
@@ -143,6 +145,8 @@ type Options struct {
 	DownloadsDir string
 	// Workloads runs services (§5.2); may be nil.
 	Workloads *workload.Manager
+	// Databases runs managed Valkey (Phase 12); may be nil.
+	Databases *dbs.Manager
 	// Logs serves container logs (§9.2); may be nil.
 	Logs *logs.Store
 	// Exec relays interactive commands to tasks; may be nil.
@@ -218,6 +222,7 @@ func New(o Options) *Server {
 		mesh:                  o.Mesh,
 		downloadsDir:          o.DownloadsDir,
 		workloads:             o.Workloads,
+		databases:             o.Databases,
 		logs:                  o.Logs,
 		exec:                  o.Exec,
 		jobs:                  o.Jobs,
@@ -411,6 +416,24 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/projects", h: s.handleCreateProject},
 		{Method: "DELETE", Path: "/api/v1/projects/{project}", h: s.handleDeleteProject},
 		{Method: "PUT", Path: "/api/v1/projects/{project}/nodes", h: s.handleSetProjectNodes},
+		{Method: "GET", Path: "/api/v1/databases", h: s.handleListAllDatabases},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/databases", h: s.handleListDatabases},
+		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/databases", h: s.handleCreateDatabase},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}", h: s.handleGetDatabase},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}", h: s.handleUpdateDatabase},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}", h: s.handleDeleteDatabase},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}/credentials", h: s.handleDatabaseCredentials},
+		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}/failover", h: s.handleFailoverDatabase},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}/metrics", h: s.handleDatabaseMetrics},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}/events", h: s.handleDatabaseEvents},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}/keys", h: s.handleScanDatabaseKeys},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}/key", h: s.handleGetDatabaseKey},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}/key", h: s.handleSetDatabaseKey},
+		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}/key", h: s.handleDeleteDatabaseKey},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}/key/ttl", h: s.handleExpireDatabaseKey},
+		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}/command", h: s.handleDatabaseCommand},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}/info", h: s.handleDatabaseInfo},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/databases/{database}/slowlog", h: s.handleDatabaseSlowlog},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments", h: s.handleListEnvironments},
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments", h: s.handleCreateEnvironment},
 		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}", h: s.handleDeleteEnvironment},
