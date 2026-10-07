@@ -8,6 +8,7 @@ import (
 
 	"syncloud/internal/dbs"
 	"syncloud/internal/metrics"
+	"syncloud/internal/secgroup"
 	"syncloud/internal/store"
 )
 
@@ -21,16 +22,12 @@ func (s *Server) requireDatabases(w http.ResponseWriter) bool {
 	return true
 }
 
-// database resolves {project}/{env}/{database}.
+// database resolves {database} (names are unique in the cluster).
 func (s *Server) database(w http.ResponseWriter, r *http.Request) (store.Database, bool) {
 	if !s.requireDatabases(w) {
 		return store.Database{}, false
 	}
-	e, ok := s.environment(w, r)
-	if !ok {
-		return store.Database{}, false
-	}
-	d, err := s.store.DatabaseByName(r.Context(), e.ID, r.PathValue("database"))
+	d, err := s.store.DatabaseByName(r.Context(), r.PathValue("database"))
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no database "+r.PathValue("database"))
 		return d, false
@@ -39,6 +36,17 @@ func (s *Server) database(w http.ResponseWriter, r *http.Request) (store.Databas
 		return d, false
 	}
 	return d, true
+}
+
+// valkey resolves a database whose engine has the Valkey tools (explorer,
+// console, failover).
+func (s *Server) valkey(w http.ResponseWriter, r *http.Request) (store.Database, bool) {
+	d, ok := s.database(w, r)
+	if ok && d.Engine != dbs.EngineValkey {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "this tool is for Valkey databases; "+d.Name+" runs "+d.Engine)
+		return d, false
+	}
+	return d, ok
 }
 
 func (s *Server) databaseErr(w http.ResponseWriter, what string, err error) {
@@ -55,7 +63,25 @@ func (s *Server) databaseErr(w http.ResponseWriter, what string, err error) {
 	}
 }
 
-func dbSRN(d store.Database) string { return envSRN(d.Project, d.Environment) + "/database/" + d.Name }
+// dbSRN names a database for IAM: under its environment, or at the top
+// level when standalone.
+func dbSRN(d store.Database) string { return databaseSRN(d.Project, d.Environment, d.Name) }
+
+func databaseSRN(project, env, name string) string {
+	if project == "" {
+		return "srn:syncloud:database/" + name
+	}
+	return envSRN(project, env) + "/database/" + name
+}
+
+// dbPeerExists checks access-list references.
+func (s *Server) dbPeerExists(r *http.Request) func(p secgroup.Peer) bool {
+	return func(p secgroup.Peer) bool { return s.peerExists(r.Context(), p) }
+}
+
+func (s *Server) handleListDatabaseEngines(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"items": dbs.Engines})
+}
 
 func (s *Server) handleListAllDatabases(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabases(w) {
@@ -91,35 +117,76 @@ func (s *Server) handleListDatabases(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+// handleCreateDatabase creates a standalone database, or one in the project
+// environment the body names. The action is checked on that exact resource.
 func (s *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabases(w) {
 		return
 	}
-	e, ok := s.environment(w, r)
-	if !ok {
-		return
-	}
 	var req struct {
-		Name    string   `json:"name"`
-		Version string   `json:"version"`
-		Spec    dbs.Spec `json:"spec"`
+		Name        string      `json:"name"`
+		Engine      string      `json:"engine"`
+		Version     string      `json:"version"`
+		Project     string      `json:"project"`
+		Environment string      `json:"environment"`
+		Spec        dbs.Spec    `json:"spec"`
+		Network     dbs.Network `json:"network"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	if d := s.decide(r, "database:CreateDatabase", envSRN(r.PathValue("project"), e.Name)+"/database/"+req.Name); !d.Allowed {
-		s.denied(w, r, "database:CreateDatabase", envSRN(r.PathValue("project"), e.Name)+"/database/"+req.Name, d.Reason)
+	cr := dbs.CreateRequest{Name: req.Name, Engine: req.Engine, Version: req.Version, Spec: req.Spec, Network: req.Network, Exists: s.dbPeerExists(r)}
+	if req.Project != "" || req.Environment != "" {
+		if req.Project == "" || req.Environment == "" {
+			writeError(w, http.StatusBadRequest, CodeBadRequest, "give both project and environment, or neither for a standalone database")
+			return
+		}
+		p, err := s.store.ProjectByName(r.Context(), req.Project)
+		if err != nil {
+			writeError(w, http.StatusNotFound, CodeNotFound, "no project "+req.Project)
+			return
+		}
+		e, err := s.store.EnvironmentByName(r.Context(), p.ID, req.Environment)
+		if err != nil {
+			writeError(w, http.StatusNotFound, CodeNotFound, "no environment "+req.Environment+" in "+req.Project)
+			return
+		}
+		cr.Env = &e
+	}
+	res := databaseSRN(req.Project, req.Environment, req.Name)
+	if d := s.decide(r, "database:CreateDatabase", res); !d.Allowed {
+		s.denied(w, r, "database:CreateDatabase", res, d.Reason)
 		return
 	}
 	u, _ := currentUser(r.Context())
-	v, err := s.databases.Create(r.Context(), e, req.Name, req.Version, req.Spec, u.Email)
+	cr.Actor = u.Email
+	v, err := s.databases.Create(r.Context(), cr)
 	if err != nil {
 		s.databaseErr(w, "create database", err)
 		return
 	}
-	s.audit(r, u.ID, "database:Create", envSRN(v.Project, v.Environment)+"/database/"+v.Name, map[string]any{"memory": v.Spec.Memory, "replicas": v.Spec.Replicas})
+	s.audit(r, u.ID, "database:Create", res, map[string]any{"engine": v.Engine, "memory": v.Spec.Memory, "replicas": v.Spec.Replicas, "public": v.Network.Public.Enabled})
 	writeJSON(w, http.StatusCreated, v)
+}
+
+func (s *Server) handleSetDatabaseNetwork(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.database(w, r)
+	if !ok {
+		return
+	}
+	var req dbs.Network
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	u, _ := currentUser(r.Context())
+	v, err := s.databases.SetNetwork(r.Context(), d.ID, req, s.dbPeerExists(r), u.Email)
+	if err != nil {
+		s.databaseErr(w, "set database network", err)
+		return
+	}
+	s.audit(r, u.ID, "database:SetNetwork", dbSRN(d), map[string]any{"access": v.Network.Access, "public": v.Network.Public.Enabled, "allow": v.Network.Public.Allow})
+	writeJSON(w, http.StatusOK, v)
 }
 
 func (s *Server) handleGetDatabase(w http.ResponseWriter, r *http.Request) {
@@ -181,7 +248,7 @@ func (s *Server) handleDatabaseCredentials(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleFailoverDatabase(w http.ResponseWriter, r *http.Request) {
-	d, ok := s.database(w, r)
+	d, ok := s.valkey(w, r)
 	if !ok {
 		return
 	}
@@ -231,7 +298,7 @@ func (s *Server) handleDatabaseEvents(w http.ResponseWriter, r *http.Request) {
 // ── explorer ────────────────────────────────────────────────────────────────
 
 func (s *Server) handleScanDatabaseKeys(w http.ResponseWriter, r *http.Request) {
-	d, ok := s.database(w, r)
+	d, ok := s.valkey(w, r)
 	if !ok {
 		return
 	}
@@ -247,7 +314,7 @@ func (s *Server) handleScanDatabaseKeys(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleGetDatabaseKey(w http.ResponseWriter, r *http.Request) {
-	d, ok := s.database(w, r)
+	d, ok := s.valkey(w, r)
 	if !ok {
 		return
 	}
@@ -260,7 +327,7 @@ func (s *Server) handleGetDatabaseKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetDatabaseKey(w http.ResponseWriter, r *http.Request) {
-	d, ok := s.database(w, r)
+	d, ok := s.valkey(w, r)
 	if !ok {
 		return
 	}
@@ -284,7 +351,7 @@ func (s *Server) handleSetDatabaseKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteDatabaseKey(w http.ResponseWriter, r *http.Request) {
-	d, ok := s.database(w, r)
+	d, ok := s.valkey(w, r)
 	if !ok {
 		return
 	}
@@ -304,7 +371,7 @@ func (s *Server) handleDeleteDatabaseKey(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleExpireDatabaseKey(w http.ResponseWriter, r *http.Request) {
-	d, ok := s.database(w, r)
+	d, ok := s.valkey(w, r)
 	if !ok {
 		return
 	}
@@ -328,7 +395,7 @@ func (s *Server) handleExpireDatabaseKey(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleDatabaseCommand(w http.ResponseWriter, r *http.Request) {
-	d, ok := s.database(w, r)
+	d, ok := s.valkey(w, r)
 	if !ok {
 		return
 	}
@@ -353,7 +420,7 @@ func (s *Server) handleDatabaseCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDatabaseInfo(w http.ResponseWriter, r *http.Request) {
-	d, ok := s.database(w, r)
+	d, ok := s.valkey(w, r)
 	if !ok {
 		return
 	}
@@ -366,7 +433,7 @@ func (s *Server) handleDatabaseInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDatabaseSlowlog(w http.ResponseWriter, r *http.Request) {
-	d, ok := s.database(w, r)
+	d, ok := s.valkey(w, r)
 	if !ok {
 		return
 	}

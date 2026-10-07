@@ -32,6 +32,22 @@ func logFilter(w http.ResponseWriter, r *http.Request) (logs.Filter, bool) {
 	return f, true
 }
 
+// databaseLogFilter narrows f to a database's members when ?database= is
+// given, and returns the resource to authorize instead of the project.
+func (s *Server) databaseLogFilter(w http.ResponseWriter, r *http.Request, f *logs.Filter) (string, bool) {
+	name := r.URL.Query().Get("database")
+	if name == "" {
+		return "", true
+	}
+	d, err := s.store.DatabaseByName(r.Context(), name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "no database "+name)
+		return "", false
+	}
+	f.Project, f.Environment, f.Service, f.NoProject = d.Project, d.Environment, "db-"+d.Name, d.Standalone()
+	return dbSRN(d), true
+}
+
 // handleQueryLogs returns stored lines, oldest first (§9.2).
 func (s *Server) handleQueryLogs(w http.ResponseWriter, r *http.Request) {
 	if s.logs == nil {
@@ -58,7 +74,11 @@ func (s *Server) handleQueryLogs(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	f, ok := logFilter(w, r)
-	if !ok || !s.logScope(w, r, f) {
+	if !ok {
+		return
+	}
+	dbRes, ok := s.databaseLogFilter(w, r, &f)
+	if !ok || !s.logScope(w, r, f, dbRes) {
 		return
 	}
 	lines, err := s.logs.Query(r.Context(), f, since, limit)
@@ -83,7 +103,11 @@ func (s *Server) handleTailLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f, ok := logFilter(w, r)
-	if !ok || !s.logScope(w, r, f) {
+	if !ok {
+		return
+	}
+	dbRes, ok := s.databaseLogFilter(w, r, &f)
+	if !ok || !s.logScope(w, r, f, dbRes) {
 		return
 	}
 	rc := http.NewResponseController(w) // unwraps middleware recorders
@@ -118,10 +142,19 @@ func (s *Server) handleTailLogs(w http.ResponseWriter, r *http.Request) {
 // logScope keeps log queries inside what the caller may read (§14): anyone
 // without the action everywhere must name a project they are allowed on
 // (and the environment and service narrow the check).
-func (s *Server) logScope(w http.ResponseWriter, r *http.Request, f logs.Filter) bool {
+//
+// A database's logs (?database=) are authorized on the database instead.
+func (s *Server) logScope(w http.ResponseWriter, r *http.Request, f logs.Filter, dbRes string) bool {
 	action, _ := r.Context().Value(authzActionKey).(string)
 	p, _ := principal(r.Context())
 	if action == "" || p.isRoot() || s.can(r, action, "srn:syncloud:*") {
+		return true
+	}
+	if dbRes != "" {
+		if d := s.decide(r, action, dbRes); !d.Allowed {
+			s.denied(w, r, action, dbRes, d.Reason)
+			return false
+		}
 		return true
 	}
 	if f.Project == "" {

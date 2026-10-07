@@ -106,6 +106,9 @@ type Options struct {
 	Firewall bool
 	// IsEdge reports edge nodes, which open HTTP and HTTPS (§8.5).
 	IsEdge func(nodeID string) bool
+	// PublicPorts are extra ports Traefik serves publicly on the
+	// controller and edge nodes (public databases, Phase 12e).
+	PublicPorts func() []string
 }
 
 type Manager struct {
@@ -264,13 +267,20 @@ func FirewallFor(self store.NodeNetwork, all []store.NodeNetwork, policies []sto
 			fw.ClusterSources = append(fw.ClusterSources, host)
 		}
 	}
+	var public []string
+	if opts.PublicPorts != nil {
+		public = opts.PublicPorts()
+	}
 	if self.NodeName == ControllerNode {
 		for _, p := range opts.ControllerPorts {
 			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:controller-" + p, Protocol: "tcp", Ports: p, Description: "controller (built-in)"})
 		}
+		for _, p := range public {
+			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:database-" + p, Protocol: "tcp", Ports: p, Description: "public databases (built-in)"})
+		}
 	}
 	if opts.IsEdge != nil && opts.IsEdge(self.NodeID) {
-		for _, p := range []string{"80", "443"} {
+		for _, p := range append([]string{"80", "443"}, public...) {
 			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:edge-" + p, Protocol: "tcp", Ports: p, Description: "edge node (built-in)"})
 		}
 	}

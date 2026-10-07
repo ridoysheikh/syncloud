@@ -1,7 +1,6 @@
 import { Link } from "@tanstack/react-router";
-import { Database as DatabaseIcon, Plus } from "lucide-react";
+import { Database as DatabaseIcon, Globe, Plus } from "lucide-react";
 import { bytes } from "@/lib/nodes";
-import { useProjects } from "@/lib/workloads";
 import {
   dbUrl,
   healthTone,
@@ -36,11 +35,28 @@ export function DatabasesTable({
       header: "Database",
       cell: (d) => (
         <Link to={dbUrl(d) as string} className="hover:text-accent font-medium">
-          {showProject ? `${d.project}/${d.environment}/` : ""}
           {d.name}
         </Link>
       ),
     },
+    ...(showProject
+      ? [
+          {
+            header: "Owner",
+            cell: (d: Database) =>
+              d.standalone ? (
+                <span className="text-muted">standalone</span>
+              ) : (
+                <Link
+                  to={`/projects/${d.project}/${d.environment}` as string}
+                  className="hover:text-accent"
+                >
+                  {d.project} / {d.environment}
+                </Link>
+              ),
+          },
+        ]
+      : []),
     {
       header: "Health",
       cell: (d) => (
@@ -79,8 +95,15 @@ export function DatabasesTable({
     {
       header: "Endpoint",
       cell: (d) => (
-        <span className="text-muted font-mono">
-          {d.host}:{d.port}
+        <span className="text-muted flex items-center gap-1.5 font-mono">
+          {d.public.enabled && d.public.available && (
+            <span title={`Public: ${d.public.host}:${d.public.port} (TLS)`}>
+              <Globe className="text-accent size-3.5" />
+            </span>
+          )}
+          {d.public.enabled && d.public.available
+            ? `${d.public.host}:${d.public.port}`
+            : `${d.host}:${d.port}`}
         </span>
       ),
     },
@@ -93,8 +116,9 @@ export function DatabasesTable({
       empty={
         loading ? null : (
           <EmptyState icon={DatabaseIcon} title="No databases yet">
-            Managed Valkey (Redis-compatible) databases with failover,
-            autoscaled memory and read replicas.
+            Managed databases, standalone or in a project: Valkey
+            (Redis-compatible) with failover, autoscaled memory and read
+            replicas, and an optional public TLS endpoint.
           </EmptyState>
         )
       }
@@ -102,14 +126,11 @@ export function DatabasesTable({
   );
 }
 
-/** Every managed database across projects (Phase 12). */
+/** Every managed database, standalone and in projects (Phase 12). */
 export function DatabasesPage() {
   const { data = [], isLoading, error } = useDatabases();
-  const { data: projects = [] } = useProjects();
-  const first = projects[0];
-  const newTo: string = first
-    ? `/projects/${first.name}/${first.environments[0] ?? "production"}/new-database`
-    : "/projects/new";
+  const newTo: string = "/databases/new";
+  const publicCount = data.filter((d) => d.public.enabled).length;
   const healthy = data.filter((d) => d.health === "healthy").length;
   const mem = data.reduce((n, d) => n + d.usage.usedMemoryBytes, 0);
   const ops = data.reduce((n, d) => n + d.usage.opsPerSec, 0);
@@ -134,7 +155,7 @@ export function DatabasesPage() {
             : "Could not load databases"}
         </Alert>
       )}
-      <div className={cn("grid grid-cols-2 md:grid-cols-4", gap)}>
+      <div className={cn("grid grid-cols-2 md:grid-cols-5", gap)}>
         <StatTile
           label="Databases"
           value={data.length ? `${healthy}/${data.length}` : 0}
@@ -150,6 +171,11 @@ export function DatabasesPage() {
         <StatTile label="Memory used" value={bytes(mem)} />
         <StatTile label="Operations" value={fmtOps(ops)} unit="/s" />
         <StatTile label="Keys" value={keys.toLocaleString()} />
+        <StatTile
+          label="Public"
+          value={publicCount}
+          hint="with a TLS endpoint"
+        />
       </div>
       <Panel title={`Databases (${data.length})`} flush>
         <DatabasesTable items={data} loading={isLoading} />

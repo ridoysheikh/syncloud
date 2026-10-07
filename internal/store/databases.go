@@ -3,22 +3,25 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 )
 
-// Database is a managed Valkey database (Phase 12). Spec and State are JSON
-// owned by package dbs; Secrets are sealed.
+// Database is a managed database (Phase 12). Spec, State and Network are
+// JSON owned by package dbs; Secrets are sealed. A standalone database has
+// no environment (EnvironmentID, Project and Environment are "").
 type Database struct {
 	ID            string
 	EnvironmentID string
 	Project       string // names, joined in
 	Environment   string
-	Name          string
+	Name          string // unique in the cluster
 	Engine        string
 	Version       string
 	Spec          string
 	State         string
+	Network       string
 	Secrets       []byte
 	Status        string
 	Deleting      bool
@@ -26,6 +29,41 @@ type Database struct {
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
+
+// DatabaseNetwork is who may reach a database: internal peers (security
+// group peer syntax, fully qualified) and the public endpoint.
+type DatabaseNetwork struct {
+	// Access lists the internal peers allowed in. Absent (nil) means the
+	// default: a project database's own environment; nothing for a
+	// standalone one.
+	Access []string       `json:"access"`
+	Public DatabasePublic `json:"public"`
+}
+
+// DatabasePublic is the TLS endpoint Traefik serves from outside the cluster.
+type DatabasePublic struct {
+	Enabled bool     `json:"enabled"`
+	Allow   []string `json:"allow"` // client CIDRs
+}
+
+// ParseNetwork returns the database's network settings with defaults.
+func (d Database) ParseNetwork() DatabaseNetwork {
+	var n DatabaseNetwork
+	_ = json.Unmarshal([]byte(d.Network), &n)
+	if n.Access == nil {
+		n.Access = []string{}
+		if d.Project != "" {
+			n.Access = []string{"environment:" + d.Project + "/" + d.Environment}
+		}
+	}
+	if n.Public.Allow == nil {
+		n.Public.Allow = []string{}
+	}
+	return n
+}
+
+// Standalone reports a database outside any project.
+func (d Database) Standalone() bool { return d.EnvironmentID == "" }
 
 // DatabaseMember is one container of a database: a data member or a sentinel.
 type DatabaseMember struct {
@@ -55,36 +93,44 @@ type DatabaseEvent struct {
 	Actor      string    `json:"actor"`
 }
 
-const databaseCols = `SELECT d.id, d.environment_id, p.name, e.name, d.name, d.engine, d.version, d.spec, d.state, d.secrets_enc,
-	d.status, d.deleting, coalesce(d.vip_rw, 0), coalesce(d.vip_ro, 0), d.created_at, d.updated_at
-	FROM databases d JOIN environments e ON e.id = d.environment_id JOIN projects p ON p.id = e.project_id`
+const databaseCols = `SELECT d.id, coalesce(d.environment_id, ''), coalesce(p.name, ''), coalesce(e.name, ''), d.name, d.engine, d.version,
+	d.spec, d.state, d.network, d.secrets_enc, d.status, d.deleting, coalesce(d.vip_rw, 0), coalesce(d.vip_ro, 0), d.created_at, d.updated_at
+	FROM databases d LEFT JOIN environments e ON e.id = d.environment_id LEFT JOIN projects p ON p.id = e.project_id`
 
 func scanDatabase(r scanner) (Database, error) {
 	var d Database
 	var created, updated int64
-	err := r.Scan(&d.ID, &d.EnvironmentID, &d.Project, &d.Environment, &d.Name, &d.Engine, &d.Version, &d.Spec, &d.State, &d.Secrets,
+	err := r.Scan(&d.ID, &d.EnvironmentID, &d.Project, &d.Environment, &d.Name, &d.Engine, &d.Version, &d.Spec, &d.State, &d.Network, &d.Secrets,
 		&d.Status, &d.Deleting, &d.VIPRW, &d.VIPRO, &created, &updated)
 	d.CreatedAt, d.UpdatedAt = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
 	return d, err
 }
 
-// CreateDatabase stores a new database. Its name must be free among the
-// environment's services and databases (they share DNS names).
+// CreateDatabase stores a new database. Its name must be free among all
+// databases, and for a project database also among its environment's
+// services (they share DNS names).
 func (s *Store) CreateDatabase(ctx context.Context, d Database) error {
 	tx, err := s.W.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM services WHERE environment_id = ? AND name = ?`, d.EnvironmentID, d.Name).Scan(&n); err != nil {
-		return err
+	var env any
+	if d.EnvironmentID != "" {
+		env = d.EnvironmentID
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM services WHERE environment_id = ? AND name = ?`, d.EnvironmentID, d.Name).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			return ErrNameTaken
+		}
 	}
-	if n > 0 {
-		return ErrNameTaken
+	if d.Network == "" {
+		d.Network = "{}"
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO databases (id, environment_id, name, engine, version, spec, state, secrets_enc, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, d.ID, d.EnvironmentID, d.Name, d.Engine, d.Version, d.Spec, d.State, d.Secrets,
+	if _, err := tx.ExecContext(ctx, `INSERT INTO databases (id, environment_id, name, engine, version, spec, state, network, secrets_enc, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, d.ID, env, d.Name, d.Engine, d.Version, d.Spec, d.State, d.Network, d.Secrets,
 		d.CreatedAt.Unix(), d.CreatedAt.Unix()); isUnique(err) {
 		return ErrNameTaken
 	} else if err != nil {
@@ -94,7 +140,7 @@ func (s *Store) CreateDatabase(ctx context.Context, d Database) error {
 }
 
 func (s *Store) ListDatabases(ctx context.Context) ([]Database, error) {
-	rows, err := s.R.QueryContext(ctx, databaseCols+` ORDER BY p.name, e.name, d.name`)
+	rows, err := s.R.QueryContext(ctx, databaseCols+` ORDER BY d.name`)
 	if err != nil {
 		return nil, err
 	}
@@ -118,15 +164,16 @@ func (s *Store) DatabaseByID(ctx context.Context, id string) (Database, error) {
 	return d, err
 }
 
-func (s *Store) DatabaseByName(ctx context.Context, environmentID, name string) (Database, error) {
-	d, err := scanDatabase(s.R.QueryRowContext(ctx, databaseCols+` WHERE d.environment_id = ? AND d.name = ?`, environmentID, name))
+func (s *Store) DatabaseByName(ctx context.Context, name string) (Database, error) {
+	d, err := scanDatabase(s.R.QueryRowContext(ctx, databaseCols+` WHERE d.name = ?`, name))
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}
 	return d, err
 }
 
-// DatabaseNameTaken reports whether a database uses the name (services check it).
+// DatabaseNameTaken reports whether a database of the environment uses the
+// name (services check it).
 func (s *Store) DatabaseNameTaken(ctx context.Context, environmentID, name string) (bool, error) {
 	var n int
 	err := s.R.QueryRowContext(ctx, `SELECT count(*) FROM databases WHERE environment_id = ? AND name = ?`, environmentID, name).Scan(&n)
@@ -135,6 +182,10 @@ func (s *Store) DatabaseNameTaken(ctx context.Context, environmentID, name strin
 
 func (s *Store) SetDatabaseSpec(ctx context.Context, id, spec string, now time.Time) error {
 	return s.execOne(ctx, `UPDATE databases SET spec = ?, updated_at = ? WHERE id = ?`, spec, now.Unix(), id)
+}
+
+func (s *Store) SetDatabaseNetwork(ctx context.Context, id, network string, now time.Time) error {
+	return s.execOne(ctx, `UPDATE databases SET network = ?, updated_at = ? WHERE id = ?`, network, now.Unix(), id)
 }
 
 func (s *Store) SetDatabaseState(ctx context.Context, id, state string) error {

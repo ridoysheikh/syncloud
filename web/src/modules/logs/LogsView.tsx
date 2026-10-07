@@ -24,6 +24,8 @@ export interface LogFilter {
   environment?: string;
   service?: string;
   task?: string;
+  /** A database's members (exact, including standalone databases). */
+  database?: string;
 }
 
 const MAX_LINES = 3000;
@@ -50,9 +52,10 @@ export function LogsView({ filter, showSource = true }: { filter: LogFilter; sho
     if (filter.environment) p.set("environment", filter.environment);
     if (filter.service) p.set("service", filter.service);
     if (filter.task) p.set("task", filter.task);
+    if (filter.database) p.set("database", filter.database);
     if (applied) p.set("q", applied);
     return p;
-  }, [filter.project, filter.environment, filter.service, filter.task, applied]);
+  }, [filter.project, filter.environment, filter.service, filter.task, filter.database, applied]);
 
   const history = useQuery({
     queryKey: ["logs", params.toString(), since],

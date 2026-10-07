@@ -243,7 +243,7 @@ func serve(args []string) error {
 			GitServer:       gitServer.Config(),
 			TraefikSettings: traefikExtras.Settings(),
 			ControllerURL:   controllerURL, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS,
-			AdminAddr: cfg.TraefikAdmin, TraefikToken: traefikToken,
+			AdminAddr: cfg.TraefikAdmin, TraefikToken: traefikToken, DatabaseEntrypoints: map[string]string{"valkey": cfg.PublicValkey},
 			RegistryRealm: ep.DashboardURL + "/api/v1/registry/token", RegistryTokenCert: regIssuer.CertPath,
 		}
 	}
@@ -264,7 +264,22 @@ func serve(args []string) error {
 		}
 		return false
 	}
-	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts, IsEdge: isEdge})
+	// Public databases open their engine's port on the controller and edges.
+	var dbMgr *dbs.Manager // set below
+	dbPorts := map[string]string{dbs.EngineValkey: portOf(cfg.PublicValkey)}
+	publicPorts := func() []string {
+		if dbMgr == nil {
+			return nil
+		}
+		var out []string
+		for _, e := range dbMgr.PublicEngines(context.Background()) {
+			if p := dbPorts[e]; p != "" {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts, IsEdge: isEdge, PublicPorts: publicPorts})
 	gw.AddHooks(meshMgr.Hooks())
 	go meshMgr.Run(ctx)
 	var workloads *workload.Manager // set below; routes need certificates too
@@ -280,6 +295,9 @@ func serve(args []string) error {
 			for _, r := range workloads.Routes(context.Background(), ep.BaseDomain) {
 				hosts = append(hosts, r.Host)
 			}
+		}
+		if dbMgr != nil {
+			hosts = append(hosts, dbMgr.PublicHosts(context.Background(), ep.BaseDomain)...)
 		}
 		return hosts
 	}
@@ -361,16 +379,24 @@ func serve(args []string) error {
 	metricStore := metrics.New(cfg.VictoriaMetricsURL, log)
 	go metricStore.Run(ctx)
 	// Managed Valkey databases (Phase 12).
-	dbMgr := dbs.New(st, gw, workloads, registry, box, bus, log)
+	dbMgr = dbs.New(st, gw, workloads, registry, box, bus, log)
 	dbMgr.Metrics = metricStore
+	dbMgr.BaseDomain = domains.Base
 	dbMgr.OnChange = disco.Kick
+	dbMgr.OnNetworkChange = func() {
+		certMgr.SetHosts(certHosts(domains.Endpoints()))
+		meshMgr.Changed(context.Background())
+	}
 	dbMgr.DNS = func(nodeID, project, env string) ([]string, []string) {
 		nn, err := st.NodeNetwork(context.Background(), nodeID)
 		if err != nil || !meshMgr.IsMember(nodeID) {
 			return nil, nil
 		}
-		return []string{mesh.Subnet(nn.SubnetIndex).Addr().Next().String()},
-			[]string{env + "." + project + "." + discovery.Zone, project + "." + discovery.Zone, discovery.Zone}
+		search := []string{env + "." + project + "." + discovery.Zone, project + "." + discovery.Zone, discovery.Zone}
+		if project == "" { // standalone
+			search = []string{"db." + discovery.Zone, discovery.Zone}
+		}
+		return []string{mesh.Subnet(nn.SubnetIndex).Addr().Next().String()}, search
 	}
 	gw.AddHooks(dbMgr.Hooks())
 	disco.Databases = dbMgr
@@ -510,7 +536,7 @@ func serve(args []string) error {
 		}
 		return out
 	}, edge.Config{Image: system.ImageTraefik, TraefikToken: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: meshControllerURL,
-		Edges: pools.EdgeNodes, Settings: traefikExtras.Settings}, log)
+		Edges: pools.EdgeNodes, Settings: traefikExtras.Settings, DatabaseEntrypoints: map[string]string{"valkey": ":6379"}}, log)
 	gw.AddHooks(edges.Hooks())
 	go edges.Run(ctx)
 	traefikProvider := &traefik.Provider{
@@ -530,6 +556,13 @@ func serve(args []string) error {
 		GitServerURL:      "http://" + system.GitServerAddr,
 		MeshControllerURL: meshControllerURL,
 		Custom:            traefikExtras.Custom,
+		TCPRoutes: func() []traefik.TCPRoute {
+			var out []traefik.TCPRoute
+			for _, r := range dbMgr.PublicRoutes(context.Background(), domains.Base()) {
+				out = append(out, traefik.TCPRoute{Name: r.Name, Entrypoint: r.Entrypoint, Host: r.Host, Servers: r.Servers, Allow: r.Allow})
+			}
+			return out
+		},
 		Certificates: func() []traefik.Certificate {
 			var out []traefik.Certificate
 			for _, p := range certMgr.Pairs() {

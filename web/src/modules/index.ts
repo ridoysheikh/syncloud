@@ -161,8 +161,9 @@ export const modules: DashboardModule[] = [
     permission: "database:ListAllDatabases",
     pages: [
       { path: "/databases", label: "Databases", component: DatabasesPage },
+      { path: "/databases/new", label: "New database", component: NewDatabaseWizard, hidden: true },
       { path: "/projects/$project/$env/new-database", label: "New database", component: NewDatabaseWizard, hidden: true },
-      { path: "/projects/$project/$env/databases/$name", label: "Database", component: DatabasePage, hidden: true },
+      { path: "/databases/$name", label: "Database", component: DatabasePage, hidden: true },
     ],
   },
   {

@@ -461,20 +461,42 @@ function ProjectDatabases({ project, env }: { project: string; env: string }) {
   const items = data.filter(
     (d) => d.project === project && d.environment === env,
   );
+  // Databases elsewhere (standalone or other projects) this environment may
+  // connect to through their access lists.
+  const reachable = data.filter(
+    (d) =>
+      !(d.project === project && d.environment === env) &&
+      d.network.access.some(
+        (a) =>
+          a === `project:${project}` ||
+          a === `environment:${project}/${env}` ||
+          a.startsWith(`service:${project}/${env}/`),
+      ),
+  );
   const newTo: string = `/projects/${project}/${env}/new-database`;
   return (
-    <Panel
-      title={`Databases in ${env} (${items.length})`}
-      flush
-      actions={
-        <Link to={newTo}>
-          <Button variant="primary">
-            <Plus className="size-3.5" /> New database
-          </Button>
-        </Link>
-      }
-    >
-      <DatabasesTable items={items} loading={isLoading} showProject={false} />
-    </Panel>
+    <>
+      <Panel
+        title={`Databases in ${env} (${items.length})`}
+        flush
+        actions={
+          <Link to={newTo}>
+            <Button variant="primary">
+              <Plus className="size-3.5" /> New database
+            </Button>
+          </Link>
+        }
+      >
+        <DatabasesTable items={items} loading={isLoading} showProject={false} />
+      </Panel>
+      {reachable.length > 0 && (
+        <Panel
+          title={`Other databases ${env} can reach (${reachable.length})`}
+          flush
+        >
+          <DatabasesTable items={reachable} />
+        </Panel>
+      )}
+    </>
   );
 }

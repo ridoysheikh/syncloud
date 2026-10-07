@@ -119,7 +119,7 @@ start_traefik() {
   x sc-e2e-ctl docker load -q -i /opt/sc/traefik.tar >/dev/null
   local tok; tok=$(x sc-e2e-ctl cat /data/traefik.token)
   x sc-e2e-ctl docker run -d --name traefik --network host traefik:v3.7.13 \
-    --entrypoints.web.address=:8080 --entrypoints.websecure.address=:8443 \
+    --entrypoints.web.address=:8080 --entrypoints.websecure.address=:8443 --entrypoints.valkey.address=:6379 \
     --providers.http.endpoint=http://127.0.0.1:7070/internal/traefik/config --providers.http.pollInterval=2s \
     "--providers.http.headers.X-Syncloud-Token=$tok" >/dev/null
 }

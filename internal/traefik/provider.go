@@ -14,7 +14,51 @@ import (
 // Dynamic is the subset of Traefik's dynamic configuration we generate.
 type Dynamic struct {
 	HTTP HTTPConfig `json:"http"`
+	TCP  *TCPConfig `json:"tcp,omitempty"`
 	TLS  *TLSConfig `json:"tls,omitempty"`
+}
+
+// TCPConfig carries the public database endpoints (Phase 12e): TLS is
+// terminated by Traefik and routed by SNI.
+type TCPConfig struct {
+	Routers     map[string]TCPRouter     `json:"routers"`
+	Services    map[string]TCPService    `json:"services"`
+	Middlewares map[string]TCPMiddleware `json:"middlewares,omitempty"`
+}
+
+type TCPRouter struct {
+	Rule        string     `json:"rule"`
+	EntryPoints []string   `json:"entryPoints"`
+	Middlewares []string   `json:"middlewares,omitempty"`
+	Service     string     `json:"service"`
+	TLS         *RouterTLS `json:"tls"`
+}
+
+type TCPService struct {
+	LoadBalancer TCPLoadBalancer `json:"loadBalancer"`
+}
+
+type TCPLoadBalancer struct {
+	Servers []TCPServer `json:"servers"`
+}
+
+type TCPServer struct {
+	Address string `json:"address"`
+}
+
+type TCPMiddleware struct {
+	IPAllowList *TCPIPAllowList `json:"ipAllowList,omitempty"`
+}
+
+type TCPIPAllowList struct {
+	SourceRange []string `json:"sourceRange"`
+}
+
+// TCPRoute is one public TLS endpoint (a database's).
+type TCPRoute struct {
+	Name, Entrypoint, Host string
+	Servers                []string // host:port
+	Allow                  []string // client CIDRs (empty: anyone)
 }
 
 type HTTPConfig struct {
@@ -136,6 +180,9 @@ type Provider struct {
 	MeshControllerURL func() string
 	// Settings returns the global settings (nil: the defaults).
 	Settings func() Settings
+	// TCPRoutes returns the public database endpoints (only served with a
+	// base domain: they need certificates).
+	TCPRoutes func() []TCPRoute
 	// GitHost returns the built-in Git server's hostname ("" when it is
 	// off, §5.8); GitServerURL is where Traefik reaches it.
 	GitHost      func() string
@@ -253,7 +300,46 @@ func (p *Provider) Config() Dynamic {
 	if p.Certificates != nil {
 		d.TLS.Certificates = p.Certificates()
 	}
+	if p.TCPRoutes != nil {
+		d.TCP = tcpConfig(p.TCPRoutes())
+	}
 	return d
+}
+
+func tcpConfig(routes []TCPRoute) *TCPConfig {
+	if len(routes) == 0 {
+		return nil
+	}
+	c := &TCPConfig{Routers: map[string]TCPRouter{}, Services: map[string]TCPService{}, Middlewares: map[string]TCPMiddleware{}}
+	for _, r := range routes {
+		if len(r.Servers) == 0 {
+			continue // nothing to serve yet (no running primary)
+		}
+		lb := TCPLoadBalancer{}
+		for _, a := range r.Servers {
+			lb.Servers = append(lb.Servers, TCPServer{Address: a})
+		}
+		c.Services[r.Name] = TCPService{LoadBalancer: lb}
+		rt := TCPRouter{Rule: hostSNI(r.Host), EntryPoints: []string{r.Entrypoint}, Service: r.Name, TLS: &RouterTLS{}}
+		if len(r.Allow) > 0 {
+			mw := r.Name + "-allow"
+			c.Middlewares[mw] = TCPMiddleware{IPAllowList: &TCPIPAllowList{SourceRange: r.Allow}}
+			rt.Middlewares = []string{mw}
+		}
+		c.Routers[r.Name] = rt
+	}
+	if len(c.Routers) == 0 {
+		return nil
+	}
+	return c
+}
+
+// hostSNI is host's TLS counterpart.
+func hostSNI(h string) string {
+	if !hostSafe.MatchString(h) {
+		h = "invalid.invalid"
+	}
+	return "HostSNI(`" + h + "`)"
 }
 
 var hostSafe = regexp.MustCompile(`^[a-z0-9.-]+$`)

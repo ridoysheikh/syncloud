@@ -9,7 +9,7 @@ These pages are for the people who install and run a SynCloud cluster:
 | [Install](install.md) | Requirements, installing the controller, joining nodes, the first sign-in |
 | [Nodes and pools](nodes.md) | Joining, draining and removing nodes; node pages and shells; which nodes a project may use; node pools, cloud providers, cluster autoscaling, edge nodes |
 | [Integrations and Traefik settings](integrations.md) | Connecting GitHub (one-click app), GitLab and Gitea; automatic webhooks and commit statuses; global Traefik options |
-| [Managed databases (Valkey)](databases.md) | Redis-compatible databases: endpoints, Sentinel failover, memory and replica autoscaling, the explorer and console |
+| [Managed databases](databases.md) | Standalone or project databases (Valkey now): internal access lists, public TLS endpoints, Sentinel failover, memory and replica autoscaling, the explorer and console |
 | [S3 storage and metrics](storage.md) | S3 endpoints, the bucket browser, binding buckets to services, the metrics explorer |
 | [Operations](operations.md) | Health, upgrades and rollback, agent upgrades, backups, restore and moving the controller, uninstall, data retention |
 | [Testing](testing.md) | Unit, end-to-end, chaos and load tests |

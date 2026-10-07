@@ -20,6 +20,7 @@ import (
 	"syncloud/internal/events"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 	"syncloud/internal/nodes"
+	"syncloud/internal/secgroup"
 	"syncloud/internal/secrets"
 	"syncloud/internal/store"
 	"syncloud/internal/workload"
@@ -57,6 +58,12 @@ type Manager struct {
 	DNS func(nodeID, project, env string) (servers, search []string)
 	// OnChange runs when endpoints or members change (service directory).
 	OnChange func()
+	// OnNetworkChange runs when the set of public endpoints or access lists
+	// changes (certificates, host firewall, security policy).
+	OnNetworkChange func()
+	// BaseDomain returns the platform's base domain ("" = none, so no
+	// public endpoints).
+	BaseDomain func() string
 	// Metrics stores member samples (nil = none).
 	Metrics Recorder
 
@@ -123,39 +130,83 @@ func (m *Manager) secrets(d store.Database) (Secrets, error) {
 	return s, json.Unmarshal(b, &s)
 }
 
+// CreateRequest is a new database.
+type CreateRequest struct {
+	Name, Engine, Version string
+	// Env is the project environment; nil for a standalone database.
+	Env     *store.Environment
+	Spec    Spec
+	Network Network
+	// Exists checks access-list references (nil: not checked).
+	Exists func(p secgroup.Peer) bool
+	Actor  string
+}
+
 // Create stores a database and starts its members.
-func (m *Manager) Create(ctx context.Context, env store.Environment, name, version string, spec Spec, actor string) (View, error) {
+func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
+	name := req.Name
 	if err := workload.ValidName(name); err != nil {
 		return View{}, ErrInvalid{fmt.Errorf("database name %w", err)}
 	}
 	if len(name) > 29 { // room for "-ro" in a 32-character label
 		return View{}, ErrInvalid{errors.New("database name must be at most 29 characters")}
 	}
+	if err := reservedName(name); err != nil {
+		return View{}, ErrInvalid{err}
+	}
+	if req.Engine == "" {
+		req.Engine = EngineValkey
+	}
+	eng, ok := EngineByName(req.Engine)
+	if !ok {
+		return View{}, ErrInvalid{fmt.Errorf("unknown engine %q", req.Engine)}
+	}
+	if !eng.Available {
+		return View{}, ErrInvalid{fmt.Errorf("%s is not available yet", eng.Title)}
+	}
+	version := req.Version
 	if version == "" {
-		version = DefaultVersion
+		version = eng.DefaultVersion
 	}
 	if Images[version] == "" {
-		return View{}, ErrInvalid{fmt.Errorf("version must be one of %s", strings.Join(versions(), ", "))}
+		return View{}, ErrInvalid{fmt.Errorf("version must be one of %s", strings.Join(eng.Versions, ", "))}
 	}
+	spec := req.Spec
 	if err := spec.Normalize(); err != nil {
 		return View{}, ErrInvalid{err}
 	}
-	if err := m.checkNodes(ctx, env.ProjectID, spec.Nodes); err != nil {
-		return View{}, err
-	}
 	now := m.now().UTC().Truncate(time.Second)
-	d := store.Database{ID: auth.NewID("db_"), EnvironmentID: env.ID, Name: name, Engine: Engine, Version: version, CreatedAt: now}
+	d := store.Database{ID: auth.NewID("db_"), Name: name, Engine: eng.Name, Version: version, CreatedAt: now}
+	if req.Env != nil {
+		if err := m.checkNodes(ctx, req.Env.ProjectID, spec.Nodes); err != nil {
+			return View{}, err
+		}
+		d.EnvironmentID = req.Env.ID
+		if p, err := m.st.ProjectByID(ctx, req.Env.ProjectID); err == nil {
+			d.Project, d.Environment = p.Name, req.Env.Name
+		}
+	}
+	n := req.Network
+	if n.Access == nil {
+		n.Access = d.ParseNetwork().Access // the default for its kind
+	}
+	if err := NormalizeNetwork(&n, req.Exists); err != nil {
+		return View{}, ErrInvalid{err}
+	}
+	nb, _ := json.Marshal(n)
+	d.Network = string(nb)
 	sec, _ := json.Marshal(Secrets{Password: randomPassword(), AdminPassword: randomPassword()})
 	d.Secrets = m.box.Seal(sec, aad(d.ID))
 	d.Spec = encode(spec)
 	d.State = encode(State{MemoryMiB: spec.Memory.Min, Replicas: spec.Replicas.Min, LimitMiB: spec.Memory.Max})
 	if err := m.st.CreateDatabase(ctx, d); errors.Is(err, store.ErrNameTaken) {
-		return View{}, ErrInvalid{fmt.Errorf("the name %s is taken in this environment (by a service or a database)", name)}
+		return View{}, ErrInvalid{fmt.Errorf("the name %s is taken (database names are unique in the cluster, and a project database cannot share its name with a service)", name)}
 	} else if err != nil {
 		return View{}, err
 	}
-	m.event(ctx, d.ID, "created", "", fmt.Sprintf("%d MiB, %d replicas", spec.Memory.Min, spec.Replicas.Min), "", actor)
+	m.event(ctx, d.ID, "created", "", fmt.Sprintf("%d MiB, %d replicas", spec.Memory.Min, spec.Replicas.Min), "", req.Actor)
 	m.Enqueue(d.ID)
+	m.networkChanged()
 	full, err := m.st.DatabaseByID(ctx, d.ID)
 	if err != nil {
 		return View{}, err
@@ -174,12 +225,14 @@ func (m *Manager) Update(ctx context.Context, id string, spec Spec, actor string
 	if err := spec.Normalize(); err != nil {
 		return View{}, ErrInvalid{err}
 	}
-	e, err := m.st.EnvironmentByID(ctx, d.EnvironmentID)
-	if err != nil {
-		return View{}, err
-	}
-	if err := m.checkNodes(ctx, e.ProjectID, spec.Nodes); err != nil {
-		return View{}, err
+	if !d.Standalone() {
+		e, err := m.st.EnvironmentByID(ctx, d.EnvironmentID)
+		if err != nil {
+			return View{}, err
+		}
+		if err := m.checkNodes(ctx, e.ProjectID, spec.Nodes); err != nil {
+			return View{}, err
+		}
 	}
 	old, _ := parseSpec(d.Spec)
 	st := parseState(d.State)
@@ -257,15 +310,6 @@ func (m *Manager) Failover(ctx context.Context, id string) error {
 		}
 	}
 	return last
-}
-
-func versions() []string {
-	var v []string
-	for k := range Images {
-		v = append(v, k)
-	}
-	sort.Strings(v)
-	return v
 }
 
 func (m *Manager) event(ctx context.Context, id, kind, from, to, reason, actor string) {
@@ -363,7 +407,7 @@ func (m *Manager) reconcile(ctx context.Context, id string) {
 			m.log.Error("delete database", "database", id, "err", err)
 			return
 		}
-		m.log.Info("database deleted", "database", d.Project+"/"+d.Environment+"/"+d.Name)
+		m.log.Info("database deleted", "database", d.Name)
 		m.mu.Lock()
 		for _, mb := range members {
 			delete(m.live, mb.ID)
@@ -372,6 +416,7 @@ func (m *Manager) reconcile(ctx context.Context, id string) {
 		m.mu.Unlock()
 		m.bus.Publish(TopicDatabase, map[string]any{"id": id, "deleted": true})
 		m.changed()
+		m.networkChanged()
 		return
 	}
 
@@ -538,6 +583,9 @@ func (m *Manager) allRunning(data, sents []store.DatabaseMember, except string) 
 }
 
 func (m *Manager) projectNodes(ctx context.Context, envID string) []string {
+	if envID == "" {
+		return nil // standalone: any node
+	}
 	e, err := m.st.EnvironmentByID(ctx, envID)
 	if err != nil {
 		return nil
@@ -752,23 +800,12 @@ func (m *Manager) Directory(ctx context.Context, vip func(index int) string, poo
 		if err != nil {
 			continue
 		}
-		st := parseState(d.State)
-		var primary string
-		var replicas []string
 		for _, mb := range members {
-			if mb.IP == "" || mb.State != store.TaskRunning {
-				continue
-			}
-			recs = append(recs, &agentv1.DNSRecord{Name: memberHost(d, mb.Kind, mb.Ordinal), Ips: []string{mb.IP}})
-			if mb.Kind != KindData {
-				continue
-			}
-			if mb.Ordinal == st.Primary {
-				primary = mb.IP
-			} else if l := m.liveOf(mb.ID); l == nil || l.Role != "master" {
-				replicas = append(replicas, mb.IP) // a restarted old primary joins as a replica soon
+			if mb.IP != "" && mb.State == store.TaskRunning {
+				recs = append(recs, &agentv1.DNSRecord{Name: memberHost(d, mb.Kind, mb.Ordinal), Ips: []string{mb.IP}})
 			}
 		}
+		primary, replicas := m.endpoints(ctx, d)
 		rw, ro, err := m.st.EnsureDatabaseVIPs(ctx, d.ID, pool, cooldown, now)
 		if err != nil {
 			m.log.Error("database VIPs", "database", d.ID, "err", err)

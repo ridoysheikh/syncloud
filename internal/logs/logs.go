@@ -75,6 +75,9 @@ type Filter struct {
 	Status string
 	// Client selects request lines from one client IP.
 	Client string
+	// NoProject selects only lines outside any project (standalone
+	// databases); Project must be "".
+	NoProject bool
 }
 
 func (f Filter) match(l Line) bool {
@@ -82,6 +85,9 @@ func (f Filter) match(l Line) bool {
 		return false
 	}
 	if f.Status != "" && !strings.HasPrefix(l.Fields["status"], f.Status) || f.Client != "" && l.Fields["client"] != f.Client {
+		return false
+	}
+	if f.NoProject && l.Project != "" {
 		return false
 	}
 	return (f.Project == "" || f.Project == l.Project) && (f.Environment == "" || f.Environment == l.Environment) &&
@@ -168,8 +174,9 @@ func (s *Store) labelsFor(taskID string) labels {
 		var project, env, name string
 		var ord int
 		var kind string
-		err := s.st.R.QueryRowContext(ctx, `SELECT p.name, e.name, d.name, m.kind, m.ordinal FROM database_members m
-			JOIN databases d ON d.id = m.database_id JOIN environments e ON e.id = d.environment_id JOIN projects p ON p.id = e.project_id
+		// Standalone databases have no project or environment.
+		err := s.st.R.QueryRowContext(ctx, `SELECT coalesce(p.name, ''), coalesce(e.name, ''), d.name, m.kind, m.ordinal FROM database_members m
+			JOIN databases d ON d.id = m.database_id LEFT JOIN environments e ON e.id = d.environment_id LEFT JOIN projects p ON p.id = e.project_id
 			WHERE m.id = ?`, taskID).Scan(&project, &env, &name, &kind, &ord)
 		if err != nil {
 			return labels{service: "unknown"}
@@ -378,6 +385,9 @@ func (f Filter) LogsQL(since time.Duration) string {
 		if kv[1] != "" {
 			parts = append(parts, kv[0]+":="+quote(kv[1]))
 		}
+	}
+	if f.NoProject {
+		parts = append(parts, `project:=""`)
 	}
 	if f.Text != "" {
 		parts = append(parts, "i("+quote(f.Text)+")")

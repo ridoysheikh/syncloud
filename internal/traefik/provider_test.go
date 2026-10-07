@@ -3,6 +3,7 @@ package traefik
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -72,5 +73,41 @@ func TestProviderRequiresTokenAndRoutesDashboard(t *testing.T) {
 	}
 	if host("evil`) || Host(`x") != "Host(`invalid.invalid`)" {
 		t.Fatal("rule injection")
+	}
+}
+
+func TestTCPRoutesForPublicDatabases(t *testing.T) {
+	domain := ""
+	routes := []TCPRoute{
+		{Name: "db-1", Entrypoint: "valkey", Host: "cache.db.example.com", Servers: []string{"10.91.1.2:6379"}, Allow: []string{"203.0.113.0/24"}},
+		{Name: "db-1-ro", Entrypoint: "valkey", Host: "cache-ro.db.example.com", Servers: []string{"10.91.1.3:6379", "10.91.2.3:6379"}},
+		{Name: "db-2", Entrypoint: "valkey", Host: "down.db.example.com"}, // no primary running
+	}
+	p := &Provider{ControllerURL: "http://127.0.0.1:7070", BaseDomain: func() string { return domain }, TCPRoutes: func() []TCPRoute { return routes }}
+	if p.Config().TCP != nil {
+		t.Fatal("TCP routes without a base domain (no certificates)")
+	}
+	domain = "example.com"
+	tcp := p.Config().TCP
+	if tcp == nil {
+		t.Fatal("no TCP config")
+	}
+	r := tcp.Routers["db-1"]
+	if r.Rule != "HostSNI(`cache.db.example.com`)" || r.EntryPoints[0] != "valkey" || r.TLS == nil || len(r.Middlewares) != 1 {
+		t.Errorf("router: %+v", r)
+	}
+	if mw := tcp.Middlewares[r.Middlewares[0]]; mw.IPAllowList == nil || mw.IPAllowList.SourceRange[0] != "203.0.113.0/24" {
+		t.Errorf("allow-list: %+v", mw)
+	}
+	if ro := tcp.Routers["db-1-ro"]; len(ro.Middlewares) != 0 || len(tcp.Services["db-1-ro"].LoadBalancer.Servers) != 2 {
+		t.Errorf("read-only route: %+v %+v", ro, tcp.Services["db-1-ro"])
+	}
+	if _, ok := tcp.Routers["db-2"]; ok {
+		t.Error("a route without servers")
+	}
+	// TLS must be terminated: the router carries "tls": {} in JSON.
+	b, _ := json.Marshal(tcp.Routers["db-1"])
+	if !json.Valid(b) || !strings.Contains(string(b), `"tls":{}`) {
+		t.Errorf("router JSON: %s", b)
 	}
 }

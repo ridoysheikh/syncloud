@@ -1,34 +1,86 @@
-# Managed databases (Valkey)
+# Managed databases
 
-SynCloud runs dedicated **Valkey** databases for your projects. Valkey is the BSD-licensed continuation of Redis: same protocol, same commands, same client libraries. Each database gets its own containers, volumes and password. Nothing is shared with other databases.
+SynCloud runs dedicated managed databases. Each one gets its own containers, volumes and password, and nothing is shared with other databases.
+
+The first engine is **Valkey**, the BSD-licensed continuation of Redis: same protocol, same commands, same client libraries. PostgreSQL is planned, and `synctl db engines` lists what is available.
+
+A database is either:
+
+- **standalone:** not tied to any project. You choose which projects, environments or services may connect, like an AWS-managed database.
+- **in a project environment:** it follows the project's allowed nodes, and its environment can connect by default.
+
+Database names are unique in the cluster, whichever kind they are.
 
 ## Create one
 
 In the dashboard, open **Databases → New database**, or a project's **Databases** tab. The wizard asks for:
 
-- **Database:** project, environment, name and Valkey version.
+- **Engine:** the engine and its version.
+- **Database:** the name, and standalone or a project environment.
 - **Capacity:** memory and read replicas (both can autoscale), and CPU.
 - **Data:** persistence, what happens when memory is full, and which nodes to use.
+- **Network:** who may connect inside the cluster, and the optional public endpoint.
 
 Or from the CLI:
 
 ```sh
-synctl db create cache -p shop --memory 256 --max-memory 2048 --replicas 1 --max-replicas 3
-synctl db credentials cache -p shop
+# standalone, open to project shop, with a public TLS endpoint
+synctl db create sessions --memory 256 --max-memory 2048 --access project:shop --public
+# in a project environment
+synctl db create cache -p shop --replicas 1 --max-replicas 3
+synctl db credentials sessions
 ```
 
 ## Connect
 
-Every database has two endpoints inside the cluster, reachable from any service:
+### Inside the cluster
+
+Every database has two internal endpoints:
+
+| Database | Read-write (always the current primary) | Read-only (the replicas; the primary when there are none) |
+| --- | --- | --- |
+| standalone | `<db>.db.syncloud.internal:6379` | `<db>-ro.db.syncloud.internal:6379` |
+| in a project | `<db>.<env>.<project>.syncloud.internal:6379` | `<db>-ro.<env>.<project>.syncloud.internal:6379` |
+
+Only the services on the database's **access list** can connect. The list works like an AWS security group for the database. Entries are:
+
+- `project:shop`: every service of the project;
+- `environment:shop/production`: every service of one environment;
+- `service:shop/production/api`: one service;
+- `group:shop/backend`: the members of a security group;
+- an IP address or CIDR, or `cluster` (every node).
+
+A project database starts with its own environment on the list. A standalone database starts with an empty list. Edit it under **Connectivity**, or:
+
+```sh
+synctl db network sessions --add-access environment:billing/production
+synctl db network sessions --remove-access project:shop
+```
+
+Changes apply within seconds, without restarts. The project's **Databases** tab also lists the databases elsewhere that its environment may reach.
+
+### From outside the cluster (public endpoint)
+
+Turn on the public endpoint under **Connectivity**, or with `synctl db network sessions --public on`. The database then gets a URL like an AWS endpoint:
 
 | Endpoint | Use |
 | --- | --- |
-| `<db>.<env>.<project>.syncloud.internal:6379` | reads and writes (always the current primary) |
-| `<db>-ro.<env>.<project>.syncloud.internal:6379` | reads, spread over the replicas (the primary when there are none) |
+| `<db>.db.<base-domain>:6379` | reads and writes |
+| `<db>-ro.db.<base-domain>:6379` | reads |
 
-The user is `default`. The password is under **Connect → Show password**, or `synctl db credentials`; revealing it is recorded in the audit log. A ready-made URL is `redis://default:<password>@<host>:6379`.
+- **TLS is required.** Use `rediss://default:<password>@<db>.db.<base-domain>:6379`, or `redis-cli --tls -h <db>.db.<base-domain>`.
+- **How it is served:** Traefik on the controller and on edge nodes terminates TLS with the platform's certificate for that name. It then forwards to the current primary over the private network, and follows a failover within seconds.
+- **Allowed client addresses:** `--allow 203.0.113.0/24` limits who can connect. The default is anywhere, and the password still protects it.
+- **Firewall:** the host firewall opens port 6379 on the controller and edge nodes only while at least one database is public.
+- **Base domain:** public endpoints need one (Settings › Domains), because their certificates are issued for it.
+  - With the default sslip.io domain, the names resolve on their own.
+  - With your own domain, point `*.db.<your-domain>` at the controller (or at the edge nodes) with a wildcard DNS record.
 
-Apps can't run administration commands (`CONFIG`, `ACL`, `REPLICAOF`, `SHUTDOWN`, `MODULE`, `DEBUG`, …). SynCloud manages those. The environment's security groups apply to databases as they do to services.
+### Credentials
+
+The user is `default`. The password is under **Connect → Show password**, or `synctl db credentials`, which also prints the ready-made URLs. Revealing the password is recorded in the audit log.
+
+Apps can't run administration commands (`CONFIG`, `ACL`, `REPLICAOF`, `SHUTDOWN`, `MODULE`, `DEBUG`, …). SynCloud manages those.
 
 ## Failover
 
@@ -72,11 +124,11 @@ The database page has:
 The same from the CLI:
 
 ```sh
-synctl db keys cache 'user:*' -p shop
-synctl db key set cache user:1 --type hash name=Ada role=admin -p shop
-synctl db cmd cache -p shop HGETALL user:1
-synctl db info cache memory -p shop
-synctl db metrics cache --range 6h -p shop
+synctl db keys cache 'user:*'
+synctl db key set cache user:1 --type hash name=Ada role=admin
+synctl db cmd cache HGETALL user:1
+synctl db info cache memory
+synctl db metrics cache --range 6h
 ```
 
 ## Persistence
@@ -91,4 +143,4 @@ Data lives in node-local volumes (`syncloud-db-<id>-m<n>`). Deleting a database 
 
 ## Placement
 
-Members of one database always run on different nodes. A database follows its project's allowed nodes, and can be limited further under **Settings → Nodes** (see [Nodes](nodes.md)). Database reservations count when the scheduler places services. A member reserves its CPU and about 1.2× its current memory.
+Members of one database always run on different nodes. A project database follows its project's allowed nodes. A standalone database may use any node. Either can be limited further under **Settings → Nodes** (see [Nodes](nodes.md)). Database reservations count when the scheduler places services. A member reserves its CPU and about 1.2× its current memory.

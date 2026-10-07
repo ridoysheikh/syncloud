@@ -29,16 +29,6 @@ const (
 	KindSentinel = "sentinel"
 )
 
-// Host is the database's read-write DNS name.
-func Host(d store.Database) string {
-	return fmt.Sprintf("%s.%s.%s.%s", d.Name, d.Environment, d.Project, Zone)
-}
-
-// ReadHost is the read-only DNS name.
-func ReadHost(d store.Database) string {
-	return fmt.Sprintf("%s-ro.%s.%s.%s", d.Name, d.Environment, d.Project, Zone)
-}
-
 // memberHost is a member's stable name: m<n> for data, s<n> for sentinels.
 func memberHost(d store.Database, kind string, ordinal int) string {
 	p := "m"
@@ -183,6 +173,9 @@ func taskSpec(d store.Database, spec Spec, st State, sec Secrets, m store.Databa
 	}
 	ts.Env = env
 	ts.Name = fmt.Sprintf("%s-%s-db-%s-%s", d.Project, d.Environment, d.Name, short)
+	if d.Standalone() {
+		ts.Name = fmt.Sprintf("db-%s-%s", d.Name, short)
+	}
 	ts.Labels = map[string]string{
 		"syncloud.project": d.Project, "syncloud.environment": d.Environment, "syncloud.service": d.Name,
 		"syncloud.service_id": d.ID, "syncloud.database": d.Name, "syncloud.db_member": short,

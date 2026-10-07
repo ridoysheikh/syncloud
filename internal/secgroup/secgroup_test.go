@@ -187,3 +187,46 @@ func TestValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestDatabaseGroup(t *testing.T) {
+	m := model(t)
+	// A standalone database open to the billing project, and a project
+	// database with the default access list (its own environment).
+	sa := store.Database{ID: "db_sa", Name: "sessions", Network: `{"access":["project:billing"]}`}
+	pd := store.Database{ID: "db_pd", EnvironmentID: "env_1", Project: "shop", Environment: "production", Name: "cache"}
+	m.Services = append(m.Services,
+		Service{ID: "db_sa", Name: "sessions", IPs: []string{"10.91.4.1", "10.91.5.1"}},
+		Service{ID: "db_pd", Project: "shop", Env: "production", Name: "cache", IPs: []string{"10.91.4.2"}})
+	m.Groups = append(m.Groups, DatabaseGroup(sa), DatabaseGroup(pd))
+	m.ResetIndex()
+	bill, web, stg := Endpoint{ServiceID: "svc_bill"}, Endpoint{ServiceID: "svc_web"}, Endpoint{ServiceID: "svc_stg"}
+	for _, c := range []struct {
+		name     string
+		src, dst Endpoint
+		port     int
+		allowed  bool
+	}{
+		{"listed project reaches the standalone database", bill, Endpoint{ServiceID: "db_sa"}, 6379, true},
+		{"other projects do not", web, Endpoint{ServiceID: "db_sa"}, 6379, false},
+		{"members reach each other (replication, Sentinel)", Endpoint{ServiceID: "db_sa"}, Endpoint{ServiceID: "db_sa"}, 26379, true},
+		{"own environment reaches the project database", web, Endpoint{ServiceID: "db_pd"}, 6379, true},
+		{"another environment does not", stg, Endpoint{ServiceID: "db_pd"}, 6379, false},
+		{"the database may connect out to its environment", Endpoint{ServiceID: "db_pd"}, web, 8080, true},
+	} {
+		if v := m.Evaluate(c.src, c.dst, "tcp", c.port); v.Allowed != c.allowed {
+			t.Errorf("%s: %+v", c.name, v)
+		}
+	}
+	// The compiled policy carries a rule whose local and peer set are the
+	// database's own members.
+	pol := Compile(m)
+	found := false
+	for _, r := range pol.GetRules() {
+		if strings.HasPrefix(r.GetId(), "dbsg_db_sa:in:0") && len(r.GetPeerSets()) == 1 && r.GetPeerSets()[0] == r.GetLocalSet() {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no members-to-members rule for the standalone database")
+	}
+}

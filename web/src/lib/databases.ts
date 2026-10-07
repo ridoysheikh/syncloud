@@ -37,13 +37,47 @@ export interface DatabaseMember {
   createdAt: string;
 }
 
+export interface DatabaseNetwork {
+  /** Internal peers allowed in: project:P, environment:P/E, service:P/E/S, a CIDR or cluster. */
+  access: string[];
+  public: { enabled: boolean; allow: string[] };
+}
+
+export interface PublicEndpoint {
+  enabled: boolean;
+  /** False when it cannot work (no base domain); reason says why. */
+  available: boolean;
+  reason?: string;
+  host?: string;
+  readHost?: string;
+  port: number;
+  tls: boolean;
+}
+
+export interface DatabaseEngine {
+  name: string;
+  title: string;
+  description: string;
+  available: boolean;
+  versions: string[];
+  defaultVersion?: string;
+  port: number;
+  scheme: string;
+  tlsScheme: string;
+  features: string[];
+}
+
 export type DatabaseHealth =
   "healthy" | "degraded" | "starting" | "checking" | "down" | "deleting";
 
 export interface Database {
   id: string;
+  /** "" for a standalone database. */
   project: string;
   environment: string;
+  standalone: boolean;
+  network: DatabaseNetwork;
+  public: PublicEndpoint;
   name: string;
   engine: string;
   version: string;
@@ -98,16 +132,28 @@ export const EVICTION_POLICIES = [
   "volatile-ttl",
 ];
 
-/** API path of an environment's databases (or one of them). */
-export const dbPath = (project: string, env: string, name?: string) =>
-  `/projects/${project}/environments/${env}/databases${name ? `/${name}` : ""}`;
+/** API path of a database (names are unique in the cluster). */
+export const dbPath = (name: string) =>
+  `/databases/${encodeURIComponent(name)}`;
 
 /** Dashboard path of a database's page. */
-export const dbUrl = (d: {
-  project: string;
-  environment: string;
-  name: string;
-}) => `/projects/${d.project}/${d.environment}/databases/${d.name}`;
+export const dbUrl = (d: { name: string }) =>
+  `/databases/${encodeURIComponent(d.name)}`;
+
+/** Where a database lives: "project / env", or "standalone". */
+export const ownerOf = (d: { project: string; environment: string }) =>
+  d.project ? `${d.project} / ${d.environment}` : "standalone";
+
+/** Database engines (Valkey now; PostgreSQL planned). */
+export function useDatabaseEngines() {
+  return useQuery({
+    queryKey: ["database-engines"],
+    queryFn: async () =>
+      (await api<{ items: DatabaseEngine[] }>("GET", "/databases/engines"))
+        .items,
+    staleTime: Infinity,
+  });
+}
 
 const key = ["databases"];
 

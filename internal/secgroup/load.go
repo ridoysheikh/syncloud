@@ -55,8 +55,9 @@ func Load(ctx context.Context, st *store.Store) (*Model, error) {
 	for _, sv := range svcs {
 		m.Services = append(m.Services, Service{ID: sv.ID, Project: sv.Project, Env: sv.Environment, Name: sv.Name, IPs: ips[sv.ID]})
 	}
-	// Managed databases (Phase 12) are members of their environment like a
-	// service: the default group covers them.
+	// Managed databases (Phase 12) use their own access list instead of
+	// their project's groups: a synthesized group attached only to them
+	// lets their members talk to each other and lets the listed peers in.
 	dbs, err := st.ListDatabases(ctx)
 	if err != nil {
 		return nil, err
@@ -72,6 +73,7 @@ func Load(ctx context.Context, st *store.Store) (*Model, error) {
 	}
 	for _, d := range dbs {
 		m.Services = append(m.Services, Service{ID: d.ID, Project: d.Project, Env: d.Environment, Name: d.Name, IPs: ips[d.ID]})
+		m.Groups = append(m.Groups, DatabaseGroup(d))
 	}
 	groups, err := st.ListSecurityGroups(ctx)
 	if err != nil {
@@ -92,6 +94,18 @@ func Load(ctx context.Context, st *store.Store) (*Model, error) {
 		m.PlatformIPs = append(m.PlatformIPs, ip)
 	}
 	return m, nil
+}
+
+// DatabaseGroup is the security group a database uses: its own members on
+// any port, and its access list over TCP. Outbound is open (replication,
+// Sentinel and DNS).
+func DatabaseGroup(d store.Database) Group {
+	in := []Rule{{Protocol: "any", Peers: []string{KindSelf}, Description: "members of the database"}}
+	if acc := d.ParseNetwork().Access; len(acc) > 0 {
+		in = append(in, Rule{Protocol: "tcp", Peers: acc, Description: "access list"})
+	}
+	return Group{ID: "dbsg_" + d.ID, Project: d.Project, Name: "database-" + d.Name, Inbound: in,
+		Outbound: []Rule{{Protocol: "any", Peers: []string{KindAny}, Description: "all outbound traffic"}}, Services: []string{d.ID}}
 }
 
 // FromStore parses a stored group's rules.

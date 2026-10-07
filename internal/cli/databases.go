@@ -17,13 +17,29 @@ type dbView struct {
 	Name        string `json:"name"`
 	Project     string `json:"project"`
 	Environment string `json:"environment"`
+	Engine      string `json:"engine"`
 	Version     string `json:"version"`
 	Health      string `json:"health"`
 	Status      string `json:"status"`
 	Host        string `json:"host"`
 	ReadHost    string `json:"readHost"`
 	Port        int    `json:"port"`
-	Spec        struct {
+	Network     struct {
+		Access []string `json:"access"`
+		Public struct {
+			Enabled bool     `json:"enabled"`
+			Allow   []string `json:"allow"`
+		} `json:"public"`
+	} `json:"network"`
+	Public struct {
+		Enabled   bool   `json:"enabled"`
+		Available bool   `json:"available"`
+		Reason    string `json:"reason"`
+		Host      string `json:"host"`
+		ReadHost  string `json:"readHost"`
+		Port      int    `json:"port"`
+	} `json:"public"`
+	Spec struct {
 		Memory         struct{ Min, Max int } `json:"memory"`
 		Replicas       struct{ Min, Max int } `json:"replicas"`
 		Persistence    string                 `json:"persistence"`
@@ -53,12 +69,20 @@ type dbView struct {
 	} `json:"usage"`
 }
 
-func (s scope) dbPath(name string) string {
-	p := "/api/v1/projects/" + url.PathEscape(s.project) + "/environments/" + url.PathEscape(s.env) + "/databases"
-	if name != "" {
-		p += "/" + url.PathEscape(name)
+// dbList is a project environment's databases.
+func (s scope) dbList() string {
+	return "/api/v1/projects/" + url.PathEscape(s.project) + "/environments/" + url.PathEscape(s.env) + "/databases"
+}
+
+// dbItem is one database (names are unique in the cluster).
+func dbItem(name string) string { return "/api/v1/databases/" + url.PathEscape(name) }
+
+// owner is where a database lives.
+func (d dbView) owner() string {
+	if d.Project == "" {
+		return "standalone"
 	}
-	return p
+	return d.Project + "/" + d.Environment
 }
 
 // dbSpecFlags are the flags shared by create and update.
@@ -133,16 +157,16 @@ func (f *dbSpecFlags) apply(cmd *cobra.Command, spec map[string]any) {
 
 func (a *app) databasesCmd() *cobra.Command {
 	var s scope
-	db := &cobra.Command{Use: "db", Aliases: []string{"databases", "database", "valkey"}, Short: "Managed Valkey (Redis-compatible) databases"}
+	db := &cobra.Command{Use: "db", Aliases: []string{"databases", "database", "valkey"}, Short: "Managed databases (Valkey, Redis-compatible), standalone or in a project"}
 	a.scopeFlags(db, &s)
 
 	list := &cobra.Command{
-		Use: "list", Aliases: []string{"ls"}, Short: "List databases (every project without -p)", Args: cobra.NoArgs,
+		Use: "list", Aliases: []string{"ls"}, Short: "List databases (all of them, or one project environment's with -p)", Args: cobra.NoArgs,
 		Annotations: op("listDatabases", "listAllDatabases"),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			path := "/api/v1/databases"
-			if s.project != "" {
-				path = s.dbPath("")
+			if cmd.Flags().Changed("project") {
+				path = s.dbList()
 			}
 			var out struct {
 				Items []dbView `json:"items"`
@@ -152,62 +176,183 @@ func (a *app) databasesCmd() *cobra.Command {
 			}
 			rows := make([][]string, 0, len(out.Items))
 			for _, d := range out.Items {
-				rows = append(rows, []string{d.Project + "/" + d.Environment + "/" + d.Name, d.Health,
+				public := "-"
+				if d.Public.Enabled {
+					public = d.Public.Host
+				}
+				rows = append(rows, []string{d.Name, d.owner(), d.Engine + " " + d.Version, d.Health,
 					fmt.Sprintf("%d MiB (%d–%d)", d.State.MemoryMiB, d.Spec.Memory.Min, d.Spec.Memory.Max),
 					fmt.Sprintf("%d (%d–%d)", d.State.Replicas, d.Spec.Replicas.Min, d.Spec.Replicas.Max),
-					fmt.Sprint(d.Usage.Keys), fmt.Sprintf("%.0f", d.Usage.OpsPerSec), d.Host})
+					fmt.Sprint(d.Usage.Keys), fmt.Sprintf("%.0f", d.Usage.OpsPerSec), public})
 			}
-			return a.printer().table(out.Items, []string{"DATABASE", "HEALTH", "MEMORY", "REPLICAS", "KEYS", "OPS/S", "HOST"}, rows)
+			return a.printer().table(out.Items, []string{"DATABASE", "OWNER", "ENGINE", "HEALTH", "MEMORY", "REPLICAS", "KEYS", "OPS/S", "PUBLIC"}, rows)
 		},
 	}
 
 	var cf dbSpecFlags
-	var version string
+	var version, engine string
+	var standalone, public bool
+	var allow, access []string
 	create := &cobra.Command{
-		Use: "create NAME", Short: "Create a database (Valkey 8; Sentinel failover when it can have replicas)", Args: cobra.ExactArgs(1),
-		Example: `  synctl db create cache -p shop --memory 256 --max-memory 2048
-  synctl db create sessions -p shop --replicas 1 --max-replicas 3 --eviction allkeys-lru`,
+		Use: "create NAME", Short: "Create a database: standalone, or in a project environment with -p", Args: cobra.ExactArgs(1),
+		Example: `  synctl db create sessions --memory 256 --max-memory 2048 --access project:shop --public
+  synctl db create cache -p shop --replicas 1 --max-replicas 3 --eviction allkeys-lru`,
 		Annotations: op("createDatabase"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			spec := map[string]any{}
 			cf.apply(cmd, spec)
+			body := map[string]any{"name": args[0], "engine": engine, "version": version, "spec": spec}
+			if s.project != "" && !standalone {
+				body["project"], body["environment"] = s.project, s.env
+			}
+			network := map[string]any{"public": map[string]any{"enabled": public, "allow": allow}}
+			if cmd.Flags().Changed("access") {
+				network["access"] = access
+			}
+			body["network"] = network
 			var v dbView
-			if err := a.do(cmd, "POST", s.dbPath(""), map[string]any{"name": args[0], "version": version, "spec": spec}, &v); err != nil {
+			if err := a.do(cmd, "POST", "/api/v1/databases", body, &v); err != nil {
 				return err
 			}
 			if a.output == "json" {
 				return a.printer().json(v)
 			}
-			fmt.Fprintf(a.out, "Created database %s: %s:%d (read-only %s). Get the password with: synctl db credentials %s -p %s\n",
-				v.Name, v.Host, v.Port, v.ReadHost, v.Name, s.project)
+			fmt.Fprintf(a.out, "Created database %s (%s): %s:%d, read-only %s\n", v.Name, v.owner(), v.Host, v.Port, v.ReadHost)
+			if v.Public.Enabled && v.Public.Available {
+				fmt.Fprintf(a.out, "Public endpoint (TLS): %s:%d, read-only %s\n", v.Public.Host, v.Public.Port, v.Public.ReadHost)
+			} else if v.Public.Enabled {
+				fmt.Fprintf(a.out, "Public endpoint unavailable: %s\n", v.Public.Reason)
+			}
+			fmt.Fprintf(a.out, "Get the password with: synctl db credentials %s\n", v.Name)
 			return nil
 		},
 	}
 	cf.add(create)
-	create.Flags().StringVar(&version, "version", "", "Valkey version: 8.1 (default) or 8.0")
+	create.Flags().StringVar(&engine, "engine", "valkey", "database engine (synctl db engines)")
+	create.Flags().StringVar(&version, "version", "", "engine version (default: the newest)")
+	create.Flags().BoolVar(&standalone, "standalone", false, "create outside any project even when $SYNCLOUD_PROJECT is set")
+	create.Flags().BoolVar(&public, "public", false, "serve a TLS endpoint <name>.db.<base-domain> outside the cluster")
+	create.Flags().StringSliceVar(&allow, "allow", nil, "client addresses allowed on the public endpoint (IP or CIDR; default anywhere)")
+	create.Flags().StringSliceVar(&access, "access", nil, "internal peers allowed in: project:P, environment:P/E, service:P/E/S, a CIDR or cluster (default: a project database's own environment)")
+
+	var netPublic string
+	var netAllow, netAccess, addAccess, removeAccess []string
+	network := &cobra.Command{
+		Use: "network NAME", Short: "Show or change who may connect: the internal access list and the public endpoint", Args: cobra.ExactArgs(1),
+		Example: `  synctl db network sessions --public on --allow 203.0.113.0/24
+  synctl db network sessions --add-access environment:billing/production
+  synctl db network sessions --public off`,
+		Annotations: op("setDatabaseNetwork"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var v dbView
+			if err := a.do(cmd, "GET", dbItem(args[0]), nil, &v); err != nil {
+				return err
+			}
+			ch := cmd.Flags().Changed
+			if ch("public") || ch("allow") || ch("access") || ch("add-access") || ch("remove-access") {
+				n := v.Network
+				switch netPublic {
+				case "":
+				case "on", "true", "yes":
+					n.Public.Enabled = true
+				case "off", "false", "no":
+					n.Public.Enabled = false
+				default:
+					return errors.New("--public is on or off")
+				}
+				if ch("allow") {
+					n.Public.Allow = netAllow
+				}
+				if ch("access") {
+					n.Access = netAccess
+				}
+				n.Access = append(n.Access, addAccess...)
+				for _, r := range removeAccess {
+					kept := n.Access[:0]
+					for _, x := range n.Access {
+						if x != r {
+							kept = append(kept, x)
+						}
+					}
+					n.Access = kept
+				}
+				if n.Access == nil {
+					n.Access = []string{}
+				}
+				if err := a.do(cmd, "PUT", dbItem(args[0])+"/network", n, &v); err != nil {
+					return err
+				}
+			}
+			if a.output == "json" {
+				return a.printer().json(map[string]any{"network": v.Network, "public": v.Public})
+			}
+			fmt.Fprintf(a.out, "internal:   %s:%d, read-only %s\n", v.Host, v.Port, v.ReadHost)
+			fmt.Fprintf(a.out, "access:     %s\n", orDash(strings.Join(v.Network.Access, ", ")))
+			switch {
+			case !v.Public.Enabled:
+				fmt.Fprintln(a.out, "public:     off")
+			case !v.Public.Available:
+				fmt.Fprintf(a.out, "public:     on, unavailable: %s\n", v.Public.Reason)
+			default:
+				fmt.Fprintf(a.out, "public:     %s:%d (TLS), read-only %s\n", v.Public.Host, v.Public.Port, v.Public.ReadHost)
+				fmt.Fprintf(a.out, "allowed:    %s\n", strings.Join(v.Network.Public.Allow, ", "))
+			}
+			return nil
+		},
+	}
+	network.Flags().StringVar(&netPublic, "public", "", "on or off")
+	network.Flags().StringSliceVar(&netAllow, "allow", nil, "replace the public allow-list (IP or CIDR)")
+	network.Flags().StringSliceVar(&netAccess, "access", nil, "replace the internal access list")
+	network.Flags().StringSliceVar(&addAccess, "add-access", nil, "add internal peers")
+	network.Flags().StringSliceVar(&removeAccess, "remove-access", nil, "remove internal peers")
+
+	engines := &cobra.Command{
+		Use: "engines", Short: "Database engines, their versions and features", Args: cobra.NoArgs,
+		Annotations: op("listDatabaseEngines"),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			var out struct {
+				Items []struct {
+					Name, Title, Description string
+					Available                bool
+					Versions                 []string
+					Port                     int
+				} `json:"items"`
+			}
+			if err := a.do(cmd, "GET", "/api/v1/databases/engines", nil, &out); err != nil {
+				return err
+			}
+			rows := [][]string{}
+			for _, e := range out.Items {
+				status := "available"
+				if !e.Available {
+					status = "planned"
+				}
+				rows = append(rows, []string{e.Name, e.Title, status, orDash(strings.Join(e.Versions, ", ")), fmt.Sprint(e.Port), e.Description})
+			}
+			return a.printer().table(out.Items, []string{"ENGINE", "TITLE", "STATUS", "VERSIONS", "PORT", "DESCRIPTION"}, rows)
+		},
+	}
 
 	get := &cobra.Command{
 		Use: "get NAME", Short: "A database: endpoints, members and usage", Args: cobra.ExactArgs(1),
 		Annotations: op("getDatabase"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			var v dbView
-			if err := a.do(cmd, "GET", s.dbPath(args[0]), nil, &v); err != nil {
+			if err := a.do(cmd, "GET", dbItem(args[0]), nil, &v); err != nil {
 				return err
 			}
 			if a.output == "json" {
 				return a.printer().json(v)
 			}
-			fmt.Fprintf(a.out, "%s/%s/%s  %s  Valkey %s\n", v.Project, v.Environment, v.Name, v.Health, v.Version)
+			fmt.Fprintf(a.out, "%s  (%s)  %s  %s %s\n", v.Name, v.owner(), v.Health, v.Engine, v.Version)
 			if v.Status != "" {
 				fmt.Fprintf(a.out, "status:     %s\n", v.Status)
 			}
 			fmt.Fprintf(a.out, "read-write: %s:%d\nread-only:  %s:%d\n", v.Host, v.Port, v.ReadHost, v.Port)
+			if v.Public.Enabled && v.Public.Available {
+				fmt.Fprintf(a.out, "public:     %s:%d (TLS), read-only %s\n", v.Public.Host, v.Public.Port, v.Public.ReadHost)
+			}
+			fmt.Fprintf(a.out, "access:     %s\n", orDash(strings.Join(v.Network.Access, ", ")))
 			fmt.Fprintf(a.out, "memory:     %d MiB now (%d–%d), %s used\nreplicas:   %d now (%d–%d)\n", v.State.MemoryMiB, v.Spec.Memory.Min, v.Spec.Memory.Max,
 				bytesIEC(uint64(v.Usage.UsedMemoryBytes)), v.State.Replicas, v.Spec.Replicas.Min, v.Spec.Replicas.Max)
 			fmt.Fprintf(a.out, "usage:      %d keys, %.0f ops/s, %d clients\n\n", v.Usage.Keys, v.Usage.OpsPerSec, v.Usage.Clients)
@@ -226,21 +371,18 @@ func (a *app) databasesCmd() *cobra.Command {
 	var uf dbSpecFlags
 	update := &cobra.Command{
 		Use: "update NAME", Aliases: []string{"set"}, Short: "Change memory, replicas, persistence, eviction or nodes", Args: cobra.ExactArgs(1),
-		Example:     `  synctl db update cache -p shop --max-memory 4096 --max-replicas 2`,
+		Example:     `  synctl db update cache --max-memory 4096 --max-replicas 2`,
 		Annotations: op("updateDatabase"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			var cur struct {
 				Spec map[string]any `json:"spec"`
 			}
-			if err := a.do(cmd, "GET", s.dbPath(args[0]), nil, &cur); err != nil {
+			if err := a.do(cmd, "GET", dbItem(args[0]), nil, &cur); err != nil {
 				return err
 			}
 			uf.apply(cmd, cur.Spec)
 			var v dbView
-			if err := a.do(cmd, "PUT", s.dbPath(args[0]), map[string]any{"spec": cur.Spec}, &v); err != nil {
+			if err := a.do(cmd, "PUT", dbItem(args[0]), map[string]any{"spec": cur.Spec}, &v); err != nil {
 				return err
 			}
 			fmt.Fprintf(a.out, "Updated %s: memory %d–%d MiB, replicas %d–%d\n", v.Name, v.Spec.Memory.Min, v.Spec.Memory.Max, v.Spec.Replicas.Min, v.Spec.Replicas.Max)
@@ -253,10 +395,7 @@ func (a *app) databasesCmd() *cobra.Command {
 		return &cobra.Command{
 			Use: use + " NAME", Short: short, Args: cobra.ExactArgs(1), Annotations: op(opID),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				if err := s.need(); err != nil {
-					return err
-				}
-				if err := a.do(cmd, method, s.dbPath(args[0])+suffix, nil, nil); err != nil {
+				if err := a.do(cmd, method, dbItem(args[0])+suffix, nil, nil); err != nil {
 					return err
 				}
 				fmt.Fprintf(a.out, done+"\n", args[0])
@@ -269,18 +408,17 @@ func (a *app) databasesCmd() *cobra.Command {
 		Use: "credentials NAME", Aliases: []string{"creds"}, Short: "Connection details with the password (audited)", Args: cobra.ExactArgs(1),
 		Annotations: op("getDatabaseCredentials"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			var c map[string]any
-			if err := a.do(cmd, "GET", s.dbPath(args[0])+"/credentials", nil, &c); err != nil {
+			if err := a.do(cmd, "GET", dbItem(args[0])+"/credentials", nil, &c); err != nil {
 				return err
 			}
 			if a.output == "json" {
 				return a.printer().json(c)
 			}
-			for _, k := range []string{"url", "readUrl", "host", "readHost", "port", "username", "password"} {
-				fmt.Fprintf(a.out, "%-9s %v\n", k+":", c[k])
+			for _, k := range []string{"url", "readUrl", "publicUrl", "publicReadUrl", "host", "readHost", "port", "username", "password"} {
+				if v, ok := c[k]; ok {
+					fmt.Fprintf(a.out, "%-14s %v\n", k+":", v)
+				}
 			}
 			return nil
 		},
@@ -291,16 +429,13 @@ func (a *app) databasesCmd() *cobra.Command {
 		Use: "metrics NAME", Short: "History: latest, average and peak of operations, memory, clients, keys, hit rate, lag…", Args: cobra.ExactArgs(1),
 		Annotations: op("getDatabaseMetrics"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			var m struct {
 				Charts map[string][]struct {
 					Key    string       `json:"key"`
 					Points [][2]float64 `json:"points"`
 				} `json:"charts"`
 			}
-			if err := a.do(cmd, "GET", s.dbPath(args[0])+"/metrics?range="+url.QueryEscape(rng), nil, &m); err != nil {
+			if err := a.do(cmd, "GET", dbItem(args[0])+"/metrics?range="+url.QueryEscape(rng), nil, &m); err != nil {
 				return err
 			}
 			var rows [][]string
@@ -324,16 +459,13 @@ func (a *app) databasesCmd() *cobra.Command {
 		Use: "events NAME", Short: "Scaling, failover and member events", Args: cobra.ExactArgs(1),
 		Annotations: op("listDatabaseEvents"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			var out struct {
 				Items []struct {
 					At                            time.Time `json:"at"`
 					Kind, From, To, Reason, Actor string
 				} `json:"items"`
 			}
-			if err := a.do(cmd, "GET", s.dbPath(args[0])+"/events", nil, &out); err != nil {
+			if err := a.do(cmd, "GET", dbItem(args[0])+"/events", nil, &out); err != nil {
 				return err
 			}
 			rows := [][]string{}
@@ -350,9 +482,6 @@ func (a *app) databasesCmd() *cobra.Command {
 		Use: "keys NAME [PATTERN]", Short: "List keys matching a pattern (SCAN), with type and TTL", Args: cobra.RangeArgs(1, 2),
 		Annotations: op("scanDatabaseKeys"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			if len(args) == 2 {
 				pattern = args[1]
 			}
@@ -367,7 +496,7 @@ func (a *app) databasesCmd() *cobra.Command {
 				} `json:"keys"`
 			}
 			q := url.Values{"pattern": {pattern}, "type": {typ}, "count": {strconv.Itoa(count)}}
-			if err := a.do(cmd, "GET", s.dbPath(args[0])+"/keys?"+q.Encode(), nil, &page); err != nil {
+			if err := a.do(cmd, "GET", dbItem(args[0])+"/keys?"+q.Encode(), nil, &page); err != nil {
 				return err
 			}
 			rows := [][]string{}
@@ -394,11 +523,8 @@ func (a *app) databasesCmd() *cobra.Command {
 	keyGet := &cobra.Command{
 		Use: "get NAME KEY", Short: "A key's value", Args: cobra.ExactArgs(2), Annotations: op("getDatabaseKey"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			var v map[string]any
-			if err := a.do(cmd, "GET", s.dbPath(args[0])+"/key?key="+url.QueryEscape(args[1]), nil, &v); err != nil {
+			if err := a.do(cmd, "GET", dbItem(args[0])+"/key?key="+url.QueryEscape(args[1]), nil, &v); err != nil {
 				return err
 			}
 			if str, ok := v["string"].(string); ok && a.output != "json" {
@@ -412,13 +538,10 @@ func (a *app) databasesCmd() *cobra.Command {
 	var kind string
 	keySet := &cobra.Command{
 		Use: "set NAME KEY VALUE...", Short: "Write a key: a string, or hash fields (f=v), list items, set or zset (score=member) members",
-		Example: `  synctl db key set cache greeting hello -p shop --ttl 3600
-  synctl db key set cache user:1 --type hash name=Ada role=admin -p shop`,
+		Example: `  synctl db key set cache greeting hello --ttl 3600
+  synctl db key set cache user:1 --type hash name=Ada role=admin`,
 		Args: cobra.MinimumNArgs(3), Annotations: op("setDatabaseKey"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			vals := args[2:]
 			w := map[string]any{"type": kind, "ttlSeconds": ttl, "replace": true}
 			switch kind {
@@ -450,7 +573,7 @@ func (a *app) databasesCmd() *cobra.Command {
 			default:
 				return errors.New("--type must be string, hash, list, set or zset")
 			}
-			if err := a.do(cmd, "PUT", s.dbPath(args[0])+"/key?key="+url.QueryEscape(args[1]), w, nil); err != nil {
+			if err := a.do(cmd, "PUT", dbItem(args[0])+"/key?key="+url.QueryEscape(args[1]), w, nil); err != nil {
 				return err
 			}
 			fmt.Fprintf(a.out, "Set %s\n", args[1])
@@ -462,14 +585,11 @@ func (a *app) databasesCmd() *cobra.Command {
 	keyDel := &cobra.Command{
 		Use: "delete NAME KEY...", Aliases: []string{"rm", "del"}, Short: "Delete keys", Args: cobra.MinimumNArgs(2), Annotations: op("deleteDatabaseKey"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			q := url.Values{"key": args[1:]}
 			var out struct {
 				Deleted int `json:"deleted"`
 			}
-			if err := a.do(cmd, "DELETE", s.dbPath(args[0])+"/key?"+q.Encode(), nil, &out); err != nil {
+			if err := a.do(cmd, "DELETE", dbItem(args[0])+"/key?"+q.Encode(), nil, &out); err != nil {
 				return err
 			}
 			fmt.Fprintf(a.out, "Deleted %d key(s)\n", out.Deleted)
@@ -479,31 +599,25 @@ func (a *app) databasesCmd() *cobra.Command {
 	keyTTL := &cobra.Command{
 		Use: "expire NAME KEY SECONDS", Short: "Set a key's TTL (-1 removes it)", Args: cobra.ExactArgs(3), Annotations: op("expireDatabaseKey"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			sec, err := strconv.ParseInt(args[2], 10, 64)
 			if err != nil {
 				return errors.New("SECONDS must be a number (-1 removes the TTL)")
 			}
-			return a.do(cmd, "PUT", s.dbPath(args[0])+"/key/ttl?key="+url.QueryEscape(args[1]), map[string]any{"ttlSeconds": sec}, nil)
+			return a.do(cmd, "PUT", dbItem(args[0])+"/key/ttl?key="+url.QueryEscape(args[1]), map[string]any{"ttlSeconds": sec}, nil)
 		},
 	}
 	keyCmd.AddCommand(keyGet, keySet, keyDel, keyTTL)
 
 	run := &cobra.Command{
 		Use: "cmd NAME COMMAND [ARG...]", Aliases: []string{"exec", "cli"}, Short: "Run one command on the primary (administration commands are refused)",
-		Example: `  synctl db cmd cache -p shop INCR visits
-  synctl db cmd cache -p shop HGETALL user:1`,
+		Example: `  synctl db cmd cache INCR visits
+  synctl db cmd cache HGETALL user:1`,
 		Args: cobra.MinimumNArgs(2), Annotations: op("runDatabaseCommand"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			var out struct {
 				Result any `json:"result"`
 			}
-			if err := a.do(cmd, "POST", s.dbPath(args[0])+"/command", map[string]any{"args": args[1:]}, &out); err != nil {
+			if err := a.do(cmd, "POST", dbItem(args[0])+"/command", map[string]any{"args": args[1:]}, &out); err != nil {
 				return err
 			}
 			if a.output == "json" {
@@ -517,11 +631,8 @@ func (a *app) databasesCmd() *cobra.Command {
 	info := &cobra.Command{
 		Use: "info NAME [SECTION]", Short: "The primary's INFO", Args: cobra.RangeArgs(1, 2), Annotations: op("getDatabaseInfo"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			var sec map[string]map[string]string
-			if err := a.do(cmd, "GET", s.dbPath(args[0])+"/info", nil, &sec); err != nil {
+			if err := a.do(cmd, "GET", dbItem(args[0])+"/info", nil, &sec); err != nil {
 				return err
 			}
 			if len(args) == 2 {
@@ -533,9 +644,6 @@ func (a *app) databasesCmd() *cobra.Command {
 	slow := &cobra.Command{
 		Use: "slowlog NAME", Short: "The primary's slowest recent commands", Args: cobra.ExactArgs(1), Annotations: op("getDatabaseSlowlog"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := s.need(); err != nil {
-				return err
-			}
 			var out struct {
 				Items []struct {
 					At       time.Time `json:"at"`
@@ -543,7 +651,7 @@ func (a *app) databasesCmd() *cobra.Command {
 					Args     []string  `json:"args"`
 				} `json:"items"`
 			}
-			if err := a.do(cmd, "GET", s.dbPath(args[0])+"/slowlog", nil, &out); err != nil {
+			if err := a.do(cmd, "GET", dbItem(args[0])+"/slowlog", nil, &out); err != nil {
 				return err
 			}
 			rows := [][]string{}
@@ -554,7 +662,7 @@ func (a *app) databasesCmd() *cobra.Command {
 		},
 	}
 
-	db.AddCommand(list, create, get, update,
+	db.AddCommand(list, create, get, update, network, engines,
 		simple("delete", "Delete a database and its data", "DELETE", "", "deleteDatabase", "Deleting database %s"),
 		creds,
 		simple("failover", "Promote a replica to primary", "POST", "/failover", "failoverDatabase", "Failover of %s requested"),

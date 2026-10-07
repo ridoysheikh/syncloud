@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"syncloud/internal/secgroup"
 	"syncloud/internal/store"
 )
 
@@ -29,7 +30,7 @@ func TestSpecNormalize(t *testing.T) {
 }
 
 func TestNamesAndInfo(t *testing.T) {
-	d := store.Database{ID: "db_abc", Name: "cache", Environment: "production", Project: "shop"}
+	d := store.Database{ID: "db_abc", EnvironmentID: "env_1", Name: "cache", Environment: "production", Project: "shop"}
 	if h := Host(d); h != "cache.production.shop.syncloud.internal" {
 		t.Error(h)
 	}
@@ -45,6 +46,19 @@ func TestNamesAndInfo(t *testing.T) {
 	if v := Volume(d, KindSentinel, 1); v != "syncloud-db-abc-s1" {
 		t.Error(v)
 	}
+	sa := store.Database{ID: "db_xyz", Name: "sessions"}
+	if Host(sa) != "sessions.db.syncloud.internal" || ReadHost(sa) != "sessions-ro.db.syncloud.internal" || memberHost(sa, KindData, 1) != "m1.sessions.db.syncloud.internal" {
+		t.Errorf("standalone names: %s %s", Host(sa), ReadHost(sa))
+	}
+	if n, ok := ordinalOf("m1.sessions.db.syncloud.internal", sa); !ok || n != 1 {
+		t.Errorf("standalone ordinalOf: %d %v", n, ok)
+	}
+	if PublicHost(sa, "example.com") != "sessions.db.example.com" || PublicReadHost(sa, "example.com") != "sessions-ro.db.example.com" {
+		t.Error("public names")
+	}
+	if reservedName("engines") == nil || reservedName("cache-ro") == nil || reservedName("cache") != nil {
+		t.Error("reserved names")
+	}
 	i := parseInfo("# Server\r\nrole:master\r\nused_memory:1024\r\ndb0:keys=3,expires=0,avg_ttl=0\r\ndb2:keys=4,expires=1\r\n")
 	if i["role"] != "master" || i.Int("used_memory") != 1024 || i.Keys() != 7 {
 		t.Errorf("info: %v keys %d", i, i.Keys())
@@ -52,7 +66,7 @@ func TestNamesAndInfo(t *testing.T) {
 }
 
 func TestTaskSpecIsStable(t *testing.T) {
-	d := store.Database{ID: "db_abc", Name: "cache", Environment: "production", Project: "shop", Version: "8.1"}
+	d := store.Database{ID: "db_abc", EnvironmentID: "env_1", Name: "cache", Environment: "production", Project: "shop", Version: "8.1"}
 	spec := Spec{Replicas: Range{1, 3}}
 	if err := spec.Normalize(); err != nil {
 		t.Fatal(err)
@@ -82,5 +96,41 @@ func TestTaskSpecIsStable(t *testing.T) {
 	_ = single.Normalize()
 	if s := taskSpec(d, single, st, sec, m, nil, nil); s.Env["SENTINELS"] != "" {
 		t.Error("a database without replicas runs no sentinels")
+	}
+}
+
+func TestNetwork(t *testing.T) {
+	// Defaults: a project database's own environment; nothing standalone.
+	if a := (store.Database{EnvironmentID: "env_1", Project: "shop", Environment: "prod"}).ParseNetwork().Access; len(a) != 1 || a[0] != "environment:shop/prod" {
+		t.Errorf("project default: %v", a)
+	}
+	if a := (store.Database{}).ParseNetwork().Access; len(a) != 0 {
+		t.Errorf("standalone default: %v", a)
+	}
+	n := Network{Access: []string{"project:shop", " project:shop", "environment:billing/prod", "10.0.0.7"}, Public: store.DatabasePublic{Enabled: true}}
+	if err := NormalizeNetwork(&n, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(n.Access, " ") != "project:shop environment:billing/prod 10.0.0.7/32" {
+		t.Errorf("access: %v", n.Access)
+	}
+	if strings.Join(n.Public.Allow, " ") != "0.0.0.0/0 ::/0" {
+		t.Errorf("public allow defaults to anywhere: %v", n.Public.Allow)
+	}
+	n = Network{Public: store.DatabasePublic{Enabled: true, Allow: []string{"203.0.113.9", "2001:db8::/32"}}}
+	if err := NormalizeNetwork(&n, nil); err != nil || strings.Join(n.Public.Allow, " ") != "203.0.113.9/32 2001:db8::/32" {
+		t.Errorf("allow: %v %v", n.Public.Allow, err)
+	}
+	for _, bad := range []Network{
+		{Access: []string{"environment:prod"}}, {Access: []string{"environment:self"}}, {Access: []string{"self"}},
+		{Access: []string{"nonsense:x"}}, {Public: store.DatabasePublic{Allow: []string{"example.com"}}},
+	} {
+		if err := NormalizeNetwork(&bad, nil); err == nil {
+			t.Errorf("accepted %+v", bad)
+		}
+	}
+	missing := Network{Access: []string{"project:ghost"}}
+	if err := NormalizeNetwork(&missing, func(secgroup.Peer) bool { return false }); err == nil {
+		t.Error("accepted a missing project")
 	}
 }

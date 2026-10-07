@@ -40,6 +40,8 @@ type Config struct {
 	Edges func() []nodes.View
 	// Settings returns the global Traefik settings (§5.7).
 	Settings func() traefik.Settings
+	// DatabaseEntrypoints are the public database entrypoints (name -> address).
+	DatabaseEntrypoints map[string]string
 }
 
 // Health is the controller's view of one edge.
@@ -94,7 +96,7 @@ func (m *Manager) meshIP(ctx context.Context, nodeID string) string {
 func (m *Manager) Spec(nodeName, meshIP string) *agentv1.TaskSpec {
 	return &agentv1.TaskSpec{
 		TaskId: TaskID, Name: "syncloud-edge-traefik", Image: m.cfg.Image,
-		Command: traefik.WithStatic([]string{
+		Command: traefik.WithStatic(append([]string{
 			"--global.checkNewVersion=false",
 			"--global.sendAnonymousUsage=false",
 			"--entrypoints.web.address=:80",
@@ -113,7 +115,7 @@ func (m *Manager) Spec(nodeName, meshIP string) *agentv1.TaskSpec {
 			fmt.Sprintf("--providers.http.headers.%s=%s", m.cfg.TokenHeader, m.cfg.TraefikToken),
 			"--accesslog=true",
 			"--accesslog.format=json",
-		}, m.settings()),
+		}, traefik.Entrypoints(m.cfg.DatabaseEntrypoints)...), m.settings()),
 		NetworkMode: "host",
 		System:      true,
 	}

@@ -39,6 +39,7 @@ const (
 	KindProject     = "project"     // every task in a project
 	KindSelfEnv     = "self-env"    // the member's own environment
 	KindSelfProject = "self-project"
+	KindSelf        = "self" // members of the rule's own group
 )
 
 // Peer is a parsed rule peer.
@@ -66,6 +67,8 @@ func ParsePeer(s, project string) (Peer, string, error) {
 		return Peer{Kind: KindSelfEnv}, s, nil
 	case "project:self":
 		return Peer{Kind: KindSelfProject}, s, nil
+	case KindSelf:
+		return Peer{Kind: KindSelf}, KindSelf, nil
 	}
 	kind, v, ok := strings.Cut(s, ":")
 	if !ok {
@@ -383,6 +386,8 @@ func (c *compiler) rule(g *Group, dir string, n int, r Rule) {
 			cidrs = append(cidrs, p.CIDR.String())
 		case KindSelfEnv:
 			selfEnv = true
+		case KindSelf:
+			peerSets = append(peerSets, c.members(g, ""))
 		case KindSelfProject:
 			peerSets = append(peerSets, c.projectSet(g.Project))
 		case KindProject:
@@ -590,6 +595,9 @@ func (m *Model) firstMatch(groups []*Group, dir string, peer, self ident, proto 
 			}
 			for _, ps := range r.Peers {
 				p, _, err := ParsePeer(ps, g.Project)
+				if err == nil && p.Kind == KindSelf && slices.Contains(m.groupsOfIdent(peer), g) {
+					return &Match{GroupID: g.ID, Group: g.Project + "/" + g.Name, Direction: dir, Index: i, Rule: r}
+				}
 				if err == nil && m.peerMatches(p, peer, self) {
 					return &Match{GroupID: g.ID, Group: g.Project + "/" + g.Name, Direction: dir, Index: i, Rule: r}
 				}

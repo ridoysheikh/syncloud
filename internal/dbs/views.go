@@ -2,6 +2,9 @@ package dbs
 
 import (
 	"context"
+	"fmt"
+	"net"
+	"net/url"
 	"time"
 
 	"syncloud/internal/store"
@@ -23,6 +26,9 @@ type View struct {
 	Host        string          `json:"host"`     // read-write
 	ReadHost    string          `json:"readHost"` // read-only
 	Port        int             `json:"port"`
+	Standalone  bool            `json:"standalone"`
+	Network     Network         `json:"network"`
+	Public      PublicEndpoint  `json:"public"`
 	Members     []Member        `json:"members"`
 	Usage       Usage           `json:"usage"`
 	Autoscale   AutoscaleStatus `json:"autoscale"`
@@ -31,6 +37,18 @@ type View struct {
 	FailoverReady bool      `json:"failoverReady"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+// PublicEndpoint is the database as reached from outside the cluster.
+type PublicEndpoint struct {
+	Enabled bool `json:"enabled"`
+	// Available is false when the endpoint cannot work (Reason says why).
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
+	Host      string `json:"host,omitempty"`
+	ReadHost  string `json:"readHost,omitempty"`
+	Port      int    `json:"port"`
+	TLS       bool   `json:"tls"`
 }
 
 // Member is one container of a database.
@@ -70,6 +88,7 @@ func (m *Manager) View(ctx context.Context, d store.Database) View {
 	st := parseState(d.State)
 	v := View{ID: d.ID, Project: d.Project, Environment: d.Environment, Name: d.Name, Engine: d.Engine, Version: d.Version,
 		Spec: spec, State: st, Status: d.Status, Deleting: d.Deleting, Host: Host(d), ReadHost: ReadHost(d), Port: Port,
+		Standalone: d.Standalone(), Network: d.ParseNetwork(), Public: m.public(d),
 		Members: []Member{}, Autoscale: m.Autoscale(d.ID), CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}
 	members, _ := m.st.DatabaseMembers(ctx, d.ID)
 	dataRunning, data, sentRunning, sents := 0, 0, 0, 0
@@ -147,6 +166,27 @@ func (m *Manager) View(ctx context.Context, d store.Database) View {
 	return v
 }
 
+func (m *Manager) baseDomain() string {
+	if m.BaseDomain == nil {
+		return ""
+	}
+	return m.BaseDomain()
+}
+
+// public describes the public endpoint.
+func (m *Manager) public(d store.Database) PublicEndpoint {
+	eng, _ := EngineByName(d.Engine)
+	p := PublicEndpoint{Enabled: d.ParseNetwork().Public.Enabled, Port: eng.Port, TLS: true}
+	base := m.baseDomain()
+	if base == "" {
+		p.Reason = "the platform has no base domain yet; public endpoints need one for their certificates"
+		return p
+	}
+	p.Host, p.ReadHost = PublicHost(d, base), PublicReadHost(d, base)
+	p.Available = true
+	return p
+}
+
 // List returns every database's view.
 func (m *Manager) List(ctx context.Context) ([]View, error) {
 	dbs, err := m.st.ListDatabases(ctx)
@@ -169,6 +209,10 @@ type Credentials struct {
 	Password string `json:"password"`
 	URL      string `json:"url"`     // redis://default:…@host:6379
 	ReadURL  string `json:"readUrl"` // read-only endpoint
+	// PublicURL and PublicReadURL reach the database from outside the
+	// cluster over TLS (only while the public endpoint is on).
+	PublicURL     string `json:"publicUrl,omitempty"`
+	PublicReadURL string `json:"publicReadUrl,omitempty"`
 }
 
 // Credentials returns the app user's connection details.
@@ -178,8 +222,15 @@ func (m *Manager) Credentials(ctx context.Context, d store.Database) (Credential
 		return Credentials{}, err
 	}
 	c := Credentials{Host: Host(d), ReadHost: ReadHost(d), Port: Port, Username: "default", Password: sec.Password}
-	c.URL = "redis://default:" + sec.Password + "@" + c.Host + ":6379"
-	c.ReadURL = "redis://default:" + sec.Password + "@" + c.ReadHost + ":6379"
+	eng, _ := EngineByName(d.Engine)
+	userinfo := url.UserPassword(c.Username, sec.Password).String()
+	build := func(scheme, host string) string {
+		return scheme + "://" + userinfo + "@" + net.JoinHostPort(host, fmt.Sprint(eng.Port))
+	}
+	c.URL, c.ReadURL = build(eng.Scheme, c.Host), build(eng.Scheme, c.ReadHost)
+	if p := m.public(d); p.Enabled && p.Available {
+		c.PublicURL, c.PublicReadURL = build(eng.TLSScheme, p.Host), build(eng.TLSScheme, p.ReadHost)
+	}
 	return c, nil
 }
 

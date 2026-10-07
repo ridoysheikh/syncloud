@@ -46,6 +46,8 @@ type Config struct {
 	HTTPSAddr string
 	// AdminAddr serves Traefik's ping and Prometheus metrics (loopback only).
 	AdminAddr string
+	// DatabaseEntrypoints are the public database entrypoints (name -> address).
+	DatabaseEntrypoints map[string]string
 	// TraefikToken authenticates Traefik to the controller's config endpoint.
 	TraefikToken string
 	// RegistryRealm is the token endpoint URL Docker clients are sent to.
@@ -129,7 +131,7 @@ var Components = []Component{
 func traefikSpec(c Config) *agentv1.TaskSpec {
 	return &agentv1.TaskSpec{
 		TaskId: "sys-traefik", Name: "syncloud-traefik", Image: ImageTraefik,
-		Command: traefik.WithStatic([]string{
+		Command: traefik.WithStatic(append([]string{
 			"--global.checkNewVersion=false",
 			"--global.sendAnonymousUsage=false",
 			"--entrypoints.web.address=" + c.HTTPAddr,
@@ -150,7 +152,7 @@ func traefikSpec(c Config) *agentv1.TaskSpec {
 			fmt.Sprintf("--providers.http.headers.%s=%s", TraefikTokenHeader, c.TraefikToken),
 			"--accesslog=true",
 			"--accesslog.format=json",
-		}, c.TraefikSettings),
+		}, traefik.Entrypoints(c.DatabaseEntrypoints)...), c.TraefikSettings),
 		NetworkMode: "host",
 		System:      true,
 	}

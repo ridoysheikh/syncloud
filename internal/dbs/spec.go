@@ -1,7 +1,8 @@
-// Package dbs runs managed Valkey databases (Phase 12): dedicated data
-// members pinned to nodes with node-local volumes, Sentinel for failover,
-// read-write and read-only endpoints, online memory and read-replica
-// autoscaling, metrics, and the explorer.
+// Package dbs runs managed databases (Phase 12): dedicated data members
+// pinned to nodes with node-local volumes, internal and public endpoints, an
+// access list per database, and metrics. Valkey is the first engine:
+// Sentinel failover, online memory and read-replica autoscaling, and the
+// explorer.
 package dbs
 
 import (
@@ -15,8 +16,7 @@ import (
 )
 
 const (
-	// Engine and versions offered.
-	Engine         = "valkey"
+	// DefaultVersion of Valkey.
 	DefaultVersion = "8.1"
 	// Port of data members; sentinels listen on SentinelPort.
 	Port         = 6379

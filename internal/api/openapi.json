@@ -1417,6 +1417,101 @@
             }
           }
         }
+      },
+      "post": {
+        "operationId": "createDatabase",
+        "tags": [
+          "databases"
+        ],
+        "summary": "Create a database (standalone, or in a project environment)",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "engine": {
+                    "type": "string",
+                    "default": "valkey"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "project": {
+                    "type": "string",
+                    "description": "with environment: a project database; omit both for a standalone one"
+                  },
+                  "environment": {
+                    "type": "string"
+                  },
+                  "spec": {
+                    "$ref": "#/components/schemas/DatabaseSpec"
+                  },
+                  "network": {
+                    "$ref": "#/components/schemas/DatabaseNetwork"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Database"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Creates a managed database. Without project and environment it is standalone. Database names are unique in the cluster. The action is checked on the database resource: srn:syncloud:database/NAME for standalone, or under the project environment."
+      }
+    },
+    "/api/v1/databases/engines": {
+      "get": {
+        "tags": [
+          "databases"
+        ],
+        "operationId": "listDatabaseEngines",
+        "summary": "List database engines",
+        "description": "Engines with their versions, port, URL schemes and features; planned engines have available=false.",
+        "responses": {
+          "200": {
+            "description": "engines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DatabaseEngine"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/projects/{project}/environments/{env}/databases": {
@@ -1459,77 +1554,9 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "post": {
-        "operationId": "createDatabase",
-        "tags": [
-          "databases"
-        ],
-        "summary": "Create a managed Valkey database: members on distinct nodes, Sentinel when it can have replicas, autoscaled memory and replicas",
-        "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string"
-                  },
-                  "version": {
-                    "type": "string",
-                    "enum": [
-                      "8.1",
-                      "8.0"
-                    ]
-                  },
-                  "spec": {
-                    "$ref": "#/components/schemas/DatabaseSpec"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Database"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
-    "/api/v1/projects/{project}/environments/{env}/databases/{database}": {
+    "/api/v1/databases/{database}": {
       "get": {
         "operationId": "getDatabase",
         "tags": [
@@ -1537,22 +1564,6 @@
         ],
         "summary": "A database: endpoints, members with roles, usage, autoscaler state",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -1585,22 +1596,6 @@
         ],
         "summary": "Change a database: memory and replicas apply online; persistence, eviction policy and a larger maximum restart members one at a time",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -1652,22 +1647,6 @@
         "summary": "Delete a database and its volumes",
         "parameters": [
           {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "database",
             "in": "path",
             "required": true,
@@ -1686,7 +1665,49 @@
         }
       }
     },
-    "/api/v1/projects/{project}/environments/{env}/databases/{database}/credentials": {
+    "/api/v1/databases/{database}/network": {
+      "put": {
+        "tags": [
+          "databases"
+        ],
+        "operationId": "setDatabaseNetwork",
+        "summary": "Set a database's access list and public endpoint",
+        "description": "access lists the internal peers allowed in (project:P, environment:P/E, service:P/E/S, group:P/G, a CIDR or cluster). public.enabled serves a TLS endpoint <name>.db.<base-domain> through Traefik; public.allow restricts client addresses (default anywhere).",
+        "parameters": [
+          {
+            "name": "database",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatabaseNetwork"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "the database",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Database"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/databases/{database}/credentials": {
       "get": {
         "operationId": "getDatabaseCredentials",
         "tags": [
@@ -1694,22 +1715,6 @@
         ],
         "summary": "Connection details: hosts, port, password and redis:// URLs (audited)",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -1759,7 +1764,7 @@
         }
       }
     },
-    "/api/v1/projects/{project}/environments/{env}/databases/{database}/failover": {
+    "/api/v1/databases/{database}/failover": {
       "post": {
         "operationId": "failoverDatabase",
         "tags": [
@@ -1767,22 +1772,6 @@
         ],
         "summary": "Promote a replica (Sentinel picks the most up-to-date one)",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -1805,7 +1794,7 @@
         }
       }
     },
-    "/api/v1/projects/{project}/environments/{env}/databases/{database}/metrics": {
+    "/api/v1/databases/{database}/metrics": {
       "get": {
         "operationId": "getDatabaseMetrics",
         "tags": [
@@ -1813,22 +1802,6 @@
         ],
         "summary": "History: operations, memory, clients, keys, hit rate, evictions, replication lag, CPU and network",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -1876,7 +1849,7 @@
         }
       }
     },
-    "/api/v1/projects/{project}/environments/{env}/databases/{database}/events": {
+    "/api/v1/databases/{database}/events": {
       "get": {
         "operationId": "listDatabaseEvents",
         "tags": [
@@ -1884,22 +1857,6 @@
         ],
         "summary": "Scaling, failover and member events, newest first",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -1934,7 +1891,7 @@
         }
       }
     },
-    "/api/v1/projects/{project}/environments/{env}/databases/{database}/keys": {
+    "/api/v1/databases/{database}/keys": {
       "get": {
         "operationId": "scanDatabaseKeys",
         "tags": [
@@ -1942,22 +1899,6 @@
         ],
         "summary": "Explorer: one SCAN step over keys matching a pattern (and type), with TTL and size",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -2044,7 +1985,7 @@
         }
       }
     },
-    "/api/v1/projects/{project}/environments/{env}/databases/{database}/key": {
+    "/api/v1/databases/{database}/key": {
       "get": {
         "operationId": "getDatabaseKey",
         "tags": [
@@ -2052,22 +1993,6 @@
         ],
         "summary": "Explorer: a key with its value by type (first 500 items)",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -2111,22 +2036,6 @@
         ],
         "summary": "Explorer: write a key (string, hash, list, set or sorted set); replace deletes it first",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -2227,22 +2136,6 @@
         "summary": "Explorer: delete keys (repeat key=)",
         "parameters": [
           {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "database",
             "in": "path",
             "required": true,
@@ -2292,7 +2185,7 @@
         }
       }
     },
-    "/api/v1/projects/{project}/environments/{env}/databases/{database}/key/ttl": {
+    "/api/v1/databases/{database}/key/ttl": {
       "put": {
         "operationId": "expireDatabaseKey",
         "tags": [
@@ -2300,22 +2193,6 @@
         ],
         "summary": "Explorer: set a key's TTL in seconds (-1 removes it)",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -2371,7 +2248,7 @@
         }
       }
     },
-    "/api/v1/projects/{project}/environments/{env}/databases/{database}/command": {
+    "/api/v1/databases/{database}/command": {
       "post": {
         "operationId": "runDatabaseCommand",
         "tags": [
@@ -2379,22 +2256,6 @@
         ],
         "summary": "Console: run one command on the primary (administration, blocking and streaming commands are refused; audited)",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -2450,7 +2311,7 @@
         }
       }
     },
-    "/api/v1/projects/{project}/environments/{env}/databases/{database}/info": {
+    "/api/v1/databases/{database}/info": {
       "get": {
         "operationId": "getDatabaseInfo",
         "tags": [
@@ -2458,22 +2319,6 @@
         ],
         "summary": "The primary's INFO, by section",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -2503,7 +2348,7 @@
         }
       }
     },
-    "/api/v1/projects/{project}/environments/{env}/databases/{database}/slowlog": {
+    "/api/v1/databases/{database}/slowlog": {
       "get": {
         "operationId": "getDatabaseSlowlog",
         "tags": [
@@ -2511,22 +2356,6 @@
         ],
         "summary": "The primary's slowest recent commands",
         "parameters": [
-          {
-            "name": "project",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "env",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "database",
             "in": "path",
@@ -17109,7 +16938,8 @@
             "type": "string"
           },
           "project": {
-            "type": "string"
+            "type": "string",
+            "description": "\"\" for a standalone database"
           },
           "environment": {
             "type": "string"
@@ -17169,6 +16999,38 @@
           "port": {
             "type": "integer"
           },
+          "standalone": {
+            "type": "boolean"
+          },
+          "network": {
+            "$ref": "#/components/schemas/DatabaseNetwork"
+          },
+          "public": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "available": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "host": {
+                "type": "string"
+              },
+              "readHost": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer"
+              },
+              "tls": {
+                "type": "boolean"
+              }
+            }
+          },
           "members": {
             "type": "array",
             "items": {
@@ -17198,6 +17060,72 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Database"
+            }
+          }
+        }
+      },
+      "DatabaseNetwork": {
+        "type": "object",
+        "properties": {
+          "access": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "public": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "DatabaseEngine": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defaultVersion": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "scheme": {
+            "type": "string"
+          },
+          "tlsScheme": {
+            "type": "string"
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           }
         }

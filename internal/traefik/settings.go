@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 )
@@ -180,6 +181,21 @@ func WithStatic(base []string, s Settings) []string {
 		}
 	}
 	return append(out, s.StaticArgs()...)
+}
+
+// Entrypoints are the flags of extra TCP entrypoints (name -> address),
+// sorted by name: the public database endpoints (Phase 12e).
+func Entrypoints(addrs map[string]string) []string {
+	names := make([]string, 0, len(addrs))
+	for n := range addrs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		out = append(out, "--entrypoints."+n+".address="+addrs[n])
+	}
+	return out
 }
 
 // TLSOptions is Traefik's tls.options entry.

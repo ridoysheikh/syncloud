@@ -25,9 +25,11 @@ import { cn, gap } from "@/ui/cn";
 import { fmtOps } from "./DatabasesPage";
 import { CapacityStep, DataStep, specOf } from "./NewDatabaseWizard";
 import { Console, Explorer } from "./Explorer";
+import { AccessEditor, allowList, PublicFields } from "./Network";
 
 type Tab =
   | "overview"
+  | "connectivity"
   | "metrics"
   | "explorer"
   | "console"
@@ -49,26 +51,18 @@ function formatUptime(sec: number) {
 
 /** One managed database (Phase 12). */
 export function DatabasePage() {
-  const { project, env, name } = useParams({ strict: false }) as {
-    project: string;
-    env: string;
-    name: string;
-  };
+  const { name } = useParams({ strict: false }) as { name: string };
   const { data: all, isLoading } = useDatabases();
-  const d = all?.find(
-    (x) => x.project === project && x.environment === env && x.name === name,
-  );
+  const d = all?.find((x) => x.name === name);
   const [tab, setTab] = useState<Tab>("overview");
-  const path = dbPath(project, env, name);
-  const projectTo: string = `/projects/${project}/${env}`;
+  const path = dbPath(name);
 
   if (!d) {
     return isLoading ? null : (
-      <Alert tone="warn">
-        Database {project}/{env}/{name} not found.
-      </Alert>
+      <Alert tone="warn">Database {name} not found.</Alert>
     );
   }
+  const projectTo: string = `/projects/${d.project}/${d.environment}`;
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader
@@ -76,24 +70,36 @@ export function DatabasePage() {
           <Link to={"/databases" as string} className="hover:text-fg">
             Databases
           </Link>,
-          <Link to={projectTo} className="hover:text-fg">
-            {project} / {env}
-          </Link>,
+          d.standalone ? (
+            <span>standalone</span>
+          ) : (
+            <Link to={projectTo} className="hover:text-fg">
+              {d.project} / {d.environment}
+            </Link>
+          ),
         ]}
         title={d.name}
         status={
           <span className="flex items-center gap-1">
             <StatusBadge tone={healthTone[d.health]}>{d.health}</StatusBadge>
-            <span className="text-faint text-xs">Valkey {d.version}</span>
+            <span className="text-faint text-xs">
+              {d.engine === "valkey" ? "Valkey" : d.engine} {d.version}
+            </span>
+            {d.public.enabled && (
+              <StatusBadge tone={d.public.available ? "info" : "warn"}>
+                public
+              </StatusBadge>
+            )}
           </span>
         }
         actions={<FailoverButton d={d} path={path} />}
       />
       {d.status && <Alert tone="warn">{d.status}</Alert>}
       <Tabs
-        tabs={
+        tabs={(
           [
             "overview",
+            "connectivity",
             "metrics",
             "explorer",
             "console",
@@ -101,20 +107,22 @@ export function DatabasePage() {
             "logs",
             "settings",
           ] as Tab[]
-        }
+        ).filter(
+          // The key tools and autoscaling are Valkey's.
+          (t) =>
+            d.engine === "valkey" ||
+            !["explorer", "console", "autoscaling"].includes(t),
+        )}
         value={tab}
         onChange={setTab}
       />
       {tab === "overview" && <Overview d={d} path={path} />}
+      {tab === "connectivity" && <Connectivity d={d} path={path} />}
       {tab === "metrics" && <Metrics path={path} />}
       {tab === "explorer" && <Explorer path={path} />}
       {tab === "console" && <Console path={path} />}
       {tab === "autoscaling" && <Autoscaling d={d} path={path} />}
-      {tab === "logs" && (
-        <LogsView
-          filter={{ project, environment: env, service: `db-${name}` }}
-        />
-      )}
+      {tab === "logs" && <LogsView filter={{ database: d.name }} />}
       {tab === "settings" && <Settings d={d} path={path} />}
     </div>
   );
@@ -242,6 +250,8 @@ interface Credentials {
   password: string;
   url: string;
   readUrl: string;
+  publicUrl?: string;
+  publicReadUrl?: string;
 }
 
 function Connection({ d, path }: { d: Database; path: string }) {
@@ -291,16 +301,143 @@ function Connection({ d, path }: { d: Database; path: string }) {
           }
           copy={show && !!c}
         />
+        {d.public.enabled && d.public.available && (
+          <>
+            <Line
+              label="Public URL"
+              value={
+                show && c?.publicUrl
+                  ? c.publicUrl
+                  : `rediss://default:${hidden}@${d.public.host}:${d.public.port}`
+              }
+              copy={show && !!c?.publicUrl}
+            />
+            <Line
+              label="Public read"
+              value={
+                show && c?.publicReadUrl
+                  ? c.publicReadUrl
+                  : `rediss://default:${hidden}@${d.public.readHost}:${d.public.port}`
+              }
+              copy={show && !!c?.publicReadUrl}
+            />
+          </>
+        )}
         {creds.error && <Alert>{errText(creds.error)}</Alert>}
         <p className="text-faint text-xs">
-          Reachable from every service in the cluster over the private network
-          (the environment's security groups apply). Any Redis client works.
-          Send writes to the read-write host; the read-only host spreads reads
-          over the replicas. Revealing the password is recorded in the audit
-          log.
+          Inside the cluster, the services on the access list connect over the
+          private network ({accessSummary(d)}).
+          {d.public.enabled && d.public.available
+            ? " From outside, use the public URL: TLS is required (rediss://, or redis-cli --tls)."
+            : " Turn on the public endpoint under Connectivity to connect from outside the cluster."}{" "}
+          Any Redis client works. Send writes to the read-write host; the
+          read-only host spreads reads over the replicas. Revealing the password
+          is recorded in the audit log.
         </p>
       </div>
     </Panel>
+  );
+}
+
+const accessSummary = (d: Database) =>
+  d.network.access.length ? d.network.access.join(", ") : "nobody is on it yet";
+
+/** Who may connect: the internal access list and the public endpoint. */
+function Connectivity({ d, path }: { d: Database; path: string }) {
+  const qc = useQueryClient();
+  const init = useMemo(
+    () => ({
+      access: d.network.access,
+      public: d.network.public.enabled,
+      allow: d.network.public.allow
+        .filter((a) => a !== "0.0.0.0/0" && a !== "::/0")
+        .join("\n"),
+    }),
+    [d.network],
+  );
+  const [f, setF] = useState(init);
+  useEffect(() => setF(init), [init]);
+  const save = useMutation({
+    mutationFn: () =>
+      api<Database>("PUT", `${path}/network`, {
+        access: f.access,
+        public: { enabled: f.public, allow: allowList(f.allow) },
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["databases"] }),
+  });
+  const dirty = JSON.stringify(f) !== JSON.stringify(init);
+  return (
+    <div className={cn("grid grid-cols-1 items-start lg:grid-cols-2", gap)}>
+      <Panel title="Endpoints">
+        <div className="flex flex-col gap-1.5">
+          <Line label="Internal" value={`${d.host}:${d.port}`} />
+          <Line label="Internal read" value={`${d.readHost}:${d.port}`} />
+          {d.public.enabled && d.public.available ? (
+            <>
+              <Line
+                label="Public"
+                value={`${d.public.host}:${d.public.port}`}
+              />
+              <Line
+                label="Public read"
+                value={`${d.public.readHost}:${d.public.port}`}
+              />
+            </>
+          ) : (
+            <p className="text-faint text-xs">
+              {d.public.enabled
+                ? `Public endpoint unavailable: ${d.public.reason}`
+                : "No public endpoint: only the access list below can connect."}
+            </p>
+          )}
+          <p className="text-faint pt-1 text-xs">
+            The public endpoint is served by Traefik on the controller and edge
+            nodes. It terminates TLS with the platform's certificate for the
+            host name and forwards to the current primary (the replicas for the
+            read-only host), following failovers within seconds.
+          </p>
+        </div>
+      </Panel>
+      <Panel title="Access">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <h3 className="text-muted text-xs font-medium">
+              Inside the cluster
+            </h3>
+            <AccessEditor
+              value={f.access}
+              onChange={(v) => setF((x) => ({ ...x, access: v }))}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <h3 className="text-muted text-xs font-medium">
+              From outside the cluster
+            </h3>
+            <PublicFields
+              name={d.name}
+              enabled={f.public}
+              allow={f.allow}
+              port={d.public.port || d.port}
+              onEnabled={(v) => setF((x) => ({ ...x, public: v }))}
+              onAllow={(v) => setF((x) => ({ ...x, allow: v }))}
+            />
+          </div>
+          {save.error && <Alert>{errText(save.error)}</Alert>}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="primary"
+              disabled={!dirty || save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Save
+            </Button>
+            <span className="text-faint text-xs">
+              Applies within seconds, without restarts.
+            </span>
+          </div>
+        </div>
+      </Panel>
+    </div>
   );
 }
 

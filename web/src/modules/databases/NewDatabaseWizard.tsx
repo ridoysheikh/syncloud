@@ -6,9 +6,9 @@ import { api, ApiError } from "@/lib/api";
 import { useProjects } from "@/lib/workloads";
 import { useNodes } from "@/lib/nodes";
 import {
-  dbPath,
   dbUrl,
   EVICTION_POLICIES,
+  useDatabaseEngines,
   type Database,
   type DatabaseSpec,
 } from "@/lib/databases";
@@ -16,9 +16,22 @@ import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { Alert, Button, Field, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import {
+  AccessEditor,
+  allowList,
+  PublicFields,
+  useBaseDomain,
+} from "./Network";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,27}[a-z0-9])?$/;
-const steps = ["Database", "Capacity", "Data", "Review"] as const;
+const steps = [
+  "Engine",
+  "Database",
+  "Capacity",
+  "Data",
+  "Network",
+  "Review",
+] as const;
 type Step = (typeof steps)[number];
 
 export const selectClass =
@@ -28,10 +41,12 @@ export const selectClass =
 const SIZES = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
 
 interface Form {
+  engine: string;
+  version: string;
+  standalone: boolean;
   project: string;
   env: string;
   name: string;
-  version: string;
   memMin: number;
   memMax: number;
   repMin: number;
@@ -41,6 +56,10 @@ interface Form {
   persistence: DatabaseSpec["persistence"];
   eviction: string;
   nodes: string[];
+  /** null: the default for the owner (its own environment, or nobody). */
+  access: string[] | null;
+  public: boolean;
+  allow: string;
 }
 
 export function specOf(f: {
@@ -67,21 +86,24 @@ export function specOf(f: {
 
 const mib = (v: number) => (v >= 1024 ? `${v / 1024} GiB` : `${v} MiB`);
 
-/** Full-page wizard for a managed Valkey database (Phase 12). */
+/** Full-page wizard for a managed database (Phase 12): standalone, or in a project environment. */
 export function NewDatabaseWizard() {
   const params = useParams({ strict: false }) as {
     project?: string;
     env?: string;
   };
   const { data: projects = [] } = useProjects();
+  const { data: engines = [] } = useDatabaseEngines();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [step, setStep] = useState<Step>("Database");
+  const [step, setStep] = useState<Step>("Engine");
   const [f, setF] = useState<Form>({
+    engine: "valkey",
+    version: "8.1",
+    standalone: !params.project,
     project: params.project ?? "",
     env: params.env ?? "production",
     name: "",
-    version: "8.1",
     memMin: 256,
     memMax: 1024,
     repMin: 1,
@@ -91,6 +113,9 @@ export function NewDatabaseWizard() {
     persistence: "aof",
     eviction: "noeviction",
     nodes: [],
+    access: null,
+    public: false,
+    allow: "",
   });
   const set = <K extends keyof Form>(k: K, v: Form[K]) =>
     setF((x) => ({ ...x, [k]: v }));
@@ -98,13 +123,24 @@ export function NewDatabaseWizard() {
   const proj = projects.find((p) => p.name === project);
   const envs = proj?.environments ?? [];
   const env = envs.includes(f.env) ? f.env : (envs[0] ?? "production");
+  const engine = engines.find((e) => e.name === f.engine);
+  const port = engine?.port ?? 6379;
+  const owner = f.standalone ? null : { project, env };
+  const access =
+    f.access ?? (owner ? [`environment:${owner.project}/${owner.env}`] : []);
+  const host = owner
+    ? `${f.name || "NAME"}.${env}.${project}.syncloud.internal`
+    : `${f.name || "NAME"}.db.syncloud.internal`;
 
   const problems: Record<Step, string> = {
-    Database: !project
-      ? "Create a project first."
-      : !nameRE.test(f.name)
-        ? "Name: 1–29 lowercase letters, digits or hyphens."
-        : "",
+    Engine: engine && !engine.available ? `${engine.title} is planned.` : "",
+    Database: !nameRE.test(f.name)
+      ? "Name: 1–29 lowercase letters, digits or hyphens."
+      : f.name === "engines" || f.name === "new" || f.name.endsWith("-ro")
+        ? 'The names "engines" and "new", and names ending in "-ro", are reserved.'
+        : !f.standalone && !project
+          ? "Create a project first, or make the database standalone."
+          : "",
     Capacity:
       f.memMin > f.memMax
         ? "The memory maximum is below the minimum."
@@ -112,6 +148,7 @@ export function NewDatabaseWizard() {
           ? "The replica maximum is below the minimum."
           : "",
     Data: "",
+    Network: "",
     Review: "",
   };
   const idx = steps.indexOf(step);
@@ -119,10 +156,16 @@ export function NewDatabaseWizard() {
 
   const create = useMutation({
     mutationFn: () =>
-      api<Database>("POST", dbPath(project, env), {
+      api<Database>("POST", "/databases", {
         name: f.name,
+        engine: f.engine,
         version: f.version,
+        ...(owner ? { project: owner.project, environment: owner.env } : {}),
         spec: specOf(f),
+        network: {
+          access,
+          public: { enabled: f.public, allow: allowList(f.allow) },
+        },
       }),
     onSuccess: (d) => {
       void qc.invalidateQueries({ queryKey: ["databases"] });
@@ -145,7 +188,7 @@ export function NewDatabaseWizard() {
         }
       />
       <div className={cn("grid grid-cols-1 md:grid-cols-[12rem_1fr]", gap)}>
-        <ol className="flex gap-1 md:flex-col">
+        <ol className="flex gap-1 overflow-x-auto md:flex-col">
           {steps.map((s, i) => (
             <li key={s}>
               <button
@@ -178,63 +221,180 @@ export function NewDatabaseWizard() {
         </ol>
         <div className="flex min-w-0 flex-col gap-2">
           <Panel title={step}>
+            {step === "Engine" && (
+              <div className="flex flex-col gap-3 text-xs">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {engines.map((e) => (
+                    <button
+                      key={e.name}
+                      type="button"
+                      disabled={!e.available}
+                      onClick={() => {
+                        set("engine", e.name);
+                        set("version", e.defaultVersion ?? "");
+                      }}
+                      className={cn(
+                        "flex flex-col gap-1 rounded-sm border p-3 text-left",
+                        f.engine === e.name
+                          ? "border-accent bg-raised"
+                          : "border-line hover:border-line-strong",
+                        !e.available && "cursor-not-allowed opacity-60",
+                      )}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{e.title}</span>
+                        {!e.available && (
+                          <span className="border-line text-muted rounded-sm border px-1 text-[10px]">
+                            planned
+                          </span>
+                        )}
+                        <span className="text-faint ml-auto font-mono">
+                          :{e.port}
+                        </span>
+                      </span>
+                      <span className="text-muted">{e.description}</span>
+                    </button>
+                  ))}
+                </div>
+                {engine?.available && (
+                  <Field
+                    label="Version"
+                    hint={
+                      engine.name === "valkey"
+                        ? "BSD-licensed; speaks the Redis protocol, so any Redis client works."
+                        : undefined
+                    }
+                  >
+                    <select
+                      className={cn(selectClass, "max-w-60")}
+                      value={f.version}
+                      onChange={(e) => set("version", e.target.value)}
+                    >
+                      {engine.versions.map((v) => (
+                        <option key={v} value={v}>
+                          {engine.title} {v}
+                          {v === engine.defaultVersion ? " (recommended)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
+              </div>
+            )}
             {step === "Database" && (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Project">
-                  <select
-                    className={selectClass}
-                    value={project}
-                    onChange={(e) => set("project", e.target.value)}
-                  >
-                    {projects.map((p) => (
-                      <option key={p.name}>{p.name}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Environment">
-                  <select
-                    className={selectClass}
-                    value={env}
-                    onChange={(e) => set("env", e.target.value)}
-                  >
-                    {envs.map((e) => (
-                      <option key={e}>{e}</option>
-                    ))}
-                  </select>
-                </Field>
+              <div className="flex flex-col gap-3 text-xs">
                 <Field
                   label="Name"
-                  hint={
-                    f.name
-                      ? `${f.name}.${env}.${project}.syncloud.internal:6379`
-                      : "Shares names with the environment's services"
-                  }
+                  hint="Unique in the cluster, like an AWS database identifier."
                 >
                   <Input
                     value={f.name}
                     onChange={(e) => set("name", e.target.value.toLowerCase())}
-                    placeholder="cache"
-                    className="font-mono"
+                    placeholder="sessions"
+                    className="max-w-80 font-mono"
                   />
                 </Field>
-                <Field
-                  label="Engine"
-                  hint="BSD-licensed; speaks the Redis protocol, so any Redis client works."
-                >
-                  <select
-                    className={selectClass}
-                    value={f.version}
-                    onChange={(e) => set("version", e.target.value)}
-                  >
-                    <option value="8.1">Valkey 8.1 (recommended)</option>
-                    <option value="8.0">Valkey 8.0</option>
-                  </select>
-                </Field>
+                <div className="flex flex-col gap-2">
+                  {(
+                    [
+                      [
+                        true,
+                        "Standalone",
+                        "Not tied to a project. You choose which projects, environments or services may connect.",
+                      ],
+                      [
+                        false,
+                        "In a project environment",
+                        "Follows the project's allowed nodes and is reachable from its environment by default.",
+                      ],
+                    ] as const
+                  ).map(([v, label, help]) => (
+                    <label key={label} className="flex items-start gap-2">
+                      <input
+                        type="radio"
+                        className="mt-0.5"
+                        checked={f.standalone === v}
+                        onChange={() => set("standalone", v)}
+                      />
+                      <span>
+                        <span className="font-medium">{label}</span>
+                        <span className="text-muted block">{help}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                {!f.standalone && (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Field label="Project">
+                      <select
+                        className={selectClass}
+                        value={project}
+                        onChange={(e) => set("project", e.target.value)}
+                      >
+                        {projects.map((p) => (
+                          <option key={p.name}>{p.name}</option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Environment">
+                      <select
+                        className={selectClass}
+                        value={env}
+                        onChange={(e) => set("env", e.target.value)}
+                      >
+                        {envs.map((e) => (
+                          <option key={e}>{e}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
+                )}
+                <p className="text-faint">
+                  Inside the cluster:{" "}
+                  <code className="font-mono">
+                    {host}:{port}
+                  </code>
+                </p>
               </div>
             )}
             {step === "Capacity" && <CapacityStep f={f} set={set} />}
             {step === "Data" && <DataStep f={f} set={set} />}
-            {step === "Review" && <Review f={f} project={project} env={env} />}
+            {step === "Network" && (
+              <div className="flex flex-col gap-4 text-xs">
+                <Section title="Inside the cluster: who may connect">
+                  <AccessEditor
+                    value={access}
+                    onChange={(v) => set("access", v)}
+                  />
+                  {f.access === null && owner && (
+                    <p className="text-faint">
+                      Default: the services of {owner.project} / {owner.env}.
+                    </p>
+                  )}
+                </Section>
+                <Section title="From outside the cluster">
+                  <PublicFields
+                    name={f.name}
+                    enabled={f.public}
+                    allow={f.allow}
+                    port={port}
+                    scheme={engine?.tlsScheme}
+                    onEnabled={(v) => set("public", v)}
+                    onAllow={(v) => set("allow", v)}
+                  />
+                </Section>
+              </div>
+            )}
+            {step === "Review" && (
+              <Review
+                f={f}
+                engineTitle={engine?.title ?? f.engine}
+                owner={owner}
+                host={host}
+                port={port}
+                access={access}
+              />
+            )}
           </Panel>
           {blocked && blocked !== step && (
             <Alert tone="warn">
@@ -467,7 +627,7 @@ export function DataStep({
       <Section title="Nodes">
         <p className="text-muted">
           Optional: keep members on some nodes (within the project's allowed
-          nodes). Members always go on different nodes.
+          nodes, for a project database). Members always go on different nodes.
         </p>
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           {nodes.map((n) => (
@@ -495,32 +655,50 @@ export function DataStep({
 
 function Review({
   f,
-  project,
-  env,
+  engineTitle,
+  owner,
+  host,
+  port,
+  access,
 }: {
   f: Form;
-  project: string;
-  env: string;
+  engineTitle: string;
+  owner: { project: string; env: string } | null;
+  host: string;
+  port: number;
+  access: string[];
 }) {
+  const base = useBaseDomain();
+  const ro = host.replace(f.name + ".", f.name + "-ro.");
   const rows: [string, ReactNode][] = [
-    [
-      "Database",
-      <span className="font-mono">
-        {project}/{env}/{f.name}
-      </span>,
-    ],
-    ["Engine", `Valkey ${f.version}`],
+    ["Name", <span className="font-mono">{f.name}</span>],
+    ["Engine", `${engineTitle} ${f.version}`],
+    ["Owner", owner ? `${owner.project} / ${owner.env}` : "standalone"],
     [
       "Read-write",
       <span className="font-mono">
-        {f.name}.{env}.{project}.syncloud.internal:6379
+        {host}:{port}
       </span>,
     ],
     [
       "Read-only",
       <span className="font-mono">
-        {f.name}-ro.{env}.{project}.syncloud.internal:6379
+        {ro}:{port}
       </span>,
+    ],
+    ["Access", access.length ? access.join(", ") : "nobody inside the cluster"],
+    [
+      "Public",
+      f.public ? (
+        <span className="font-mono">
+          {f.name}.db.{base || "<base domain>"}:{port} (TLS)
+          {allowList(f.allow).length
+            ? ` from ${allowList(f.allow).join(", ")}`
+            : " from anywhere"}
+        </span>
+      ) : (
+        "off"
+      ),
     ],
     [
       "Memory",

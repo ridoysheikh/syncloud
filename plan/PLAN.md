@@ -1614,6 +1614,74 @@ User decisions (2026-10-07): **Valkey 8** (BSD; same protocol and clients as Red
   - e2e `test/e2e/databases.sh`: members on distinct nodes; writes and reads through both endpoints from a task; explorer and console; a frozen primary fails over and writes resume within ~15s, the old primary rejoins as a replica with data intact; memory autoscales 64 → 128 MiB at 98% use; read load adds a replica; deletion removes volumes.
 - ⬜ Slice 12d: scheduled RDB snapshots to S3 and restore into a new database; binding a database to a service (inject `REDIS_URL`).
 
+**12e: standalone databases, public endpoints, engine-neutral (user request, 2026-10-07)**
+
+The user wants a database to work like an AWS-managed one: it gets a URL that is usable from outside the cluster, it does not have to belong to a project, and "database" must not mean only Redis (PostgreSQL comes later).
+
+- **One namespace.** Database names are unique in the cluster, as in an AWS account, and every database is addressed as `/api/v1/databases/{name}`.
+  - A database is either **standalone** (no project) or **in a project environment**, as before. A project database keeps its project's node limits and its environment DNS names.
+  - Creating one: `POST /databases` for standalone; `POST /projects/{p}/environments/{e}/databases` for a project database, so IAM checks the project.
+  - The IAM resource is `srn:syncloud:database/<name>` for standalone and `…/project/<p>/env/<e>/database/<name>` for a project database. The API resolves it from the name.
+  - Names `engines` and anything ending in `-ro` are reserved.
+- **Internal endpoints.**
+  - Standalone: `<name>.db.syncloud.internal` and `<name>-ro.db.syncloud.internal`. Members are `m<n>.<name>.db.syncloud.internal`.
+  - Project databases are unchanged: `<name>.<env>.<project>.syncloud.internal`. Existing Sentinel state refers to these names.
+- **Access (internal).** Every database has its own access list, like an RDS security group, compiled as a synthesized security group attached only to it:
+  - inbound from its own members (all ports);
+  - inbound on the engine port from each listed peer: `project:P`, `environment:P/E`, `service:P/E/S`, a CIDR, or `cluster`.
+  - A project database starts with `environment:<p>/<e>`, which is what the project default group gave it. A standalone database starts with none.
+  - Platform addresses (Traefik on the controller and edges, health checks) are always allowed, as for services.
+- **Public endpoint (external URL).** Per database, off by default.
+  - Traefik terminates TLS on an engine entrypoint (Valkey `:6379`) and routes by SNI (`HostSNI`) to the current primary over the mesh:
+    - `<name>.db.<base-domain>:6379` is read-write;
+    - `<name>-ro.db.<base-domain>:6379` is read-only, served by the replicas (the primary when there are none).
+  - The URL is `rediss://default:<password>@<name>.db.<base-domain>:6379`.
+  - Certificates come from the controller like any route: HTTP-01 per host, and DNS-01 for wildcards later.
+  - An IP allow-list (CIDRs, default `0.0.0.0/0`) becomes a Traefik TCP `ipAllowList` middleware.
+  - The primary changes after a failover. The controller rewrites the TCP backends within one probe (≤ 5 s) and Traefik picks them up on its 2 s poll.
+  - The host firewall opens the engine port on the controller and edge nodes only while at least one database is public.
+  - A base domain is required. Without one, the endpoint shows why it is unavailable.
+  - TLS is mandatory: SNI routing cannot work on plain TCP, and passwords must not cross the internet in clear text.
+  - PostgreSQL will use Traefik's STARTTLS support for Postgres on its own `:5432` entrypoint, with the same model.
+- **Engines.**
+  - `GET /databases/engines` lists the engines with their versions, port, URL scheme and capabilities: Valkey is available; PostgreSQL is listed as planned.
+  - `engine` is part of a database (default `valkey`).
+  - Engine-specific API parts reject other engines with 400; the key explorer, console and Sentinel failover are Valkey's.
+  - The wizard starts with the engine choice.
+  - Code boundary: the operator core (members, placement, network, public routes, events) stays in `internal/dbs`. Engine behavior (task specs, probe, autoscale signals, explorer) is what PostgreSQL will add as its own files.
+- **UI.**
+  - **Databases** gets a sidebar entry.
+  - The wizard has these steps:
+    1. engine;
+    2. name and owner, either standalone or a project environment;
+    3. capacity;
+    4. data;
+    5. network: access list, public endpoint and allow-list;
+    6. review.
+  - The database page moves to `/databases/<name>` and gains a **Connectivity** tab: internal and public endpoints, connection strings, the access list and the public switch. The project tab lists that project's databases.
+- **CLI.**
+  - `synctl db create NAME [-p P -e E]` creates standalone without `-p`.
+  - `synctl db network NAME --public on|off --allow CIDR… --access PEER…`.
+  - `synctl db engines`.
+  - Every item command takes only the name.
+
+**Progress**
+- ✅ 12e (2026-10-07):
+  - **Store:** migration 00033 rebuilds the three database tables. The environment is nullable, names are globally unique, and a `network` JSON column is added. It was checked on a copy of the dev database: members and events were kept, and the access list defaults to the database's own environment.
+  - **Engines and access:** `dbs.Engines` lists Valkey and PostgreSQL (planned). The access list compiles to a synthesized `dbsg_` security group with a new `self` peer kind.
+  - **Public endpoints:** Traefik TCP routers use `HostSNI` with TLS termination and an `ipAllowList`. A `valkey` entrypoint is added on the controller and edges (`--public-valkey`, dev `127.0.0.1:16379`). The firewall opens the port only while a database is public, and public hosts get certificates.
+  - **API, CLI and UI:**
+    - the API moves to `/databases/{name}` plus `PUT …/network` and `GET /databases/engines`, with `database:CreateDatabase` checked on the exact resource;
+    - database logs use `?database=`, authorized on the database;
+    - `synctl db create|network|engines`;
+    - the wizard gains Engine, Database (owner) and Network steps, and the database page a Connectivity tab;
+    - a project tab lists the other databases it can reach.
+  - **e2e** `test/e2e/databases.sh`:
+    - a standalone database is refused, then reachable once its environment is on the access list;
+    - `rediss://` through Traefik from another machine reads and writes, the read-only endpoint is read-only, and plain TCP is refused;
+    - the allow-list is enforced, and the public endpoint follows a failover (writes resumed 13 s after the primary froze);
+    - the existing steps all pass.
+
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)
 

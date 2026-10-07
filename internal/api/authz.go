@@ -78,6 +78,7 @@ var selfService = map[string]bool{
 	"iam:BeginMFA": true, "iam:EnableMFA": true, "iam:DisableMFA": true, "iam:ChangePassword": true,
 	"iam:ListMyPermissions": true, "sts:AssumeRole": true, "auth:ApproveDevice": true, "docs:ListCommands": true,
 	"shell:StartShell": true, "shell:GetShell": true, "shell:StopShell": true, "shell:ExecShell": true,
+	"database:ListDatabaseEngines": true,
 }
 
 // listOps are global listings: allowed when some policy grants the action
@@ -89,6 +90,8 @@ var listOps = map[string]bool{
 	"traffic:GetTraffic": true, "traffic:GetTrafficMap": true, "project:ListProjects": true, "project:CreateProject": true,
 	"registry:ListRepositories": true, "quota:ListQuotas": true, "usage:GetUsage": true,
 	"usage:ExportUsage": true, "network:CheckReachability": true, "database:ListAllDatabases": true,
+	// The handler checks the exact resource (standalone or in a project).
+	"database:CreateDatabase": true,
 }
 
 // Resource names.
@@ -112,8 +115,6 @@ func (s *Server) resourceOf(r *http.Request, action string) string {
 				res += "/service/" + pv("service")
 			case pv("job") != "":
 				res += "/job/" + pv("job")
-			case pv("database") != "":
-				res += "/database/" + pv("database")
 			}
 		}
 		switch {
@@ -156,6 +157,11 @@ func (s *Server) resourceOf(r *http.Request, action string) string {
 			}
 		}
 		return "srn:syncloud:build/" + id
+	case strings.HasPrefix(path, "/api/v1/databases/") && pv("database") != "":
+		if d, err := s.store.DatabaseByName(ctx, pv("database")); err == nil {
+			return dbSRN(d)
+		}
+		return "srn:syncloud:database/" + pv("database")
 	case strings.HasPrefix(path, "/api/v1/nodes/") && id != "", strings.HasPrefix(path, "/api/v1/firewall/nodes/") && id != "":
 		return "srn:syncloud:node/" + id
 	case strings.HasPrefix(path, "/api/v1/s3/endpoints/") && pv("endpoint") != "":
@@ -427,7 +433,7 @@ func (s *Server) filterItems(r *http.Request, items any, kind string) any {
 		case itemService:
 			res = serviceSRN(str(m, "project"), str(m, "environment"), str(m, "name"))
 		case itemDatabase:
-			res = envSRN(str(m, "project"), str(m, "environment")) + "/database/" + str(m, "name")
+			res = databaseSRN(str(m, "project"), str(m, "environment"), str(m, "name"))
 		case itemJob:
 			res = envSRN(str(m, "project"), str(m, "environment")) + "/job/" + str(m, "name")
 		case itemProject:
