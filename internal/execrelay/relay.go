@@ -40,11 +40,21 @@ var ErrNodeOffline = errors.New("the task's node is not connected")
 
 // Open starts command in the task's container.
 func (r *Relay) Open(nodeID, taskID string, command []string, tty bool, cols, rows uint32) (*Session, error) {
+	return r.open(nodeID, &agentv1.ExecStart{TaskId: taskID, Command: command, Tty: tty, Cols: cols, Rows: rows})
+}
+
+// OpenHost starts command on the node itself, outside any container (a node
+// shell). Agents run with --no-host-shell refuse it.
+func (r *Relay) OpenHost(nodeID string, command []string, tty bool, cols, rows uint32) (*Session, error) {
+	return r.open(nodeID, &agentv1.ExecStart{Host: true, Command: command, Tty: tty, Cols: cols, Rows: rows})
+}
+
+func (r *Relay) open(nodeID string, start *agentv1.ExecStart) (*Session, error) {
 	s := &Session{ID: auth.NewID("exec_"), nodeID: nodeID, relay: r, Out: make(chan *agentv1.ExecOutput, 256)}
 	r.mu.Lock()
 	r.sessions[s.ID] = s
 	r.mu.Unlock()
-	err := s.send(&agentv1.ExecInput{Msg: &agentv1.ExecInput_Start{Start: &agentv1.ExecStart{TaskId: taskID, Command: command, Tty: tty, Cols: cols, Rows: rows}}})
+	err := s.send(&agentv1.ExecInput{Msg: &agentv1.ExecInput_Start{Start: start}})
 	if err != nil {
 		r.remove(s.ID)
 		if errors.Is(err, agentgw.ErrNotConnected) {

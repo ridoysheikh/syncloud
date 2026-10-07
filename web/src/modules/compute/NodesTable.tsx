@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { Server, Trash2 } from "lucide-react";
 import {
   bytes,
@@ -31,7 +32,12 @@ export function NodesTable({
       header: "Name",
       cell: (n) => (
         <div className="flex items-center gap-2">
-          <span className="font-medium">{n.name}</span>
+          <Link
+            to={`/compute/nodes/${n.name}` as string}
+            className="hover:text-accent font-medium"
+          >
+            {n.name}
+          </Link>
           {n.name === "ctl-0" && (
             <span className="text-faint text-[10px] uppercase">controller</span>
           )}

@@ -171,13 +171,22 @@ func (c *Client) Stream(ctx context.Context, path string) (io.ReadCloser, error)
 // ExecDial opens an interactive command in a task (see the execTask
 // operation). The caller owns the connection.
 func (c *Client) ExecDial(ctx context.Context, taskID string, command []string, tty bool, cols, rows int) (*websocket.Conn, error) {
+	return c.dialTerminal(ctx, "/api/v1/tasks/"+url.PathEscape(taskID)+"/exec", command, tty, cols, rows)
+}
+
+// NodeShellDial opens a shell on a node itself (command empty = login shell).
+func (c *Client) NodeShellDial(ctx context.Context, nodeID string, command []string, tty bool, cols, rows int) (*websocket.Conn, error) {
+	return c.dialTerminal(ctx, "/api/v1/nodes/"+url.PathEscape(nodeID)+"/shell", command, tty, cols, rows)
+}
+
+func (c *Client) dialTerminal(ctx context.Context, path string, command []string, tty bool, cols, rows int) (*websocket.Conn, error) {
 	q := url.Values{"command": command, "cols": {fmt.Sprint(cols)}, "rows": {fmt.Sprint(rows)}}
 	if tty {
 		q.Set("tty", "1")
 	} else {
 		q.Set("tty", "0")
 	}
-	ref, err := url.Parse("/api/v1/tasks/" + url.PathEscape(taskID) + "/exec?" + q.Encode())
+	ref, err := url.Parse(path + "?" + q.Encode())
 	if err != nil {
 		return nil, err
 	}

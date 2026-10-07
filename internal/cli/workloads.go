@@ -56,6 +56,7 @@ func (a *app) projectsCmd() *cobra.Command {
 	create.Flags().StringVar(&desc, "description", "", "description")
 	create.Flags().StringVar(&env, "environment", "production", "first environment")
 	p.AddCommand(
+		a.projectNodesCmd(),
 		&cobra.Command{
 			Use: "list", Aliases: []string{"ls"}, Short: "List projects", Args: cobra.NoArgs,
 			Annotations: op("listProjects"),

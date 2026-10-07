@@ -19,6 +19,43 @@ Node status:
 
 A re-joined node keeps its ID, pool and tasks and gets a new certificate. The old certificate stops working. Use this when a machine is reinstalled.
 
+## A node's page
+
+Click a node under **Compute → Nodes** (the controller, `ctl-0`, too). Its page has three tabs:
+
+- **Overview:** live CPU, memory, disk, load, running tasks and uptime; the node's details (OS, kernel, Docker, agent version); and history charts for 15 minutes to 7 days. The charts cover CPU, memory and disk against their totals, load, network and private-network traffic, running tasks, and its tasks' CPU and memory by service.
+- **Tasks:** every task on the node, with links to their services.
+- **Shell:** a login shell on the node itself, as the user the agent runs as. That is **root** on installed nodes.
+
+The same from the CLI:
+
+```sh
+synctl nodes metrics w1 --range 6h     # latest, average and peak of each chart
+synctl nodes shell w1                  # interactive shell
+synctl nodes shell ctl-0 -- df -h      # one command
+```
+
+Node shells need the `node:NodeShell` permission, which only administrators have by default. Every session is recorded in the audit log as `node:Shell`. To turn node shells off on a machine, start its agent with `--no-host-shell` (or set `SYNCLOUD_AGENT_NO_HOST_SHELL=1`). Task exec still works there.
+
+## Which nodes a project may use
+
+By default, a project's services and jobs run on any schedulable node. To keep a project on certain machines, open the project's **Settings** tab, choose **Allowed nodes → Only these nodes**, and tick the nodes. Or use the CLI:
+
+```sh
+synctl projects nodes shop w1 w2     # only w1 and w2
+synctl projects nodes shop --any     # any node again
+synctl projects nodes shop           # show the list
+```
+
+Each service can narrow its project's list on its **Placement** tab, for example to keep one service on a single worker. The same tab sets spreading: spread over the nodes (the default) or pack onto as few as possible. In a spec this is `"placement": {"nodes": ["w1"], "strategy": "binpack"}`.
+
+The rules:
+
+- **A service can't widen its project's list.** Naming a node the project doesn't allow is rejected. Likewise, a project can't drop a node that one of its services is limited to; change the service first.
+- **Changing the lists moves tasks.** Tasks on a node that is no longer allowed are replaced on an allowed node. As with a drain, the new task starts before the old one stops. If no allowed node has room, the old task keeps running and the service says why it can't place.
+- **The controller node.** Naming `ctl-0` in a project's or service's list runs those tasks on the controller, even when the controller takes no general workloads. A draining controller still takes nothing.
+- **Jobs follow their project's list.** Builds don't: they are platform work.
+
 ## Node pools
 
 A pool groups nodes with the same purpose. It has a role:

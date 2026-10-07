@@ -416,6 +416,7 @@ message ExecStart {
   bool tty = 3;
   uint32 cols = 4;
   uint32 rows = 5;
+  bool host = 6;                // on the node itself, not in a task (task_id empty)
 }
 
 message ExecResize {

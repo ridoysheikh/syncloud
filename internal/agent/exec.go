@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -18,6 +19,8 @@ type execSessions struct {
 
 	mu       sync.Mutex
 	sessions map[string]*execSession
+	// hostShell allows sessions on the node itself (node shells).
+	hostShell bool
 }
 
 func newExecSessions(d *docker.Client, log *slog.Logger) *execSessions {
@@ -72,6 +75,14 @@ func (e *execSessions) run(ctx context.Context, id string, st *agentv1.ExecStart
 	}()
 	fail := func(err error) {
 		e.emit(&agentv1.ExecOutput{SessionId: id, Exited: true, ExitCode: -1, Error: err.Error()})
+	}
+	if st.GetHost() {
+		if !e.hostShell {
+			fail(errors.New("node shells are turned off on this node (syncloud-agent run --no-host-shell)"))
+			return
+		}
+		e.runHost(ctx, id, st, s, fail)
+		return
 	}
 	list, err := e.docker.List(ctx, LabelTaskID+"="+st.GetTaskId())
 	if err != nil || len(list) == 0 || list[0].State != "running" {

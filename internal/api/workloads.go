@@ -2,7 +2,9 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"syncloud/internal/auth"
@@ -75,7 +77,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	u, _ := currentUser(r.Context())
 	s.audit(r, u.ID, "project:Create", "srn:syncloud:project/"+p.Name, nil)
-	writeJSON(w, http.StatusCreated, map[string]any{"id": p.ID, "name": p.Name, "description": p.Description, "createdAt": p.CreatedAt, "environments": []string{env.Name}})
+	writeJSON(w, http.StatusCreated, map[string]any{"id": p.ID, "name": p.Name, "description": p.Description, "nodes": []string{}, "createdAt": p.CreatedAt, "environments": []string{env.Name}})
 }
 
 func (s *Server) project(w http.ResponseWriter, r *http.Request) (store.Project, bool) {
@@ -121,6 +123,72 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	u, _ := currentUser(r.Context())
 	s.audit(r, u.ID, "project:Delete", "srn:syncloud:project/"+p.Name, nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSetProjectNodes limits the nodes a project's services and jobs run
+// on (empty = any). Tasks on nodes no longer allowed are replaced elsewhere,
+// new task first (§6.3).
+func (s *Server) handleSetProjectNodes(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.project(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Nodes []string `json:"nodes"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	nodes := []string{}
+	for _, n := range req.Nodes {
+		n = strings.TrimSpace(n)
+		if !workload.ValidNodeName(n) {
+			writeError(w, http.StatusBadRequest, CodeBadRequest, fmt.Sprintf("%q is not a node name", n))
+			return
+		}
+		if !slices.Contains(nodes, n) {
+			nodes = append(nodes, n)
+		}
+	}
+	slices.Sort(nodes)
+	if len(nodes) > 64 {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "at most 64 nodes")
+		return
+	}
+	// Services that name a node outside the new list would never place.
+	svcs, err := s.store.ListServices(r.Context())
+	if err != nil {
+		s.internalError(w, "list services", err)
+		return
+	}
+	for _, sv := range svcs {
+		if sv.Project != p.Name || len(nodes) == 0 {
+			continue
+		}
+		spec, err := s.workloads.SpecFor(r.Context(), sv.ID, sv.Revision)
+		if err != nil {
+			continue
+		}
+		for _, n := range append(slices.Clone(spec.Placement.Nodes), spec.Placement.Node) {
+			if n != "" && !slices.Contains(nodes, n) {
+				writeError(w, http.StatusConflict, CodeConflict, fmt.Sprintf("service %s/%s runs only on %s, which this list leaves out; change its placement first", sv.Environment, sv.Name, n))
+				return
+			}
+		}
+	}
+	if err := s.store.SetProjectNodes(r.Context(), p.ID, nodes); err != nil {
+		s.internalError(w, "set project nodes", err)
+		return
+	}
+	for _, sv := range svcs {
+		if sv.Project == p.Name {
+			s.workloads.Enqueue(sv.ID)
+		}
+	}
+	u, _ := currentUser(r.Context())
+	s.audit(r, u.ID, "project:SetNodes", projectSRN(p.Name), map[string]any{"nodes": nodes})
+	p.Nodes = nodes
+	writeJSON(w, http.StatusOK, p)
 }
 
 func (s *Server) handleListEnvironments(w http.ResponseWriter, r *http.Request) {

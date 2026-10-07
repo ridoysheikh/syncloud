@@ -34,6 +34,7 @@ import {
 import { QuotaPage, QuotasPage } from "./quota/QuotasPage";
 import { ApiPage } from "./api/ApiPage";
 import { NodesPage } from "./compute/NodesPage";
+import { NodePage } from "./compute/NodePage";
 import { EdgeNodesPage, NodePoolPage, NodePoolsPage } from "./compute/NodePoolsPage";
 import { NewProjectPage, ProjectsPage } from "./projects/ProjectsPage";
 import { ProjectPage } from "./projects/ProjectPage";
@@ -100,6 +101,7 @@ export const modules: DashboardModule[] = [
       { path: "/compute/tasks", label: "Tasks", component: TasksPage },
       { path: "/compute/jobs", label: "Jobs", component: JobsPage },
       { path: "/compute/nodes", label: "Nodes", component: NodesPage },
+      { path: "/compute/nodes/$name", label: "Node", component: NodePage, hidden: true },
       { path: "/compute/node-pools", label: "Node Pools", component: NodePoolsPage },
       { path: "/compute/node-pools/new", label: "New node pool", component: NodePoolPage, hidden: true },
       { path: "/compute/node-pools/$name", label: "Node pool", component: NodePoolPage, hidden: true },

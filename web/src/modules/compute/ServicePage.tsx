@@ -7,6 +7,7 @@ import {
   deploymentTone,
   AWAITING_BUILD,
   servicePath,
+  useProjects,
   useServices,
   useSharedVars,
   type Deployment,
@@ -38,6 +39,7 @@ import { RequestsTail, TrafficPanel } from "@/modules/traffic/Traffic";
 import { ServiceSecurityPanel } from "@/modules/network/SecurityGroups";
 import { AutoscalingPanel } from "./AutoscalingPanel";
 import { Tabs } from "@/ui/Tabs";
+import { ServicePlacementPanel } from "@/modules/projects/NodeLimits";
 
 interface Revision {
   revision: number;
@@ -59,6 +61,7 @@ type Tab =
   | "variables"
   | "s3"
   | "revisions"
+  | "placement"
   | "spec";
 
 /** One service: scale, tasks, revisions and its spec (§4). */
@@ -71,6 +74,7 @@ export function ServicePage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { data: services } = useServices();
+  const { data: projects } = useProjects();
   const svc = services?.find(
     (s) => s.project === project && s.environment === env && s.name === name,
   );
@@ -257,6 +261,7 @@ export function ServicePage() {
           "variables",
           "s3",
           "revisions",
+          "placement",
           "spec",
         ] as Tab[]}
         value={tab}
@@ -306,6 +311,14 @@ export function ServicePage() {
       )}
       {tab === "s3" && <ServiceS3Panel path={path} />}
       {tab === "revisions" && <Revisions path={path} />}
+      {tab === "placement" && (
+        <ServicePlacementPanel
+          path={path}
+          service={svc}
+          projectNodes={projects?.find((x) => x.name === project)?.nodes ?? []}
+          projectTo={`/projects/${project}/${env}`}
+        />
+      )}
       {tab === "spec" && <SpecEditor path={path} spec={svc.spec} />}
     </div>
   );

@@ -81,10 +81,11 @@ func run(args []string) error {
 	case "run":
 		network := fs.String("network", envOr("SYNCLOUD_AGENT_NETWORK", "auto"), "join the private network: on, off, or auto (on when running as root)")
 		advertise := fs.String("advertise-address", os.Getenv("SYNCLOUD_ADVERTISE_ADDRESS"), "address other nodes use to reach this node's WireGuard port (default: as seen by the controller)")
+		noHostShell := fs.Bool("no-host-shell", os.Getenv("SYNCLOUD_AGENT_NO_HOST_SHELL") == "1", "refuse node shells from the dashboard (task exec still works)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		opts := agent.Options{AdvertiseAddress: *advertise}
+		opts := agent.Options{AdvertiseAddress: *advertise, NoHostShell: *noHostShell}
 		switch *network {
 		case "on":
 			opts.Network = true

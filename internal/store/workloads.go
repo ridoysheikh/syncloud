@@ -10,10 +10,12 @@ import (
 )
 
 type Project struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Nodes are the node names the project's workloads may run on (empty = any).
+	Nodes     []string  `json:"nodes"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type Environment struct {
@@ -120,7 +122,7 @@ func (s *Store) CreateProject(ctx context.Context, p Project, env Environment) e
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
-	rows, err := s.R.QueryContext(ctx, `SELECT id, name, description, created_at FROM projects ORDER BY name`)
+	rows, err := s.R.QueryContext(ctx, `SELECT id, name, description, nodes, created_at FROM projects ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -129,9 +131,11 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 	for rows.Next() {
 		var p Project
 		var at int64
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &at); err != nil {
+		var nodes string
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &nodes, &at); err != nil {
 			return nil, err
 		}
+		p.Nodes = parseNodes(nodes)
 		p.CreatedAt = time.Unix(at, 0).UTC()
 		out = append(out, p)
 	}
@@ -139,14 +143,46 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 }
 
 func (s *Store) ProjectByName(ctx context.Context, name string) (Project, error) {
+	return s.project(ctx, `name = ?`, name)
+}
+
+func (s *Store) ProjectByID(ctx context.Context, id string) (Project, error) {
+	return s.project(ctx, `id = ?`, id)
+}
+
+func (s *Store) project(ctx context.Context, where string, arg any) (Project, error) {
 	var p Project
 	var at int64
-	err := s.R.QueryRowContext(ctx, `SELECT id, name, description, created_at FROM projects WHERE name = ?`, name).Scan(&p.ID, &p.Name, &p.Description, &at)
+	var nodes string
+	err := s.R.QueryRowContext(ctx, `SELECT id, name, description, nodes, created_at FROM projects WHERE `+where, arg).Scan(&p.ID, &p.Name, &p.Description, &nodes, &at)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
+	p.Nodes = parseNodes(nodes)
 	p.CreatedAt = time.Unix(at, 0).UTC()
 	return p, err
+}
+
+// SetProjectNodes sets the nodes a project's workloads may run on (nil = any).
+func (s *Store) SetProjectNodes(ctx context.Context, id string, nodes []string) error {
+	if nodes == nil {
+		nodes = []string{}
+	}
+	b, _ := json.Marshal(nodes)
+	res, err := s.W.ExecContext(ctx, `UPDATE projects SET nodes = ? WHERE id = ?`, string(b), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func parseNodes(s string) []string {
+	out := []string{}
+	_ = json.Unmarshal([]byte(s), &out)
+	return out
 }
 
 // ErrNotEmpty means the resource still has children.

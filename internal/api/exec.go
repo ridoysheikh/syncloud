@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"syncloud/internal/execrelay"
 	"syncloud/internal/store"
 )
 
@@ -56,6 +57,7 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 
 // relayExec upgrades to a WebSocket and relays an exec session in a
 // container (a task, or a Cloud Shell) on a node.
+// An empty taskID opens the command on the node itself.
 func (s *Server) relayExec(w http.ResponseWriter, r *http.Request, nodeID, taskID string, command []string, tty bool, cols, rows int) {
 	c, err := websocket.Accept(w, r, nil) // same-origin only
 	if err != nil {
@@ -63,7 +65,12 @@ func (s *Server) relayExec(w http.ResponseWriter, r *http.Request, nodeID, taskI
 	}
 	defer c.CloseNow()
 	c.SetReadLimit(1 << 20)
-	sess, err := s.exec.Open(nodeID, taskID, command, tty, uint32(cols), uint32(rows))
+	var sess *execrelay.Session
+	if taskID == "" {
+		sess, err = s.exec.OpenHost(nodeID, command, tty, uint32(cols), uint32(rows))
+	} else {
+		sess, err = s.exec.Open(nodeID, taskID, command, tty, uint32(cols), uint32(rows))
+	}
 	if err != nil {
 		writeControl(r.Context(), c, execControl{Type: "error", Message: err.Error()})
 		c.Close(websocket.StatusNormalClosure, "")

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 	"time"
 
@@ -226,6 +228,14 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 	spec.SharedEnv = nil
 	if len(e.SharedEnv) > 0 {
 		spec.SharedEnv = e.SharedEnv
+	}
+	// A service can narrow its project's allowed nodes, never widen them.
+	if p, err := m.st.ProjectByID(ctx, e.ProjectID); err == nil && len(p.Nodes) > 0 {
+		for _, n := range append(slices.Clone(spec.Placement.Nodes), spec.Placement.Node) {
+			if n != "" && !slices.Contains(p.Nodes, n) {
+				return ServiceView{}, false, ErrInvalid{fmt.Errorf("node %s is not allowed in project %s (allowed: %s)", n, p.Name, strings.Join(p.Nodes, ", "))}
+			}
+		}
 	}
 	if desired > maxDesired {
 		return ServiceView{}, false, ErrInvalid{fmt.Errorf("desiredCount must be at most %d", maxDesired)}

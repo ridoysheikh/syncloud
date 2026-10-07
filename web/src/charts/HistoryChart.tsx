@@ -90,7 +90,12 @@ export function HistoryChart({
           type: "value",
           splitNumber: 3,
           min: 0,
-          max,
+          // Room for the reference line (a memory total or limit) too.
+          max:
+            max ??
+            (markLine
+              ? (v: { max: number }) => Math.max(v.max, markLine.value) * 1.05
+              : undefined),
           // A fixed top gets even quarters, so its label never crowds the last tick.
           interval: max !== undefined ? max / 4 : undefined,
           minInterval: integer ? 1 : undefined,

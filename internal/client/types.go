@@ -393,8 +393,18 @@ type Project struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
 	Description  string    `json:"description"`
+	Nodes        []string  `json:"nodes"` // allowed nodes; empty = any
 	Environments []string  `json:"environments"`
 	CreatedAt    time.Time `json:"createdAt"`
+}
+
+// SetProjectNodes limits the nodes a project's workloads run on (empty = any).
+func (c *Client) SetProjectNodes(ctx context.Context, project string, nodes []string) (Project, error) {
+	if nodes == nil {
+		nodes = []string{}
+	}
+	var out Project
+	return out, c.Do(ctx, "PUT", "/api/v1/projects/"+url.PathEscape(project)+"/nodes", map[string]any{"nodes": nodes}, &out)
 }
 
 type Environment struct {

@@ -30,6 +30,7 @@ import {
   type VarRow,
 } from "./VarsEditor";
 import { Tabs } from "@/ui/Tabs";
+import { ProjectNodesPanel } from "./NodeLimits";
 
 type Tab =
   "services" | "metrics" | "traffic" | "logs" | "variables" | "settings";
@@ -144,6 +145,7 @@ export function ProjectPage() {
       {tab === "settings" && (
         <ProjectSettings
           project={p.name}
+          nodes={p.nodes ?? []}
           environments={p.environments}
           services={services.filter((s) => s.project === p.name)}
         />
@@ -325,10 +327,12 @@ function SharedVariables({
 
 function ProjectSettings({
   project,
+  nodes,
   environments,
   services,
 }: {
   project: string;
+  nodes: string[];
   environments: string[];
   services: Service[];
 }) {
@@ -362,7 +366,14 @@ function ProjectSettings({
   };
   const err = addEnv.error ?? delEnv.error ?? delProject.error;
   return (
-    <div className={cn("grid grid-cols-1 lg:grid-cols-2", gap)}>
+    <div className={cn("grid grid-cols-1 items-start lg:grid-cols-2", gap)}>
+      <div className="lg:col-span-2">
+        <ProjectNodesPanel
+          project={project}
+          nodes={nodes}
+          services={services}
+        />
+      </div>
       <Panel title="Environments">
         <div className="flex flex-col gap-2">
           {environments.map((e) => {

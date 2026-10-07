@@ -23,7 +23,14 @@ export interface Spec {
     cpuLimit?: number;
     memoryLimit?: number;
   };
-  placement: { strategy?: "spread" | "binpack" };
+  placement: {
+    strategy?: "spread" | "binpack";
+    /** Pinned to one node by name. */
+    node?: string;
+    pools?: string[];
+    /** Runs only on these nodes (within the project's allowed nodes). */
+    nodes?: string[];
+  };
   health?: {
     type: "http" | "tcp" | "cmd";
     path?: string;
@@ -112,6 +119,8 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  /** Nodes the project's services and jobs may run on; empty = any. */
+  nodes: string[];
   environments: string[];
 }
 

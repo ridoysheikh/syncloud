@@ -234,6 +234,7 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 		m.log.Error("load task definition", "service", serviceID, "err", err)
 		return
 	}
+	spec = spec.WithProjectNodes(m.projectNodes(ctx, sv.Project))
 	tasks, err := m.st.ServiceTasks(ctx, sv.ID, 0)
 	if err != nil {
 		m.log.Error("load tasks", "service", serviceID, "err", err)
@@ -288,7 +289,8 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 	for _, t := range active {
 		// Tasks on a draining node are retired like an old revision, so
 		// replacements start elsewhere before they stop.
-		if n, ok := m.nodes.Get(t.NodeID); ok && n.Draining {
+		if n, ok := m.nodes.Get(t.NodeID); ok && (n.Draining || !spec.Placement.Allows(n.Name)) {
+			// Also tasks on a node the project or service no longer allows.
 			old = append(old, t)
 			continue
 		}
@@ -594,14 +596,14 @@ func (m *Manager) place(ctx context.Context, spec Spec, serviceID string, rev in
 		switch {
 		case n.Status != store.NodeReady || !n.Connected:
 			c.Eligible, c.Why = false, "not ready"
-		case !n.Schedulable && !(platform && n.Name == mesh.ControllerNode):
+		case !takesTasks(n.Name, n.Schedulable, n.Draining, spec.Placement, platform):
 			c.Eligible, c.Why = false, "not schedulable"
 		case n.Info.DockerVersion == "":
 			c.Eligible, c.Why = false, "without Docker"
 		case !m.netReady(n.ID):
 			c.Eligible, c.Why = false, "network not ready"
-		case spec.Placement.Node != "" && n.Name != spec.Placement.Node:
-			c.Eligible, c.Why = false, "not the pinned node"
+		case !spec.Placement.Allows(n.Name):
+			c.Eligible, c.Why = false, "not an allowed node"
 		case !m.poolAllows(n.ID, spec.Placement.Pools):
 			c.Eligible, c.Why = false, "in another node pool"
 		}
@@ -686,6 +688,39 @@ type DeployHooks interface {
 	RunPreDeploy(ctx context.Context, sv store.Service, toRev int, depID string)
 	// RunPostDeploy starts post-deploy jobs after a deployment succeeded.
 	RunPostDeploy(ctx context.Context, sv store.Service, dep store.Deployment)
+}
+
+// takesTasks reports whether a node accepts a new task: schedulable nodes
+// do; the controller node also takes platform tasks, and tasks that name it
+// explicitly even when it runs no general workloads (unless draining).
+func takesTasks(name string, schedulable, draining bool, p Placement, platform bool) bool {
+	if schedulable {
+		return true
+	}
+	return name == mesh.ControllerNode && (platform || p.Names(name) && !draining)
+}
+
+// projectNodes is the project's allowed nodes (none = any).
+func (m *Manager) projectNodes(ctx context.Context, project string) []string {
+	p, err := m.st.ProjectByName(ctx, project)
+	if err != nil {
+		return nil
+	}
+	return p.Nodes
+}
+
+// RestrictToEnvironment limits spec to the allowed nodes of the
+// environment's project (for job runs).
+func (m *Manager) RestrictToEnvironment(ctx context.Context, envID string, spec Spec) Spec {
+	e, err := m.st.EnvironmentByID(ctx, envID)
+	if err != nil {
+		return spec
+	}
+	p, err := m.st.ProjectByID(ctx, e.ProjectID)
+	if err != nil {
+		return spec
+	}
+	return spec.WithProjectNodes(p.Nodes)
 }
 
 // PlaceSpec picks a node for a one-off task with spec's resources.

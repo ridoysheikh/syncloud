@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -91,7 +92,37 @@ type Placement struct {
 	Node string `json:"node,omitempty"`
 	// Pools limits tasks to node pools ("default" is nodes outside any pool).
 	Pools []string `json:"pools,omitempty"`
+	// Nodes limits tasks to these nodes by name, within the project's
+	// allowed nodes (§6.3). Naming the controller node runs tasks there even
+	// when it takes no general workloads.
+	Nodes []string `json:"nodes,omitempty"`
+
+	// project holds the project's allowed nodes while placing; never stored.
+	project []string
 }
+
+// WithProjectNodes returns spec limited to a project's allowed nodes as
+// well (none = any). The limit is applied at placement and not stored, so
+// changing a project's nodes does not create service revisions.
+func (s Spec) WithProjectNodes(nodes []string) Spec {
+	s.Placement.project = nodes
+	return s
+}
+
+// Allows reports whether a task may run on the named node.
+func (p Placement) Allows(node string) bool {
+	return (p.Node == "" || p.Node == node) &&
+		(len(p.Nodes) == 0 || slices.Contains(p.Nodes, node)) &&
+		(len(p.project) == 0 || slices.Contains(p.project, node))
+}
+
+// Names reports whether the node is named explicitly (pinned or listed).
+func (p Placement) Names(node string) bool {
+	return p.Node == node || slices.Contains(p.Nodes, node) || slices.Contains(p.project, node)
+}
+
+// ValidNodeName checks a node name.
+func ValidNodeName(s string) bool { return nodeNameRE.MatchString(s) }
 
 var (
 	nameRE     = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
@@ -233,6 +264,16 @@ func (s *Spec) Normalize() error {
 	if s.Placement.Node != "" && !nodeNameRE.MatchString(s.Placement.Node) {
 		return errors.New("placement node must be a node name")
 	}
+	if len(s.Placement.Nodes) > 64 {
+		return errors.New("placement nodes: at most 64")
+	}
+	for _, n := range s.Placement.Nodes {
+		if !nodeNameRE.MatchString(n) {
+			return fmt.Errorf("placement nodes: %q is not a node name", n)
+		}
+	}
+	slices.Sort(s.Placement.Nodes)
+	s.Placement.Nodes = slices.Compact(s.Placement.Nodes)
 	switch s.Placement.Strategy {
 	case "":
 		s.Placement.Strategy = "spread"

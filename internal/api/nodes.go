@@ -4,10 +4,12 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"syncloud/internal/auth"
+	"syncloud/internal/metrics"
 	"syncloud/internal/store"
 )
 
@@ -280,4 +282,55 @@ func (s *Server) joinCommand(r *http.Request, args string) string {
 		return "curl -fsSLk --pinnedpubkey '" + pin + "' " + base + "/join.sh | sudo bash -s -- --pin '" + pin + "' " + args
 	}
 	return "curl -fsSL " + base + "/join.sh | sudo bash -s -- " + args
+}
+
+// handleNodeMetrics charts one node for its page: resources, network, tasks
+// and its tasks' usage by service (§9.1).
+func (s *Server) handleNodeMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "metrics are not enabled")
+		return
+	}
+	n, ok := s.nodes.Get(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, CodeNotFound, "no such node")
+		return
+	}
+	rng, ok := metricsRange(w, r)
+	if !ok {
+		return
+	}
+	res, err := s.metrics.Node(r.Context(), n.Name, metrics.Ranges[rng], s.now())
+	if err != nil {
+		s.metricsErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleNodeShell opens an interactive shell on a node itself, as the user
+// the agent runs as (root on installed nodes). Same WebSocket protocol as
+// task exec.
+//
+//	GET /api/v1/nodes/{id}/shell?cols=120&rows=30[&command=htop]
+func (s *Server) handleNodeShell(w http.ResponseWriter, r *http.Request) {
+	if s.exec == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "exec is not enabled")
+		return
+	}
+	n, ok := s.nodes.Get(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, CodeNotFound, "no such node")
+		return
+	}
+	if !n.Connected {
+		writeError(w, http.StatusConflict, CodeConflict, "the node is not connected")
+		return
+	}
+	q := r.URL.Query()
+	cols, _ := strconv.Atoi(q.Get("cols"))
+	rows, _ := strconv.Atoi(q.Get("rows"))
+	u, _ := currentUser(r.Context())
+	s.audit(r, u.ID, "node:Shell", "srn:syncloud:node/"+n.ID, map[string]any{"node": n.Name, "command": strings.Join(q["command"], " ")})
+	s.relayExec(w, r, n.ID, "", q["command"], q.Get("tty") != "0", cols, rows)
 }

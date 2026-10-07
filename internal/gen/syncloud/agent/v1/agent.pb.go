@@ -3513,6 +3513,7 @@ type ExecStart struct {
 	Tty           bool                   `protobuf:"varint,3,opt,name=tty,proto3" json:"tty,omitempty"`
 	Cols          uint32                 `protobuf:"varint,4,opt,name=cols,proto3" json:"cols,omitempty"`
 	Rows          uint32                 `protobuf:"varint,5,opt,name=rows,proto3" json:"rows,omitempty"`
+	Host          bool                   `protobuf:"varint,6,opt,name=host,proto3" json:"host,omitempty"` // on the node itself, not in a task (task_id empty)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3580,6 +3581,13 @@ func (x *ExecStart) GetRows() uint32 {
 		return x.Rows
 	}
 	return 0
+}
+
+func (x *ExecStart) GetHost() bool {
+	if x != nil {
+		return x.Host
+	}
+	return false
 }
 
 type ExecResize struct {
@@ -4122,13 +4130,14 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\x06resize\x18\x04 \x01(\v2\x1d.syncloud.agent.v1.ExecResizeH\x00R\x06resize\x12\x16\n" +
 	"\x05close\x18\x05 \x01(\bH\x00R\x05close\x12\x1d\n" +
 	"\tstdin_eof\x18\x06 \x01(\bH\x00R\bstdinEofB\x05\n" +
-	"\x03msg\"x\n" +
+	"\x03msg\"\x8c\x01\n" +
 	"\tExecStart\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x03(\tR\acommand\x12\x10\n" +
 	"\x03tty\x18\x03 \x01(\bR\x03tty\x12\x12\n" +
 	"\x04cols\x18\x04 \x01(\rR\x04cols\x12\x12\n" +
-	"\x04rows\x18\x05 \x01(\rR\x04rows\"4\n" +
+	"\x04rows\x18\x05 \x01(\rR\x04rows\x12\x12\n" +
+	"\x04host\x18\x06 \x01(\bR\x04host\"4\n" +
 	"\n" +
 	"ExecResize\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +

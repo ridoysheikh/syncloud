@@ -144,6 +144,8 @@ type Options struct {
 	// RenewBefore renews the node certificate when less than this is left
 	// (default 30 days of the 90-day validity).
 	RenewBefore time.Duration
+	// NoHostShell refuses node shells (a terminal on the node itself).
+	NoHostShell bool
 }
 
 // Run keeps the agent connected until ctx ends, reconnecting with backoff.
@@ -182,6 +184,7 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 	stats := NewTaskStats(d, log)
 	go stats.Run(ctx)
 	execs := newExecSessions(d, log)
+	execs.hostShell = !opts.NoHostShell
 	go collectGarbage(ctx, d, dataDir, log)
 	renewBefore := opts.RenewBefore
 	if renewBefore == 0 {
