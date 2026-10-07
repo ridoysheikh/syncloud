@@ -52,7 +52,7 @@ IPS=$(api $SVC/tasks | grep -o '"desired":"running","state":"running","ip":"[0-9
 x sc-e2e-ctl sh -c 'pkill -9 -f "[s]yncloud-controller --dev"'
 sleep 15
 for ip in $IPS; do x sc-e2e-w2 wget -q -T 3 -O /dev/null "http://$ip:8080/hostname" || fail "task $ip not reachable while the controller is down"; done
-x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false > /var/log/controller.log 2>&1"
+x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false --base-domain off > /var/log/controller.log 2>&1"
 for _ in $(seq 1 30); do x sc-e2e-ctl curl -fs localhost:7070/api/v1/system/status >/dev/null 2>&1 && break; sleep 1; done
 x sc-e2e-ctl curl -fs -c /tmp/jar -H 'content-type: application/json' localhost:7070/api/v1/auth/login -d '{"email":"e2e@example.com","password":"e2e-password-123"}' >/dev/null
 sleep 20

@@ -110,7 +110,7 @@ done
 [ "$ok" = 1 ] || fail "no write through the HA URL while the controller was down"
 echo "  ✓ Patroni promoted a replica without the controller; the HA URL found it"
 x $(nodec $LEADNODE) sh -c "docker unpause \$(docker ps -aq --filter label=syncloud.task_id=$LEADTASK)" >/dev/null
-x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false ${CTL_FLAGS:-} >> /var/log/controller.log 2>&1"
+x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false --base-domain off ${CTL_FLAGS:-} >> /var/log/controller.log 2>&1"
 for _ in $(seq 1 30); do x sc-e2e-ctl curl -fs localhost:7070/api/v1/system/status >/dev/null 2>&1 && break; sleep 1; done
 wait_for "healthy again with the controller back" '[ "$(health)" = healthy ] && [ "$(primary)" != "$LEAD" ]'
 wait_for "the read-write endpoint follows" 'ins back'

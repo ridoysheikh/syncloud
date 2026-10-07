@@ -543,6 +543,7 @@ function Connectivity({ d, path }: { d: Database; path: string }) {
               enabled={f.public}
               allow={f.allow}
               port={d.public.port || d.port}
+              engine={d.engine}
               onEnabled={(v) => setF((x) => ({ ...x, public: v }))}
               onAllow={(v) => setF((x) => ({ ...x, allow: v }))}
             />

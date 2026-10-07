@@ -310,6 +310,14 @@ curl -fsSL https://get.syncloud.dev/install.sh | sudo bash
 
 [sslip.io](https://sslip.io) is a free public DNS service where any name containing an IP address resolves to that IP. For example, `203-0-113-10.sslip.io` and `anything.203-0-113-10.sslip.io` both resolve to `203.0.113.10`. This gives every install working HTTPS addresses with no DNS setup.
 
+**Dev mode too (user request, 2026-10-08):** a development or test controller also starts with an sslip.io base domain. It is built from the address the machine is reached at, not the public IP, which in dev is usually behind NAT:
+1. `--public-ip`, when given;
+2. otherwise the `--agent-advertise` IP;
+3. otherwise the host's address on its default route;
+4. otherwise `127.0.0.1`.
+
+sslip.io resolves private addresses too, so `192-168-1-20.sslip.io` works from the same network. ACME is off in dev, so these names get self-signed certificates. An sslip.io/nip.io base domain follows a changed address in dev as well.
+
 **Default addresses** (controller public IP `203.0.113.10`, base domain `203-0-113-10.sslip.io`):
 | What | Address |
 |---|---|
@@ -1171,7 +1179,7 @@ Because there is only one controller:
   - The agent's own minimal Docker Engine API client (API v1.44, Docker 25+), with an idempotent task runner (spec hash label, replace on change), Docker event watching, and a snapshot in Hello.
   - The controller pushes RunTask/StopTask over the stream. System tasks (Traefik v3.7.13, VictoriaMetrics v1.153.0, VictoriaLogs v1.53.0) run on `ctl-0` and are re-applied every minute.
   - The Traefik HTTP provider endpoint (token-protected) routes the dashboard. X-Forwarded-* is trusted from loopback only.
-  - Dev mode uses 127.0.0.1:8080/8443. Settings → Platform page; `synctl system tasks`.
+  - Dev mode uses `127.0.0.1:8080` for HTTP and `:443` for HTTPS (since 2026-10-08), so the dashboard is `https://<base domain>` with no port. Settings → Platform page; `synctl system tasks`.
 - ✅ Slice 2b (2026-10-06), private registry: `registry:3.1.2` runs as a system task with Docker token auth.
   - The controller issues ES256 JWTs (x5c and libtrust-style kid) at `/api/v1/registry/token`.
   - `docker login` accepts an access key (key ID as username, secret as password) or any username with a personal access token.

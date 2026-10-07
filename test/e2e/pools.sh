@@ -50,7 +50,7 @@ for i in 1 2 3 4 5; do
   [ "$(x sc-e2e-ctl curl -s -o /dev/null -w '%{http_code}' -H 'Host: web-production-shop.localhost' "http://$W2/hostname")" = 200 ] || fail "edge stopped serving without the controller (try $i)"
 done
 CTL_IP=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" sc-e2e-ctl)
-x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false > /var/log/controller.log 2>&1"
+x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false --base-domain off > /var/log/controller.log 2>&1"
 for _ in $(seq 1 30); do x sc-e2e-ctl curl -fs localhost:7070/api/v1/system/status >/dev/null 2>&1 && break; sleep 1; done
 x sc-e2e-ctl curl -fs -c /tmp/jar -H 'content-type: application/json' localhost:7070/api/v1/auth/login -d '{"email":"e2e@example.com","password":"e2e-password-123"}' >/dev/null
 for _ in $(seq 1 30); do api $P/edges | grep -q '"node":"w2"[^}]*"state":"healthy"' && break; sleep 2; done

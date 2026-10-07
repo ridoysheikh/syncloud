@@ -110,7 +110,7 @@ export function PublicFields({
   enabled,
   allow,
   port,
-  scheme = "rediss",
+  engine,
   onEnabled,
   onAllow,
 }: {
@@ -119,12 +119,16 @@ export function PublicFields({
   /** One address or CIDR per line. */
   allow: string;
   port: number;
-  scheme?: string;
+  engine: string;
   onEnabled: (v: boolean) => void;
   onAllow: (v: string) => void;
 }) {
   const base = useBaseDomain();
   const host = `${name || "NAME"}.db.${base || "<base domain>"}`;
+  const example =
+    engine === "postgres"
+      ? `postgresql://app:…@${host}:${port}/${(name || "NAME").replace(/-/g, "_")}?sslmode=require`
+      : `rediss://default:…@${host}:${port}`;
   return (
     <div className="flex flex-col gap-3 text-xs">
       <Toggle
@@ -137,10 +141,7 @@ export function PublicFields({
             <code className="font-mono">
               {host}:{port}
             </code>{" "}
-            over TLS (
-            <code className="font-mono">
-              {scheme}://default:…@{host}:{port}
-            </code>
+            over TLS (<code className="font-mono">{example}</code>
             ). Traefik terminates TLS with the platform's certificate and
             forwards to the current primary.
           </>

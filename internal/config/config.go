@@ -20,7 +20,7 @@ type Controller struct {
 	// this is the controller's WireGuard IP (10.90.0.1:7443, §8).
 	AgentAdvertise string
 	// PublicHTTP and PublicHTTPS are Traefik's public entrypoints
-	// (":80"/":443"; dev defaults to 127.0.0.1:8080/8443).
+	// (":80"/":443"; dev serves HTTP on 127.0.0.1:8080, HTTPS still on :443).
 	PublicHTTP  string
 	PublicHTTPS string
 	// PublicValkey is Traefik's entrypoint for public Valkey databases
@@ -37,7 +37,8 @@ type Controller struct {
 	// SystemTasks runs the platform components on ctl-0 (D20). Off in tests.
 	SystemTasks bool
 	// BaseDomain is set on first start when no base domain is stored (§5.0.2).
-	// Without it, a non-dev controller uses <public-ip>.sslip.io.
+	// Without it the controller uses <public-ip>.sslip.io, or in dev mode
+	// <its address>.sslip.io (the agent advertise IP or the default-route address).
 	BaseDomain string
 	// PublicIP overrides public IP detection.
 	PublicIP string
@@ -93,13 +94,13 @@ func LoadController(args []string) (Controller, error) {
 	fs.StringVar(&c.AgentAdvertise, "agent-advertise", env("SYNCLOUD_AGENT_ADVERTISE", ""), "agent gateway address for nodes (default: --agent-listen)")
 	fs.BoolVar(&c.Dev, "dev", env("SYNCLOUD_DEV", "") == "1", "development mode")
 	fs.StringVar(&c.PublicHTTP, "public-http", env("SYNCLOUD_PUBLIC_HTTP", ""), "Traefik HTTP entrypoint (default :80, dev 127.0.0.1:8080)")
-	fs.StringVar(&c.PublicHTTPS, "public-https", env("SYNCLOUD_PUBLIC_HTTPS", ""), "Traefik HTTPS entrypoint (default :443, dev 127.0.0.1:8443)")
+	fs.StringVar(&c.PublicHTTPS, "public-https", env("SYNCLOUD_PUBLIC_HTTPS", ""), "Traefik HTTPS entrypoint (default :443)")
 	fs.StringVar(&c.PublicValkey, "public-valkey", env("SYNCLOUD_PUBLIC_VALKEY", ""), "Traefik entrypoint of public Valkey databases (default :6379, dev 127.0.0.1:16379)")
 	fs.StringVar(&c.PublicPostgres, "public-postgres", env("SYNCLOUD_PUBLIC_POSTGRES", ""), "Traefik entrypoint of public PostgreSQL databases (default :5432, dev 127.0.0.1:15432)")
 	fs.StringVar(&c.PostgresImage, "postgres-image", env("SYNCLOUD_POSTGRES_IMAGE", ""), "PostgreSQL images per major version, as VERSION=IMAGE[,VERSION=IMAGE] (default: the release's pinned images)")
 	fs.StringVar(&c.TraefikAdmin, "traefik-admin", env("SYNCLOUD_TRAEFIK_ADMIN", "127.0.0.1:8082"), "Traefik ping/metrics address (loopback)")
 	fs.BoolVar(&c.SystemTasks, "system-tasks", env("SYNCLOUD_SYSTEM_TASKS", "1") == "1", "run platform components (Traefik, metrics, logs) on the local node")
-	fs.StringVar(&c.BaseDomain, "base-domain", env("SYNCLOUD_BASE_DOMAIN", ""), "initial base domain (default <public-ip>.sslip.io outside dev mode)")
+	fs.StringVar(&c.BaseDomain, "base-domain", env("SYNCLOUD_BASE_DOMAIN", ""), "initial base domain (default <public-ip>.sslip.io; in dev mode <local address>.sslip.io; off = none)")
 	fs.StringVar(&c.PublicIP, "public-ip", env("SYNCLOUD_PUBLIC_IP", ""), "public IPv4 address (default: detect)")
 	acme := fs.String("acme", env("SYNCLOUD_ACME", ""), "issue certificates with ACME: 1 or 0 (default 1, dev 0)")
 	fs.StringVar(&c.ACMEDirectory, "acme-directory", env("SYNCLOUD_ACME_DIRECTORY", "https://acme-v02.api.letsencrypt.org/directory"), "ACME directory URL")
@@ -127,7 +128,10 @@ func LoadController(args []string) (Controller, error) {
 		c.PublicHTTP = map[bool]string{true: "127.0.0.1:8080", false: ":80"}[c.Dev]
 	}
 	if c.PublicHTTPS == "" {
-		c.PublicHTTPS = map[bool]string{true: "127.0.0.1:8443", false: ":443"}[c.Dev]
+		// Dev mode too: the dashboard is https://<base domain>, without a
+		// port. (Plain HTTP only redirects there; dev keeps it off port 80,
+		// which development machines often use already.)
+		c.PublicHTTPS = ":443"
 	}
 	if c.PublicPostgres == "" {
 		c.PublicPostgres = map[bool]string{true: "127.0.0.1:15432", false: ":5432"}[c.Dev]

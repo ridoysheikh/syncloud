@@ -42,7 +42,7 @@ echo "== a changed etcd spec rolls out to the running member"
 x sc-e2e-ctl docker tag "$PG_IMAGE" syncloud/pg-test:dev
 x sc-e2e-ctl pkill -f "syncloud-controller --dev"
 sleep 2
-x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false --postgres-image 18=syncloud/pg-test:dev >> /var/log/controller.log 2>&1"
+x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false --base-domain off --postgres-image 18=syncloud/pg-test:dev >> /var/log/controller.log 2>&1"
 wait_for "the etcd member on the new image" '[ "$(x sc-e2e-ctl docker inspect -f "{{.Config.Image}}" syncloud-etcd-e0 2>/dev/null)" = syncloud/pg-test:dev ]'
 wait_for "healthy again" '[ "$(health)" = healthy ] && [ "$(q "SELECT count(*) FROM t" 2>/dev/null)" = "[['"'"'2'"'"']]" ]'
 echo "  ✓ the etcd member was recreated with the new spec and the cluster kept its data"

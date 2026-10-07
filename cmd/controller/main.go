@@ -13,6 +13,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -196,7 +197,13 @@ func serve(args []string) error {
 	if err := domains.Load(ctx); err != nil {
 		return err
 	}
-	detector := domain.NewDetector(cfg.PublicIP)
+	publicIP := cfg.PublicIP
+	if cfg.Dev && publicIP == "" {
+		// Development and tests: the address this machine is reached at,
+		// not the NAT's (sslip.io names, suggestions).
+		publicIP = devAddress(cfg)
+	}
+	detector := domain.NewDetector(publicIP)
 	if err := initBaseDomain(ctx, cfg, domains, detector, log); err != nil {
 		return err
 	}
@@ -836,15 +843,20 @@ func loopbackURLHost(listen string) string {
 	return net.JoinHostPort(host, port)
 }
 
-// initBaseDomain stores the first base domain: --base-domain, or outside dev
-// mode <public-ip>.sslip.io (§5.0.2). An existing setting is never replaced.
+// initBaseDomain stores the first base domain: --base-domain, or
+// <address>.sslip.io (§5.0.2) — the public IP, or in dev mode the address
+// the machine is reached at. An existing domain is never replaced, except
+// that an sslip.io/nip.io one follows a changed address.
 func initBaseDomain(ctx context.Context, cfg config.Controller, domains *domain.Service, det *domain.Detector, log *slog.Logger) error {
+	address := func() (string, error) { // in dev mode, the local address (see the detector)
+		dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		return det.PublicIP(dctx)
+	}
 	if cur := domains.Base(); cur != "" {
 		// After a restore on a new host, an sslip.io/nip.io domain still names the old IP.
-		if svc, ok := domain.WildcardService(cur); ok && (!cfg.Dev || cfg.PublicIP != "") {
-			dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			ip, err := det.PublicIP(dctx)
-			cancel()
+		if svc, ok := domain.WildcardService(cur); ok {
+			ip, err := address()
 			if want := domain.Wildcard(ip, svc); err == nil && want != cur {
 				log.Warn("public IP changed: moving the base domain", "from", cur, "to", want)
 				_, err = domains.Set(ctx, want)
@@ -854,13 +866,11 @@ func initBaseDomain(ctx context.Context, cfg config.Controller, domains *domain.
 		return nil
 	}
 	base := cfg.BaseDomain
+	if base == "off" { // no base domain: services on <name>.localhost over HTTP (tests)
+		return nil
+	}
 	if base == "" {
-		if cfg.Dev {
-			return nil
-		}
-		dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		ip, err := det.PublicIP(dctx)
-		cancel()
+		ip, err := address()
 		if err != nil {
 			log.Warn("no base domain: public IP detection failed; set one with --base-domain or in Settings → Domains", "err", err)
 			return nil
@@ -872,6 +882,26 @@ func initBaseDomain(ctx context.Context, cfg config.Controller, domains *domain.
 	}
 	log.Info("base domain set", "domain", base)
 	return nil
+}
+
+// devAddress is where a development or test controller is reached: the
+// agent advertise address when it is an IP, else this host's address on its
+// default route, else loopback. sslip.io resolves private addresses too, so
+// <address>.sslip.io names work from the same network.
+func devAddress(cfg config.Controller) string {
+	if host, _, err := net.SplitHostPort(cfg.AgentAdvertise); err == nil {
+		if a, err := netip.ParseAddr(host); err == nil && a.Is4() && !a.IsUnspecified() && !a.IsLoopback() {
+			return a.String()
+		}
+	}
+	// A UDP "connection" sends nothing; it only picks the outgoing interface.
+	if c, err := net.Dial("udp4", "192.0.2.1:9"); err == nil {
+		defer c.Close()
+		if a, ok := c.LocalAddr().(*net.UDPAddr); ok && a.IP.To4() != nil && !a.IP.IsLoopback() {
+			return a.IP.String()
+		}
+	}
+	return "127.0.0.1"
 }
 
 // acmeHTTPClient trusts the system roots plus caFile, if given.

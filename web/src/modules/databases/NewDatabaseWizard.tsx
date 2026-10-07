@@ -449,7 +449,7 @@ export function NewDatabaseWizard() {
                     enabled={f.public}
                     allow={f.allow}
                     port={port}
-                    scheme={engine?.tlsScheme}
+                    engine={f.engine}
                     onEnabled={(v) => set("public", v)}
                     onAllow={(v) => set("allow", v)}
                   />

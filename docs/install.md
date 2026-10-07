@@ -27,7 +27,7 @@ Useful options:
 
 | Option | Effect |
 | --- | --- |
-| `--base-domain example.com` | Use your own domain instead of `<ip>.sslip.io`. Point `*.example.com` at the controller. |
+| `--base-domain example.com` | Use your own domain instead of `<ip>.sslip.io`. Point `*.example.com` at the controller. Without it, the base domain is `<public-ip>.sslip.io`. A development controller (`--dev`) instead uses its local address, such as `192-168-1-20.sslip.io`. |
 | `--public-ip IP` | Skip public IP detection. |
 | `--acme-email you@example.com` | Contact address for Let's Encrypt. |
 | `--version V` | Install a specific release. |

@@ -34,7 +34,7 @@ echo $NEW > "$R/channels/stable"
 
 # Binaries replace themselves, so run them from a writable copy.
 x sc-e2e-ctl sh -c 'pkill -f "[s]yncloud-controller --dev"; sleep 1; cp /opt/sc/syncloud-controller /usr/local/bin/'
-x -d sc-e2e-ctl sh -c "/usr/local/bin/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false $CTL_FLAGS > /var/log/controller.log 2>&1"
+x -d sc-e2e-ctl sh -c "/usr/local/bin/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false --base-domain off $CTL_FLAGS > /var/log/controller.log 2>&1"
 for _ in $(seq 1 30); do x sc-e2e-ctl curl -fs localhost:7070/api/v1/system/status >/dev/null 2>&1 && break; sleep 1; done
 for n in ctl w1 w2; do
   mode=kernel; [ $n = w2 ] && mode=userspace
