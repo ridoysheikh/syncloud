@@ -190,4 +190,64 @@ Patroni keeps its leader lock in the platform etcd. SynCloud runs that etcd itse
 
 **Failover** on the database page, or `POST /api/v1/databases/<name>/failover`, performs a planned switchover to a healthy replica. With **synchronous replication** on, each commit waits until a replica has it, so a failover never loses a committed transaction.
 
-Coming next: PgBouncer pooling, the public STARTTLS endpoint, WAL-G backups to S3 with point-in-time restore, metrics, replica autoscaling, and pg_duckdb reading from S3.
+### Explorer and administration
+
+A PostgreSQL database page has these administration tabs:
+
+- **Databases:** the databases in the cluster, with owner, size and connections. You can create one, rename it, change its owner or connection limit, or drop it.
+  - The cluster's own database keeps its name, because the credentials use it.
+  - Dropping a database disconnects its sessions first.
+- **Roles:** every role, with its attributes, memberships and owned databases. Creating or editing a role opens a full page with these settings:
+  - **Sign-in:** whether the role can log in; its password (generated, typed, kept or removed); expiry; and connection limit.
+  - **Abilities:** create databases, create roles, and inherit privileges.
+  - **Membership:** other roles and the useful predefined ones, such as `pg_read_all_data` and `pg_monitor`, with an optional admin flag.
+  - **Access to databases:** read only, read and write, or none for each database. This covers every schema, table and sequence, including tables created later.
+  - **Drop:** first hands the role's objects in every database to another role.
+- **Explorer:** a tree of schemas, tables, views, materialized views, sequences, functions and types. System schemas are behind a toggle.
+  - A table shows its columns, keys, indexes (with size and scans), constraints, triggers, statistics, and its generated `CREATE` statement.
+  - The **Data** tab pages through rows. You can sort by a column, filter (`=`, `<`, `like`, `is null`, …) and count matching rows. It is read-only.
+  - Every database, schema, table, sequence and function has a **Privileges** grid with one row per grantee. Ticking boxes and choosing **Apply** runs the GRANT and REVOKE statements in one transaction and shows them.
+  - Choose a role to see what it can actually do, including through PUBLIC and its memberships.
+  - On a schema you can also grant on all its tables, sequences or functions at once, and set default privileges for objects created later.
+  - The database node lists the extensions you can install, update or drop in that database.
+- **Console:** runs SQL against any database in the cluster.
+  - **Read-only:** this is the default. Each statement runs in its own read-only transaction, so a `COMMIT` in the text does not end it.
+  - **Writes allowed:** statements commit, and the SQL text is recorded in the audit log.
+  - **Run as:** the console runs as `app`, or as a role `app` may become through **Run as**. It never runs as the superuser.
+  - Ctrl+Enter runs the selection, or everything. `EXPLAIN (ANALYZE, FORMAT JSON)` is drawn as a plan tree, and recent queries are kept in your browser.
+- **Sessions:** client connections with their state, wait events, blocking sessions and query. You can cancel a query or end a session. The platform's own sessions are hidden unless you ask for them.
+
+What is protected:
+
+- `syncloud_admin`, `replicator` and the `postgres` database can be viewed but not changed.
+- `SUPERUSER`, `REPLICATION`, `BYPASSRLS` and the file-access roles cannot be granted.
+- `app` keeps its name, password and login, because the credentials and the console use them.
+
+Passwords are hashed (SCRAM-SHA-256) before they reach the server. SynCloud does not store them, so a generated password is shown once.
+
+Every change is audited. Each operation is its own IAM action, so browsing (`database:GetPgSchema`, `database:ReadPgRows`, `database:RunPgQuery`) can be granted without administration (`database:AlterPgRole`, `database:ChangePgPrivileges`, `database:ExecutePgQuery`).
+
+The same operations are available from the CLI:
+
+```sh
+synctl db sql orders "SELECT count(*) FROM items"            # read-only
+synctl db sql orders --write - < migration.sql                 # writes, from stdin
+synctl db sql orders --as reporting "SELECT * FROM sales"      # as another role
+synctl db roles orders
+synctl db role create orders reporting --member-of pg_monitor  # prints the password once
+synctl db grant orders reporting --access read                 # whole database, now and later
+synctl db grant orders reporting --privileges SELECT,INSERT --on table:public.items
+synctl db revoke orders reporting --privileges ALL --on all-tables:public
+synctl db privileges orders --on table:public.items --role reporting
+synctl db role drop orders reporting --reassign-to app
+synctl db databases orders
+synctl db database create orders analytics
+synctl db schema orders
+synctl db describe orders public.items --ddl
+synctl db rows orders items --where 'status=open' --order id --desc --count
+synctl db extension install orders vector --db analytics
+synctl db sessions orders
+synctl db session cancel orders 4242
+```
+
+Coming next: PgBouncer pooling, the public STARTTLS endpoint, parameters, WAL-G backups to S3 with point-in-time restore, metrics, replica autoscaling, and pg_duckdb reading from S3.

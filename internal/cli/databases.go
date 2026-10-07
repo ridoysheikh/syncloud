@@ -667,6 +667,7 @@ func (a *app) databasesCmd() *cobra.Command {
 		creds,
 		simple("failover", "Promote a replica to primary", "POST", "/failover", "failoverDatabase", "Failover of %s requested"),
 		metricsCmd, events, keys, keyCmd, run, info, slow)
+	db.AddCommand(pgCommands(a)...)
 	return db
 }
 

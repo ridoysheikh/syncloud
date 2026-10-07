@@ -1841,7 +1841,7 @@ One image runs every role, chosen by its command: Patroni-managed Postgres, PgBo
   - failover still works with the controller stopped.
 - **13b.** Explorer and administration (above): databases, roles, schema browser, privileges and presets, extensions, SQL console, sessions; e2e: create a role, grant read-only on a database, connect as it (SELECT works, INSERT refused), revoke, alter it, and drop it with reassign; browse schema, columns and DDL; run a console query as `app`; refuse protected roles and SUPERUSER.
 - **13b2.** PgBouncer; public STARTTLS endpoint; parameters.
-- **13c.** WAL-G archiving and scheduled backups to S3 (MinIO in e2e), the backups UI, PITR restore and clone into a new cluster.
+- **13c.** WAL-G archiving and scheduled backups to S3 (MinIO in e2e), the backups UI, PITR restore and clone into a new cluster. User request (2026-10-07): WAL-G with S3 configuration and point-in-time recovery is required, so 13c comes right after 13b, before 13b2.
 - **13d.** Metrics and the dashboard charts; read-replica and vertical autoscaling; the analytics replica; storage alerts.
 - **13e.** pg_duckdb S3 integration and warehouse UX (Parquet read/export, analytics endpoint); TimescaleDB, pgvector and partman checks in e2e; docs.
 
@@ -1867,7 +1867,20 @@ One image runs every role, chosen by its command: Patroni-managed Postgres, PgBo
     - Removing a member on a node that cannot be told leaked its volume. Removals now record the volume in `database_orphans` (migration 00035), and the node removes it when it reports in.
     - After a controller restart, a member whose node had not reconnected yet looked changed, because its resolver was missing from the spec, and it was restarted. Spec-change restarts now wait for the member's node to connect.
   - **Docs:** a PostgreSQL section in docs/databases.md.
-- ⬜ 13b, 13b2, 13c–13e.
+- ✅ 13b (2026-10-07):
+  - **Explorer and administration:**
+    - Backend: `internal/dbs/pgadmin.go`, `pgschema.go`, `pgprivs.go` and `pgquery.go`.
+    - API: `internal/api/pgexplorer.go`, 21 operations under `/databases/{name}/pg/`.
+    - CLI: `synctl db sql|databases|database|roles|role|grant|revoke|privileges|schema|describe|rows|extensions|extension|sessions|session`.
+    - Dashboard: the Databases, Roles, Explorer, Console and Sessions tabs, plus full-page role forms.
+  - **Safety:**
+    - The console signs in as `app`. Read-only runs use one read-only transaction per statement over the extended protocol.
+    - Passwords are sent as SCRAM verifiers.
+    - Platform roles and databases are protected.
+    - `app` gets CREATEDB, CREATEROLE and `pg_monitor`, plus SET (not inherit) on the roles created through the API.
+  - **Verified:** `test/e2e/postgres-admin.sh`, plus UI flows in a browser.
+  - **Fix:** roles with `VALID UNTIL 'infinity'` broke the role list. The query now maps infinity to NULL.
+- ⬜ 13c (next, per the user), 13b2, 13d, 13e.
 
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)

@@ -26,17 +26,47 @@ import { fmtOps } from "./DatabasesPage";
 import { CapacityStep, DataStep, specOf } from "./NewDatabaseWizard";
 import { Console, Explorer } from "./Explorer";
 import { PgDataStep } from "./PostgresSteps";
+import { PgConsole } from "./pg/Console";
+import { PgDatabases, PgSessions } from "./pg/Databases";
+import { PgExplorer } from "./pg/Explorer";
+import { PgRoles } from "./pg/Roles";
 import { AccessEditor, allowList, PublicFields } from "./Network";
 
 type Tab =
   | "overview"
   | "connectivity"
   | "metrics"
+  | "databases"
+  | "roles"
   | "explorer"
   | "console"
+  | "sessions"
   | "autoscaling"
   | "logs"
   | "settings";
+
+const valkeyTabs: Tab[] = [
+  "overview",
+  "connectivity",
+  "metrics",
+  "explorer",
+  "console",
+  "autoscaling",
+  "logs",
+  "settings",
+];
+// Metrics and autoscaling for PostgreSQL come with Phase 13d.
+const postgresTabs: Tab[] = [
+  "overview",
+  "connectivity",
+  "databases",
+  "roles",
+  "explorer",
+  "console",
+  "sessions",
+  "logs",
+  "settings",
+];
 
 const errText = (e: unknown) =>
   e instanceof ApiError ? e.message : "Request failed";
@@ -55,8 +85,21 @@ export function DatabasePage() {
   const { name } = useParams({ strict: false }) as { name: string };
   const { data: all, isLoading } = useDatabases();
   const d = all?.find((x) => x.name === name);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTabState] = useState<Tab>(
+    () =>
+      (new URLSearchParams(window.location.search).get("tab") as Tab | null) ??
+      "overview",
+  );
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    // Keep the tab in the URL, so going back from a role page lands here.
+    const u = new URL(window.location.href);
+    u.searchParams.set("tab", t);
+    window.history.replaceState(window.history.state, "", u);
+  };
   const path = dbPath(name);
+  // The database inside a PostgreSQL cluster the explorer and console use.
+  const [pgDb, setPgDb] = useState(name.replace(/-/g, "_"));
 
   if (!d) {
     return isLoading ? null : (
@@ -64,6 +107,7 @@ export function DatabasePage() {
     );
   }
   const projectTo: string = `/projects/${d.project}/${d.environment}`;
+  const pg = d.engine === "postgres";
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader
@@ -97,32 +141,37 @@ export function DatabasePage() {
       />
       {d.status && <Alert tone="warn">{d.status}</Alert>}
       <Tabs
-        tabs={(
-          [
-            "overview",
-            "connectivity",
-            "metrics",
-            "explorer",
-            "console",
-            "autoscaling",
-            "logs",
-            "settings",
-          ] as Tab[]
-        ).filter(
-          // The key tools, autoscaling and (for now) metrics are Valkey's.
-          (t) =>
-            d.engine === "valkey" ||
-            !["explorer", "console", "autoscaling", "metrics"].includes(t),
-        )}
+        tabs={pg ? postgresTabs : valkeyTabs}
         value={tab}
         onChange={setTab}
       />
       {tab === "overview" && <Overview d={d} path={path} />}
       {tab === "connectivity" && <Connectivity d={d} path={path} />}
-      {tab === "metrics" && <Metrics path={path} />}
-      {tab === "explorer" && <Explorer path={path} />}
-      {tab === "console" && <Console path={path} />}
-      {tab === "autoscaling" && <Autoscaling d={d} path={path} />}
+      {tab === "metrics" && !pg && <Metrics path={path} />}
+      {tab === "databases" && pg && (
+        <PgDatabases
+          path={path}
+          onExplore={(db) => {
+            setPgDb(db);
+            setTab("explorer");
+          }}
+        />
+      )}
+      {tab === "roles" && pg && <PgRoles path={path} name={d.name} />}
+      {tab === "explorer" &&
+        (pg ? (
+          <PgExplorer path={path} db={pgDb} setDb={setPgDb} />
+        ) : (
+          <Explorer path={path} />
+        ))}
+      {tab === "console" &&
+        (pg ? (
+          <PgConsole path={path} db={pgDb} setDb={setPgDb} />
+        ) : (
+          <Console path={path} />
+        ))}
+      {tab === "sessions" && pg && <PgSessions path={path} />}
+      {tab === "autoscaling" && !pg && <Autoscaling d={d} path={path} />}
       {tab === "logs" && <LogsView filter={{ database: d.name }} />}
       {tab === "settings" && <Settings d={d} path={path} />}
     </div>

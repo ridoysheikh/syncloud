@@ -77,7 +77,8 @@ type Manager struct {
 	mu        sync.Mutex
 	live      map[string]*Live // member ID -> last probe
 	auto      map[string]*autoState
-	etcdUsers map[string]bool // PostgreSQL clusters whose etcd user exists
+	etcdUsers map[string]bool          // PostgreSQL clusters whose etcd user exists
+	pgSlots   map[string]chan struct{} // explorer connection slots per PostgreSQL cluster
 }
 
 // Recorder imports Prometheus text samples.
