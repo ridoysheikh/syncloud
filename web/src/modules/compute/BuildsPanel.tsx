@@ -80,7 +80,7 @@ export const builderLabel: Record<Builder, string> = {
 
 const isPattern = (s: string) => /[*?[]/.test(s);
 const shortRef = (r: string) => r.replace(/^refs\/(heads|tags)\//, "");
-const sel = "bg-bg border-line h-7 rounded-sm border px-1.5 text-xs";
+const sel = "bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs";
 
 const errText = (e: unknown, fallback: string) =>
   e instanceof ApiError ? e.message : fallback;

@@ -185,7 +185,7 @@ function PushCommands() {
     <Panel title="Push an image">
       <div className="flex flex-col gap-1 text-xs">
         {data.selfSigned && data.trust && (
-          <div className="border-warn/40 bg-warn/10 mb-1 flex flex-col gap-1 rounded-sm border p-2">
+          <div className="border-warn/20 bg-warn/10 mb-1 flex flex-col gap-1 rounded-sm border p-2">
             <span className="text-warn">
               The registry has a self-signed certificate (a private network).
               Nodes trust it automatically; run this once on each machine you

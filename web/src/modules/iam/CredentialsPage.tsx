@@ -304,7 +304,7 @@ function SecretDialog({
 function CopyValue({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="bg-bg border-line-strong flex h-8 items-center rounded-sm border pl-2">
+    <div className="bg-bg border-line-strong flex h-8 items-center rounded-input border pl-2">
       <code className="flex-1 truncate font-mono text-xs select-all">{value}</code>
       <IconButton
         label="Copy"

@@ -8,36 +8,43 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* Surfaces */
+  /* Surfaces. Borders blend into the surfaces: they separate, not frame. */
   --color-bg: #0b0d10;
   --color-surface: #111418;
-  --color-raised: #171b21;
-  --color-hover: #1d222a;
-  --color-line: #232831;
-  --color-line-strong: #2f3540;
+  --color-raised: #161a1f;
+  --color-hover: #1b2027;
+  --color-line: #171a20;
+  --color-line-strong: #1d2128;
+  /* Selected and focused borders, and focus outlines: a dim accent, not the
+     light text accent. */
+  --color-line-accent: #2a4068;
 
-  /* Text */
-  --color-fg: #e4e7eb;
-  --color-muted: #8a929d;
-  --color-faint: #5c646f;
+  /* Text: every text color is at least 8.5:1 against bg, surface, raised and
+     hover (WCAG AAA is 7:1). Status colors double as text, so they are light. */
+  --color-fg: #eef1f4;
+  --color-muted: #c0c7d0;
+  --color-faint: #b6bec8;
 
   /* Accent and status */
-  --color-accent: #4c8dff;
-  --color-accent-fg: #ffffff;
-  /* Button fills: darker than the accent and the raised surface (§10.1). */
+  --color-accent: #b4d0ff;
+  /* Text on a solid accent or status fill. */
+  --color-accent-fg: #0b0d10;
+  /* Button fills: darker than the accent and the raised surface (§10.1).
+     White on the primary fill is 9:1 (8.3:1 hovered). */
   --color-btn: #0e1115;
-  --color-btn-hover: #161a20;
-  --color-btn-primary: #2556b8;
-  --color-btn-primary-hover: #2c63d1;
-  --color-ok: #3fb950;
-  --color-warn: #d29922;
-  --color-bad: #f85149;
-  --color-info: #4c8dff;
-  --color-neutral: #6e7681;
+  --color-btn-hover: #14181d;
+  --color-btn-primary: #1d4594;
+  --color-btn-primary-hover: #1f4a9e;
+  --color-ok: #96e4a0;
+  --color-warn: #f2cf78;
+  --color-bad: #ffbab4;
+  --color-info: #b4d0ff;
+  --color-neutral: #8b939e;
 
-  /* Minor radii: rounded-sm (2px) for inputs, rounded-btn (5px) for buttons,
-     rounded-md (4px) for panels. */
+  /* Minor radii: rounded-sm (2px) for badges, rounded-input (4px) for form
+     fields, rounded-btn (5px) for buttons, rounded-md (4px) for panels. */
   --radius-sm: 0.125rem;
+  --radius-input: 0.25rem;
   --radius-md: 0.25rem;
   --radius-btn: 0.3125rem;
 }
@@ -59,7 +66,30 @@
     scrollbar-color: var(--color-line-strong) transparent;
   }
   :focus-visible {
-    outline: 1px solid var(--color-accent);
+    outline: 1px solid var(--color-line-accent);
     outline-offset: 1px;
   }
+}
+
+/*
+ * Form fields share one radius and focus color wherever they are styled.
+ * Unlayered so it wins over a caller's rounded-* utility.
+ */
+input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"]),
+select,
+textarea {
+  border-radius: var(--radius-input);
+}
+input:not([type="checkbox"], [type="radio"], [type="range"]):focus,
+select:focus,
+textarea:focus {
+  border-color: var(--color-line-accent);
+}
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-btn-primary);
+}
+::placeholder {
+  color: var(--color-faint);
+  opacity: 1;
 }

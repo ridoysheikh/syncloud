@@ -164,7 +164,7 @@ export function PublicFields({
             rows={3}
             placeholder={"203.0.113.0/24\n198.51.100.7"}
             className={cn(
-              "bg-bg border-line-strong focus:border-accent w-full rounded-sm border px-2 py-1 font-mono text-xs outline-none",
+              "bg-bg border-line-strong focus:border-line-accent w-full rounded-input border px-2 py-1 font-mono text-xs outline-none",
             )}
           />
         </Field>

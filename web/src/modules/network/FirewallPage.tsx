@@ -155,7 +155,7 @@ function EffectiveRules({ nodes }: { nodes: { id: string; name: string }[] }) {
       flush
       actions={
         <>
-          <select value={id} onChange={(e) => setNode(e.target.value)} className="bg-bg border-line h-7 rounded-sm border px-1.5 text-xs">
+          <select value={id} onChange={(e) => setNode(e.target.value)} className="bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs">
             {nodes.map((n) => (
               <option key={n.id} value={n.id}>
                 {n.name}
@@ -303,7 +303,7 @@ export function FirewallPolicyPage() {
               <select
                 value={r.protocol}
                 onChange={(e) => setRule(i, { protocol: e.target.value as Rule["protocol"], ports: "" })}
-                className="bg-bg border-line h-7 rounded-sm border px-1.5 text-xs"
+                className="bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs"
               >
                 <option value="tcp">TCP</option>
                 <option value="udp">UDP</option>

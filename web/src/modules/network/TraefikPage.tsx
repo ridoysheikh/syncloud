@@ -77,7 +77,7 @@ const CLOUDFLARE = [
   "2c0f:f248::/32",
 ];
 
-const sel = "bg-bg border-line-strong focus:border-accent h-8 w-full rounded-sm border px-2 text-sm outline-none";
+const sel = "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
 const stateTone = (s: string) => (s === "running" || s === "healthy" ? "ok" : s === "starting" || s === "pulling" ? "info" : "bad");
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -237,7 +237,7 @@ export function TraefikPage() {
                 rows={4}
                 spellCheck={false}
                 placeholder="e.g. 10.0.0.0/8"
-                className="bg-bg border-line-strong focus:border-accent w-full rounded-sm border p-2 font-mono text-xs outline-none"
+                className="bg-bg border-line-strong focus:border-line-accent w-full rounded-input border p-2 font-mono text-xs outline-none"
               />
             </Field>
             <div className="flex flex-wrap items-center gap-1.5">

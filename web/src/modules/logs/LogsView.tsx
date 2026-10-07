@@ -33,7 +33,7 @@ const PAGE = 500;
 
 /** Seconds in a range such as "15m" or "168h". */
 const secondsOf = (r: string) => Number(r.slice(0, -1)) * (r.endsWith("m") ? 60 : 3600);
-const taskColors = ["text-sky-400", "text-violet-400", "text-teal-400", "text-amber-400", "text-pink-400", "text-lime-400"];
+const taskColors = ["text-sky-300", "text-violet-300", "text-teal-300", "text-amber-300", "text-pink-300", "text-lime-300"];
 const levelColor: Record<string, string> = { fatal: "text-bad", error: "text-bad", warn: "text-warn", debug: "text-faint" };
 
 function colorOf(id: string) {
@@ -159,7 +159,7 @@ export function LogsView({ filter, showSource = true }: { filter: LogFilter; sho
           >
             <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search text…" className="h-7 w-40 sm:w-56" />
           </form>
-          <select value={since} onChange={(e) => setSince(e.target.value)} className="bg-bg border-line h-7 rounded-sm border px-1.5 text-xs">
+          <select value={since} onChange={(e) => setSince(e.target.value)} className="bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs">
             {["5m", "15m", "1h", "6h", "24h", "168h"].map((s) => (
               <option key={s} value={s}>
                 last {s === "168h" ? "7d" : s}

@@ -52,12 +52,12 @@ interface Value {
 const TYPES = ["string", "hash", "list", "set", "zset", "stream"] as const;
 
 const typeColor: Record<string, string> = {
-  string: "text-[#3987e5] border-[#3987e5]/40",
-  hash: "text-[#d95926] border-[#d95926]/40",
-  list: "text-[#199e70] border-[#199e70]/40",
-  set: "text-[#c98500] border-[#c98500]/40",
-  zset: "text-[#d55181] border-[#d55181]/40",
-  stream: "text-[#9085e9] border-[#9085e9]/40",
+  string: "text-[#a8c8ff] border-[#a8c8ff]/40",
+  hash: "text-[#ffb48f] border-[#ffb48f]/40",
+  list: "text-[#7fdcb8] border-[#7fdcb8]/40",
+  set: "text-[#f2cf78] border-[#f2cf78]/40",
+  zset: "text-[#ffa8c8] border-[#ffa8c8]/40",
+  stream: "text-[#c8c0ff] border-[#c8c0ff]/40",
 };
 
 const errText = (e: unknown) =>
@@ -152,7 +152,7 @@ export function Explorer({ path }: { path: string }) {
             />
           </div>
           <select
-            className="bg-bg border-line-strong focus:border-accent h-7 w-28 shrink-0 rounded-sm border px-1.5 text-xs outline-none"
+            className="bg-bg border-line-strong focus:border-line-accent h-7 w-28 shrink-0 rounded-input border px-1.5 text-xs outline-none"
             value={type}
             onChange={(e) => setType(e.target.value)}
             aria-label="Key type"
@@ -420,7 +420,7 @@ function ValueEditor({
             value={text}
             onChange={(e) => setText(e.target.value)}
             spellCheck={false}
-            className="bg-bg border-line-strong focus:border-accent min-h-48 w-full rounded-sm border p-2 font-mono text-xs outline-none"
+            className="bg-bg border-line-strong focus:border-line-accent min-h-48 w-full rounded-input border p-2 font-mono text-xs outline-none"
           />
           <div>
             <Button
@@ -667,7 +667,7 @@ function NewKey({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             spellCheck={false}
-            className="bg-bg border-line-strong focus:border-accent min-h-32 w-full rounded-sm border p-2 font-mono text-xs outline-none"
+            className="bg-bg border-line-strong focus:border-line-accent min-h-32 w-full rounded-input border p-2 font-mono text-xs outline-none"
           />
         </Field>
         {create.error && <Alert>{errText(create.error)}</Alert>}

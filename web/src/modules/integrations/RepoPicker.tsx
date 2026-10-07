@@ -103,7 +103,7 @@ export function RepoPicker({
             onClick={() => onConnection(c.name)}
             className={cn(
               "rounded-btn flex h-7 items-center gap-1.5 border px-2",
-              connection === c.name ? "border-accent bg-hover text-fg" : "border-line-strong text-muted hover:text-fg",
+              connection === c.name ? "border-line-accent bg-hover text-fg" : "border-line-strong text-muted hover:text-fg",
             )}
           >
             <span className="font-medium">{c.name}</span>
@@ -117,7 +117,7 @@ export function RepoPicker({
           onClick={() => onConnection("")}
           className={cn(
             "rounded-btn h-7 border px-2",
-            connection === "" ? "border-accent bg-hover text-fg" : "border-line-strong text-muted hover:text-fg",
+            connection === "" ? "border-line-accent bg-hover text-fg" : "border-line-strong text-muted hover:text-fg",
           )}
         >
           Any Git URL

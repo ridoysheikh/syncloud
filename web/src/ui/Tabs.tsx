@@ -35,8 +35,7 @@ export function Tabs<T extends string>({
       ref={ref}
       role="tablist"
       className={cn(
-        // On narrow screens the right edge fades: more tabs scroll in.
-        "flex min-w-0 gap-3 overflow-x-auto overflow-y-hidden pr-4 text-xs [scrollbar-width:none] max-md:[mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]",
+        "flex min-w-0 gap-3 overflow-x-auto overflow-y-hidden pr-4 text-xs [scrollbar-width:none]",
         tabRule,
         className,
       )}
@@ -51,7 +50,7 @@ export function Tabs<T extends string>({
             "shrink-0 border-b-2 px-1 pb-1.5 whitespace-nowrap",
             capitalize && "capitalize",
             value === t
-              ? "border-accent text-fg"
+              ? "border-line-accent text-fg"
               : "text-muted hover:text-fg border-transparent",
           )}
         >

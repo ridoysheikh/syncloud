@@ -490,7 +490,7 @@ function SpecEditor({ path, spec }: { path: string; spec: Spec }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           spellCheck={false}
-          className="bg-bg border-line h-96 w-full rounded-sm border p-2 font-mono text-[11px] leading-relaxed"
+          className="bg-bg border-line-strong h-96 w-full rounded-input border p-2 font-mono text-[11px] leading-relaxed"
         />
         {(parseErr || apply.error) && (
           <Alert>

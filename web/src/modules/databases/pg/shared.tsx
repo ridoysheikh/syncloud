@@ -17,7 +17,7 @@ import { cn } from "@/ui/cn";
 
 /** A compact select for toolbars and inline forms (selectClass is full width). */
 export const inlineSelect =
-  "bg-bg border-line-strong focus:border-accent h-7 rounded-sm border px-1.5 text-xs outline-none";
+  "bg-bg border-line-strong focus:border-line-accent h-7 rounded-input border px-1.5 text-xs outline-none";
 
 export const errText = (e: unknown) =>
   e instanceof ApiError ? e.message : "Request failed";

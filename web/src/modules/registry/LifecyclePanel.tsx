@@ -57,7 +57,7 @@ const toRule = (r: Row): Rule => ({
   [r.mode]: Number(r.count),
 });
 
-const select = "bg-bg border-line-strong h-7 rounded-sm border px-1.5 text-xs";
+const select = "bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs";
 
 /** A repository's lifecycle policy with a dry-run preview (§5.10). */
 export function LifecyclePanel({ repo }: { repo: string }) {

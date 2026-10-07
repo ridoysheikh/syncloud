@@ -38,7 +38,7 @@ const steps = [
 type Step = (typeof steps)[number];
 
 export const selectClass =
-  "bg-bg border-line-strong focus:border-accent h-8 w-full rounded-sm border px-2 text-sm outline-none";
+  "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
 
 /** Sizes offered in the wizard (MiB). */
 const SIZES = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
@@ -265,7 +265,7 @@ export function NewDatabaseWizard() {
                     i < idx
                       ? "border-accent bg-accent text-accent-fg"
                       : s === step
-                        ? "border-accent text-accent"
+                        ? "border-line-accent text-accent"
                         : "border-line",
                   )}
                 >
@@ -297,7 +297,7 @@ export function NewDatabaseWizard() {
                       className={cn(
                         "flex flex-col gap-1 rounded-sm border p-3 text-left",
                         f.engine === e.name
-                          ? "border-accent bg-raised"
+                          ? "border-line-accent bg-raised"
                           : "border-line hover:border-line-strong",
                         !e.available && "cursor-not-allowed opacity-60",
                       )}

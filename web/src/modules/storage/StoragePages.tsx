@@ -507,7 +507,7 @@ export function ServiceS3Panel({ path }: { path: string }) {
   const list = rows ?? [];
   const patch = (i: number, p: Partial<(typeof list)[number]>) => setRows(list.map((r, j) => (j === i ? { ...r, ...p } : r)));
   const dirty = rows !== null && JSON.stringify(rows) !== JSON.stringify(cur.data?.map((b) => ({ endpoint: b.endpoint, bucket: b.bucket, prefix: b.prefix, envPrefix: b.envPrefix })));
-  const sel = "bg-bg border-line-strong focus:border-accent h-7 rounded-sm border px-2 text-xs outline-none";
+  const sel = "bg-bg border-line-strong focus:border-line-accent h-7 rounded-input border px-2 text-xs outline-none";
   return (
     <Panel
       title="S3 buckets"

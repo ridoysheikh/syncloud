@@ -29,7 +29,7 @@ const steps = ["Source", "Service", "Variables", "Review"] as const;
 type Step = (typeof steps)[number];
 
 const select =
-  "bg-bg border-line-strong focus:border-accent h-8 w-full rounded-sm border px-2 text-sm outline-none";
+  "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
 
 interface Form {
   source: "image" | "git";
@@ -233,7 +233,7 @@ export function NewServiceWizard() {
                     i < idx
                       ? "border-accent bg-accent text-accent-fg"
                       : s === step
-                        ? "border-accent text-accent"
+                        ? "border-line-accent text-accent"
                         : "border-line",
                   )}
                 >
@@ -359,7 +359,7 @@ function Choice({
         "flex flex-col gap-1 rounded-md border text-left transition-colors",
         pad,
         active
-          ? "border-accent bg-accent/10"
+          ? "border-line-accent bg-accent/10"
           : "border-line hover:border-line-strong",
       )}
     >

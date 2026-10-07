@@ -138,9 +138,9 @@ export function PrivilegesEditor({
                           className={cn(
                             "inline-flex size-5 items-center justify-center rounded-sm border",
                             on
-                              ? "bg-accent/20 border-accent text-accent"
+                              ? "bg-accent/10 border-line-accent text-accent"
                               : "border-line-strong",
-                            changed && "ring-warn ring-1",
+                            changed && "ring-warn/30 ring-1",
                             (locked || g === p.owner) && "opacity-60",
                           )}
                         >

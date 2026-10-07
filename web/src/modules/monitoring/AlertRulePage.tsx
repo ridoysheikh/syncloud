@@ -22,7 +22,7 @@ import {
 } from "./AlertsPage";
 
 const sel =
-  "bg-bg border-line-strong focus:border-accent h-8 w-full rounded-sm border px-2 text-sm outline-none";
+  "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
 
 const types: { id: string; title: string; text: string }[] = [
   {
@@ -194,7 +194,7 @@ export function AlertRulePage() {
               onClick={() => set("type", t.id)}
               className={cn(
                 "border-line hover:border-line-strong rounded-sm border p-2 text-left",
-                r.type === t.id && "border-accent bg-hover",
+                r.type === t.id && "border-line-accent bg-hover",
               )}
             >
               <div className="text-sm">{t.title}</div>

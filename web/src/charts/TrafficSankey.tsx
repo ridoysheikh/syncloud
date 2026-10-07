@@ -97,7 +97,7 @@ export function TrafficSankey({
               formatter: (p: { name: string }) =>
                 byName.get(p.name)?.label ?? p.name,
             },
-            lineStyle: { color: "gradient", opacity: 0.25, curveness: 0.5 },
+            lineStyle: { color: "source", opacity: 0.25, curveness: 0.5 },
             data: nodes.map((n) => ({
               name: n.name,
               itemStyle: { color: n.color, borderWidth: 0 },

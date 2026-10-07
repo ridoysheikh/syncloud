@@ -199,7 +199,7 @@ function AddNodeDialog({
 function CommandBox({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="bg-bg border-line-strong flex items-start gap-1 rounded-sm border p-1.5 pl-2">
+    <div className="bg-bg border-line-strong flex items-start gap-1 rounded-input border p-1.5 pl-2">
       <code className="flex-1 font-mono text-xs break-all select-all">
         {value}
       </code>

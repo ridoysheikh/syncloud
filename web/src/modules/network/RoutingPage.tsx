@@ -32,7 +32,7 @@ interface MiddlewareView {
   services: string[];
 }
 
-const sel = "bg-bg border-line-strong focus:border-accent h-8 w-full rounded-sm border px-2 text-sm outline-none";
+const sel = "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
 
 function useMiddlewares() {
   return useQuery({
@@ -202,7 +202,7 @@ function CustomConfigPanel() {
         spellCheck={false}
         rows={12}
         placeholder={"http:\n  routers:\n    legacy:\n      rule: Host(`legacy.example.com`)\n      service: legacy\n  services:\n    legacy:\n      loadBalancer:\n        servers:\n          - url: http://10.0.0.5:8080"}
-        className="bg-bg border-line-strong focus:border-accent w-full rounded-sm border p-2 font-mono text-xs outline-none"
+        className="bg-bg border-line-strong focus:border-line-accent w-full rounded-input border p-2 font-mono text-xs outline-none"
       />
       {checked === "ok" && <p className="text-ok mt-1 text-xs">Valid.</p>}
       {checked && checked !== "ok" && (
@@ -466,7 +466,7 @@ export function MiddlewarePage() {
                   setType(t.type);
                   setConfig(defaults[t.type]);
                 }}
-                className={cn("border-line hover:border-line-strong rounded-sm border p-2 text-left", type === t.type && "border-accent bg-hover")}
+                className={cn("border-line hover:border-line-strong rounded-sm border p-2 text-left", type === t.type && "border-line-accent bg-hover")}
               >
                 <div className="text-sm">{presetLabels[t.type]}</div>
                 <div className="text-muted mt-0.5 text-xs">{t.description}</div>

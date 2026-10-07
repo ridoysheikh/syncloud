@@ -75,7 +75,7 @@ const fmt = (m: Metric, v: number) =>
     : m === "rps"
       ? `${v.toFixed(v < 10 ? 2 : 0)}/s`
       : `${v.toFixed(0)}ms`;
-const sel = "bg-bg border-line h-8 w-full rounded-sm border px-2 text-sm";
+const sel = "bg-bg border-line-strong h-8 w-full rounded-input border px-2 text-sm";
 
 /** Target tracking autoscaling of one service (§5.5). */
 export function AutoscalingPanel({

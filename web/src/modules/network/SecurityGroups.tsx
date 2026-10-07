@@ -35,7 +35,7 @@ export interface SecurityGroup {
   updatedAt: string;
 }
 
-const sel = "bg-bg border-line-strong focus:border-accent h-7 rounded-sm border px-1.5 text-xs outline-none";
+const sel = "bg-bg border-line-strong focus:border-line-accent h-7 rounded-input border px-1.5 text-xs outline-none";
 
 export function useSecurityGroups() {
   return useQuery({
@@ -248,7 +248,7 @@ export function ReachabilityPanel({ to: fixedTo }: { to?: string }) {
         </div>
       )}
       {v && (
-        <div className={cn("mt-2 flex items-start gap-2 rounded-sm border p-2 text-xs", v.verdict.allowed ? "border-ok/40" : "border-bad/40")}>
+        <div className={cn("mt-2 flex items-start gap-2 rounded-sm border p-2 text-xs", v.verdict.allowed ? "border-ok/20" : "border-bad/20")}>
           {v.verdict.allowed ? <ShieldCheck className="text-ok mt-0.5 size-4 shrink-0" /> : <ShieldX className="text-bad mt-0.5 size-4 shrink-0" />}
           <div className="flex flex-col gap-0.5">
             <span>

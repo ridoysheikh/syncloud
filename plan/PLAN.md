@@ -1001,7 +1001,8 @@ UI principles:
 
 **Spacing and shape (dense UI)**
 - Standard container/card padding: **`p-1.5 sm:p-2 md:p-3 lg:p-4`**. Gaps follow the same scale (`gap-1.5 sm:gap-2 md:gap-3 lg:gap-4`). Margins stay minimal; layout spacing comes from `gap`, not margins.
-- **Border radius is minor**: `rounded-sm` (2px) for inputs, buttons and badges, and `rounded` (4px) at most for cards and panels. There are no pill shapes except status dots.
+- **Border radius is minor**: `rounded-sm` (2px) for badges, `rounded-input` (4px) for every form field (enforced in `index.css`), `rounded-btn` (5px) for buttons, and `rounded` (4px) at most for cards and panels. There are no pill shapes except status dots.
+- **Borders blend in**: `line`/`line-strong` sit a few steps above the surfaces, selected and focused borders and focus outlines use the dim `line-accent`, and status borders are at most 20% opacity. No gradients anywhere.
 - Dense tables: `text-xs`/`text-sm`, row height ~28–32px, sticky headers, monospace for IDs, digests and IPs.
 - Thin 1px borders instead of heavy shadows to separate panels.
 - These are defined once as Tailwind component classes or React primitives (`<Panel>`, `<StatTile>`, `<DataTable>`, `<PageHeader>`), so every module looks the same.
@@ -1009,6 +1010,7 @@ UI principles:
 **Dark theme only**
 - One dark palette, defined as Tailwind theme tokens (CSS variables): background, surface, surface-raised, border, text, text-muted, and accent. Status colors are healthy (green), degraded (amber), down (red), deploying (blue) and neutral (gray).
 - There is no light mode or theme switcher, and no `dark:` variants. Dark is simply the design.
+- **Text contrast is at least 8.5:1** against bg, surface, raised and hover, placeholders included; status colors double as text, so they are light pastels, and tints behind text stay at 10%. Disabled controls are exempt.
 
 **Charts: Apache ECharts, minimal**
 - One shared **SynCloud ECharts theme** registered once: transparent background, no chart borders, faint dashed split lines, muted axis labels (`text-xs`), no axis lines or ticks, thin 1.5px lines, light area fill with low opacity, no symbols except on hover, and compact grid margins.
@@ -2072,6 +2074,12 @@ One image runs every role, chosen by its command: Patroni-managed Postgres, PgBo
     - type-to-confirm (disabled until the exact name);
     - no native dialogs fired;
     - logs over a 5-minute range: 62 → 121 → 240 lines, with button and scroll loading.
+
+- ✅ 14b (2026-10-08), requested after 14: borders close to the background, a small radius on inputs, 8.5:1 text contrast, no gradients:
+  - New tokens: blended `line`/`line-strong`, `line-accent` for selected/focused borders and outlines, light text and status colors (`muted` 9.6:1, `faint` 8.7:1 on the hover surface), and `accent-fg` dark for text on light fills; primary buttons keep white text on a darker fill (9:1).
+  - `index.css` gives every input, select and textarea the 4px radius, the dim focus border and the `faint` placeholder; raw selects share `border-line-strong`.
+  - The tab fade mask and the Sankey link gradient are gone.
+  - A Playwright contrast audit composites each text element's real background on all 104 routes at 1440 and 390 px: 0 below 8.5:1.
 
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)

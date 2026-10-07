@@ -145,7 +145,7 @@ export function NodesTable({
           onChange={(e) =>
             onSchedule(n, e.target.value as "cordon" | "drain" | "uncordon")
           }
-          className="bg-bg border-line h-7 rounded-sm border px-1 text-xs"
+          className="bg-bg border-line-strong h-7 rounded-input border px-1 text-xs"
           title="Whether this node runs services"
         >
           <option value="uncordon">run tasks</option>

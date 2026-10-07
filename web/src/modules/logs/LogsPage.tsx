@@ -13,7 +13,7 @@ export function LogsPage() {
   const [service, setService] = useState("");
   const envs = projects.find((p) => p.name === project)?.environments ?? [];
   const svcs = services.filter((s) => s.project === project && (!env || s.environment === env));
-  const sel = "bg-bg border-line h-7 rounded-sm border px-1.5 text-xs";
+  const sel = "bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs";
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader

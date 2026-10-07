@@ -151,7 +151,7 @@ function UsagePanel() {
         title="Usage"
         actions={
           <>
-            <select value={project} onChange={(e) => setProject(e.target.value)} className="bg-bg border-line h-7 rounded-sm border px-1.5 text-xs">
+            <select value={project} onChange={(e) => setProject(e.target.value)} className="bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs">
               <option value="">every project</option>
               {projects.map((p) => (
                 <option key={p.name}>{p.name}</option>

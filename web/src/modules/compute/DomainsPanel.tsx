@@ -81,7 +81,7 @@ export function DomainsPanel({
             <select
               value={port}
               onChange={(e) => setPort(e.target.value)}
-              className="bg-bg border-line h-7 rounded-sm border px-1.5 text-xs"
+              className="bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs"
             >
               {httpPorts.map((p) => (
                 <option key={p} value={p}>

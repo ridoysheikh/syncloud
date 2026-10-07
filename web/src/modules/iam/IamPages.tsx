@@ -57,7 +57,7 @@ interface Attachment {
   policy: string;
 }
 
-const sel = "bg-bg border-line-strong focus:border-accent h-8 rounded-sm border px-2 text-sm outline-none";
+const sel = "bg-bg border-line-strong focus:border-line-accent h-8 rounded-input border px-2 text-sm outline-none";
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "never");
 const errText = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 
@@ -235,7 +235,7 @@ export function NewUserPage() {
               ["service", "Service account", "For CI and automation: access keys and tokens only, no console sign-in."],
             ] as const
           ).map(([k, t, d]) => (
-            <button type="button" key={k} onClick={() => setKind(k)} className={cn("border-line rounded-sm border p-2 text-left", kind === k && "border-accent bg-hover")}>
+            <button type="button" key={k} onClick={() => setKind(k)} className={cn("border-line rounded-sm border p-2 text-left", kind === k && "border-line-accent bg-hover")}>
               <div className="text-sm">{t}</div>
               <div className="text-muted mt-0.5 text-xs">{d}</div>
             </button>
@@ -827,7 +827,7 @@ export function PolicyPage() {
           readOnly={readOnly}
           spellCheck={false}
           rows={22}
-          className="bg-bg border-line-strong focus:border-accent w-full rounded-sm border p-2 font-mono text-xs outline-none"
+          className="bg-bg border-line-strong focus:border-line-accent w-full rounded-input border p-2 font-mono text-xs outline-none"
         />
         {parseError && <p className="text-bad mt-1 text-xs">{parseError}</p>}
         <p className="text-muted mt-1.5 text-xs">

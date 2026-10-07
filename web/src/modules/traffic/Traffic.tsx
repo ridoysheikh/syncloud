@@ -484,7 +484,7 @@ export function RequestsTail({
     const el = box.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [lines]);
-  const sel = "bg-bg border-line h-7 rounded-sm border px-1.5 text-xs";
+  const sel = "bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs";
   const showService = !filter.service;
 
   return (

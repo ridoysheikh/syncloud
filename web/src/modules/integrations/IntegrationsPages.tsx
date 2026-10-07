@@ -232,7 +232,7 @@ export function GitConnectPage() {
               onClick={() => setKind(p.kind)}
               className={cn(
                 "rounded-btn flex flex-col gap-1 border p-2.5 text-left",
-                kind === p.kind ? "border-accent bg-hover" : "border-line hover:border-line-strong",
+                kind === p.kind ? "border-line-accent bg-hover" : "border-line hover:border-line-strong",
               )}
             >
               <span className="flex items-center gap-2 text-sm font-medium">

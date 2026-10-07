@@ -427,7 +427,7 @@ function ChannelsTab() {
     create.mutate();
   };
   const sel =
-    "bg-bg border-line-strong h-8 w-full rounded-sm border px-2 text-sm";
+    "bg-bg border-line-strong h-8 w-full rounded-input border px-2 text-sm";
   return (
     <div className={cn("grid grid-cols-1 lg:grid-cols-[1fr_22rem]", gap)}>
       <Panel title="Channels" flush>

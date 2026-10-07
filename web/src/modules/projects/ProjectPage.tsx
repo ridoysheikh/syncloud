@@ -117,7 +117,7 @@ export function ProjectPage() {
                 className={cn(
                   "rounded-sm border px-1.5 py-0.5 text-xs",
                   e === env
-                    ? "border-accent text-fg bg-accent/10"
+                    ? "border-line-accent text-fg bg-accent/10"
                     : "border-line text-muted hover:text-fg",
                 )}
               >

@@ -132,7 +132,7 @@ export function VarsEditor({
             onChange={(e) => setPaste(e.target.value)}
             placeholder={"DATABASE_URL=postgres://…\nLOG_LEVEL=info"}
             spellCheck={false}
-            className="bg-bg border-line-strong h-32 w-full rounded-sm border p-2 font-mono text-xs"
+            className="bg-bg border-line-strong h-32 w-full rounded-input border p-2 font-mono text-xs"
           />
           <div>
             <Button type="button" onClick={applyPaste} disabled={!paste.trim()}>

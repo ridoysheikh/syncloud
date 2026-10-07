@@ -49,7 +49,7 @@ interface Provider {
   summary: string;
 }
 
-const sel = "bg-bg border-line-strong focus:border-accent h-8 w-full rounded-sm border px-2 text-sm outline-none";
+const sel = "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
 const errText = (e: unknown, f: string) => (e instanceof ApiError ? e.message : f);
 const usePools = () =>
   useQuery({ queryKey: ["node-pools"], queryFn: async () => (await api<{ items: Pool[] }>("GET", "/node-pools")).items, refetchInterval: 5000 });

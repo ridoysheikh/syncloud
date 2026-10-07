@@ -85,7 +85,7 @@ function AlertBell() {
       {firing.length > 0 && (
         <span
           className={cn(
-            "absolute -top-0.5 -right-0.5 min-w-3.5 rounded-full px-1 text-center text-[9px] leading-3.5 font-semibold text-white",
+            "absolute -top-0.5 -right-0.5 min-w-3.5 rounded-full px-1 text-center text-[9px] leading-3.5 font-semibold text-accent-fg",
             critical ? "bg-bad" : "bg-warn",
           )}
         >
@@ -106,7 +106,7 @@ function BackupWarning() {
   return (
     <Link
       to={backupsPath}
-      className="border-warn/40 bg-warn/10 text-warn hidden h-7 items-center gap-1.5 rounded-sm border px-2 text-xs font-medium md:flex"
+      className="border-warn/20 bg-warn/10 text-warn hidden h-7 items-center gap-1.5 rounded-sm border px-2 text-xs font-medium md:flex"
       title={failing ? data.status.lastError : "The controller is not backed up. Configure an S3 destination."}
       aria-label={failing ? "Backup failing" : "Backups are off"}
     >
@@ -153,7 +153,7 @@ function UserMenu({ user }: { user: User }) {
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <span className="bg-accent/20 text-accent flex size-5 items-center justify-center rounded-sm text-[10px] font-semibold">
+        <span className="bg-accent/10 text-accent flex size-5 items-center justify-center rounded-sm text-[10px] font-semibold">
           {user.name.slice(0, 1).toUpperCase()}
         </span>
         <span className="hidden max-w-32 truncate md:inline">{user.name}</span>

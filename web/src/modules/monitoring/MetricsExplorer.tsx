@@ -85,7 +85,7 @@ export function MetricsExplorerPage() {
             }}
             rows={3}
             spellCheck={false}
-            className="bg-bg border-line-strong focus:border-accent w-full rounded-sm border p-2 font-mono text-xs outline-none"
+            className="bg-bg border-line-strong focus:border-line-accent w-full rounded-input border p-2 font-mono text-xs outline-none"
             placeholder="PromQL, e.g. sum by (service) (rate(traefik_service_requests_total[5m]))"
           />
           <div className="flex flex-wrap items-center gap-2">
