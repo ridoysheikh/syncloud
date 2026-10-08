@@ -1,7 +1,7 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { Link, useParams } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ExternalLink, GitBranch, Plus, Trash2 } from "lucide-react";
+import { Boxes, ExternalLink, GitBranch, Plus } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import {
   AWAITING_BUILD,
@@ -33,9 +33,13 @@ import { Tabs } from "@/ui/Tabs";
 import { ProjectNodesPanel } from "./NodeLimits";
 import { DatabasesTable } from "@/modules/databases/DatabasesPage";
 import { useDatabases } from "@/lib/databases";
-import { confirmAction } from "@/ui/dialogs";
 import { ProjectDeployments } from "@/modules/compute/Deployments";
 import { ProjectDomains } from "./ProjectDomains";
+import {
+  DangerZone,
+  DeployLockBanner,
+  EnvironmentsPanel,
+} from "./ProjectSettings";
 
 type Tab =
   | "services"
@@ -97,6 +101,7 @@ export function ProjectPage() {
       {p.description && (
         <p className="text-muted -mt-1 text-xs">{p.description}</p>
       )}
+      <DeployLockBanner project={p.name} env={env} />
       <div className="flex flex-wrap-reverse items-end justify-between gap-x-2 gap-y-1">
         <Tabs
           className="flex-1"
@@ -179,10 +184,11 @@ export function ProjectPage() {
         <ProjectSettings
           key={p.name}
           project={p.name}
+          projectId={p.id}
+          createdAt={p.createdAt}
           description={p.description}
           rollbackWindow={p.rollbackWindow}
           nodes={p.nodes ?? []}
-          environments={p.environments}
           services={services.filter((s) => s.project === p.name)}
         />
       )}
@@ -363,56 +369,34 @@ function SharedVariables({
 
 function ProjectSettings({
   project,
+  projectId,
+  createdAt,
   description,
   rollbackWindow,
   nodes,
-  environments,
   services,
 }: {
   project: string;
+  projectId: string;
+  createdAt: string;
   description: string;
   rollbackWindow: number;
   nodes: string[];
-  environments: string[];
   services: Service[];
 }) {
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-  const [name, setName] = useState("");
-  const done = () => qc.invalidateQueries({ queryKey: ["projects"] });
-  const addEnv = useMutation({
-    mutationFn: () =>
-      api("POST", `/projects/${project}/environments`, { name }),
-    onSuccess: () => {
-      setName("");
-      done();
-    },
-  });
-  const delEnv = useMutation({
-    mutationFn: (e: string) => api("DELETE", envPath(project, e)),
-    onSuccess: done,
-  });
-  const delProject = useMutation({
-    mutationFn: () => api("DELETE", `/projects/${project}`),
-    onSuccess: () => {
-      done();
-      const to: string = "/projects";
-      void navigate({ to });
-    },
-  });
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (name) addEnv.mutate();
-  };
-  const err = addEnv.error ?? delEnv.error ?? delProject.error;
   return (
     <div className={cn("grid grid-cols-1 items-start lg:grid-cols-2", gap)}>
       <div className="lg:col-span-2">
         <ProjectGeneralPanel
           project={project}
+          projectId={projectId}
+          createdAt={createdAt}
           description={description}
           rollbackWindow={rollbackWindow}
         />
+      </div>
+      <div className="lg:col-span-2">
+        <EnvironmentsPanel project={project} services={services} />
       </div>
       <div className="lg:col-span-2">
         <ProjectNodesPanel
@@ -421,76 +405,9 @@ function ProjectSettings({
           services={services}
         />
       </div>
-      <Panel title="Environments">
-        <div className="flex flex-col gap-2">
-          {environments.map((e) => {
-            const n = services.filter((s) => s.environment === e).length;
-            return (
-              <div
-                key={e}
-                className="flex items-center justify-between text-xs"
-              >
-                <span className="font-mono">{e}</span>
-                <span className="flex items-center gap-2">
-                  <span className="text-faint">
-                    {n} service{n === 1 ? "" : "s"}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    disabled={n > 0 || environments.length === 1}
-                    title={n > 0 ? "Delete its services first" : undefined}
-                    onClick={async () =>
-                      (await confirmAction(`Delete environment ${e}?`)) &&
-                      delEnv.mutate(e)
-                    }
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </span>
-              </div>
-            );
-          })}
-          <form onSubmit={submit} className="flex items-end gap-1.5">
-            <Field label="New environment">
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value.toLowerCase())}
-                placeholder="staging"
-                className="h-7 font-mono"
-              />
-            </Field>
-            <Button type="submit" disabled={!name || addEnv.isPending}>
-              Add
-            </Button>
-          </form>
-        </div>
-      </Panel>
-      <Panel title="Danger zone">
-        <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="text-muted">
-            {services.length
-              ? `Delete the project's ${services.length} service${services.length === 1 ? "" : "s"} first.`
-              : "Delete the project and its environments."}
-          </span>
-          <Button
-            variant="danger"
-            disabled={services.length > 0 || delProject.isPending}
-            onClick={async () =>
-              (await confirmAction(`Delete project ${project}?`)) &&
-              delProject.mutate()
-            }
-          >
-            <Trash2 className="size-3.5" /> Delete project
-          </Button>
-        </div>
-      </Panel>
-      {err && (
-        <div className="lg:col-span-2">
-          <Alert>
-            {err instanceof ApiError ? err.message : "Request failed"}
-          </Alert>
-        </div>
-      )}
+      <div className="lg:col-span-2">
+        <DangerZone project={project} services={services} />
+      </div>
     </div>
   );
 }
@@ -543,10 +460,14 @@ function ProjectDatabases({ project, env }: { project: string; env: string }) {
 /** A project's description and how many revisions stay rollback-ready. */
 function ProjectGeneralPanel({
   project,
+  projectId,
+  createdAt,
   description,
   rollbackWindow,
 }: {
   project: string;
+  projectId: string;
+  createdAt: string;
   description: string;
   rollbackWindow: number;
 }) {
@@ -605,6 +526,18 @@ function ProjectGeneralPanel({
           />
         </Field>
       </div>
+      <dl className="text-muted mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        <div>
+          <dt className="inline">ID </dt>
+          <dd className="text-fg inline font-mono break-all">{projectId}</dd>
+        </div>
+        <div>
+          <dt className="inline">Created </dt>
+          <dd className="text-fg inline">
+            {new Date(createdAt).toLocaleDateString()}
+          </dd>
+        </div>
+      </dl>
       {save.error && (
         <div className="mt-2">
           <Alert>

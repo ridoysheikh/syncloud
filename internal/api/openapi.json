@@ -1312,7 +1312,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Delete an empty project",
+        "summary": "Delete a project: empty, or with force its services first (202). Refused while it has databases.",
         "parameters": [
           {
             "name": "project",
@@ -1321,6 +1321,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "delete its services too"
           }
         ],
         "responses": {
@@ -1332,6 +1341,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Error"
+          },
+          "202": {
+            "description": "Its services are being deleted; the project goes after them"
           }
         }
       },
@@ -4153,7 +4165,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Create an environment",
+        "summary": "Create an environment, empty or as a copy of another (cloneFrom)",
         "parameters": [
           {
             "name": "project",
@@ -4173,6 +4185,14 @@
                 "properties": {
                   "name": {
                     "type": "string"
+                  },
+                  "cloneFrom": {
+                    "type": "string",
+                    "description": "copy this environment: shared variables, services (current specs), jobs and security group attachments; not domains, public ports, Git sources, S3 bindings or databases"
+                  },
+                  "startServices": {
+                    "type": "boolean",
+                    "description": "with cloneFrom: keep the services' task counts (default: 0 tasks)"
                   }
                 },
                 "required": [
@@ -4208,7 +4228,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Delete an environment without services",
+        "summary": "Delete an environment: empty, or with force its services first (202: it goes after them). Refused while it has databases.",
         "parameters": [
           {
             "name": "project",
@@ -4225,6 +4245,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "delete its services too"
           }
         ],
         "responses": {
@@ -4236,6 +4265,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Error"
+          },
+          "202": {
+            "description": "Its services are being deleted; the environment goes after them"
           }
         }
       }
@@ -15047,6 +15079,73 @@
           }
         }
       }
+    },
+    "/api/v1/projects/{project}/environments/{env}/policy": {
+      "put": {
+        "operationId": "setEnvironmentPolicy",
+        "tags": [
+          "projects"
+        ],
+        "summary": "Set an environment's deploy policy: builds deploying themselves, and a deploy lock with a reason (locked deploys answer 423; rollbacks and cancels still work)",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "autoDeploy": {
+                    "type": "boolean"
+                  },
+                  "locked": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "why deploys are locked (3\u2013300 characters)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Environment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -16127,6 +16226,9 @@
           "rollbackWindow": {
             "type": "integer",
             "description": "revisions whose images registry cleanup keeps for rollbacks"
+          },
+          "deleting": {
+            "type": "boolean"
           }
         }
       },
@@ -16163,6 +16265,33 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "autoDeploy": {
+            "type": "boolean",
+            "description": "builds deploy themselves (the Git source's switch applies too)"
+          },
+          "lock": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "set: deploys are locked (rollbacks and cancels still work)",
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "by": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "deleting": {
+            "type": "boolean",
+            "description": "deleted with everything: it goes once its services are gone"
           }
         }
       },

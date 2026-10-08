@@ -247,6 +247,9 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 	if desired > maxDesired {
 		return ServiceView{}, false, ErrInvalid{fmt.Errorf("desiredCount must be at most %d", maxDesired)}
 	}
+	if err := m.checkLock(ctx, env.ID); err != nil {
+		return ServiceView{}, false, err
+	}
 	now := m.now().UTC().Truncate(time.Second)
 	sv, err := m.st.ServiceByName(ctx, env.ID, name)
 	created := false
@@ -479,6 +482,9 @@ func (m *Manager) rollback(ctx context.Context, sv store.Service, revision int, 
 func (m *Manager) SetSharedEnv(ctx context.Context, env store.Environment, vars map[string]string, actor string) ([]string, error) {
 	if err := ValidateEnv(vars); err != nil {
 		return nil, ErrInvalid{err}
+	}
+	if err := m.checkLock(ctx, env.ID); err != nil {
+		return nil, err // the variables would redeploy every service
 	}
 	if err := m.st.SetSharedEnv(ctx, env.ID, vars); err != nil {
 		return nil, err

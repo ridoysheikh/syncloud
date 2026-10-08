@@ -44,6 +44,10 @@ import { confirmAction } from "@/ui/dialogs";
 import { lineDiff, withContext } from "@/lib/linediff";
 import { DeploymentsTable, useDeploymentActions } from "./Deployments";
 import { DeployTab } from "./DeployTab";
+import {
+  DeployLockBanner,
+  useEnvironments,
+} from "@/modules/projects/ProjectSettings";
 
 interface Revision {
   revision: number;
@@ -95,6 +99,7 @@ export function ServicePage() {
   );
 
   const actions = useDeploymentActions();
+  const lock = useEnvironments(project).data?.find((e) => e.name === env)?.lock;
   const scale = useMutation({
     mutationFn: (n: number) =>
       api("POST", `${path}/scale`, { desiredCount: n }),
@@ -158,9 +163,15 @@ export function ServicePage() {
               </IconButton>
             </div>
             <Button
-              disabled={actions.pending || svc.spec.image === AWAITING_BUILD}
+              disabled={
+                actions.pending || svc.spec.image === AWAITING_BUILD || !!lock
+              }
               onClick={() => void actions.redeploy(path)}
-              title="Restart every task with a rolling deployment"
+              title={
+                lock
+                  ? `Deploys to ${env} are locked: ${lock.reason}`
+                  : "Restart every task with a rolling deployment"
+              }
             >
               <RefreshCw className="size-3.5" /> Redeploy
             </Button>
@@ -175,6 +186,7 @@ export function ServicePage() {
           </>
         }
       />
+      <DeployLockBanner project={project} env={env} />
       {svc.status &&
         (svc.spec.image === AWAITING_BUILD ? (
           <Alert tone="info">

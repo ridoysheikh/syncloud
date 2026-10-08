@@ -409,9 +409,16 @@ func (c *Client) SetProjectNodes(ctx context.Context, project string, nodes []st
 }
 
 type Environment struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	CreatedAt  time.Time `json:"createdAt"`
+	AutoDeploy bool      `json:"autoDeploy"`
+	Lock       *struct {
+		Reason string    `json:"reason"`
+		By     string    `json:"by"`
+		At     time.Time `json:"at"`
+	} `json:"lock"`
+	Deleting bool `json:"deleting"`
 }
 
 type ServicePort struct {
@@ -609,8 +616,17 @@ func (c *Client) CreateProject(ctx context.Context, name, description, environme
 	return out, c.Do(ctx, "POST", "/api/v1/projects", map[string]string{"name": name, "description": description, "environment": environment}, &out)
 }
 
-func (c *Client) DeleteProject(ctx context.Context, name string) error {
-	return c.Do(ctx, "DELETE", "/api/v1/projects/"+url.PathEscape(name), nil, nil)
+// DeleteProject deletes a project; with everything its services go first
+// (pending: the project goes after them).
+func (c *Client) DeleteProject(ctx context.Context, name string, everything bool) (pending bool, err error) {
+	var out struct {
+		Deleting bool `json:"deleting"`
+	}
+	q := ""
+	if everything {
+		q = "?force=true"
+	}
+	return out.Deleting, c.Do(ctx, "DELETE", "/api/v1/projects/"+url.PathEscape(name)+q, nil, &out)
 }
 
 func (c *Client) ListEnvironments(ctx context.Context, project string) ([]Environment, error) {
@@ -623,8 +639,41 @@ func (c *Client) CreateEnvironment(ctx context.Context, project, name string) (E
 	return out, c.Do(ctx, "POST", "/api/v1/projects/"+url.PathEscape(project)+"/environments", map[string]string{"name": name}, &out)
 }
 
-func (c *Client) DeleteEnvironment(ctx context.Context, project, name string) error {
-	return c.Do(ctx, "DELETE", "/api/v1/projects/"+url.PathEscape(project)+"/environments/"+url.PathEscape(name), nil, nil)
+// DeleteEnvironment deletes an environment, with its services when
+// everything is set (pending: it goes after them).
+func (c *Client) DeleteEnvironment(ctx context.Context, project, name string, everything bool) (pending bool, err error) {
+	var out struct {
+		Deleting bool `json:"deleting"`
+	}
+	q := ""
+	if everything {
+		q = "?force=true"
+	}
+	return out.Deleting, c.Do(ctx, "DELETE", "/api/v1/projects/"+url.PathEscape(project)+"/environments/"+url.PathEscape(name)+q, nil, &out)
+}
+
+// CloneEnvironment creates an environment as a copy of another.
+func (c *Client) CloneEnvironment(ctx context.Context, project, name, from string, start bool) (services, jobs []string, err error) {
+	var out struct {
+		Services []string `json:"services"`
+		Jobs     []string `json:"jobs"`
+	}
+	err = c.Do(ctx, "POST", "/api/v1/projects/"+url.PathEscape(project)+"/environments",
+		map[string]any{"name": name, "cloneFrom": from, "startServices": start}, &out)
+	return out.Services, out.Jobs, err
+}
+
+// EnvironmentPolicy changes an environment's auto-deploy switch and deploy
+// lock; nil fields keep their value.
+type EnvironmentPolicy struct {
+	AutoDeploy *bool   `json:"autoDeploy,omitempty"`
+	Locked     *bool   `json:"locked,omitempty"`
+	Reason     *string `json:"reason,omitempty"`
+}
+
+func (c *Client) SetEnvironmentPolicy(ctx context.Context, project, env string, in EnvironmentPolicy) (Environment, error) {
+	var out Environment
+	return out, c.Do(ctx, "PUT", "/api/v1/projects/"+url.PathEscape(project)+"/environments/"+url.PathEscape(env)+"/policy", in, &out)
 }
 
 // SharedVariables returns an environment's shared variables.

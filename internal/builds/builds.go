@@ -920,7 +920,24 @@ func (m *Manager) kickQueue() {
 // built deploys a succeeded build when auto-deploy is on, and reports it.
 func (m *Manager) built(ctx context.Context, b store.Build) {
 	state, desc := gitprovider.StateSuccess, "Built; deploy it from the dashboard"
-	if g, err := m.st.GitSourceByService(ctx, b.ServiceID); err == nil && g.AutoDeploy && m.newerDeployed(ctx, b) {
+	g, err := m.st.GitSourceByService(ctx, b.ServiceID)
+	// The environment's policy (Phase 15d): auto-deploy off, or locked.
+	if err == nil && g.AutoDeploy {
+		if sv, serr := m.st.ServiceByID(ctx, b.ServiceID); serr == nil {
+			if e, eerr := m.st.EnvironmentByID(ctx, sv.EnvironmentID); eerr == nil {
+				switch {
+				case e.Lock != nil:
+					g.AutoDeploy = false
+					b.Message = "not deployed: deploys to " + e.Name + " are locked (" + e.Lock.Reason + ")"
+					desc = "Built; deploys are locked"
+				case !e.AutoDeploy:
+					g.AutoDeploy = false
+					b.Message = "not deployed: " + e.Name + " deploys builds by hand"
+				}
+			}
+		}
+	}
+	if err == nil && g.AutoDeploy && m.newerDeployed(ctx, b) {
 		// Two pushes built at once: never roll back to the older commit
 		// because its build happened to finish last.
 		b.Message = "not deployed: a newer commit of " + gitremote.ShortRef(b.Ref) + " is already deployed"

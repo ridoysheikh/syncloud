@@ -19,6 +19,8 @@ type Project struct {
 	// their images through registry cleanup (Phase 15a).
 	RollbackWindow int       `json:"rollbackWindow"`
 	CreatedAt      time.Time `json:"createdAt"`
+	// Deleting: the project goes once its environments are gone (15d).
+	Deleting bool `json:"deleting"`
 }
 
 type Environment struct {
@@ -27,18 +29,38 @@ type Environment struct {
 	Name      string            `json:"name"`
 	SharedEnv map[string]string `json:"sharedEnv"`
 	CreatedAt time.Time         `json:"createdAt"`
+	// AutoDeploy lets builds deploy themselves (Phase 15d; the Git source's
+	// own switch applies too).
+	AutoDeploy bool `json:"autoDeploy"`
+	// Lock, when set, blocks deployments other than rollbacks and cancels.
+	Lock     *DeployLock `json:"lock"`
+	Deleting bool        `json:"deleting"`
 }
 
-const envCols = `SELECT id, project_id, name, shared_env, created_at FROM environments`
+// DeployLock is why an environment takes no deployments, and since when.
+type DeployLock struct {
+	Reason string    `json:"reason"`
+	By     string    `json:"by"`
+	At     time.Time `json:"at"`
+}
+
+const envCols = `SELECT id, project_id, name, shared_env, created_at, auto_deploy, lock_reason, locked_by, locked_at, deleting FROM environments`
 
 func scanEnv(r scanner) (Environment, error) {
 	var e Environment
-	var shared string
+	var shared, reason, by string
 	var at int64
-	if err := r.Scan(&e.ID, &e.ProjectID, &e.Name, &shared, &at); err != nil {
+	var lockedAt sql.NullInt64
+	if err := r.Scan(&e.ID, &e.ProjectID, &e.Name, &shared, &at, &e.AutoDeploy, &reason, &by, &lockedAt, &e.Deleting); err != nil {
 		return e, err
 	}
 	e.CreatedAt = time.Unix(at, 0).UTC()
+	if reason != "" {
+		e.Lock = &DeployLock{Reason: reason, By: by}
+		if lockedAt.Valid {
+			e.Lock.At = time.Unix(lockedAt.Int64, 0).UTC()
+		}
+	}
 	err := json.Unmarshal([]byte(shared), &e.SharedEnv)
 	return e, err
 }
@@ -128,7 +150,7 @@ func (s *Store) CreateProject(ctx context.Context, p Project, env Environment) e
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
-	rows, err := s.R.QueryContext(ctx, `SELECT id, name, description, nodes, rollback_window, created_at FROM projects ORDER BY name`)
+	rows, err := s.R.QueryContext(ctx, `SELECT id, name, description, nodes, rollback_window, created_at, deleting FROM projects ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +160,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 		var p Project
 		var at int64
 		var nodes string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &nodes, &p.RollbackWindow, &at); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &nodes, &p.RollbackWindow, &at, &p.Deleting); err != nil {
 			return nil, err
 		}
 		p.Nodes = parseNodes(nodes)
@@ -160,7 +182,7 @@ func (s *Store) project(ctx context.Context, where string, arg any) (Project, er
 	var p Project
 	var at int64
 	var nodes string
-	err := s.R.QueryRowContext(ctx, `SELECT id, name, description, nodes, rollback_window, created_at FROM projects WHERE `+where, arg).Scan(&p.ID, &p.Name, &p.Description, &nodes, &p.RollbackWindow, &at)
+	err := s.R.QueryRowContext(ctx, `SELECT id, name, description, nodes, rollback_window, created_at, deleting FROM projects WHERE `+where, arg).Scan(&p.ID, &p.Name, &p.Description, &nodes, &p.RollbackWindow, &at, &p.Deleting)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -213,7 +235,9 @@ var ErrNotEmpty = errors.New("not empty")
 // DeleteProject removes a project without services.
 func (s *Store) DeleteProject(ctx context.Context, id string) error {
 	var n int
-	if err := s.R.QueryRowContext(ctx, `SELECT count(*) FROM services sv JOIN environments e ON e.id = sv.environment_id WHERE e.project_id = ?`, id).Scan(&n); err != nil {
+	// Databases too: deleting their rows would leave their members running.
+	if err := s.R.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM services sv JOIN environments e ON e.id = sv.environment_id WHERE e.project_id = ?)
+		+ (SELECT count(*) FROM databases d JOIN environments e ON e.id = d.environment_id WHERE e.project_id = ?)`, id, id).Scan(&n); err != nil {
 		return err
 	}
 	if n > 0 {
@@ -292,13 +316,76 @@ func (s *Store) SetSharedEnv(ctx context.Context, envID string, vars map[string]
 
 func (s *Store) DeleteEnvironment(ctx context.Context, id string) error {
 	var n int
-	if err := s.R.QueryRowContext(ctx, `SELECT count(*) FROM services WHERE environment_id = ?`, id).Scan(&n); err != nil {
+	if err := s.R.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM services WHERE environment_id = ?) + (SELECT count(*) FROM databases WHERE environment_id = ?)`,
+		id, id).Scan(&n); err != nil {
 		return err
 	}
 	if n > 0 {
 		return ErrNotEmpty
 	}
 	_, err := s.W.ExecContext(ctx, `DELETE FROM environments WHERE id = ?`, id)
+	return err
+}
+
+// SetEnvironmentPolicy sets an environment's auto-deploy switch and deploy
+// lock (lock nil: unlocked).
+func (s *Store) SetEnvironmentPolicy(ctx context.Context, id string, autoDeploy bool, lock *DeployLock) error {
+	reason, by := "", ""
+	var at any
+	if lock != nil {
+		reason, by, at = lock.Reason, lock.By, lock.At.Unix()
+	}
+	res, err := s.W.ExecContext(ctx, `UPDATE environments SET auto_deploy = ?, lock_reason = ?, locked_by = ?, locked_at = ? WHERE id = ?`,
+		autoDeploy, reason, by, at, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// EnvironmentContents counts what is left in an environment.
+func (s *Store) EnvironmentContents(ctx context.Context, id string) (services int, databases []string, err error) {
+	if err = s.R.QueryRowContext(ctx, `SELECT count(*) FROM services WHERE environment_id = ?`, id).Scan(&services); err != nil {
+		return
+	}
+	rows, err := s.R.QueryContext(ctx, `SELECT name FROM databases WHERE environment_id = ? ORDER BY name`, id)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n string
+		if err = rows.Scan(&n); err != nil {
+			return
+		}
+		databases = append(databases, n)
+	}
+	return services, databases, rows.Err()
+}
+
+// MarkEnvironmentDeleting flags an environment to go once its services are
+// gone; its jobs go at once (no new runs start).
+func (s *Store) MarkEnvironmentDeleting(ctx context.Context, id string) error {
+	tx, err := s.W.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE environments SET deleting = 1 WHERE id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM jobs WHERE environment_id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// MarkProjectDeleting flags a project to go once its environments are gone.
+func (s *Store) MarkProjectDeleting(ctx context.Context, id string) error {
+	_, err := s.W.ExecContext(ctx, `UPDATE projects SET deleting = 1 WHERE id = ?`, id)
 	return err
 }
 

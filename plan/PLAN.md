@@ -2302,6 +2302,40 @@ The Settings tab is split into sections:
 - **Node limits**, which already exist.
 - **Danger zone:** delete the project, after typing its name; only an empty project can be deleted, unless "delete everything" is checked.
 
+**Progress 15d:** ✅ 2026-10-08.
+- **Store:** migration `00040_environment_policy` adds `auto_deploy`, the lock (`lock_reason`, `locked_by`, `locked_at`) and `deleting` to environments, and `deleting` to projects.
+- **Fix:**
+  - Before: deleting an environment or project checked only for services. Their databases' rows cascaded away and left the members running.
+  - Now both refuse while databases exist, and name them.
+- **Deploy lock:**
+  - `ErrLocked` → HTTP 423 `locked`, with the reason. It blocks:
+    - creating or updating a service, and redeploying;
+    - changing shared variables, checked before they are stored;
+    - S3 bindings;
+    - build deploys. A build is still recorded, with "not deployed: deploys to production are locked (…)".
+  - Rollbacks, cancels and scaling still work.
+  - The auto-deploy switch per environment: when it is off, builds run but are deployed by hand.
+- **Clone:** `POST …/environments {cloneFrom, startServices}` copies:
+  - the shared variables;
+  - every service's current spec (at 0 tasks unless started);
+  - the jobs;
+  - security group memberships.
+
+  Domains, public ports, Git sources, S3 bindings and databases are not copied, and the UI says so.
+- **Delete everything:**
+  - `DELETE …?force=true` on an environment or project answers 202. It marks the environment, or the project and its environments, `deleting`, removes their jobs, and deletes their services.
+  - When the reconciler removes a service's last row, `finishDeletions` deletes the environment and then the project.
+  - New services cannot be created in a deleting environment.
+- **API and CLI:**
+  - API: `PUT …/environments/{env}/policy`.
+  - synctl: `envs lock --reason`, `envs unlock`, `envs auto-deploy on|off`, `envs create --from [--start]`, `envs delete --everything`, `projects delete --everything`; `envs list` shows the policy.
+- **Web:**
+  - **Settings:** General (description, rollback window, ID, created); Environments, each with lock and unlock (with a reason), the "builds deploy themselves" switch and delete (type the name, with an option to delete the services too); Add or copy an environment; Allowed nodes; Danger zone (delete the project the same way).
+  - **Lock banner:** a locked environment shows it on its project and service pages, and Redeploy is disabled with the reason.
+- **Tests:**
+  - Unit: `TestDeployLockCloneAndDeleteEverything`.
+  - e2e: the new `test/e2e/settings.sh`.
+
 **Order:** 15a, then 15b, 15c and 15d. Each slice follows the usual workflow: unit tests, a DinD e2e (`test/e2e/deployments.sh`, extended per slice), screenshots, then this plan and a commit.
 
 ### Later (v2+)

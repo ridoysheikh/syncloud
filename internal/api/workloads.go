@@ -117,8 +117,12 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if s.workloads != nil {
+		s.deleteProject(w, r, p)
+		return
+	}
 	if err := s.store.DeleteProject(r.Context(), p.ID); errors.Is(err, store.ErrNotEmpty) {
-		writeError(w, http.StatusConflict, CodeConflict, "delete the project's services first")
+		writeError(w, http.StatusConflict, CodeConflict, "delete the project's services and databases first")
 		return
 	} else if err != nil {
 		s.internalError(w, "delete project", err)
@@ -218,12 +222,20 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request)
 	}
 	var req struct {
 		Name string `json:"name"`
+		// CloneFrom copies another environment (Phase 15d); StartServices
+		// keeps the copies' task counts instead of 0.
+		CloneFrom     string `json:"cloneFrom"`
+		StartServices bool   `json:"startServices"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if err := workload.ValidName(req.Name); err != nil {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "environment name "+err.Error())
+		return
+	}
+	if req.CloneFrom != "" {
+		s.cloneEnvironment(w, r, p, req.CloneFrom, req.Name, req.StartServices)
 		return
 	}
 	e := store.Environment{ID: auth.NewID("env_"), ProjectID: p.ID, Name: req.Name, SharedEnv: map[string]string{}, CreatedAt: s.now().UTC().Truncate(1e9)}
@@ -244,15 +256,26 @@ func (s *Server) handleDeleteEnvironment(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if err := s.store.DeleteEnvironment(r.Context(), e.ID); errors.Is(err, store.ErrNotEmpty) {
-		writeError(w, http.StatusConflict, CodeConflict, "delete the environment's services first")
+	if !s.requireWorkloads(w) {
+		return
+	}
+	force := r.URL.Query().Get("force") == "true"
+	pending, err := s.workloads.DeleteEnvironment(r.Context(), e, force)
+	var inv workload.ErrInvalid
+	if errors.As(err, &inv) {
+		writeError(w, http.StatusConflict, CodeConflict, inv.Error())
 		return
 	} else if err != nil {
 		s.internalError(w, "delete environment", err)
 		return
 	}
 	u, _ := currentUser(r.Context())
-	s.audit(r, u.ID, "project:DeleteEnvironment", "srn:syncloud:project/"+r.PathValue("project")+"/"+e.Name, nil)
+	s.audit(r, u.ID, "project:DeleteEnvironment", "srn:syncloud:project/"+r.PathValue("project")+"/"+e.Name, map[string]any{"force": force})
+	if pending {
+		// Its services are being deleted; the environment goes after them.
+		writeJSON(w, http.StatusAccepted, map[string]any{"deleting": true})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -329,9 +352,12 @@ func (s *Server) service(w http.ResponseWriter, r *http.Request) (store.Service,
 func (s *Server) workloadError(w http.ResponseWriter, what string, err error) {
 	var inv workload.ErrInvalid
 	var quota workload.ErrQuota
+	var locked workload.ErrLocked
 	switch {
 	case errors.As(err, &quota):
 		writeError(w, http.StatusForbidden, CodeQuotaExceeded, quota.Error())
+	case errors.As(err, &locked):
+		writeError(w, http.StatusLocked, CodeLocked, locked.Error())
 	case errors.As(err, &inv):
 		writeError(w, http.StatusBadRequest, CodeBadRequest, inv.Error())
 	case errors.Is(err, store.ErrNotFound):

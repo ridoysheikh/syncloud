@@ -464,6 +464,7 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments", h: s.handleListEnvironments},
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments", h: s.handleCreateEnvironment},
 		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}", h: s.handleDeleteEnvironment},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/policy", h: s.handleSetEnvironmentPolicy},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/variables", h: s.handleGetSharedEnv},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/metrics", h: s.handleEnvironmentMetrics},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/metrics", h: s.handleServiceMetrics},

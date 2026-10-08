@@ -173,6 +173,9 @@ func (m *Manager) Redeploy(ctx context.Context, serviceID, actor string, runHook
 	if spec.Image == AwaitingBuild {
 		return ServiceView{}, ErrInvalid{errors.New("the service has no image yet: it is waiting for its first build")}
 	}
+	if err := m.checkLock(ctx, sv.EnvironmentID); err != nil {
+		return ServiceView{}, err
+	}
 	spec.RedeployedAt = m.now().UTC().Format(time.RFC3339Nano)
 	ctx = WithCause(ctx, Cause{Trigger: store.TriggerRedeploy})
 	if err := m.rollout(ctx, sv, spec.Canonical(), sv.DesiredCount, actor, runHooks, "redeploy"); err != nil {

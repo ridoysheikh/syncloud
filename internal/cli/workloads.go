@@ -136,6 +136,28 @@ func (a *app) projectsCmd() *cobra.Command {
 		},
 	}
 	addresses.Flags().StringVarP(&addrEnv, "environment", "e", "production", "environment")
+	var everything bool
+	deleteProjectCmd := &cobra.Command{
+		Use: "delete NAME", Aliases: []string{"rm"}, Short: "Delete a project (empty, or --everything)", Args: cobra.ExactArgs(1),
+		Annotations: op("deleteProject"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			pending, err := c.DeleteProject(ctx(cmd), args[0], everything)
+			if err != nil {
+				return err
+			}
+			if pending {
+				fmt.Fprintf(a.out, "Deleting project %s: its services stop first, then it goes\n", args[0])
+			} else {
+				fmt.Fprintf(a.out, "Deleted project %s\n", args[0])
+			}
+			return nil
+		},
+	}
+	deleteProjectCmd.Flags().BoolVar(&everything, "everything", false, "delete its services too (databases must be deleted first)")
 	p.AddCommand(
 		addresses,
 		update,
@@ -161,21 +183,7 @@ func (a *app) projectsCmd() *cobra.Command {
 			},
 		},
 		create,
-		&cobra.Command{
-			Use: "delete NAME", Aliases: []string{"rm"}, Short: "Delete an empty project", Args: cobra.ExactArgs(1),
-			Annotations: op("deleteProject"),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				c, err := a.client()
-				if err != nil {
-					return err
-				}
-				if err := c.DeleteProject(ctx(cmd), args[0]); err != nil {
-					return err
-				}
-				fmt.Fprintf(a.out, "Deleted project %s\n", args[0])
-				return nil
-			},
-		},
+		deleteProjectCmd,
 	)
 	return p
 }
@@ -184,6 +192,49 @@ func (a *app) envsCmd() *cobra.Command {
 	var s scope
 	e := &cobra.Command{Use: "envs", Aliases: []string{"env", "environments"}, Short: "Environments of a project"}
 	a.scopeFlags(e, &s)
+	var cloneFrom, lockReason string
+	var cloneStart, envEverything bool
+	// policyCmd changes an environment's deploy policy; with no fixed
+	// input, its second argument is on or off (auto-deploy).
+	policyCmd := func(use, short string, in func(*cobra.Command) client.EnvironmentPolicy) *cobra.Command {
+		nargs := cobra.ExactArgs(1)
+		if in == nil {
+			nargs = cobra.ExactArgs(2)
+		}
+		return &cobra.Command{
+			Use: use, Short: short, Args: nargs,
+			Annotations: op("setEnvironmentPolicy"),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				if err := s.need(); err != nil {
+					return err
+				}
+				var pol client.EnvironmentPolicy
+				if in != nil {
+					pol = in(cmd)
+				} else {
+					on := args[1] == "on"
+					if !on && args[1] != "off" {
+						return errors.New("say on or off")
+					}
+					pol.AutoDeploy = &on
+				}
+				c, err := a.client()
+				if err != nil {
+					return err
+				}
+				x, err := c.SetEnvironmentPolicy(ctx(cmd), s.project, args[0], pol)
+				if err != nil {
+					return err
+				}
+				state := "deploys allowed"
+				if x.Lock != nil {
+					state = "deploys locked: " + x.Lock.Reason
+				}
+				fmt.Fprintf(a.out, "%s/%s: %s; builds deploy themselves: %v\n", s.project, x.Name, state, x.AutoDeploy)
+				return nil
+			},
+		}
+	}
 	// update edits the shared variables of --env and reports the rollout.
 	update := func(cmd *cobra.Command, f func(map[string]string) error) error {
 		if err := s.need(); err != nil {
@@ -290,9 +341,19 @@ func (a *app) envsCmd() *cobra.Command {
 				}
 				rows := make([][]string, 0, len(es))
 				for _, x := range es {
-					rows = append(rows, []string{x.Name, age(x.CreatedAt)})
+					auto, lock := "on", "-"
+					if !x.AutoDeploy {
+						auto = "off"
+					}
+					if x.Lock != nil {
+						lock = x.Lock.Reason + " (" + x.Lock.By + ", " + age(x.Lock.At) + ")"
+					}
+					if x.Deleting {
+						lock = "deleting"
+					}
+					rows = append(rows, []string{x.Name, auto, lock, age(x.CreatedAt)})
 				}
-				return a.printer().table(es, []string{"NAME", "CREATED"}, rows)
+				return a.printer().table(es, []string{"NAME", "AUTO-DEPLOY", "LOCKED", "CREATED"}, rows)
 			},
 		},
 		&cobra.Command{
@@ -306,6 +367,15 @@ func (a *app) envsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				if cloneFrom != "" {
+					svcs, jobs, err := c.CloneEnvironment(ctx(cmd), s.project, args[0], cloneFrom, cloneStart)
+					if err != nil {
+						return err
+					}
+					fmt.Fprintf(a.out, "Created environment %s/%s from %s: %d services (%s), %d jobs\n", s.project, args[0], cloneFrom,
+						len(svcs), map[bool]string{true: "started", false: "at 0 tasks"}[cloneStart], len(jobs))
+					return nil
+				}
 				if _, err := c.CreateEnvironment(ctx(cmd), s.project, args[0]); err != nil {
 					return err
 				}
@@ -314,7 +384,7 @@ func (a *app) envsCmd() *cobra.Command {
 			},
 		},
 		&cobra.Command{
-			Use: "delete NAME", Aliases: []string{"rm"}, Short: "Delete an environment without services", Args: cobra.ExactArgs(1),
+			Use: "delete NAME", Aliases: []string{"rm"}, Short: "Delete an environment (empty, or --everything)", Args: cobra.ExactArgs(1),
 			Annotations: op("deleteEnvironment"),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if err := s.need(); err != nil {
@@ -324,14 +394,40 @@ func (a *app) envsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := c.DeleteEnvironment(ctx(cmd), s.project, args[0]); err != nil {
+				pending, err := c.DeleteEnvironment(ctx(cmd), s.project, args[0], envEverything)
+				if err != nil {
 					return err
 				}
-				fmt.Fprintf(a.out, "Deleted environment %s/%s\n", s.project, args[0])
+				if pending {
+					fmt.Fprintf(a.out, "Deleting environment %s/%s: its services stop first, then it goes\n", s.project, args[0])
+				} else {
+					fmt.Fprintf(a.out, "Deleted environment %s/%s\n", s.project, args[0])
+				}
 				return nil
 			},
 		},
+		policyCmd("lock NAME --reason TEXT", "Lock deploys to an environment (rollbacks and cancels still work)", func(cmd *cobra.Command) client.EnvironmentPolicy {
+			t := true
+			return client.EnvironmentPolicy{Locked: &t, Reason: &lockReason}
+		}),
+		policyCmd("unlock NAME", "Allow deploys to an environment again", func(*cobra.Command) client.EnvironmentPolicy {
+			f := false
+			return client.EnvironmentPolicy{Locked: &f}
+		}),
+		policyCmd("auto-deploy NAME on|off", "Whether builds deploy themselves in an environment", nil),
 	)
+	for _, c := range e.Commands() {
+		switch c.Name() {
+		case "create":
+			c.Flags().StringVar(&cloneFrom, "from", "", "copy another environment: shared variables, services, jobs and security groups")
+			c.Flags().BoolVar(&cloneStart, "start", false, "with --from: start the copied services (default: 0 tasks)")
+		case "delete":
+			c.Flags().BoolVar(&envEverything, "everything", false, "delete its services too (databases must be deleted first)")
+		case "lock":
+			c.Flags().StringVar(&lockReason, "reason", "", "why deploys are locked (shown to whoever tries)")
+			_ = c.MarkFlagRequired("reason")
+		}
+	}
 	return e
 }
 

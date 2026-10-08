@@ -463,6 +463,7 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			if hadPublic && m.OnPublicPorts != nil {
 				m.OnPublicPorts() // its entrypoints and firewall rules go
 			}
+			m.finishDeletions(ctx, sv.EnvironmentID)
 			return
 		}
 		m.enqueueAfter(sv.ID, 3*time.Second)

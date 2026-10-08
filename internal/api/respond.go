@@ -20,6 +20,8 @@ const (
 	CodeInvalidOrigin = "invalid_origin"
 	CodeMFARequired   = "mfa_required"
 	CodeQuotaExceeded = "quota_exceeded"
+	// CodeLocked: the environment's deploys are locked (Phase 15d).
+	CodeLocked = "locked"
 )
 
 type apiError struct {
