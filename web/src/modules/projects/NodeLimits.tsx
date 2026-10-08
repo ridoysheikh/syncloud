@@ -2,89 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { api, ApiError } from "@/lib/api";
-import { bytes, CONTROLLER_NODE, pct, useNodes } from "@/lib/nodes";
-import { ControllerTag, NodeStatus } from "@/entities/nodes";
+import { Layers, ListChecks, Network, Shuffle } from "lucide-react";
+import { NodePicker } from "@/entities/nodes";
+import { ChoiceCards } from "@/ui/choice";
 import { useTasks, type Service } from "@/lib/workloads";
 import { Panel } from "@/ui/Panel";
-import { Alert, Button, StatusBadge } from "@/ui/controls";
+import { Alert, Button } from "@/ui/controls";
 import { cn } from "@/ui/cn";
-
-/**
- * Checkboxes over the cluster's nodes. `limit` restricts the choice to a
- * project's allowed nodes; names in `value` that are not (or no longer)
- * nodes stay listed so they can be removed.
- */
-function NodeChecklist({
-  value,
-  onChange,
-  limit,
-  counts,
-}: {
-  value: string[];
-  onChange: (v: string[]) => void;
-  limit?: string[];
-  /** Running tasks per node name, shown beside each node. */
-  counts?: Record<string, number>;
-}) {
-  const { data: nodes = [] } = useNodes();
-  const names = useMemo(() => {
-    const all = new Set(nodes.map((n) => n.name));
-    for (const v of value) all.add(v);
-    return [...all]
-      .filter((n) => !limit?.length || limit.includes(n))
-      .sort((a, b) =>
-        a === CONTROLLER_NODE
-          ? -1
-          : b === CONTROLLER_NODE
-            ? 1
-            : a.localeCompare(b),
-      );
-  }, [nodes, value, limit]);
-  const toggle = (n: string) =>
-    onChange(
-      value.includes(n) ? value.filter((x) => x !== n) : [...value, n].sort(),
-    );
-  return (
-    <ul className="border-line divide-line divide-y rounded-sm border">
-      {names.map((name) => {
-        const n = nodes.find((x) => x.name === name);
-        const m = n?.metrics;
-        return (
-          <li key={name}>
-            <label className="hover:bg-hover/50 flex min-h-8 cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5 px-2 py-1 text-xs">
-              <input
-                type="checkbox"
-                checked={value.includes(name)}
-                onChange={() => toggle(name)}
-              />
-              <span className="font-medium">{name}</span>
-              <ControllerTag name={name} />
-              {n ? (
-                <NodeStatus node={n} />
-              ) : (
-                <StatusBadge tone="neutral">not joined</StatusBadge>
-              )}
-              <span className="text-muted ml-auto flex items-center gap-2">
-                {counts && (
-                  <span>
-                    {counts[name] ?? 0} task{counts[name] === 1 ? "" : "s"}
-                  </span>
-                )}
-                {n && m && (
-                  <span className="hidden sm:inline">
-                    {n.info.cpuCores} cores · CPU {m.cpuPercent.toFixed(0)}% ·
-                    mem {pct(m.memoryUsedBytes, m.memoryTotalBytes).toFixed(0)}%
-                    of {bytes(m.memoryTotalBytes)}
-                  </span>
-                )}
-              </span>
-            </label>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
 
 /** "Any node" or "only these nodes", with the checklist for the latter. */
 function NodeLimitEditor({
@@ -102,26 +26,27 @@ function NodeLimitEditor({
 }) {
   return (
     <div className="flex flex-col gap-2 text-xs">
-      <div className="flex flex-wrap gap-x-4 gap-y-1">
-        <label className="flex items-center gap-1.5">
-          <input
-            type="radio"
-            checked={value === null}
-            onChange={() => onChange(null)}
-          />
-          {anyLabel}
-        </label>
-        <label className="flex items-center gap-1.5">
-          <input
-            type="radio"
-            checked={value !== null}
-            onChange={() => onChange(value ?? [])}
-          />
-          Only these nodes
-        </label>
-      </div>
+      <ChoiceCards
+        label="Where it may run"
+        value={value === null ? "any" : "only"}
+        onChange={(v) => onChange(v === "any" ? null : (value ?? []))}
+        options={[
+          {
+            value: "any",
+            title: anyLabel,
+            description: "The scheduler places tasks on whichever node fits.",
+            icon: Network,
+          },
+          {
+            value: "only",
+            title: "Only these nodes",
+            description: "Pick the nodes below; others never get a task.",
+            icon: ListChecks,
+          },
+        ]}
+      />
       {value !== null && (
-        <NodeChecklist
+        <NodePicker
           value={value}
           onChange={onChange}
           limit={limit}
@@ -285,23 +210,27 @@ export function ServicePlacementPanel({
         </div>
         <div className="flex flex-col gap-1">
           <span className="text-muted font-medium">Spreading</span>
-          <div className="flex flex-wrap gap-x-4 gap-y-1">
-            {(
-              [
-                ["spread", "Spread tasks over the nodes (default)"],
-                ["binpack", "Pack tasks onto as few nodes as possible"],
-              ] as const
-            ).map(([v, label]) => (
-              <label key={v} className="flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  checked={strategy === v}
-                  onChange={() => setStrategy(v)}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
+          <ChoiceCards
+            label="Spreading"
+            value={strategy}
+            onChange={setStrategy}
+            options={[
+              {
+                value: "spread",
+                title: "Spread",
+                description:
+                  "Tasks go to different nodes, so one node failing takes down as few as possible. The default.",
+                icon: Shuffle,
+              },
+              {
+                value: "binpack",
+                title: "Pack",
+                description:
+                  "Tasks fill as few nodes as possible, leaving the others free for large services.",
+                icon: Layers,
+              },
+            ]}
+          />
         </div>
         {spec.placement.node && (
           <Alert tone="info">

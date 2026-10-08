@@ -9,7 +9,8 @@ import {
   type PgObjectRef,
   type PgPrivilegeChange,
 } from "@/lib/pg";
-import { Alert, Button } from "@/ui/controls";
+import { Alert, Button, Toggle } from "@/ui/controls";
+import { ChipSelect, Segmented } from "@/ui/choice";
 import { cn } from "@/ui/cn";
 import { errText, SqlBlock, inlineSelect } from "./shared";
 
@@ -311,31 +312,26 @@ function SchemaBulk({
     <div className="border-line flex flex-col gap-2 border-t pt-3">
       <h3 className="text-muted font-medium">Everything in this schema</h3>
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          className={cn(inlineSelect, "w-24")}
+        <Segmented
+          label="Grant or revoke"
+          size="sm"
           value={revoke ? "revoke" : "grant"}
-          onChange={(e) => setRevoke(e.target.value === "revoke")}
-          aria-label="Grant or revoke"
-        >
-          <option value="grant">Grant</option>
-          <option value="revoke">Revoke</option>
-        </select>
-        <div className="flex flex-wrap gap-x-2 gap-y-1">
-          {(bulkPrivs[what] ?? []).map((pv) => (
-            <label key={pv} className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={selected.includes(pv)}
-                onChange={() =>
-                  setSelected((s) =>
-                    s.includes(pv) ? s.filter((x) => x !== pv) : [...s, pv],
-                  )
-                }
-              />
-              {pv}
-            </label>
-          ))}
-        </div>
+          onChange={(v) => setRevoke(v === "revoke")}
+          options={[
+            { value: "grant", label: "Grant" },
+            { value: "revoke", label: "Revoke" },
+          ]}
+        />
+        <ChipSelect
+          label="Privileges"
+          mono
+          value={selected}
+          onChange={setSelected}
+          options={(bulkPrivs[what] ?? []).map((pv) => ({
+            value: pv,
+            label: pv,
+          }))}
+        />
         <span>on all</span>
         <select
           className={cn(inlineSelect, "w-28")}
@@ -365,13 +361,12 @@ function SchemaBulk({
           ))}
         </select>
       </div>
-      <label className="flex flex-wrap items-center gap-1.5">
-        <input
-          type="checkbox"
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Toggle
           checked={future}
-          onChange={(e) => setFuture(e.target.checked)}
+          onChange={setFuture}
+          label="and on ones created later by"
         />
-        and on ones created later by
         <select
           className={cn(inlineSelect, "max-w-40")}
           value={forRole}
@@ -384,7 +379,7 @@ function SchemaBulk({
           ))}
         </select>
         <span className="text-faint">(default privileges)</span>
-      </label>
+      </div>
       <div>
         <Button
           variant="primary"

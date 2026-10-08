@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { Pencil, Plus, Route as RouteIcon, ShieldCheck, ShieldX, Trash2, X } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Pencil, Plus, Route as RouteIcon, Server, ShieldCheck, ShieldX, Trash2, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useNodes } from "@/lib/nodes";
 import { useProjects, useServices } from "@/lib/workloads";
@@ -10,6 +10,7 @@ import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
+import { ChipSelect, ChoiceField, Segmented } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
 
@@ -490,7 +491,7 @@ export function SecurityGroupPage() {
           </Field>
         </div>
         <div className="mt-2">
-          <Field
+          <ChoiceField
             label="Attached services"
             hint={
               existing?.default
@@ -498,16 +499,15 @@ export function SecurityGroupPage() {
                 : "A service with any attached group no longer uses the default group: attach default as well to keep it."
             }
           >
-            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-              {projectServices.length === 0 && <span className="text-faint">No services in this project yet.</span>}
-              {projectServices.map((s) => (
-                <label key={s} className="flex items-center gap-1.5">
-                  <input type="checkbox" checked={attached.includes(s)} onChange={(e) => setAttached(e.target.checked ? [...attached, s] : attached.filter((x) => x !== s))} />
-                  <span className="font-mono">{s}</span>
-                </label>
-              ))}
-            </div>
-          </Field>
+            <ChipSelect
+              label="Attached services"
+              mono
+              empty="No services in this project yet."
+              value={attached}
+              onChange={setAttached}
+              options={projectServices.map((s) => ({ value: s, label: s }))}
+            />
+          </ChoiceField>
         </div>
       </Panel>
       <RulesEditor title="Inbound rules (who may connect to the members)" dir="in" rules={inbound} onChange={setInbound} suggestions={suggestions} />
@@ -634,12 +634,18 @@ export function DropLogPanel() {
       flush
       actions={
         <>
-          <select value={direction} onChange={(e) => setDirection(e.target.value)} className={sel}>
-            <option value="">all</option>
-            <option value="in">into containers</option>
-            <option value="out">out of containers</option>
-            <option value="host">host firewall</option>
-          </select>
+          <Segmented
+            label="Direction"
+            size="sm"
+            value={direction}
+            onChange={setDirection}
+            options={[
+              { value: "", label: "all" },
+              { value: "in", label: "inbound", icon: ArrowDownToLine },
+              { value: "out", label: "outbound", icon: ArrowUpFromLine },
+              { value: "host", label: "host", icon: Server },
+            ]}
+          />
           <select value={node} onChange={(e) => setNode(e.target.value)} className={sel}>
             <option value="">every node</option>
             {(nodes.data ?? []).map((n) => (

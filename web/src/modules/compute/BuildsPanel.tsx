@@ -7,7 +7,14 @@ import { since } from "@/lib/nodes";
 import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
-import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
+import {
+  Alert,
+  Button,
+  Field,
+  Input,
+  StatusBadge,
+  Toggle,
+} from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { LogsView } from "@/modules/logs/LogsView";
 import { Link } from "@tanstack/react-router";
@@ -284,14 +291,11 @@ function ConnectForm({ path, initial }: { path: string; initial?: GitSource }) {
             />
           </Field>
         )}
-        <label className="flex items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            checked={autoDeploy}
-            onChange={(e) => setAutoDeploy(e.target.checked)}
-          />
-          Deploy successful builds automatically
-        </label>
+        <Toggle
+          checked={autoDeploy}
+          onChange={setAutoDeploy}
+          label="Deploy successful builds automatically"
+        />
         {save.error && (
           <Alert>
             {errText(save.error, "Could not connect the repository")}

@@ -37,3 +37,29 @@ func TestNoNativeDialogs(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestNoBareChoiceInputs keeps raw checkboxes and radio buttons out of the
+// dashboard (Phase 16b): choices are cards, chips, segmented controls or
+// toggles from web/src/ui/choice.tsx and controls.tsx.
+func TestNoBareChoiceInputs(t *testing.T) {
+	bare := regexp.MustCompile(`type=["'{](checkbox|radio)`)
+	root := filepath.Join("..", "..", "web", "src")
+	err := filepath.WalkDir(root, func(p string, e fs.DirEntry, err error) error {
+		if err != nil || e.IsDir() || !strings.HasSuffix(p, ".tsx") {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			if bare.MatchString(line) {
+				t.Errorf("%s:%d uses a bare checkbox or radio; use ChoiceCards, ChipSelect, Segmented or Toggle: %s", p, i+1, strings.TrimSpace(line))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

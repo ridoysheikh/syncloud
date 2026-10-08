@@ -26,6 +26,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { GiteaIcon, GitHubIcon, GitLabIcon } from "@/ui/brands";
+import { ChoiceCards } from "@/ui/choice";
 import { GitServerPanel } from "./GitServerPanel";
 import { kindLabel, useGitConnections, useRepos, type GitConnection, type GitKind } from "./RepoPicker";
 import { confirmAction } from "@/ui/dialogs";
@@ -225,24 +226,19 @@ export function GitConnectPage() {
     <div className={cn("flex flex-col", gap)}>
       <PageHeader crumbs={["Integrations"]} title="Connect a Git provider" />
       <Panel title="1 · Provider">
-        <div className={cn("grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4", gap)}>
-          {providers.map((p) => (
-            <button
-              type="button"
-              key={p.kind}
-              onClick={() => setKind(p.kind)}
-              className={cn(
-                "rounded-btn flex flex-col gap-1 border p-2.5 text-left",
-                kind === p.kind ? "border-line-accent bg-hover" : "border-line hover:border-line-strong",
-              )}
-            >
-              <span className="flex items-center gap-2 text-sm font-medium">
-                <p.icon className="size-4" /> {p.title}
-              </span>
-              <span className="text-muted text-xs">{p.blurb}</span>
-            </button>
-          ))}
-        </div>
+        <ChoiceCards
+          label="Provider"
+          value={kind ?? ("" as GitKind)}
+          onChange={setKind}
+          columns={4}
+          options={providers.map((p) => ({
+            value: p.kind,
+            title: p.title,
+            description: p.blurb,
+            icon: p.icon,
+            aside: p.recommended ? <span className="text-ok text-[10px] uppercase">recommended</span> : undefined,
+          }))}
+        />
       </Panel>
       {kind && (
         <Panel title={kind === "github-app" ? "2 · Create the GitHub App" : `2 · ${kindLabel[kind]} access token`}>

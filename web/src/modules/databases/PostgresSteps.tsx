@@ -1,6 +1,7 @@
-import { useNodes } from "@/lib/nodes";
+import { NodePicker } from "@/entities/nodes";
 import { useS3Buckets, useS3Endpoints } from "@/lib/pg";
 import { Field, Input } from "@/ui/controls";
+import { ChoiceField } from "@/ui/choice";
 import {
   PgAddonsField,
   PgParamsField,
@@ -47,8 +48,8 @@ export function PgCapacityStep({
         </div>
       </Section>
       <Section title="Replicas and failover">
-        <Field label="Read replicas">
-          <div className="max-w-40">
+        <ChoiceField label="Read replicas">
+          <div>
             <CountSelect
               value={f.repMin}
               onChange={(v) => {
@@ -64,7 +65,7 @@ export function PgCapacityStep({
               }}
             />
           </div>
-        </Field>
+        </ChoiceField>
         <p className="text-faint">
           {f.repMin === 0
             ? "One server, no failover: if its node goes down the database is down until it returns."
@@ -97,7 +98,6 @@ export function PgDataStep({
 }) {
   const catalog = usePgCatalog();
   const pg = f.pg;
-  const { data: nodes = [] } = useNodes();
   const endpoints = useS3Endpoints();
   const buckets = useS3Buckets(f.backupEndpoint ?? "");
   return (
@@ -198,25 +198,7 @@ export function PgDataStep({
           Optional: keep members on some nodes. Members always go on different
           nodes.
         </p>
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {nodes.map((n) => (
-            <label key={n.id} className="flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={f.nodes.includes(n.name)}
-                onChange={() =>
-                  set(
-                    "nodes",
-                    f.nodes.includes(n.name)
-                      ? f.nodes.filter((x) => x !== n.name)
-                      : [...f.nodes, n.name],
-                  )
-                }
-              />
-              {n.name}
-            </label>
-          ))}
-        </div>
+        <NodePicker value={f.nodes} onChange={(v) => set("nodes", v)} />
       </Section>
     </div>
   );

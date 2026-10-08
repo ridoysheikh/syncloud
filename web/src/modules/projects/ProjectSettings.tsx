@@ -320,15 +320,13 @@ export function EnvironmentsPanel({
             </select>
           </Field>
           {from && (
-            <label className="flex h-8 items-center gap-1.5 text-xs">
-              <input
-                type="checkbox"
+            <span className="flex h-8 items-center">
+              <Toggle
                 checked={start}
-                onChange={(e) => setStart(e.target.checked)}
-                className="size-3.5"
+                onChange={setStart}
+                label="Start the copied services"
               />
-              Start the copied services
-            </label>
+            </span>
           )}
           <Button type="submit" disabled={!name || add.isPending}>
             <Plus className="size-3.5" /> {from ? "Copy" : "Add"}

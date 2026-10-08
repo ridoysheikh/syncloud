@@ -8,6 +8,7 @@ import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input } from "@/ui/controls";
+import { ChoiceField, Segmented } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
 
@@ -166,12 +167,18 @@ export function EndpointFormPage() {
           <Field label="Region" hint="auto for R2; empty for MinIO">
             <Input value={f.region} onChange={set("region")} placeholder="eu-central-1" />
           </Field>
-          <Field label="Bucket addressing">
-            <label className="flex h-8 items-center gap-2 text-xs">
-              <input type="checkbox" checked={f.pathStyle} onChange={(e) => setF({ ...f, pathStyle: e.target.checked })} />
-              Path-style (MinIO, Garage, most self-hosted servers)
-            </label>
-          </Field>
+          <ChoiceField label="Bucket addressing">
+            <Segmented
+              label="Bucket addressing"
+              value={f.pathStyle ? "path" : "host"}
+              onChange={(v) => setF({ ...f, pathStyle: v === "path" })}
+              options={[
+                { value: "path", label: "Path-style" },
+                { value: "host", label: "Virtual-hosted" },
+              ]}
+            />
+            <span className="text-faint text-xs">{f.pathStyle ? "MinIO, Garage, most self-hosted servers" : "AWS S3 and most hosted services"}</span>
+          </ChoiceField>
           <Field label="Access key ID">
             <Input value={f.accessKeyId} onChange={set("accessKeyId")} className="font-mono" autoComplete="off" />
           </Field>

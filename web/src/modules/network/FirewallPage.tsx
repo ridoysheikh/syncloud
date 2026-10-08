@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Shield, Trash2, X } from "lucide-react";
+import { Globe, ListChecks, Pencil, Plus, Shield, Trash2, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useNodes } from "@/lib/nodes";
 import { PageHeader } from "@/ui/PageHeader";
@@ -11,6 +11,8 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { DropLogPanel } from "./SecurityGroups";
+import { NodePicker } from "@/entities/nodes";
+import { ChoiceCards, ChoiceField } from "@/ui/choice";
 import { confirmAction } from "@/ui/dialogs";
 
 interface Rule {
@@ -276,24 +278,25 @@ export function FirewallPolicyPage() {
               <Input value={description} onChange={(e) => setDescription(e.target.value)} />
             </Field>
           </div>
-          <Field label="Applies to">
-            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-              <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={all} onChange={(e) => setTargets(e.target.checked ? ["*"] : [])} /> All nodes
-              </label>
-              {!all &&
-                nodes.map((n) => (
-                  <label key={n.id} className="flex items-center gap-1.5">
-                    <input
-                      type="checkbox"
-                      checked={targets.includes(n.id)}
-                      onChange={(e) => setTargets(e.target.checked ? [...targets, n.id] : targets.filter((t) => t !== n.id))}
-                    />
-                    {n.name}
-                  </label>
-                ))}
+          <ChoiceField label="Applies to">
+            <div className="flex flex-col gap-2">
+              <ChoiceCards
+                label="Applies to"
+                value={all ? "all" : "some"}
+                onChange={(v) => setTargets(v === "all" ? ["*"] : [])}
+                options={[
+                  { value: "all", title: "All nodes", description: "Every node, including ones that join later.", icon: Globe },
+                  { value: "some", title: "Some nodes", description: "Only the nodes picked below.", icon: ListChecks },
+                ]}
+              />
+              {!all && (
+                <NodePicker
+                  value={targets.map((id) => nodes.find((n) => n.id === id)?.name ?? id)}
+                  onChange={(names) => setTargets(names.map((name) => nodes.find((n) => n.name === name)?.id ?? name))}
+                />
+              )}
             </div>
-          </Field>
+          </ChoiceField>
         </div>
       </Panel>
       <Panel title="Allow inbound (on the nodes' public addresses)">

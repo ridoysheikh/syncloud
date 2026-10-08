@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { Check, Download, KeyRound, Plus, Shield, ShieldCheck, ShieldX, Trash2, UserPlus, Users, X } from "lucide-react";
+import { Bot, Check, Download, KeyRound, Plus, Shield, ShieldCheck, ShieldX, Trash2, UserPlus, UserRound, Users, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useProjects } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
@@ -9,7 +9,8 @@ import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { LAZY_BATCH } from "@/ui/paging";
 import { EmptyState } from "@/ui/EmptyState";
-import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
+import { Alert, Button, Field, IconButton, Input, StatusBadge, Toggle } from "@/ui/controls";
+import { ChipSelect, ChoiceCards, ChoiceField } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
 
@@ -229,18 +230,16 @@ export function NewUserPage() {
         }
       />
       <Panel title="Kind">
-        <div className="grid max-w-2xl grid-cols-2 gap-2">
-          {(
-            [
-              ["user", "Person", "Signs in to the dashboard with a password (and MFA); can also have keys and tokens."],
-              ["service", "Service account", "For CI and automation: access keys and tokens only, no console sign-in."],
-            ] as const
-          ).map(([k, t, d]) => (
-            <button type="button" key={k} onClick={() => setKind(k)} className={cn("border-line rounded-sm border p-2 text-left", kind === k && "border-line-accent bg-hover")}>
-              <div className="text-sm">{t}</div>
-              <div className="text-muted mt-0.5 text-xs">{d}</div>
-            </button>
-          ))}
+        <div className="max-w-2xl">
+          <ChoiceCards
+            label="Kind"
+            value={kind}
+            onChange={setKind}
+            options={[
+              { value: "user", title: "Person", description: "Signs in to the dashboard with a password (and MFA); can also have keys and tokens.", icon: UserRound },
+              { value: "service", title: "Service account", description: "For CI and automation: access keys and tokens only, no console sign-in.", icon: Bot },
+            ]}
+          />
         </div>
       </Panel>
       <Panel title="Details">
@@ -377,15 +376,18 @@ export function UserPage() {
         </div>
       </Panel>
       <Panel title="Groups">
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-          {groups.length === 0 && <span className="text-faint">No groups yet.</span>}
-          {groups.map((g) => (
-            <label key={g.id} className="flex items-center gap-1.5">
-              <input type="checkbox" checked={g.members.includes(id)} onChange={(e) => membership.mutate({ g, add: e.target.checked })} />
-              {g.name}
-            </label>
-          ))}
-        </div>
+        <ChipSelect
+          label="Groups"
+          empty="No groups yet."
+          disabled={membership.isPending}
+          value={groups.filter((g) => g.members.includes(id)).map((g) => g.id)}
+          onChange={(next) => {
+            // One chip changes per click: add or remove that group.
+            const g = groups.find((x) => next.includes(x.id) !== x.members.includes(id));
+            if (g) membership.mutate({ g, add: next.includes(g.id) });
+          }}
+          options={groups.map((g) => ({ value: g.id, label: g.name }))}
+        />
       </Panel>
       <AttachedPolicies type="user" id={id} />
       <UserKeys userId={id} />
@@ -502,14 +504,13 @@ export function GroupPage() {
         </div>
       </Panel>
       <Panel title="Members">
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-          {users.map((u) => (
-            <label key={u.id} className="flex items-center gap-1.5">
-              <input type="checkbox" checked={members.includes(u.id)} onChange={(e) => setMembers(e.target.checked ? [...members, u.id] : members.filter((m) => m !== u.id))} />
-              {u.kind === "service" ? u.name : u.email}
-            </label>
-          ))}
-        </div>
+        <ChipSelect
+          label="Members"
+          empty="No users yet."
+          value={members}
+          onChange={setMembers}
+          options={users.map((u) => ({ value: u.id, label: u.kind === "service" ? u.name : u.email }))}
+        />
       </Panel>
       {!isNew && id && <AttachedPolicies type="group" id={id} />}
       {save.isSuccess && !isNew && <Alert tone="info">Saved.</Alert>}
@@ -605,7 +606,6 @@ export function RolePage() {
       void navigate({ to: "/iam/roles" as string });
     },
   });
-  const toggle = (list: string[], set: (v: string[]) => void, x: string, on: boolean) => set(on ? [...list, x] : list.filter((y) => y !== x));
   return (
     <form
       onSubmit={(e) => {
@@ -645,25 +645,25 @@ export function RolePage() {
       </Panel>
       <Panel title="Who may assume it">
         <div className="flex flex-col gap-2 text-xs">
-          <div className="flex flex-wrap gap-x-3 gap-y-1">
-            {users.map((u) => (
-              <label key={u.id} className="flex items-center gap-1.5">
-                <input type="checkbox" checked={trustUsers.includes(u.id)} onChange={(e) => toggle(trustUsers, setTrustUsers, u.id, e.target.checked)} />
-                {u.kind === "service" ? u.name : u.email}
-              </label>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-x-3 gap-y-1">
-            {groups.map((g) => (
-              <label key={g.id} className="flex items-center gap-1.5">
-                <input type="checkbox" checked={trustGroups.includes(g.id)} onChange={(e) => toggle(trustGroups, setTrustGroups, g.id, e.target.checked)} />
-                group {g.name}
-              </label>
-            ))}
-          </div>
-          <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={requireMfa} onChange={(e) => setRequireMfa(e.target.checked)} /> Only when signed in with MFA
-          </label>
+          <ChoiceField label="Users">
+            <ChipSelect
+              label="Users"
+              empty="No users yet."
+              value={trustUsers}
+              onChange={setTrustUsers}
+              options={users.map((u) => ({ value: u.id, label: u.kind === "service" ? u.name : u.email }))}
+            />
+          </ChoiceField>
+          <ChoiceField label="Groups">
+            <ChipSelect
+              label="Groups"
+              empty="No groups yet."
+              value={trustGroups}
+              onChange={setTrustGroups}
+              options={groups.map((g) => ({ value: g.id, label: g.name }))}
+            />
+          </ChoiceField>
+          <Toggle checked={requireMfa} onChange={setRequireMfa} label="Only when signed in with MFA" />
         </div>
       </Panel>
       {!isNew && id && <AttachedPolicies type="role" id={id} />}
@@ -883,9 +883,9 @@ function SimulatorPanel() {
         <Field label="Resource">
           <Input value={resource} onChange={(e) => setResource(e.target.value)} className="w-[32rem] max-w-[calc(100vw-3rem)] font-mono" />
         </Field>
-        <label className="flex h-8 items-center gap-1.5 text-xs">
-          <input type="checkbox" checked={mfa} onChange={(e) => setMfa(e.target.checked)} /> with MFA
-        </label>
+        <span className="flex h-8 items-center">
+          <Toggle checked={mfa} onChange={setMfa} label="with MFA" />
+        </span>
         <Button type="submit" variant="primary" disabled={!principal || sim.isPending}>
           Simulate
         </Button>
@@ -1112,10 +1112,13 @@ export function SecurityPage() {
       </Section>
       {settings.data && (
         <Section title="Account settings">
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={settings.data.requireMfa} onChange={(e) => setRequire.mutate(e.target.checked)} />
-            Require MFA for every person (service accounts use keys)
-          </label>
+          <Toggle
+            checked={settings.data.requireMfa}
+            disabled={setRequire.isPending}
+            onChange={(v) => setRequire.mutate(v)}
+            label="Require MFA for every person"
+            hint="Service accounts use access keys."
+          />
           {setRequire.error && <Alert>{errText(setRequire.error, "Could not change the setting")}</Alert>}
         </Section>
       )}

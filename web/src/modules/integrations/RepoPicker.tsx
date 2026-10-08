@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Check, ExternalLink, Lock, Plus, Search } from "lucide-react";
+import { Check, ExternalLink, Link2, Lock, Plus, Search } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { Alert, Input } from "@/ui/controls";
 import { cn } from "@/ui/cn";
 import { useLazyList } from "@/ui/paging";
+import { ChoiceCards } from "@/ui/choice";
+import { GiteaIcon, GitHubIcon, GitLabIcon } from "@/ui/brands";
 
 export type GitKind = "github-app" | "github" | "gitlab" | "gitea";
 
@@ -97,34 +99,25 @@ export function RepoPicker({
   const lazyRepos = useLazyList(repos.data ?? []);
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        {connections.map((c) => (
-          <button
-            type="button"
-            key={c.name}
-            onClick={() => onConnection(c.name)}
-            className={cn(
-              "rounded-btn flex h-7 items-center gap-1.5 border px-2",
-              connection === c.name ? "border-line-accent bg-hover text-fg" : "border-line-strong text-muted hover:text-fg",
-            )}
-          >
-            <span className="font-medium">{c.name}</span>
-            <span className="text-faint">
-              {kindLabel[c.kind]} · {c.account}
-            </span>
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => onConnection("")}
-          className={cn(
-            "rounded-btn h-7 border px-2",
-            connection === "" ? "border-line-accent bg-hover text-fg" : "border-line-strong text-muted hover:text-fg",
-          )}
-        >
-          Any Git URL
-        </button>
-        <Link to={"/integrations/git/new" as string} target="_blank" className="text-accent ml-1 flex items-center gap-1 hover:underline">
+      {connections.length > 0 && (
+      <ChoiceCards
+        label="Repository source"
+        value={connection}
+        onChange={onConnection}
+        columns={3}
+        options={[
+          ...connections.map((c) => ({
+            value: c.name,
+            title: c.name,
+            description: `${kindLabel[c.kind]} · ${c.account}`,
+            icon: c.kind === "gitlab" ? GitLabIcon : c.kind === "gitea" ? GiteaIcon : GitHubIcon,
+          })),
+          { value: "", title: "Any Git URL", description: "A public repository, or one reached with a token.", icon: Link2 },
+        ]}
+      />
+      )}
+      <div className="flex text-xs">
+        <Link to={"/integrations/git/new" as string} target="_blank" className="text-accent flex items-center gap-1 hover:underline">
           <Plus className="size-3" /> Connect GitHub, GitLab or Gitea
         </Link>
       </div>

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Clock, Copy as CopyIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { dbPath, useDatabases, type Database } from "@/lib/databases";
 import { usePgBackups } from "@/lib/pg";
@@ -8,6 +9,7 @@ import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { Alert, Button, Field, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { ChoiceCards } from "@/ui/choice";
 import { selectClass } from "../NewDatabaseWizard";
 import { errText } from "./shared";
 
@@ -132,16 +134,29 @@ export function PgRestorePage() {
                 </>
               )}
             </p>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                checked={mode === "time"}
-                onChange={() => setMode("time")}
-              />
-              A moment (your local time)
-            </label>
+            <ChoiceCards
+              label="Restore to"
+              value={mode}
+              onChange={setMode}
+              options={[
+                {
+                  value: "time",
+                  title: "A moment",
+                  description:
+                    "Replay the archive up to a point in time (your local time).",
+                  icon: Clock,
+                },
+                {
+                  value: "latest",
+                  title: "The latest state",
+                  description:
+                    "Replay the whole archive: a clone of the database as it is now.",
+                  icon: CopyIcon,
+                },
+              ]}
+            />
             {mode === "time" && (
-              <div className="flex flex-wrap items-center gap-2 pl-5">
+              <div className="flex flex-wrap items-center gap-2">
                 <Input
                   type="datetime-local"
                   step={1}
@@ -179,14 +194,6 @@ export function PgRestorePage() {
                 That moment is outside the restore window.
               </Alert>
             )}
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                checked={mode === "latest"}
-                onChange={() => setMode("latest")}
-              />
-              The latest state (replay the whole archive: a clone)
-            </label>
             <Field label="Start from base backup">
               <select
                 className={cn(selectClass, "max-w-md")}

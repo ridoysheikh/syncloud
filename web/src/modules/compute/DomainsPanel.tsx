@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Globe, Trash2 } from "lucide-react";
+import { ArrowRight, CornerUpRight, Globe, Trash2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
@@ -12,7 +12,9 @@ import {
   IconButton,
   Input,
   StatusBadge,
+  Toggle,
 } from "@/ui/controls";
+import { ChoiceField, Segmented } from "@/ui/choice";
 import { confirmAction } from "@/ui/dialogs";
 
 interface DomainCheck {
@@ -113,16 +115,17 @@ export function DomainsPanel({
             spellCheck={false}
           />
         </Field>
-        <Field label="Action">
-          <select
+        <ChoiceField label="Action">
+          <Segmented
+            label="Action"
             value={mode}
-            onChange={(e) => setMode(e.target.value as typeof mode)}
-            className={select}
-          >
-            <option value="route">Route to this service</option>
-            <option value="redirect">Redirect to another host</option>
-          </select>
-        </Field>
+            onChange={setMode}
+            options={[
+              { value: "route", label: "Route here", icon: ArrowRight },
+              { value: "redirect", label: "Redirect", icon: CornerUpRight },
+            ]}
+          />
+        </ChoiceField>
         {mode === "route" ? (
           <>
             <Field label="Path prefix (optional)">
@@ -150,15 +153,13 @@ export function DomainsPanel({
               </Field>
             )}
             {prefix && (
-              <label className="flex h-8 items-center gap-1.5 text-xs">
-                <input
-                  type="checkbox"
+              <span className="flex h-8 items-center">
+                <Toggle
                   checked={strip}
-                  onChange={(e) => setStrip(e.target.checked)}
-                  className="size-3.5"
+                  onChange={setStrip}
+                  label="Strip the prefix"
                 />
-                Strip the prefix
-              </label>
+              </span>
             )}
           </>
         ) : (

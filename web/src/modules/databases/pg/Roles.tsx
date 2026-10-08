@@ -15,6 +15,7 @@ import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input, Toggle } from "@/ui/controls";
+import { ChoiceCard } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
 import { selectClass } from "../NewDatabaseWizard";
 import { errText, inlineSelect } from "./shared";
@@ -467,26 +468,21 @@ export function PgRolePage() {
                   Roles this one belongs to. It gets their privileges (and with
                   admin, may grant them to others).
                 </p>
-                {members.map(([r, help]) => {
-                  const m = isMember(r);
-                  return (
-                    <div
-                      key={r}
-                      className="flex flex-wrap items-center gap-x-3 gap-y-0.5"
-                    >
-                      <label className="flex min-w-56 items-center gap-1.5">
-                        <input
-                          type="checkbox"
-                          checked={!!m}
-                          onChange={() => toggleMember(r)}
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 sm:gap-2 xl:grid-cols-3">
+                  {members.map(([r, help]) => {
+                    const m = isMember(r);
+                    return (
+                      <div key={r} className="flex min-w-0 flex-col gap-1">
+                        <ChoiceCard
+                          multi
+                          selected={!!m}
+                          onSelect={() => toggleMember(r)}
+                          title={<span className="font-mono">{r}</span>}
+                          description={help}
+                          className="flex-1"
                         />
-                        <span className="font-mono">{r}</span>
-                      </label>
-                      <span className="text-faint flex-1">{help}</span>
-                      {m && (
-                        <label className="flex items-center gap-1">
-                          <input
-                            type="checkbox"
+                        {m && (
+                          <Toggle
                             checked={m.admin}
                             onChange={() =>
                               set(
@@ -496,13 +492,13 @@ export function PgRolePage() {
                                 ),
                               )
                             }
+                            label="admin: may grant it to others"
                           />
-                          admin
-                        </label>
-                      )}
-                    </div>
-                  );
-                })}
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </Panel>
             {creating && (

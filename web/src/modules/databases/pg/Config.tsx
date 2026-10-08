@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Lock, ShieldCheck, Zap } from "lucide-react";
 import { api } from "@/lib/api";
 import { bytes } from "@/lib/nodes";
 import {
@@ -30,7 +31,8 @@ import {
   Toggle,
 } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
-import { CountSelect, selectClass, SizeSelect } from "../NewDatabaseWizard";
+import { ChoiceCards, ChoiceField, Segmented } from "@/ui/choice";
+import { CountSelect, SizeSelect } from "../NewDatabaseWizard";
 import { errText, inlineSelect } from "./shared";
 
 /** The PostgreSQL engine's add-ons and parameter catalog. */
@@ -120,50 +122,56 @@ export function PgReplicationField({
   );
   return (
     <div className="flex flex-col gap-3">
+      <ChoiceCards
+        label="Replication mode"
+        value={value.mode}
+        onChange={(v) => set("mode", v)}
+        columns={3}
+        options={[
+          {
+            value: "async",
+            title: "Asynchronous",
+            description:
+              "Commits return at once; a failover can lose the last moments of writes.",
+            icon: Zap,
+          },
+          {
+            value: "sync",
+            title: "Synchronous",
+            description:
+              "Each commit waits until replicas have it: a failover loses nothing. With no replica left, writes continue unprotected.",
+            icon: ShieldCheck,
+            disabled: replicas === 0,
+          },
+          {
+            value: "strict",
+            title: "Synchronous, strict",
+            description:
+              "Like synchronous, but writes stop rather than continue without a replica that has them.",
+            icon: Lock,
+            disabled: replicas === 0,
+          },
+        ]}
+      />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field
-          label="Mode"
-          hint={
-            value.mode === "async"
-              ? "Commits return at once; a failover can lose the last moments of writes."
-              : value.mode === "sync"
-                ? "Each commit waits until replicas have it: a failover loses nothing. With no replica left, writes continue unprotected."
-                : "Like synchronous, but writes stop rather than continue without a replica that has them."
-          }
-        >
-          <select
-            className={selectClass}
-            value={value.mode}
-            onChange={(e) =>
-              set("mode", e.target.value as PgReplicationSpec["mode"])
-            }
-          >
-            <option value="async">Asynchronous</option>
-            <option value="sync" disabled={replicas === 0}>
-              Synchronous
-            </option>
-            <option value="strict" disabled={replicas === 0}>
-              Synchronous, strict
-            </option>
-          </select>
-        </Field>
         {value.mode !== "async" && (
-          <Field
+          <ChoiceField
             label="Replicas that confirm each commit"
             hint="More is safer, and slower."
           >
-            <select
-              className={selectClass}
-              value={value.syncReplicas}
-              onChange={(e) => set("syncReplicas", Number(e.target.value))}
-            >
-              {Array.from({ length: Math.max(1, replicas) }, (_, i) => (
-                <option key={i + 1} value={i + 1}>
-                  {i + 1}
-                </option>
-              ))}
-            </select>
-          </Field>
+            <Segmented
+              label="Replicas that confirm each commit"
+              value={String(value.syncReplicas)}
+              onChange={(v) => set("syncReplicas", Number(v))}
+              options={Array.from(
+                { length: Math.max(1, replicas) },
+                (_, i) => ({
+                  value: String(i + 1),
+                  label: String(i + 1),
+                }),
+              )}
+            />
+          </ChoiceField>
         )}
       </div>
       {replicas === 0 && (
@@ -458,7 +466,7 @@ export function PgConfigTab({ d, path }: { d: Database; path: string }) {
         <Panel title="Size and replication">
           <div className="flex flex-col gap-3 text-xs">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <Field
+              <ChoiceField
                 label="Read replicas"
                 hint="Added replicas clone from the newest base backup when backups are on."
               >
@@ -481,7 +489,7 @@ export function PgConfigTab({ d, path }: { d: Database; path: string }) {
                     })
                   }
                 />
-              </Field>
+              </ChoiceField>
               <Field
                 label="Memory per member"
                 hint="Restarts the members one at a time."

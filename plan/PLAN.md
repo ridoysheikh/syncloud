@@ -2391,6 +2391,59 @@ The Settings tab is split into sections:
   - The overflow and contrast sweep over 13 changed routes at 390 and 1440 px found nothing.
   - Playwright: the node and service hover cards open, the cards view renders, and there are no console errors beyond the pre-login 401.
 
+### Phase 16b: Rich selection controls (user request, 2026-10-08)
+
+**Problem:** choices are still bare form controls:
+- the node selectors are rows of checkboxes;
+- options with an explanation are radio buttons;
+- lists of services, groups, users or channels are checkbox runs;
+- on/off settings are loose checkboxes.
+
+**Design:** selection primitives in `ui/choice.tsx`. A selected item is shown by a blended accent border and a tinted background, with a small check mark (not a checkbox), and the title turns accent:
+- **`ChoiceCard`:** a selectable tile with a title, description, optional icon and extra content. It is a `button` with `role="radio"` or `role="checkbox"` and `aria-checked`.
+- **`ChoiceCards`:** a single choice among a few explained options, laid out as a grid of cards. It is a radiogroup that arrow keys move through.
+- **`ChipSelect`:** a multi-select of short items as toggle chips, with "all/none" when the list is long.
+- **`Segmented`:** two to four short options in one control, replacing small selects.
+- **`NodePicker`** (`entities/nodes.tsx`): node cards showing the status dot, the controller tag, status, CPU and memory bars, and the task count. Names that are not joined stay listed so they can be removed.
+
+**Adoption:**
+- `NodePicker`: service and project node limits, the database wizards (Valkey and PostgreSQL node choice), and firewall policy targets (with an "All nodes" card).
+- `ChoiceCards`:
+  - any node or only these nodes;
+  - spread or binpack;
+  - standalone or replicated databases, and persistence;
+  - restore to a moment or to the latest state;
+  - the new service's exposure (public, internal or worker) and build type;
+  - the node pool role (worker or edge).
+- `ChipSelect`: services attached to security groups and middlewares, IAM group membership, group members and role trust, alert channels, and PostgreSQL privileges.
+- `Segmented`: the node pool role, domain action (route or redirect), alert comparison and severity, grant or revoke, the drop log direction, S3 addressing, and replica counts.
+- `Toggle` for every standalone boolean (auto-deploy, enabled, path-style, MFA, CORS credentials, security headers, pool autoscale, prefix strip, start copied services, scale-in protection, dialog options and role admin).
+- `internal/web/nodialogs_test.go` also fails on `type="radio"` in `web/src`: radios are always cards or segmented.
+
+**Tests:** `tsc` and the build, the overflow and contrast sweep, and Playwright screenshots of the node picker, wizard options and chips.
+
+**Progress:** ✅ 2026-10-08.
+- **Primitives:** `ui/choice.tsx` has `ChoiceCard`, `ChoiceCards` (arrow keys move the choice), `ChipSelect` (all/none above 6 items), `Segmented`, `ChoiceField` and `selectable()`. `ChoiceField` exists because a `<label>` around several buttons forwards clicks to the first one. The selected style is a `line-accent` border, a `btn-primary/15` fill, an accent title and a round accent check mark.
+- **NodePicker:** the service and project node limits, the Valkey and PostgreSQL wizards, and firewall targets (after an All/Some nodes card).
+- **Cards:**
+  - any or only these nodes; spread or pack;
+  - the database engine; standalone or project; persistence; replication mode;
+  - restore to a moment or the latest state;
+  - the new service's source, builder and network (public, internal, worker);
+  - the alert type; the middleware type; the Git provider and repository connection;
+  - person or service account; PostgreSQL role membership (with an admin toggle under each chosen card);
+  - the confirm-dialog option.
+- **Chips:** IAM groups, members and role trust; alert channels; services attached to security groups and middlewares; PostgreSQL privileges.
+- **Segmented:**
+  - the node pool role; domain route or redirect; above or below; alert severity;
+  - grant or revoke; the drop log direction; S3 path-style or virtual-hosted;
+  - replica counts (0–5) and sync replicas.
+- **Toggles:** every remaining boolean.
+- **Checks:**
+  - `TestNoBareChoiceInputs` keeps `type="checkbox"`/`"radio"` out of `web/src`, and none remain.
+  - The overflow and contrast sweep on 15 form routes at 390 and 1440 px found nothing.
+  - Playwright: picking a node card sets `aria-checked`, arrow keys move a card choice, and there are no page errors.
+
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)
 

@@ -8,6 +8,7 @@ import {
 import { AlertTriangle, Info } from "lucide-react";
 import { Dialog } from "./Dialog";
 import { Button, Input } from "./controls";
+import { ChoiceCard } from "./choice";
 import { cn } from "./cn";
 
 /**
@@ -171,20 +172,13 @@ function PendingDialog({ p }: { p: Pending }) {
             <div className="text-muted break-words">{opts.message}</div>
           )}
           {p.kind === "confirm" && opts.option && (
-            <label className="flex cursor-pointer items-start gap-2">
-              <input
-                type="checkbox"
-                checked={option}
-                onChange={(e) => setOption(e.target.checked)}
-                className="mt-0.5 size-3.5 shrink-0"
-              />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-fg">{opts.option.label}</span>
-                {opts.option.hint && (
-                  <span className="text-faint">{opts.option.hint}</span>
-                )}
-              </span>
-            </label>
+            <ChoiceCard
+              multi
+              selected={option}
+              onSelect={() => setOption(!option)}
+              title={opts.option.label}
+              description={opts.option.hint}
+            />
           )}
           {p.kind === "confirm" && opts.typeToConfirm && (
             <form

@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { Check, FileCode, Layers, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, CornerUpRight, FileArchive, FileCode, Gauge, Globe, KeyRound, Layers, Pencil, Plus, RotateCw, Shield, ShieldCheck, Trash2, X, Zap } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useProjects, useServices } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
-import { Alert, Button, Field, IconButton, Input } from "@/ui/controls";
+import { Alert, Button, Field, IconButton, Input, Toggle } from "@/ui/controls";
+import { ChipSelect, ChoiceCards } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
 
@@ -247,6 +248,18 @@ function RawConfigPanel() {
 
 // ── editor ───────────────────────────────────────────────────────────────────
 
+const presetIcons: Record<PresetType, typeof Layers> = {
+  "ip-allowlist": ShieldCheck,
+  "rate-limit": Gauge,
+  "basic-auth": KeyRound,
+  "redirect-www": CornerUpRight,
+  cors: Globe,
+  "security-headers": Shield,
+  "circuit-breaker": Zap,
+  compress: FileArchive,
+  retry: RotateCw,
+};
+
 const presetLabels: Record<PresetType, string> = {
   "ip-allowlist": "IP allow-list",
   "rate-limit": "Rate limit",
@@ -339,23 +352,15 @@ function PresetFields({ type, config, set }: { type: PresetType; config: Record<
           <Field label="Max age" hint="seconds browsers cache the answer">
             <Input type="number" value={config.maxAge ?? 0} onChange={(e) => patch({ maxAge: Number(e.target.value) })} />
           </Field>
-          <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={!!config.credentials} onChange={(e) => patch({ credentials: e.target.checked })} /> Allow credentials (cookies)
-          </label>
+          <Toggle checked={!!config.credentials} onChange={(v) => patch({ credentials: v })} label="Allow credentials (cookies)" />
         </div>
       );
     case "security-headers":
       return (
         <div className="flex flex-col gap-1.5 text-xs">
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={!!config.hsts} onChange={(e) => patch({ hsts: e.target.checked })} /> HSTS (browsers only use HTTPS for a year)
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={!!config.frameDeny} onChange={(e) => patch({ frameDeny: e.target.checked })} /> Deny framing (X-Frame-Options: DENY)
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={!!config.noSniff} onChange={(e) => patch({ noSniff: e.target.checked })} /> No MIME sniffing (X-Content-Type-Options: nosniff)
-          </label>
+          <Toggle checked={!!config.hsts} onChange={(v) => patch({ hsts: v })} label="HSTS" hint="Browsers only use HTTPS for a year." />
+          <Toggle checked={!!config.frameDeny} onChange={(v) => patch({ frameDeny: v })} label="Deny framing" hint="X-Frame-Options: DENY" />
+          <Toggle checked={!!config.noSniff} onChange={(v) => patch({ noSniff: v })} label="No MIME sniffing" hint="X-Content-Type-Options: nosniff" />
           <Field label="Referrer policy">
             <select value={config.referrerPolicy ?? ""} onChange={(e) => patch({ referrerPolicy: e.target.value })} className={sel}>
               {["", "no-referrer", "no-referrer-when-downgrade", "origin", "origin-when-cross-origin", "same-origin", "strict-origin", "strict-origin-when-cross-origin", "unsafe-url"].map((p) => (
@@ -457,22 +462,21 @@ export function MiddlewarePage() {
       />
       {isNew && (
         <Panel title="Type">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-            {(data?.types ?? []).map((t) => (
-              <button
-                type="button"
-                key={t.type}
-                onClick={() => {
-                  setType(t.type);
-                  setConfig(defaults[t.type]);
-                }}
-                className={cn("border-line hover:border-line-strong rounded-sm border p-2 text-left", type === t.type && "border-line-accent bg-hover")}
-              >
-                <div className="text-sm">{presetLabels[t.type]}</div>
-                <div className="text-muted mt-0.5 text-xs">{t.description}</div>
-              </button>
-            ))}
-          </div>
+          <ChoiceCards
+            label="Type"
+            value={type}
+            onChange={(v) => {
+              setType(v);
+              setConfig(defaults[v]);
+            }}
+            columns={4}
+            options={(data?.types ?? []).map((t) => ({
+              value: t.type,
+              title: presetLabels[t.type],
+              description: t.description,
+              icon: presetIcons[t.type],
+            }))}
+          />
         </Panel>
       )}
       <Panel title={presetLabels[type]}>
@@ -493,15 +497,14 @@ export function MiddlewarePage() {
         </div>
       </Panel>
       <Panel title="Attached services">
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-          {projectServices.length === 0 && <span className="text-faint">No services in this project yet.</span>}
-          {projectServices.map((s) => (
-            <label key={s} className="flex items-center gap-1.5">
-              <input type="checkbox" checked={attached.includes(s)} onChange={(e) => setAttached(e.target.checked ? [...attached, s] : attached.filter((x) => x !== s))} />
-              <span className="font-mono">{s}</span>
-            </label>
-          ))}
-        </div>
+        <ChipSelect
+          label="Attached services"
+          mono
+          empty="No services in this project yet."
+          value={attached}
+          onChange={setAttached}
+          options={projectServices.map((s) => ({ value: s, label: s }))}
+        />
       </Panel>
       {save.error && <Alert>{save.error instanceof ApiError ? save.error.message : "Could not save"}</Alert>}
     </form>

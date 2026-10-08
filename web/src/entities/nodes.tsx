@@ -9,6 +9,7 @@ import {
   statusLabel,
   statusTone,
   useNodeIndex,
+  useNodes,
   type Node,
 } from "@/lib/nodes";
 import { useTaskIndex, type Task } from "@/lib/workloads";
@@ -17,6 +18,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { CardRow, HoverCard } from "@/ui/HoverCard";
 import { IconButton, StatusBadge } from "@/ui/controls";
 import { Meter } from "@/ui/Meter";
+import { ChoiceCard } from "@/ui/choice";
 import { cn, pad } from "@/ui/cn";
 
 /* Nodes, drawn the same way everywhere (Phase 16). */
@@ -435,3 +437,124 @@ export function NodesTable({
 /** Tasks of one node, in the order the node page lists them. */
 export const tasksOn = (tasks: Task[], node: Node) =>
   tasks.filter((t) => t.nodeId === node.id && t.desired === "running");
+
+/** A compact two-bar usage summary (CPU and memory) for picker cards. */
+function MiniUsage({ node }: { node: Node }) {
+  const m = node.metrics;
+  if (!m) return <span className="text-faint">no metrics yet</span>;
+  return (
+    <span className="flex flex-col gap-1">
+      <span className="flex items-center gap-2">
+        <span className="text-muted w-8 shrink-0">CPU</span>
+        <Meter
+          value={m.cpuPercent}
+          label={`${m.cpuPercent.toFixed(0)}% · ${node.info.cpuCores}c`}
+          className="min-w-0 flex-1"
+        />
+      </span>
+      <span className="flex items-center gap-2">
+        <span className="text-muted w-8 shrink-0">Mem</span>
+        <Meter
+          value={pct(m.memoryUsedBytes, m.memoryTotalBytes)}
+          label={`${bytes(m.memoryUsedBytes)} / ${bytes(m.memoryTotalBytes)}`}
+          className="min-w-0 flex-1"
+        />
+      </span>
+    </span>
+  );
+}
+
+const byRole = (a: string, b: string) =>
+  a === CONTROLLER_NODE ? -1 : b === CONTROLLER_NODE ? 1 : a.localeCompare(b);
+
+/**
+ * Nodes as selectable cards (Phase 16b): status, controller tag, CPU and
+ * memory, and tasks. `value` holds node names; `limit` narrows the choice
+ * (a project's allowed nodes). Chosen names that are not (or no longer)
+ * nodes stay listed so they can be removed.
+ */
+export function NodePicker({
+  value,
+  onChange,
+  limit,
+  counts,
+  label = "Nodes",
+}: {
+  value: string[];
+  onChange: (v: string[]) => void;
+  limit?: string[];
+  /** Tasks per node name to show; by default the node's active tasks. */
+  counts?: Record<string, number>;
+  label?: string;
+}) {
+  const { data: nodes = [], isLoading } = useNodes();
+  const perNode = useTasksPerNode();
+  const names = useMemo(() => {
+    const all = new Set(nodes.map((n) => n.name));
+    for (const v of value) all.add(v);
+    return [...all]
+      .filter((n) => !limit?.length || limit.includes(n))
+      .sort(byRole);
+  }, [nodes, value, limit]);
+  const toggle = (n: string) =>
+    onChange(
+      value.includes(n) ? value.filter((x) => x !== n) : [...value, n].sort(),
+    );
+  if (!isLoading && names.length === 0)
+    return (
+      <span className="text-faint text-xs">No nodes have joined yet.</span>
+    );
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 sm:gap-2 xl:grid-cols-3"
+    >
+      {names.map((name) => {
+        const n = nodes.find((x) => x.name === name);
+        const tasks = counts
+          ? (counts[name] ?? 0)
+          : n
+            ? (perNode.get(n.id)?.running ?? 0)
+            : 0;
+        return (
+          <ChoiceCard
+            key={name}
+            multi
+            selected={value.includes(name)}
+            onSelect={() => toggle(name)}
+            icon={Server}
+            title={
+              <span className="flex items-center gap-1.5">
+                {name}
+                <ControllerTag name={name} />
+              </span>
+            }
+            description={
+              n ? (
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span className="inline-flex items-center gap-1">
+                    <NodeDot node={n} />
+                    {statusLabel[n.status]}
+                    {n.draining
+                      ? " · draining"
+                      : !n.schedulable
+                        ? " · no new tasks"
+                        : ""}
+                  </span>
+                  <span className="text-faint">
+                    {tasks} {tasks === 1 ? "task" : "tasks"}
+                  </span>
+                </span>
+              ) : (
+                "not joined (anymore)"
+              )
+            }
+          >
+            {n && <MiniUsage node={n} />}
+          </ChoiceCard>
+        );
+      })}
+    </div>
+  );
+}

@@ -7,12 +7,28 @@ import {
 } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { BellRing } from "lucide-react";
+import {
+  Activity,
+  ArrowDown,
+  ArrowUp,
+  BellRing,
+  Code,
+  Hammer,
+  HeartPulse,
+  Rocket,
+  ScrollText,
+  Server,
+  Timer,
+  Info,
+  Siren,
+  TriangleAlert,
+} from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useProjects, useServices } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
-import { Alert, Button, Field, Input } from "@/ui/controls";
+import { Alert, Button, Field, Input, Toggle } from "@/ui/controls";
+import { ChipSelect, ChoiceCards, ChoiceField, Segmented } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
 import {
   describeRule,
@@ -23,6 +39,17 @@ import {
 
 const sel =
   "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
+
+const typeIcons: Record<string, typeof Activity> = {
+  metric: Activity,
+  log: ScrollText,
+  health: HeartPulse,
+  deployment: Rocket,
+  node: Server,
+  build: Hammer,
+  job: Timer,
+  promql: Code,
+};
 
 const types: { id: string; title: string; text: string }[] = [
   {
@@ -186,22 +213,18 @@ export function AlertRulePage() {
         }
       />
       <Section title="What to watch">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {types.map((t) => (
-            <button
-              type="button"
-              key={t.id}
-              onClick={() => set("type", t.id)}
-              className={cn(
-                "border-line hover:border-line-strong rounded-sm border p-2 text-left",
-                r.type === t.id && "border-line-accent bg-hover",
-              )}
-            >
-              <div className="text-sm">{t.title}</div>
-              <div className="text-muted mt-0.5 text-xs">{t.text}</div>
-            </button>
-          ))}
-        </div>
+        <ChoiceCards
+          label="What to watch"
+          value={r.type}
+          onChange={(v) => set("type", v)}
+          columns={4}
+          options={types.map((t) => ({
+            value: t.id,
+            title: t.title,
+            description: t.text,
+            icon: typeIcons[t.id],
+          }))}
+        />
       </Section>
 
       {(scoped || r.type === "promql") && (
@@ -308,16 +331,17 @@ export function AlertRulePage() {
           )}
           {thresholded && (
             <div className="grid grid-cols-3 gap-2">
-              <Field label={r.type === "log" ? "Lines" : "Is"}>
-                <select
-                  value={r.op}
-                  onChange={(e) => set("op", e.target.value)}
-                  className={sel}
-                >
-                  <option value=">">above</option>
-                  <option value="<">below</option>
-                </select>
-              </Field>
+              <ChoiceField label={r.type === "log" ? "Lines" : "Is"}>
+                <Segmented
+                  label={r.type === "log" ? "Lines" : "Is"}
+                  value={r.op === "<" ? "<" : ">"}
+                  onChange={(v) => set("op", v)}
+                  options={[
+                    { value: ">", label: "above", icon: ArrowUp },
+                    { value: "<", label: "below", icon: ArrowDown },
+                  ]}
+                />
+              </ChoiceField>
               <Field label="Threshold">
                 <Input
                   type="number"
@@ -354,19 +378,18 @@ export function AlertRulePage() {
               autoFocus={isNew}
             />
           </Field>
-          <Field label="Severity">
-            <select
+          <ChoiceField label="Severity">
+            <Segmented
+              label="Severity"
               value={r.severity}
-              onChange={(e) =>
-                set("severity", e.target.value as AlertRule["severity"])
-              }
-              className={sel}
-            >
-              <option value="info">info</option>
-              <option value="warning">warning</option>
-              <option value="critical">critical</option>
-            </select>
-          </Field>
+              onChange={(v) => set("severity", v)}
+              options={[
+                { value: "info", label: "info", icon: Info },
+                { value: "warning", label: "warning", icon: TriangleAlert },
+                { value: "critical", label: "critical", icon: Siren },
+              ]}
+            />
+          </ChoiceField>
           {!["deployment", "build", "job"].includes(r.type) && (
             <Field label="Fire after" hint="seconds the condition must hold">
               <Input
@@ -378,42 +401,27 @@ export function AlertRulePage() {
             </Field>
           )}
         </div>
-        <Field
-          label="Channels"
-          hint={
-            channels.length === 0
-              ? "No channels yet: alerts only appear in the history."
-              : undefined
-          }
-        >
-          <div className="flex flex-wrap gap-3 text-sm">
-            {channels.map((c) => (
-              <label key={c.id} className="flex items-center gap-1.5">
-                <input
-                  type="checkbox"
-                  checked={r.channels.includes(c.id)}
-                  onChange={(e) =>
-                    set(
-                      "channels",
-                      e.target.checked
-                        ? [...r.channels, c.id]
-                        : r.channels.filter((x) => x !== c.id),
-                    )
-                  }
-                />
-                {c.name} <span className="text-faint text-xs">{c.type}</span>
-              </label>
-            ))}
-          </div>
-        </Field>
-        <label className="flex items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            checked={r.enabled}
-            onChange={(e) => set("enabled", e.target.checked)}
-          />{" "}
-          Enabled
-        </label>
+        <ChoiceField label="Channels">
+          <ChipSelect
+            label="Channels"
+            empty="No channels yet: alerts only appear in the history."
+            value={r.channels}
+            onChange={(v) => set("channels", v)}
+            options={channels.map((c) => ({
+              value: c.id,
+              label: (
+                <>
+                  {c.name} <span className="text-faint">{c.type}</span>
+                </>
+              ),
+            }))}
+          />
+        </ChoiceField>
+        <Toggle
+          checked={r.enabled}
+          onChange={(v) => set("enabled", v)}
+          label="Enabled"
+        />
         <p className="text-muted text-xs">
           Fires for <span className="font-mono">{d.scope}</span> when {d.cond};
           checked every 30 seconds, and notifies again when it resolves.

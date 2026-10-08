@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { Cloud, Copy, Globe, Layers, Pencil, Plus, Trash2 } from "lucide-react";
+import { Cloud, Copy, Cpu, Globe, Layers, Pencil, Plus, Trash2 } from "lucide-react";
 import { usePaged } from "@/lib/paged";
 import { LoadMore } from "@/ui/LoadMore";
 import { api, ApiError } from "@/lib/api";
@@ -10,7 +10,8 @@ import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Meter } from "@/ui/Meter";
-import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
+import { Alert, Button, Field, IconButton, Input, StatusBadge, Toggle } from "@/ui/controls";
+import { ChoiceField, Segmented } from "@/ui/choice";
 import { NodeLink } from "@/entities/nodes";
 import { cn, gap } from "@/ui/cn";
 import { useLazyList } from "@/ui/paging";
@@ -176,9 +177,9 @@ function PoolPanel({ pool: p }: { pool: Pool }) {
               header: "Scale-in",
               cell: (n) =>
                 p.id ? (
-                  <label className="flex items-center gap-1.5 whitespace-nowrap">
-                    <input type="checkbox" checked={n.scaleInProtected} onChange={() => protect.mutate(n)} /> protected
-                  </label>
+                  <span className="whitespace-nowrap">
+                    <Toggle checked={n.scaleInProtected} onChange={() => protect.mutate(n)} label="protected" />
+                  </span>
                 ) : null,
             },
           ]}
@@ -343,12 +344,17 @@ export function NodePoolPage() {
           <Field label="Name">
             <Input value={name} onChange={(e) => setName(e.target.value)} disabled={!isNew} placeholder="workers" autoFocus={isNew} />
           </Field>
-          <Field label="Role" hint={role === "edge" ? "Runs a Traefik replica; takes no tasks" : "Runs tasks"}>
-            <select value={role} onChange={(e) => setRole(e.target.value as "worker" | "edge")} className={sel}>
-              <option value="worker">worker</option>
-              <option value="edge">edge</option>
-            </select>
-          </Field>
+          <ChoiceField label="Role" hint={role === "edge" ? "Runs a Traefik replica; takes no tasks" : "Runs tasks"}>
+            <Segmented
+              label="Role"
+              value={role}
+              onChange={setRole}
+              options={[
+                { value: "worker", label: "Worker", icon: Cpu },
+                { value: "edge", label: "Edge", icon: Globe },
+              ]}
+            />
+          </ChoiceField>
           <Field label="Servers" hint={provider ? "created through the provider" : "nodes join with a command"}>
             <select value={provider} onChange={(e) => setProvider(e.target.value)} className={sel}>
               <option value="">manual (join by hand)</option>
@@ -398,9 +404,7 @@ export function NodePoolPage() {
                   <Input type="number" min={0} value={max} onChange={(e) => setMax(Number(e.target.value))} />
                 </Field>
               </div>
-              <label className="flex items-center gap-2 text-xs">
-                <input type="checkbox" checked={spec.autoscale} onChange={(e) => patch({ autoscale: e.target.checked })} /> Add and remove servers automatically
-              </label>
+              <Toggle checked={!!spec.autoscale} onChange={(v) => patch({ autoscale: v })} label="Add and remove servers automatically" />
               {spec.autoscale && (
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   <Field label="Add when tasks wait (s)" hint="no node can take them">

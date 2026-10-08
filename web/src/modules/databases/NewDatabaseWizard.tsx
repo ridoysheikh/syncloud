@@ -1,10 +1,20 @@
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Camera,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Database as DatabaseIcon,
+  FileClock,
+  FolderKanban,
+  Globe,
+  MemoryStick,
+} from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useProjects } from "@/lib/workloads";
-import { useNodes } from "@/lib/nodes";
+import { NodePicker } from "@/entities/nodes";
 import {
   dbUrl,
   defaultPgReplication,
@@ -18,6 +28,7 @@ import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { Alert, Button, Field, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { ChoiceCard, ChoiceCards, ChoiceField, Segmented } from "@/ui/choice";
 import {
   AccessEditor,
   allowList,
@@ -280,13 +291,18 @@ export function NewDatabaseWizard() {
           <Panel title={step}>
             {step === "Engine" && (
               <div className="flex flex-col gap-3 text-xs">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div
+                  role="radiogroup"
+                  aria-label="Engine"
+                  className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+                >
                   {engines.map((e) => (
-                    <button
+                    <ChoiceCard
                       key={e.name}
-                      type="button"
+                      selected={f.engine === e.name}
                       disabled={!e.available}
-                      onClick={() => {
+                      icon={DatabaseIcon}
+                      onSelect={() => {
                         set("engine", e.name);
                         set("version", e.defaultVersion ?? "");
                         // Engine-sized defaults.
@@ -294,27 +310,14 @@ export function NewDatabaseWizard() {
                         set("memMax", 1024);
                         set("cpu", e.name === "postgres" ? "0.5" : "0.1");
                       }}
-                      className={cn(
-                        "flex flex-col gap-1 rounded-sm border p-3 text-left",
-                        f.engine === e.name
-                          ? "border-line-accent bg-raised"
-                          : "border-line hover:border-line-strong",
-                        !e.available && "cursor-not-allowed opacity-60",
-                      )}
-                    >
-                      <span className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{e.title}</span>
-                        {!e.available && (
-                          <span className="border-line text-muted rounded-sm border px-1 text-[10px]">
-                            planned
-                          </span>
-                        )}
-                        <span className="text-faint ml-auto font-mono">
-                          :{e.port}
+                      title={e.title}
+                      aside={
+                        <span className="text-faint font-mono">
+                          {e.available ? `:${e.port}` : "planned"}
                         </span>
-                      </span>
-                      <span className="text-muted">{e.description}</span>
-                    </button>
+                      }
+                      description={e.description}
+                    />
                   ))}
                 </div>
                 {engine?.available && (
@@ -355,35 +358,27 @@ export function NewDatabaseWizard() {
                     className="max-w-80 font-mono"
                   />
                 </Field>
-                <div className="flex flex-col gap-2">
-                  {(
-                    [
-                      [
-                        true,
-                        "Standalone",
+                <ChoiceCards
+                  label="Ownership"
+                  value={f.standalone ? "standalone" : "project"}
+                  onChange={(v) => set("standalone", v === "standalone")}
+                  options={[
+                    {
+                      value: "standalone",
+                      title: "Standalone",
+                      description:
                         "Not tied to a project. You choose which projects, environments or services may connect.",
-                      ],
-                      [
-                        false,
-                        "In a project environment",
+                      icon: Globe,
+                    },
+                    {
+                      value: "project",
+                      title: "In a project environment",
+                      description:
                         "Follows the project's allowed nodes and is reachable from its environment by default.",
-                      ],
-                    ] as const
-                  ).map(([v, label, help]) => (
-                    <label key={label} className="flex items-start gap-2">
-                      <input
-                        type="radio"
-                        className="mt-0.5"
-                        checked={f.standalone === v}
-                        onChange={() => set("standalone", v)}
-                      />
-                      <span>
-                        <span className="font-medium">{label}</span>
-                        <span className="text-muted block">{help}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
+                      icon: FolderKanban,
+                    },
+                  ]}
+                />
                 {!f.standalone && (
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Field label="Project">
@@ -544,17 +539,15 @@ export function CountSelect({
   onChange: (v: number) => void;
 }) {
   return (
-    <select
-      className={selectClass}
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
-    >
-      {[0, 1, 2, 3, 4, 5].map((n) => (
-        <option key={n} value={n}>
-          {n}
-        </option>
-      ))}
-    </select>
+    <Segmented
+      label="Count"
+      value={String(value)}
+      onChange={(v) => onChange(Number(v))}
+      options={[0, 1, 2, 3, 4, 5].map((n) => ({
+        value: String(n),
+        label: String(n),
+      }))}
+    />
   );
 }
 
@@ -602,12 +595,12 @@ export function CapacityStep({
       </Section>
       <Section title="Read replicas and failover">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label="At least">
+          <ChoiceField label="At least">
             <CountSelect value={f.repMin} onChange={(v) => set("repMin", v)} />
-          </Field>
-          <Field label="At most">
+          </ChoiceField>
+          <ChoiceField label="At most">
             <CountSelect value={f.repMax} onChange={(v) => set("repMax", v)} />
-          </Field>
+          </ChoiceField>
           <Field label="Scale out above read CPU (%)">
             <Input
               type="number"
@@ -647,42 +640,38 @@ export function DataStep({
   f: Pick<Form, "persistence" | "eviction" | "nodes">;
   set: SetFn;
 }) {
-  const { data: nodes = [] } = useNodes();
   return (
     <div className="flex flex-col gap-4 text-xs">
       <Section title="Persistence">
-        {(
-          [
-            [
-              "aof",
-              "Append-only file + snapshots",
-              "Every write is logged (fsync every second); loses at most a second of writes on a crash. Recommended.",
-            ],
-            [
-              "rdb",
-              "Snapshots only",
-              "Saved every 1–60 minutes depending on activity; a crash loses writes since the last snapshot.",
-            ],
-            [
-              "none",
-              "In memory only",
-              "Nothing is written to disk: a pure cache. A restarted member starts empty (replicas resync).",
-            ],
-          ] as const
-        ).map(([v, label, help]) => (
-          <label key={v} className="flex items-start gap-2">
-            <input
-              type="radio"
-              className="mt-0.5"
-              checked={f.persistence === v}
-              onChange={() => set("persistence", v)}
-            />
-            <span>
-              <span className="font-medium">{label}</span>
-              <span className="text-muted block">{help}</span>
-            </span>
-          </label>
-        ))}
+        <ChoiceCards
+          label="Persistence"
+          value={f.persistence}
+          onChange={(v) => set("persistence", v)}
+          columns={3}
+          options={[
+            {
+              value: "aof",
+              title: "Append-only file + snapshots",
+              description:
+                "Every write is logged (fsync every second); loses at most a second of writes on a crash. Recommended.",
+              icon: FileClock,
+            },
+            {
+              value: "rdb",
+              title: "Snapshots only",
+              description:
+                "Saved every 1–60 minutes depending on activity; a crash loses writes since the last snapshot.",
+              icon: Camera,
+            },
+            {
+              value: "none",
+              title: "In memory only",
+              description:
+                "Nothing is written to disk: a pure cache. A restarted member starts empty (replicas resync).",
+              icon: MemoryStick,
+            },
+          ]}
+        />
       </Section>
       <Section title="When memory is full">
         <select
@@ -706,25 +695,7 @@ export function DataStep({
           Optional: keep members on some nodes (within the project's allowed
           nodes, for a project database). Members always go on different nodes.
         </p>
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {nodes.map((n) => (
-            <label key={n.id} className="flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={f.nodes.includes(n.name)}
-                onChange={() =>
-                  set(
-                    "nodes",
-                    f.nodes.includes(n.name)
-                      ? f.nodes.filter((x) => x !== n.name)
-                      : [...f.nodes, n.name],
-                  )
-                }
-              />
-              {n.name}
-            </label>
-          ))}
-        </div>
+        <NodePicker value={f.nodes} onChange={(v) => set("nodes", v)} />
       </Section>
     </div>
   );

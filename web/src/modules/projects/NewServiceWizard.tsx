@@ -1,7 +1,20 @@
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Box, Check, ChevronLeft, ChevronRight, GitBranch } from "lucide-react";
+import {
+  Box,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Cog,
+  FileCode2,
+  FileText,
+  GitBranch,
+  Globe,
+  Network,
+  Package,
+  Wand2,
+} from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import {
   AWAITING_BUILD,
@@ -14,8 +27,9 @@ import {
 } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
-import { Alert, Button, Field, Input } from "@/ui/controls";
-import { cn, gap, pad } from "@/ui/cn";
+import { Alert, Button, Field, Input, Toggle } from "@/ui/controls";
+import { ChoiceCards, ChoiceField } from "@/ui/choice";
+import { cn, gap } from "@/ui/cn";
 import { toVars, VarsEditor, varsError, type VarRow } from "./VarsEditor";
 import {
   BranchInput,
@@ -359,40 +373,6 @@ export function NewServiceWizard() {
 
 type SetFn = <K extends keyof Form>(k: K, v: Form[K]) => void;
 
-function Choice({
-  active,
-  onClick,
-  icon,
-  title,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: ReactNode;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex flex-col gap-1 rounded-md border text-left transition-colors",
-        pad,
-        active
-          ? "border-line-accent bg-accent/10"
-          : "border-line hover:border-line-strong",
-      )}
-    >
-      <span className="flex items-center gap-2 text-sm font-medium">
-        {icon}
-        {title}
-      </span>
-      <span className="text-muted text-xs">{children}</span>
-    </button>
-  );
-}
-
 function SourceStep({
   f,
   set,
@@ -406,26 +386,27 @@ function SourceStep({
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Choice
-          active={f.source === "image"}
-          onClick={() => set("source", "image")}
-          icon={<Box className="size-4" />}
-          title="Container image"
-        >
-          Deploy an existing image from Docker Hub, GHCR or the private
-          registry.
-        </Choice>
-        <Choice
-          active={f.source === "git"}
-          onClick={() => set("source", "git")}
-          icon={<GitBranch className="size-4" />}
-          title="Git repository"
-        >
-          Build a branch with BuildKit (a Dockerfile, or Nixpacks without one);
-          new commits are built and deployed.
-        </Choice>
-      </div>
+      <ChoiceCards
+        label="Source"
+        value={f.source}
+        onChange={(v) => set("source", v)}
+        options={[
+          {
+            value: "image",
+            title: "Container image",
+            description:
+              "Deploy an existing image from Docker Hub, GHCR or the private registry.",
+            icon: Box,
+          },
+          {
+            value: "git",
+            title: "Git repository",
+            description:
+              "Build a branch with BuildKit (a Dockerfile, or Nixpacks without one); new commits are built and deployed.",
+            icon: GitBranch,
+          },
+        ]}
+      />
       {f.source === "image" ? (
         <Field
           label="Image"
@@ -496,21 +477,42 @@ function SourceStep({
               />
             </Field>
           </div>
+          <ChoiceField label="Builder">
+            <ChoiceCards
+              label="Builder"
+              value={f.builder}
+              onChange={(v) => set("builder", v)}
+              columns={4}
+              options={[
+                {
+                  value: "auto",
+                  title: "Automatic",
+                  description: "The Dockerfile if there is one, else Nixpacks.",
+                  icon: Wand2,
+                },
+                {
+                  value: "dockerfile",
+                  title: "Dockerfile",
+                  description: "Build the Dockerfile at the path below.",
+                  icon: FileCode2,
+                },
+                {
+                  value: "nixpacks",
+                  title: "Nixpacks",
+                  description:
+                    "Detect the language and build without a Dockerfile.",
+                  icon: Package,
+                },
+                {
+                  value: "static",
+                  title: "Static site",
+                  description: "Serve the built files on port 80.",
+                  icon: FileText,
+                },
+              ]}
+            />
+          </ChoiceField>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <Field label="Builder">
-              <select
-                value={f.builder}
-                onChange={(e) =>
-                  set("builder", e.target.value as Form["builder"])
-                }
-                className={select}
-              >
-                <option value="auto">Automatic</option>
-                <option value="dockerfile">Dockerfile</option>
-                <option value="nixpacks">Nixpacks</option>
-                <option value="static">Static site (port 80)</option>
-              </select>
-            </Field>
             <div className="sm:col-span-2">
               <Field
                 label="Watch paths"
@@ -550,14 +552,11 @@ function SourceStep({
               />
             </Field>
           )}
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={f.autoDeploy}
-              onChange={(e) => set("autoDeploy", e.target.checked)}
-            />
-            Deploy every successful build automatically
-          </label>
+          <Toggle
+            checked={f.autoDeploy}
+            onChange={(v) => set("autoDeploy", v)}
+            label="Deploy every successful build automatically"
+          />
         </div>
       )}
     </div>
@@ -630,20 +629,37 @@ function ServiceStep({
           />
         </Field>
       </div>
+      <ChoiceField label="Network">
+        <ChoiceCards
+          label="Network"
+          value={f.exposure}
+          onChange={(v) => set("exposure", v)}
+          columns={3}
+          options={[
+            {
+              value: "public",
+              title: "Public HTTP",
+              description:
+                "Gets a public HTTPS address; add your own domains later.",
+              icon: Globe,
+            },
+            {
+              value: "internal",
+              title: "Internal only",
+              description:
+                "Reachable by the project's services over the private network (TCP).",
+              icon: Network,
+            },
+            {
+              value: "none",
+              title: "Worker",
+              description: "No port: background jobs, queues, consumers.",
+              icon: Cog,
+            },
+          ]}
+        />
+      </ChoiceField>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <Field label="Network">
-          <select
-            value={f.exposure}
-            onChange={(e) =>
-              set("exposure", e.target.value as Form["exposure"])
-            }
-            className={select}
-          >
-            <option value="public">HTTP, public URL</option>
-            <option value="internal">Internal only (TCP)</option>
-            <option value="none">No port (worker)</option>
-          </select>
-        </Field>
         {f.exposure !== "none" && (
           <Field label="Container port">
             <Input
