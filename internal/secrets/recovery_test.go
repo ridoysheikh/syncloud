@@ -33,4 +33,9 @@ func TestRecoveryKeyWrapUnwrap(t *testing.T) {
 	if RecoveryKeySuffix(rk) != strings.ReplaceAll(rk, "-", "")[len(strings.ReplaceAll(rk, "-", ""))-6:] {
 		t.Fatal("suffix")
 	}
+	for _, typed := range []string{rk, strings.ToLower(rk), rk[len(rk)-7:], " " + strings.ReplaceAll(rk[len(rk)-7:], "-", "") + " "} {
+		if RecoveryKeySuffix(typed) != RecoveryKeySuffix(rk) {
+			t.Fatalf("typed %q gives %q", typed, RecoveryKeySuffix(typed))
+		}
+	}
 }

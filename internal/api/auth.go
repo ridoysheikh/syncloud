@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
 	"github.com/ridoysheikh/syncloud/internal/store"
 	"github.com/ridoysheikh/syncloud/internal/version"
 )
@@ -96,7 +97,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if want, ok, err := s.store.GetSetting(r.Context(), store.SettingRecoverySuffixHash); err != nil {
 		s.internalError(w, "get recovery setting", err)
 		return
-	} else if ok && !auth.TokenMatches(strings.ToUpper(strings.TrimSpace(req.RecoveryKeySuffix)), want) {
+	} else if ok && !auth.TokenMatches(secrets.RecoveryKeySuffix(req.RecoveryKeySuffix), want) {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "the last 6 characters of the recovery key do not match; it was printed with the setup token")
 		return
 	}

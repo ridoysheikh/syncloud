@@ -288,7 +288,12 @@ func TestSetupRequiresRecoveryKeySuffix(t *testing.T) {
 	if resp, _ := e.do(t, "POST", "/api/v1/setup", req, nil); resp.StatusCode != 400 {
 		t.Fatalf("wrong suffix: %d", resp.StatusCode)
 	}
-	req["recoveryKeySuffix"] = "abc234"
+	// The last group alone is one character short: dashes don't count.
+	req["recoveryKeySuffix"] = "-BC234"
+	if resp, _ := e.do(t, "POST", "/api/v1/setup", req, nil); resp.StatusCode != 400 {
+		t.Fatalf("five characters: %d", resp.StatusCode)
+	}
+	req["recoveryKeySuffix"] = " a-bc234 "
 	if resp, body := e.do(t, "POST", "/api/v1/setup", req, nil); resp.StatusCode != 201 {
 		t.Fatalf("setup: %d %v", resp.StatusCode, body)
 	}

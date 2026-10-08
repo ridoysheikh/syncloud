@@ -49,9 +49,11 @@ func normalizeRecoveryKey(k string) ([]byte, error) {
 	return raw, nil
 }
 
-// RecoveryKeySuffix is what the setup wizard asks the user to type back.
+// RecoveryKeySuffix is what the setup wizard asks the user to type back: the
+// key's last 6 characters, dashes and spaces not counted. Applied to the
+// user's answer too, so "2-IRWKX", "2IRWKX" or the whole key all match.
 func RecoveryKeySuffix(k string) string {
-	k = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(k), "-", ""))
+	k = strings.ToUpper(strings.NewReplacer("-", "", " ", "", "\n", "", "\t", "").Replace(k))
 	if len(k) < 6 {
 		return k
 	}

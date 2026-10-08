@@ -57,7 +57,7 @@ export function SetupPage() {
           />
         </Field>
         {status?.recoveryConfirmRequired && (
-          <Field label="Recovery key: last 6 characters" hint="Printed with the setup token. You need it to restore backups, so store it safely first.">
+          <Field label="Recovery key: last 6 characters" hint="Printed with the setup token; dashes don't count (a key ending …-T5JV2-IRWKX gives 2IRWKX). You need the key to restore backups, so store it safely first.">
             <Input
               value={form.recoveryKeySuffix}
               onChange={set("recoveryKeySuffix")}
@@ -65,7 +65,7 @@ export function SetupPage() {
               className="font-mono text-xs uppercase"
               autoComplete="off"
               spellCheck={false}
-              maxLength={6}
+              maxLength={80}
               minLength={6}
               required
             />

@@ -316,7 +316,8 @@ if [ -f "$DATA_DIR/recovery-key" ]; then
   echo "  Recovery key:  $(cat "$DATA_DIR/recovery-key")"
   echo
   echo "  Save the recovery key now. It is shown only once and is needed to"
-  echo "  restore backups. Setup asks for its last 6 characters."
+  echo "  restore backups. Setup asks for its last 6 characters, dashes not"
+  echo "  counted: $(tr -d -- '-\n' < "$DATA_DIR/recovery-key" | tail -c 6)"
 fi
 echo
 echo "  Certificates are being requested; the first visit may show a"
