@@ -170,6 +170,6 @@ function RailItem({ module: m, active }: { module: DashboardModule; active: bool
 function itemClass(active: boolean) {
   return cn(
     "flex h-7 w-full min-w-0 shrink-0 items-center gap-2 rounded-sm px-2 text-[13px] transition-colors",
-    active ? "bg-raised text-fg shadow-[inset_2px_0_0_var(--color-accent)]" : "text-muted hover:text-fg hover:bg-hover",
+    active ? "bg-raised text-fg" : "text-muted hover:text-fg hover:bg-hover",
   );
 }

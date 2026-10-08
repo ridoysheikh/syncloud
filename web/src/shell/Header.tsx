@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, ChevronDown, LogOut, Menu, Search, SquareTerminal, TriangleAlert, X } from "lucide-react";
+import { Bell, ChevronDown, LogOut, Menu, SquareTerminal, TriangleAlert, X } from "lucide-react";
 import { backupQuery } from "@/lib/backups";
 import { api, type User } from "@/lib/api";
 import { stopStream, useStreamState } from "@/lib/stream";
@@ -35,29 +35,7 @@ export function Header({
         <span className="font-semibold tracking-tight">SynCloud</span>
       </div>
 
-      {/* Project / environment switcher: projects arrive with services (Phase 2). */}
-      <button
-        disabled
-        title="Projects arrive in Phase 2"
-        className="border-line text-muted hidden h-7 items-center gap-1.5 rounded-sm border px-2 text-xs lg:flex"
-      >
-        <span>default</span>
-        <span className="text-faint">/</span>
-        <span>production</span>
-        <ChevronDown className="size-3" />
-      </button>
-
-      <div className="flex min-w-0 flex-1 justify-center">
-        <button
-          disabled
-          title="Global search and the ⌘K command palette arrive with the first resources"
-          className="bg-bg border-line text-faint hidden h-7 w-full max-w-md items-center gap-2 rounded-sm border px-2 text-xs sm:flex"
-        >
-          <Search className="size-3.5" />
-          <span className="flex-1 text-left">Search resources…</span>
-          <kbd className="border-line rounded-sm border px-1 font-mono text-[10px]">⌘K</kbd>
-        </button>
-      </div>
+      <div className="flex-1" />
 
       <BackupWarning />
       <StreamIndicator />
