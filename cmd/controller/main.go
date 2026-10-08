@@ -294,11 +294,13 @@ func serve(args []string) error {
 		return false
 	}
 	// Public databases open their engine's port on the controller and edges.
-	var dbMgr *dbs.Manager // set below
+	// The database manager is created further down, after loops that already
+	// read these lists; until then they leave databases out.
+	var dbRef atomic.Pointer[dbs.Manager]
 	dbPorts := map[string]string{dbs.EngineValkey: portOf(cfg.PublicValkey), dbs.EnginePostgres: portOf(cfg.PublicPostgres)}
 	publicPorts := func() []mesh.PublicPort {
 		var out []mesh.PublicPort
-		if dbMgr != nil {
+		if dbMgr := dbRef.Load(); dbMgr != nil {
 			for _, e := range dbMgr.PublicEngines(context.Background()) {
 				if p := dbPorts[e]; p != "" {
 					out = append(out, mesh.PublicPort{Port: p, Protocol: "tcp", Kind: "database"})
@@ -328,7 +330,7 @@ func serve(args []string) error {
 				hosts = append(hosts, r.Host)
 			}
 		}
-		if dbMgr != nil {
+		if dbMgr := dbRef.Load(); dbMgr != nil {
 			hosts = append(hosts, dbMgr.PublicHosts(context.Background(), ep.BaseDomain)...)
 		}
 		return hosts
@@ -416,7 +418,7 @@ func serve(args []string) error {
 	metricStore := metrics.New(cfg.VictoriaMetricsURL, log)
 	go metricStore.Run(ctx)
 	// Managed Valkey databases (Phase 12).
-	dbMgr = dbs.New(st, gw, workloads, registry, box, bus, log)
+	dbMgr := dbs.New(st, gw, workloads, registry, box, bus, log)
 	dbMgr.Metrics = metricStore
 	dbMgr.BaseDomain = domains.Base
 	dbMgr.PostgresImages, err = postgresImages(cfg.PostgresImage)
@@ -454,6 +456,10 @@ func serve(args []string) error {
 	gw.AddHooks(dbMgr.Hooks())
 	disco.Databases = dbMgr
 	workloads.ExtraUsage = dbMgr.Usage
+	// Public databases' names and ports: the lists built so far lacked them,
+	// which dropped their certificates after every controller restart.
+	dbRef.Store(dbMgr)
+	dbMgr.OnNetworkChange()
 	go dbMgr.Run(ctx)
 	gw.AddHooks(agentgw.Hooks{OnHeartbeat: func(node store.Node, hb *agentv1.Heartbeat) {
 		metricStore.Add(node.Name, hb.GetTasks())
