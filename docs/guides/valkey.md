@@ -45,8 +45,13 @@ Turn on the **public endpoint**, and the database is served with TLS at `<db>.db
 
 ```sh
 synctl db network sessions --public on --allow 203.0.113.0/24
-redis-cli --tls -h sessions.db.<base-domain> -a <password>
+redis-cli --tls --sni sessions.db.<base-domain> -u 'rediss://default:<password>@sessions.db.<base-domain>:6379'
 ```
+
+The endpoint is TLS only, and the client must send the host name (SNI): one port serves every public database, and the name says which one. Client libraries do this on their own; `redis-cli` and `valkey-cli` need `--sni`. The dashboard's **Connect** panel has the command ready to copy.
+
+- **`certificate verify failed`**: SNI is missing (add `--sni`), or the certificate is still being issued in the first minute after turning the endpoint on.
+- **`Protocol error, got "H"`** or **`I/O error`**: the client connected without TLS (`redis://`). Use `rediss://` or `--tls`.
 
 With your own base domain, point `*.db.<your-domain>` at the controller or the edge nodes.
 

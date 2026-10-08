@@ -37,6 +37,8 @@ synctl db network orders --add-access environment:billing/production
 synctl db network orders --public on --allow 203.0.113.0/24     # a public TLS endpoint
 ```
 
+The public endpoint is TLS only (`sslmode=require` or stricter) and needs a client that sends the host name (SNI), which libpq does from version 14. With an older `psql` or driver, Traefik can't tell which database you mean.
+
 ## Size and replicas
 
 | Setting | Notes |

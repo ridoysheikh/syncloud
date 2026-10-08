@@ -447,6 +447,17 @@ function Connection({ d, path }: { d: Database; path: string }) {
               }
               copy={show && !!c?.publicReadUrl}
             />
+            {!pg && (
+              <Line
+                label="redis-cli"
+                value={`redis-cli --tls --sni ${d.public.host} -u ${
+                  show && c?.publicUrl
+                    ? c.publicUrl
+                    : url(d.public.host, d.public.port, true)
+                }`}
+                copy={show && !!c?.publicUrl}
+              />
+            )}
           </>
         )}
         {creds.error && <Alert>{errText(creds.error)}</Alert>}
@@ -455,8 +466,8 @@ function Connection({ d, path }: { d: Database; path: string }) {
           private network ({accessSummary(d)}).
           {d.public.enabled && d.public.available
             ? pg
-              ? " From outside, use the public URL: TLS is required (sslmode=require)."
-              : " From outside, use the public URL: TLS is required (rediss://, or redis-cli --tls)."
+              ? " From outside, use the public URL: TLS is required (sslmode=require), with libpq 14 or later, which sends the host name (SNI)."
+              : " From outside, use the public URL: TLS is required (rediss://), and the client must send the host name (SNI). Client libraries do; redis-cli and valkey-cli need --sni."
             : " Turn on the public endpoint under Connectivity to connect from outside the cluster."}{" "}
           {pg
             ? "Any PostgreSQL driver works. Send writes to the read-write host; the read-only host spreads reads over the replicas. The HA URL lists every member, so the driver finds the primary even while the controller is down."

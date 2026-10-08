@@ -142,8 +142,9 @@ export function PublicFields({
               {host}:{port}
             </code>{" "}
             over TLS (<code className="font-mono">{example}</code>
-            ). Traefik terminates TLS with the platform's certificate and
-            forwards to the current primary.
+            ). Traefik picks the database by the host name the client sends
+            (SNI), terminates TLS with its certificate and forwards to the
+            current primary.
           </>
         }
       />
