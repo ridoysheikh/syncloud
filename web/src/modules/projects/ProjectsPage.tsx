@@ -15,6 +15,7 @@ import { Panel } from "@/ui/Panel";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap, pad } from "@/ui/cn";
+import { useLazyList } from "@/ui/paging";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 
@@ -23,6 +24,7 @@ export function ProjectsPage() {
   const { data: projects = [], isLoading } = useProjects();
   const { data: services = [] } = useServices();
   const newTo: string = "/projects/new";
+  const lazy = useLazyList(projects);
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader
@@ -45,17 +47,23 @@ export function ProjectsPage() {
           </EmptyState>
         </Panel>
       ) : (
-        <div
-          className={cn("grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3", gap)}
-        >
-          {projects.map((p) => (
-            <ProjectCard
-              key={p.id}
-              project={p}
-              services={services.filter((s) => s.project === p.name)}
-            />
-          ))}
-        </div>
+        <>
+          <div
+            className={cn(
+              "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3",
+              gap,
+            )}
+          >
+            {lazy.shown.map((p) => (
+              <ProjectCard
+                key={p.id}
+                project={p}
+                services={services.filter((s) => s.project === p.name)}
+              />
+            ))}
+          </div>
+          {lazy.more}
+        </>
       )}
     </div>
   );

@@ -14,6 +14,7 @@ import {
 import { ApiError } from "@/lib/api";
 import type { PgObjectKind } from "@/lib/pg";
 import { cn } from "@/ui/cn";
+import { Pagination, usePagination } from "@/ui/paging";
 
 /** A compact select for toolbars and inline forms (selectClass is full width). */
 export const inlineSelect =
@@ -73,13 +74,16 @@ export function Cell({ v }: { v: string | null }) {
   return <span title={v.length > 120 ? v : undefined}>{short}</span>;
 }
 
-/** A grid of query results, with an optional sortable header. */
+/**
+ * A grid of query results, with an optional sortable header. Without an
+ * offset (rows already paged by the server) the rows are paginated here.
+ */
 export function ResultGrid({
   columns,
   rows,
   sort,
   onSort,
-  offset = 0,
+  offset,
 }: {
   columns: { name: string; type: string }[];
   rows: (string | null)[][];
@@ -88,73 +92,82 @@ export function ResultGrid({
   offset?: number;
 }) {
   const [wrap, setWrap] = useState(false);
+  const local = usePagination(rows);
+  const paged = offset === undefined && local.paged;
+  const shown = paged ? local.rows : rows;
+  const first = offset ?? (paged ? local.pager.page * local.pager.pageSize : 0);
   return (
-    <div className="max-h-[60vh] overflow-auto">
-      <table className="w-full border-collapse font-mono text-xs">
-        <thead className="bg-surface sticky top-0 z-10">
-          <tr className="border-line border-b">
-            <th className="text-faint w-8 px-2 text-right font-normal">
-              <button
-                type="button"
-                onClick={() => setWrap((w) => !w)}
-                title={wrap ? "Truncate long values" : "Wrap long values"}
-                className="hover:text-fg"
-              >
-                #
-              </button>
-            </th>
-            {columns.map((c) => (
-              <th
-                key={c.name}
-                className="h-7 px-2 text-left font-medium whitespace-nowrap"
-              >
+    <div>
+      <div className="max-h-[60vh] overflow-auto">
+        <table className="w-full border-collapse font-mono text-xs">
+          <thead className="bg-surface sticky top-0 z-10">
+            <tr className="border-line border-b">
+              <th className="text-faint w-8 px-2 text-right font-normal">
                 <button
                   type="button"
-                  disabled={!onSort}
-                  onClick={() => onSort?.(c.name)}
-                  className={cn(
-                    "flex items-baseline gap-1",
-                    onSort && "hover:text-accent",
-                  )}
+                  onClick={() => setWrap((w) => !w)}
+                  title={wrap ? "Truncate long values" : "Wrap long values"}
+                  className="hover:text-fg"
                 >
-                  <span>{c.name}</span>
-                  {sort?.column === c.name && (
-                    <span className="text-accent">{sort.desc ? "↓" : "↑"}</span>
-                  )}
-                  <span className="text-faint font-sans text-[10px] font-normal">
-                    {c.type}
-                  </span>
+                  #
                 </button>
               </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr
-              key={i}
-              className="border-line hover:bg-hover/50 border-b last:border-b-0"
-            >
-              <td className="text-faint px-2 py-1 text-right align-top">
-                {offset + i + 1}
-              </td>
-              {r.map((v, j) => (
-                <td
-                  key={j}
-                  className={cn(
-                    "px-2 py-1 align-top",
-                    wrap
-                      ? "break-all whitespace-pre-wrap"
-                      : "whitespace-nowrap",
-                  )}
+              {columns.map((c) => (
+                <th
+                  key={c.name}
+                  className="h-7 px-2 text-left font-medium whitespace-nowrap"
                 >
-                  {wrap && v !== null ? v : <Cell v={v} />}
-                </td>
+                  <button
+                    type="button"
+                    disabled={!onSort}
+                    onClick={() => onSort?.(c.name)}
+                    className={cn(
+                      "flex items-baseline gap-1",
+                      onSort && "hover:text-accent",
+                    )}
+                  >
+                    <span>{c.name}</span>
+                    {sort?.column === c.name && (
+                      <span className="text-accent">
+                        {sort.desc ? "↓" : "↑"}
+                      </span>
+                    )}
+                    <span className="text-faint font-sans text-[10px] font-normal">
+                      {c.type}
+                    </span>
+                  </button>
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {shown.map((r, i) => (
+              <tr
+                key={i}
+                className="border-line hover:bg-hover/50 border-b last:border-b-0"
+              >
+                <td className="text-faint px-2 py-1 text-right align-top">
+                  {first + i + 1}
+                </td>
+                {r.map((v, j) => (
+                  <td
+                    key={j}
+                    className={cn(
+                      "px-2 py-1 align-top",
+                      wrap
+                        ? "break-all whitespace-pre-wrap"
+                        : "whitespace-nowrap",
+                    )}
+                  >
+                    {wrap && v !== null ? v : <Cell v={v} />}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {paged && <Pagination {...local.pager} />}
     </div>
   );
 }

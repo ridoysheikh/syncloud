@@ -19,6 +19,7 @@ import { Panel } from "@/ui/Panel";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap, pad } from "@/ui/cn";
+import { useLazyList } from "@/ui/paging";
 import { MetricsPanel } from "./MetricsPanel";
 import { LogsView } from "@/modules/logs/LogsView";
 import { RequestsTail, TrafficPanel } from "@/modules/traffic/Traffic";
@@ -203,6 +204,7 @@ function ServiceGrid({
   services: Service[];
   newTo: string;
 }) {
+  const lazy = useLazyList(services);
   if (services.length === 0) {
     return (
       <Panel>
@@ -216,15 +218,18 @@ function ServiceGrid({
     );
   }
   return (
-    <div
-      className={cn(
-        "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4",
-        gap,
-      )}
-    >
-      {services.map((s) => (
-        <ServiceCard key={s.id} s={s} />
-      ))}
+    <div className="flex flex-col">
+      <div
+        className={cn(
+          "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4",
+          gap,
+        )}
+      >
+        {lazy.shown.map((s) => (
+          <ServiceCard key={s.id} s={s} />
+        ))}
+      </div>
+      {lazy.more}
     </div>
   );
 }

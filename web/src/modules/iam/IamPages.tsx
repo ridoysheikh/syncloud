@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { Check, Download, KeyRound, Plus, Shield, ShieldCheck, ShieldX, Trash2, UserPlus, Users, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
@@ -7,6 +7,7 @@ import { useProjects } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
+import { LAZY_BATCH } from "@/ui/paging";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
@@ -925,13 +926,19 @@ export function AuditPage() {
   const [action, setAction] = useState("");
   const [text, setText] = useState("");
   const [since, setSince] = useState("24h");
-  const [before, setBefore] = useState<number[]>([]);
-  const q = new URLSearchParams({ limit: "100", since });
+  const q = new URLSearchParams({ limit: String(LAZY_BATCH), since });
   if (actor) q.set("actor", actor);
   if (action) q.set("action", action);
   if (text) q.set("q", text);
-  if (before.length) q.set("before", String(before[before.length - 1]));
-  const { data, isLoading, error } = useQuery({ queryKey: ["audit", q.toString()], queryFn: items<AuditEvent>(`/audit?${q}`) });
+  // Older events load LAZY_BATCH at a time as the table pages toward them.
+  const audit = useInfiniteQuery({
+    queryKey: ["audit", q.toString()],
+    queryFn: ({ pageParam }) => items<AuditEvent>(`/audit?${q}${pageParam ? `&before=${pageParam}` : ""}`)(),
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.length === LAZY_BATCH ? last[last.length - 1]!.id : undefined),
+  });
+  const data = audit.data?.pages.flat();
+  const { isLoading, error } = audit;
   const exportQ = new URLSearchParams(q);
   exportQ.delete("limit");
   exportQ.delete("before");
@@ -973,8 +980,12 @@ export function AuditPage() {
       <Forbidden error={error} />
       <Panel flush>
         <DataTable
+          key={q.toString()}
           rows={data ?? []}
           rowKey={(e) => String(e.id)}
+          hasMore={!!audit.hasNextPage}
+          onLoadMore={() => void audit.fetchNextPage({ cancelRefetch: false })}
+          loadingMore={audit.isFetchingNextPage}
           empty={!isLoading && !error && <EmptyState icon={Shield} title="No events" />}
           columns={[
             { header: "When", cell: (e) => <span className="text-muted whitespace-nowrap">{new Date(e.at).toLocaleString()}</span> },
@@ -1001,10 +1012,6 @@ export function AuditPage() {
           ]}
         />
       </Panel>
-      <div className="flex gap-2">
-        {before.length > 0 && <Button onClick={() => setBefore(before.slice(0, -1))}>Newer</Button>}
-        {(data?.length ?? 0) === 100 && <Button onClick={() => setBefore([...before, data![data!.length - 1]!.id])}>Older</Button>}
-      </div>
     </div>
   );
 }

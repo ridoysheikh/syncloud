@@ -12,6 +12,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Meter } from "@/ui/Meter";
 import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { useLazyList } from "@/ui/paging";
 import { confirmAction } from "@/ui/dialogs";
 
 interface PoolSpec {
@@ -59,6 +60,7 @@ const useProviders = () =>
 /** Compute › Node pools (§6.5): manual and provider-backed pools, cluster autoscaling. */
 export function NodePoolsPage() {
   const { data: pools = [], isLoading, error } = usePools();
+  const lazy = useLazyList(pools);
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader
@@ -74,9 +76,10 @@ export function NodePoolsPage() {
       />
       {error && <Alert tone="warn">{errText(error, "Unavailable")}</Alert>}
       {!isLoading && pools.length === 0 && <EmptyState icon={Layers} title="No node pools" />}
-      {pools.map((p) => (
+      {lazy.shown.map((p) => (
         <PoolPanel key={p.id || "default"} pool={p} />
       ))}
+      {lazy.more}
       <ProvidersPanel />
     </div>
   );
@@ -86,7 +89,6 @@ function PoolPanel({ pool: p }: { pool: Pool }) {
   const qc = useQueryClient();
   const [join, setJoin] = useState("");
   const events = usePaged<{ id: number; at: string; kind: string; message: string }>(["node-pools", p.name, "events"], `/node-pools/${p.name}/events`, {
-    limit: 20,
     enabled: !!p.id,
     refetchInterval: 10_000,
   });

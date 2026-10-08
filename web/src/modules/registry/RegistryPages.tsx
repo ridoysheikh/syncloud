@@ -15,6 +15,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, IconButton, StatusBadge } from "@/ui/controls";
 import { LifecyclePanel } from "./LifecyclePanel";
 import { cn, gap } from "@/ui/cn";
+import { useLazyList } from "@/ui/paging";
 import { Tabs } from "@/ui/Tabs";
 import { confirmAction } from "@/ui/dialogs";
 
@@ -108,7 +109,6 @@ function ActivityPanel({ repo }: { repo?: string }) {
   } = usePaged<RegistryEvent>(
     ["registry", "events", repo ?? ""],
     `/registry/events${repo ? `?repository=${encodeURIComponent(repo)}` : ""}`,
-    { limit: repo ? 50 : 15 },
   );
   if (error) return null;
   return (
@@ -387,6 +387,7 @@ export function RepositoriesPage() {
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["registry"] }),
   });
+  const lazyRepos = useLazyList(repos);
 
   return (
     <div className={cn("flex flex-col", gap)}>
@@ -403,37 +404,40 @@ export function RepositoriesPage() {
               Push one with the commands on the Registry page.
             </EmptyState>
           ) : (
-            <ul className="text-xs">
-              {repos.map((r) => (
-                <li key={r.name}>
-                  <button
-                    onClick={() => setRepo(r.name)}
-                    className={cn(
-                      "hover:bg-hover flex w-full justify-between px-3 py-1.5 text-left font-mono",
-                      r.name === current && "bg-hover text-accent",
-                    )}
-                  >
-                    <span className="truncate">{r.name}</span>
-                    <span
-                      className="text-faint flex items-center gap-1.5"
-                      title={
-                        r.lastPulledAt
-                          ? `last pulled ${since(r.lastPulledAt)}`
-                          : "never pulled"
-                      }
-                    >
-                      {r.lifecycle && (
-                        <span
-                          title="lifecycle policy"
-                          className="bg-ok size-1.5 rounded-full"
-                        />
+            <>
+              <ul className="text-xs">
+                {lazyRepos.shown.map((r) => (
+                  <li key={r.name}>
+                    <button
+                      onClick={() => setRepo(r.name)}
+                      className={cn(
+                        "hover:bg-hover flex w-full justify-between px-3 py-1.5 text-left font-mono",
+                        r.name === current && "bg-hover text-accent",
                       )}
-                      {r.tags}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+                    >
+                      <span className="truncate">{r.name}</span>
+                      <span
+                        className="text-faint flex items-center gap-1.5"
+                        title={
+                          r.lastPulledAt
+                            ? `last pulled ${since(r.lastPulledAt)}`
+                            : "never pulled"
+                        }
+                      >
+                        {r.lifecycle && (
+                          <span
+                            title="lifecycle policy"
+                            className="bg-ok size-1.5 rounded-full"
+                          />
+                        )}
+                        {r.tags}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {lazyRepos.more}
+            </>
           )}
         </Panel>
         <div className={cn("flex min-w-0 flex-col", gap)}>

@@ -5,6 +5,7 @@ import { Check, ExternalLink, Lock, Plus, Search } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { Alert, Input } from "@/ui/controls";
 import { cn } from "@/ui/cn";
+import { useLazyList } from "@/ui/paging";
 
 export type GitKind = "github-app" | "github" | "gitlab" | "gitea";
 
@@ -93,6 +94,7 @@ export function RepoPicker({
     return () => clearTimeout(t);
   }, [q]);
   const repos = useRepos(connection, debounced);
+  const lazyRepos = useLazyList(repos.data ?? []);
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -142,7 +144,7 @@ export function RepoPicker({
                   No repositories{debounced && ` matching “${debounced}”`}. A GitHub App only sees the repositories it is installed on.
                 </div>
               )}
-              {repos.data?.map((r) => (
+              {lazyRepos.shown.map((r) => (
                 <button
                   type="button"
                   key={r.fullName}
@@ -168,6 +170,7 @@ export function RepoPicker({
                   </a>
                 </button>
               ))}
+              {lazyRepos.more}
             </div>
           </div>
         </div>

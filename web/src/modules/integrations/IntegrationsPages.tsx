@@ -21,6 +21,7 @@ import { since } from "@/lib/nodes";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
+import { LazyItems } from "@/ui/paging";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
@@ -441,16 +442,18 @@ export function GitConnectionPage() {
             </p>
           ) : (
             <ul className="flex flex-col gap-1 text-xs">
-              {c.services.map((s) => {
-                const [p, e, n] = s.split("/");
-                return (
-                  <li key={s}>
-                    <Link to={`/projects/${p}/${e}/services/${n}?tab=builds` as string} className="hover:text-accent font-mono">
-                      {s}
-                    </Link>
-                  </li>
-                );
-              })}
+              <LazyItems items={c.services}>
+                {(s) => {
+                  const [p, e, n] = s.split("/");
+                  return (
+                    <li key={s}>
+                      <Link to={`/projects/${p}/${e}/services/${n}?tab=builds` as string} className="hover:text-accent font-mono">
+                        {s}
+                      </Link>
+                    </li>
+                  );
+                }}
+              </LazyItems>
             </ul>
           )}
         </Panel>

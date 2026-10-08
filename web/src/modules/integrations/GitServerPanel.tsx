@@ -8,6 +8,7 @@ import { Alert, Button, StatusBadge, Toggle } from "@/ui/controls";
 import { GiteaIcon, GitHubIcon, GitLabIcon } from "@/ui/brands";
 import { useGitConnections } from "./RepoPicker";
 import { confirmAction } from "@/ui/dialogs";
+import { LazyItems } from "@/ui/paging";
 
 interface GitServer {
   enabled: boolean;
@@ -121,16 +122,18 @@ export function GitServerPanel() {
           </div>
           {external.length > 0 && (
             <ul className="flex flex-col gap-0.5 text-xs">
-              {external.map((c) => (
-                <li key={c.id}>
-                  <Link to={`/integrations/git/${c.name}` as string} className="hover:text-accent">
-                    <span className="font-medium">{c.name}</span>{" "}
-                    <span className="text-muted">
-                      {c.webUrl.replace(/^https?:\/\//, "")} as {c.account} · {c.services.length} service{c.services.length === 1 ? "" : "s"}
-                    </span>
-                  </Link>
-                </li>
-              ))}
+              <LazyItems items={external}>
+                {(c) => (
+                  <li key={c.id}>
+                    <Link to={`/integrations/git/${c.name}` as string} className="hover:text-accent">
+                      <span className="font-medium">{c.name}</span>{" "}
+                      <span className="text-muted">
+                        {c.webUrl.replace(/^https?:\/\//, "")} as {c.account} · {c.services.length} service{c.services.length === 1 ? "" : "s"}
+                      </span>
+                    </Link>
+                  </li>
+                )}
+              </LazyItems>
             </ul>
           )}
         </div>

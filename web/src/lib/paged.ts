@@ -1,5 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { api } from "./api";
+import { LAZY_BATCH } from "../ui/paging";
 
 /** A page of a cursor-paginated history list (§14). */
 export interface Page<T> {
@@ -9,8 +10,8 @@ export interface Page<T> {
 }
 
 /**
- * Loads a history list a page at a time (?limit=&before=). Spread `table`
- * into a DataTable to fetch the next page as its end scrolls into view.
+ * Loads a history list LAZY_BATCH rows at a time (?limit=&before=). Spread
+ * `table` into a DataTable to fetch the next batch as the user pages on.
  */
 export function usePaged<T>(
   key: readonly unknown[],
@@ -22,7 +23,7 @@ export function usePaged<T>(
     enabled?: boolean;
   } = {},
 ) {
-  const limit = opts.limit ?? 50;
+  const limit = opts.limit ?? LAZY_BATCH;
   const q = useInfiniteQuery({
     queryKey: [...key, "paged", limit],
     queryFn: ({ pageParam }) => {
@@ -45,7 +46,7 @@ export function usePaged<T>(
   });
   const items = q.data?.pages.flatMap((p) => p.items) ?? [];
   const hasMore = !!q.hasNextPage;
-  const loadMore = () => void q.fetchNextPage();
+  const loadMore = () => void q.fetchNextPage({ cancelRefetch: false });
   return {
     ...q,
     items,

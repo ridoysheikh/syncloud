@@ -25,6 +25,7 @@ import {
   type PgRows,
 } from "@/lib/pg";
 import { Panel } from "@/ui/Panel";
+import { LazyItems, PAGE_SIZE } from "@/ui/paging";
 import { EmptyState } from "@/ui/EmptyState";
 import { Tabs } from "@/ui/Tabs";
 import { Alert, Button, IconButton, Input, Toggle } from "@/ui/controls";
@@ -177,27 +178,30 @@ export function PgExplorer({
                             setOpen((o) => ({ ...o, [key]: !kOpen }))
                           }
                         />
-                        {kOpen &&
-                          objs.map((o) => (
-                            <TreeRow
-                              key={o.oid}
-                              depth={3}
-                              icon={kindIcon[o.kind]}
-                              label={o.name}
-                              mono
-                              active={
-                                sel.kind === "object" &&
-                                sel.object.oid === o.oid
-                              }
-                              onClick={() =>
-                                setSel({
-                                  kind: "object",
-                                  schema: s.name,
-                                  object: o,
-                                })
-                              }
-                            />
-                          ))}
+                        {kOpen && (
+                          <LazyItems items={objs}>
+                            {(o) => (
+                              <TreeRow
+                                key={o.oid}
+                                depth={3}
+                                icon={kindIcon[o.kind]}
+                                label={o.name}
+                                mono
+                                active={
+                                  sel.kind === "object" &&
+                                  sel.object.oid === o.oid
+                                }
+                                onClick={() =>
+                                  setSel({
+                                    kind: "object",
+                                    schema: s.name,
+                                    object: o,
+                                  })
+                                }
+                              />
+                            )}
+                          </LazyItems>
+                        )}
                       </div>
                     );
                   })}
@@ -836,7 +840,7 @@ const OPS: [string, string][] = [
   ["notnull", "is not null"],
 ];
 
-const PAGE = 100;
+const PAGE = PAGE_SIZE;
 
 /** A page of a table's rows, sortable and filterable, read-only. */
 function DataView({

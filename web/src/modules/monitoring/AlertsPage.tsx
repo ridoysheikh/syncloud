@@ -563,7 +563,6 @@ function ChannelsTab() {
 
 function HistoryTab() {
   const q = usePaged<AlertEvent>(["alerts", "events"], "/alerts/events", {
-    limit: 100,
     refetchInterval: 30_000,
   });
   const { items: data, isLoading } = q;

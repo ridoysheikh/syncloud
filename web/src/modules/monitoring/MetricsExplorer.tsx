@@ -9,6 +9,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button } from "@/ui/controls";
 import { HistoryChart } from "@/charts/HistoryChart";
 import { cn, gap } from "@/ui/cn";
+import { useLazyList } from "@/ui/paging";
 
 interface Series {
   labels: Record<string, string>;
@@ -69,6 +70,7 @@ export function MetricsExplorerPage() {
     queryFn: async () => (await api<{ items: string[] }>("GET", "/metrics/names")).items,
     staleTime: 5 * 60e3,
   });
+  const lazyNames = useLazyList(names.data ?? []);
   const end = res.dataUpdatedAt || Date.now();
   const series = useMemo(() => (res.data?.series ?? []).map((s) => ({ name: seriesName(s.labels), points: s.points })), [res.data]);
 
@@ -122,11 +124,12 @@ export function MetricsExplorerPage() {
             <details>
               <summary className="text-muted cursor-pointer">{names.data.length} metric names</summary>
               <div className="mt-1 flex max-h-40 flex-wrap gap-x-3 gap-y-0.5 overflow-auto font-mono">
-                {names.data.map((n) => (
+                {lazyNames.shown.map((n) => (
                   <button key={n} className="text-muted hover:text-fg" onClick={() => setText(n)}>
                     {n}
                   </button>
                 ))}
+                <div className="basis-full">{lazyNames.more}</div>
               </div>
             </details>
           )}

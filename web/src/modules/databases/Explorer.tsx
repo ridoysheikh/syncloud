@@ -1,4 +1,5 @@
 import {
+  Children,
   useEffect,
   useRef,
   useState,
@@ -18,6 +19,7 @@ import { Panel } from "@/ui/Panel";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { Pagination, useLazyList, usePagination } from "@/ui/paging";
 import { selectClass } from "./NewDatabaseWizard";
 import { confirmAction } from "@/ui/dialogs";
 
@@ -106,6 +108,11 @@ export function Explorer({ path }: { path: string }) {
   });
   const list = keys.data?.pages.flatMap((p) => p.keys) ?? [];
   const total = keys.data?.pages[0]?.total ?? 0;
+  const lazy = useLazyList(list, {
+    hasMore: !!keys.hasNextPage,
+    onLoadMore: () => void keys.fetchNextPage({ cancelRefetch: false }),
+    loadingMore: keys.isFetchingNextPage,
+  });
   const search = (e: FormEvent) => {
     e.preventDefault();
     setApplied(pattern.trim() || "*");
@@ -168,46 +175,38 @@ export function Explorer({ path }: { path: string }) {
             <Alert tone="warn">{errText(keys.error)}</Alert>
           </div>
         )}
-        <ul className="divide-line max-h-[60vh] divide-y overflow-y-auto">
-          {list.map((k) => (
-            <li key={k.key}>
-              <button
-                onClick={() => {
-                  setSelected(k.key);
-                  setAdding(false);
-                }}
-                className={cn(
-                  "hover:bg-hover/50 flex w-full items-center gap-2 px-2 py-1 text-left text-xs",
-                  selected === k.key && "bg-raised",
-                )}
-              >
-                <TypeBadge type={k.type} />
-                <span
-                  className="min-w-0 flex-1 truncate font-mono"
-                  title={k.key}
+        <div className="max-h-[60vh] overflow-y-auto">
+          <ul className="divide-line divide-y">
+            {lazy.shown.map((k) => (
+              <li key={k.key}>
+                <button
+                  onClick={() => {
+                    setSelected(k.key);
+                    setAdding(false);
+                  }}
+                  className={cn(
+                    "hover:bg-hover/50 flex w-full items-center gap-2 px-2 py-1 text-left text-xs",
+                    selected === k.key && "bg-raised",
+                  )}
                 >
-                  {k.key}
-                </span>
-                <span className="text-faint shrink-0 tabular-nums">
-                  {k.ttlMs >= 0 ? fmtTTL(k.ttlMs) : ""} {bytes(k.bytes)}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+                  <TypeBadge type={k.type} />
+                  <span
+                    className="min-w-0 flex-1 truncate font-mono"
+                    title={k.key}
+                  >
+                    {k.key}
+                  </span>
+                  <span className="text-faint shrink-0 tabular-nums">
+                    {k.ttlMs >= 0 ? fmtTTL(k.ttlMs) : ""} {bytes(k.bytes)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {lazy.more}
+        </div>
         {list.length === 0 && !keys.isLoading && !keys.error && (
           <p className="text-faint p-3 text-xs">No keys match {applied}.</p>
-        )}
-        {keys.hasNextPage && (
-          <div className="border-line border-t p-1.5">
-            <Button
-              variant="ghost"
-              disabled={keys.isFetchingNextPage}
-              onClick={() => void keys.fetchNextPage()}
-            >
-              Load more
-            </Button>
-          </div>
         )}
       </Panel>
       {adding ? (
@@ -558,23 +557,27 @@ function Table({
   head: string[];
   children: React.ReactNode;
 }) {
+  const { rows, pager, paged } = usePagination(Children.toArray(children));
   return (
-    <div className="border-line max-h-[50vh] overflow-auto rounded-sm border">
-      <table className="w-full border-collapse text-xs">
-        <thead className="bg-surface sticky top-0">
-          <tr>
-            {head.map((h, i) => (
-              <th
-                key={i}
-                className="text-muted border-line border-b px-2 py-1 text-left font-medium"
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>{children}</tbody>
-      </table>
+    <div className="border-line rounded-sm border">
+      <div className="max-h-[50vh] overflow-auto">
+        <table className="w-full border-collapse text-xs">
+          <thead className="bg-surface sticky top-0">
+            <tr>
+              {head.map((h, i) => (
+                <th
+                  key={i}
+                  className="text-muted border-line border-b px-2 py-1 text-left font-medium"
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>{rows}</tbody>
+        </table>
+      </div>
+      {paged && <Pagination {...pager} />}
     </div>
   );
 }
