@@ -266,3 +266,50 @@ func validHookSignature(h http.Header, body []byte, secret string) bool {
 	mac.Write(body)
 	return hmac.Equal(got, mac.Sum(nil))
 }
+
+// handleGetBuildSettings returns a Git source's build settings (Phase 15b);
+// build variables by name only.
+func (s *Server) handleGetBuildSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBuilds(w) {
+		return
+	}
+	sv, ok := s.service(w, r)
+	if !ok {
+		return
+	}
+	out, err := s.builds.GetSettings(r.Context(), sv)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, CodeNotFound, "the service has no Git source")
+		return
+	} else if err != nil {
+		s.internalError(w, "get build settings", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleSetBuildSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBuilds(w) {
+		return
+	}
+	sv, ok := s.service(w, r)
+	if !ok {
+		return
+	}
+	var in builds.SettingsInput
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	out, err := s.builds.SetSettings(r.Context(), sv, in)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, CodeNotFound, "the service has no Git source")
+		return
+	} else if err != nil {
+		s.buildError(w, "set build settings", err)
+		return
+	}
+	u, _ := currentUser(r.Context())
+	s.audit(r, u.ID, "build:SetBuildSettings", srnOf(sv), map[string]any{
+		"postBuild": len(out.PostBuild), "variables": out.Variables})
+	writeJSON(w, http.StatusOK, out)
+}

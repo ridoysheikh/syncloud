@@ -1060,6 +1060,35 @@ func (c *Client) ListGitSources(ctx context.Context) ([]GitSourceSummary, error)
 	return out.Items, c.Do(ctx, "GET", "/api/v1/git/sources", nil, &out)
 }
 
+// BuildSettings are a Git source's command overrides, build variable
+// names and after-build checks.
+type BuildSettings struct {
+	InstallCommand string   `json:"installCommand"`
+	BuildCommand   string   `json:"buildCommand"`
+	StartCommand   string   `json:"startCommand"`
+	PostBuild      []string `json:"postBuild"`
+	Variables      []string `json:"variables"`
+}
+
+// BuildSettingsInput changes them; a nil variable keeps its stored value.
+type BuildSettingsInput struct {
+	InstallCommand string             `json:"installCommand"`
+	BuildCommand   string             `json:"buildCommand"`
+	StartCommand   string             `json:"startCommand"`
+	PostBuild      []string           `json:"postBuild"`
+	Variables      map[string]*string `json:"variables"`
+}
+
+func (c *Client) GetBuildSettings(ctx context.Context, project, env, service string) (BuildSettings, error) {
+	var out BuildSettings
+	return out, c.Do(ctx, "GET", svcPath(project, env, service)+"/git/build-settings", nil, &out)
+}
+
+func (c *Client) SetBuildSettings(ctx context.Context, project, env, service string, in BuildSettingsInput) (BuildSettings, error) {
+	var out BuildSettings
+	return out, c.Do(ctx, "PUT", svcPath(project, env, service)+"/git/build-settings", in, &out)
+}
+
 func (c *Client) GetGitSource(ctx context.Context, project, env, service string) (GitSource, error) {
 	var out GitSource
 	return out, c.Do(ctx, "GET", svcPath(project, env, service)+"/git", nil, &out)

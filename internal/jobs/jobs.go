@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"syncloud/internal/agentgw"
@@ -41,7 +40,10 @@ type Spec struct {
 	// the revision being deployed for hooks) with Command.
 	Service string `json:"service,omitempty"`
 	// Task is a standalone task definition when there is no Service.
-	Task              *workload.Spec    `json:"task,omitempty"`
+	Task *workload.Spec `json:"task,omitempty"`
+	// Entrypoint replaces the image's ENTRYPOINT (release commands use
+	// ["sh", "-c"] so they run in a shell whatever the image's is).
+	Entrypoint        []string          `json:"entrypoint,omitempty"`
 	Command           []string          `json:"command,omitempty"`
 	Env               map[string]string `json:"env,omitempty"`
 	Schedule          string            `json:"schedule,omitempty"`
@@ -51,6 +53,9 @@ type Spec struct {
 	Retries           int               `json:"retries,omitempty"`
 	StartingDeadline  int               `json:"startingDeadline,omitempty"` // seconds (default 600)
 	HistoryLimit      int               `json:"historyLimit,omitempty"`     // runs kept (default 20)
+	// Order sorts a service's deploy hooks of one kind: they run one at a
+	// time, lowest first (then oldest first).
+	Order int `json:"order,omitempty"`
 }
 
 // Normalize validates and fills defaults.
@@ -134,9 +139,6 @@ type Manager struct {
 	log   *slog.Logger
 	now   func() time.Time
 
-	mu    sync.Mutex
-	hooks map[string]map[string]bool // deployment ID -> pending hook run IDs
-
 	// AdmitCount checks a quota before a new job is stored (§7.2).
 	AdmitCount func(ctx context.Context, envID, what string) error
 	// OnRunAddress is called when a run's container address becomes known.
@@ -155,8 +157,19 @@ func (m *Manager) StartBuild(ctx context.Context, sv store.Service, spec workloa
 	return m.start(ctx, t, TriggerBuild, 1, "")
 }
 
+// TriggerCheck marks after-build checks (Phase 15b): the service's task
+// definition with a freshly built image, run before it is deployed.
+const TriggerCheck = "post-build"
+
+// StartCheck runs a build's after-build checks.
+func (m *Manager) StartCheck(ctx context.Context, sv store.Service, spec workload.Spec) (store.JobRun, error) {
+	spec.Health, spec.Ports = nil, nil
+	t := runTarget{envID: sv.EnvironmentID, project: sv.Project, environment: sv.Environment, service: &sv, revision: sv.Revision, spec: spec}
+	return m.start(ctx, t, TriggerCheck, 1, "")
+}
+
 func NewManager(st *store.Store, gw *agentgw.Gateway, wl *workload.Manager, reg *nodes.Registry, bus *events.Bus, log *slog.Logger) *Manager {
-	return &Manager{st: st, gw: gw, wl: wl, nodes: reg, bus: bus, log: log, now: time.Now, hooks: map[string]map[string]bool{}}
+	return &Manager{st: st, gw: gw, wl: wl, nodes: reg, bus: bus, log: log, now: time.Now}
 }
 
 func (m *Manager) Hooks() agentgw.Hooks {
@@ -204,6 +217,9 @@ func (m *Manager) target(ctx context.Context, env store.Environment, project, en
 		t.service, t.revision, t.spec = &sv, revision, td
 	} else {
 		t.spec = *spec.Task
+	}
+	if len(spec.Entrypoint) > 0 {
+		t.spec.Entrypoint = spec.Entrypoint
 	}
 	if len(spec.Command) > 0 {
 		t.spec.Command = spec.Command
@@ -479,8 +495,8 @@ func (m *Manager) finish(ctx context.Context, run store.JobRun, status string, c
 		time.AfterFunc(delay, func() { m.retry(context.Background(), run) })
 		return
 	}
-	if run.DeploymentID != "" && run.Trigger == KindPreDeploy {
-		m.hookDone(ctx, run.DeploymentID, run.ID, status == store.RunSucceeded, msg)
+	if run.DeploymentID != "" && (run.Trigger == KindPreDeploy || run.Trigger == KindPostDeploy) {
+		m.advanceHooks(ctx, run.DeploymentID)
 	}
 }
 
@@ -519,18 +535,11 @@ func (m *Manager) retry(ctx context.Context, prev store.JobRun) {
 	if prev.Trigger == KindPreDeploy || prev.Trigger == KindPostDeploy {
 		trigger = prev.Trigger // a hook retry is still that hook
 	}
-	run, err := m.start(ctx, t, trigger, prev.Attempt+1, prev.DeploymentID)
-	if err != nil {
+	if _, err := m.start(ctx, t, trigger, prev.Attempt+1, prev.DeploymentID); err != nil {
 		m.log.Error("retry job run", "run", prev.ID, "err", err)
-		return
-	}
-	if prev.DeploymentID != "" {
-		m.mu.Lock()
-		if set := m.hooks[prev.DeploymentID]; set != nil {
-			delete(set, prev.ID)
-			set[run.ID] = true
+		if prev.DeploymentID != "" {
+			m.advanceHooks(ctx, prev.DeploymentID) // the failed run decides
 		}
-		m.mu.Unlock()
 	}
 }
 

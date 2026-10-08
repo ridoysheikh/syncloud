@@ -54,6 +54,8 @@ interface Form {
   cpu: string;
   memory: string;
   healthPath: string;
+  /** A pre-deploy command such as database migrations (optional). */
+  release: string;
 }
 
 /** Full-page wizard: source → service settings → variables → review (§4). */
@@ -90,6 +92,7 @@ export function NewServiceWizard() {
     cpu: "0.1",
     memory: "128",
     healthPath: "",
+    release: "",
   });
   const set = <K extends keyof Form>(k: K, v: Form[K]) =>
     setF((x) => ({ ...x, [k]: v }));
@@ -144,7 +147,10 @@ export function NewServiceWizard() {
   const idx = steps.indexOf(step);
   const blocked = steps.slice(0, idx + 1).find((s) => problems[s]);
 
-  const spec = (): Partial<Spec> & { desiredCount: number } => ({
+  const spec = (): Partial<Spec> & {
+    desiredCount: number;
+    releaseCommands?: { preDeploy: { command: string }[] };
+  } => ({
     image: f.source === "image" ? f.image.trim() : AWAITING_BUILD,
     ports:
       f.exposure === "none"
@@ -162,6 +168,9 @@ export function NewServiceWizard() {
         ? { type: "http", path: f.healthPath }
         : undefined,
     desiredCount: Number(f.tasks),
+    releaseCommands: f.release.trim()
+      ? { preDeploy: [{ command: f.release.trim() }] }
+      : undefined,
   });
 
   const create = useMutation({
@@ -272,6 +281,18 @@ export function NewServiceWizard() {
                   overrides them.
                 </p>
                 <VarsEditor rows={vars} onChange={setVars} inherited={shared} />
+                <Field
+                  label="Release command (optional)"
+                  hint="Runs in the new image with these variables before every deployment takes traffic, for example database migrations. If it fails, the deployment stops and the running version stays. The first tasks start only after it passes. Change it later on the service's Deploy tab."
+                >
+                  <Input
+                    value={f.release}
+                    onChange={(e) => set("release", e.target.value)}
+                    placeholder="npm run migrate"
+                    className="font-mono"
+                    spellCheck={false}
+                  />
+                </Field>
               </div>
             )}
             {step === "Review" && (
@@ -759,6 +780,13 @@ function Review({
       </Row>
       <Row k="Tasks">
         {f.tasks} × {f.cpu} CPU, {f.memory} MiB
+      </Row>
+      <Row k="Release command">
+        {f.release.trim() ? (
+          <span className="font-mono break-all">{f.release.trim()}</span>
+        ) : (
+          <span className="text-faint">none</span>
+        )}
       </Row>
       <Row k="Variables">
         {names.length === 0 ? (

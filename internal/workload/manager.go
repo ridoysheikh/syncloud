@@ -312,6 +312,13 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 	if spec.Image == AwaitingBuild {
 		desired, status = 0, "waiting for the first build"
 	}
+	if sv.Held {
+		// The first deployment waits on its pre-deploy jobs (§5.11).
+		desired, status = 0, "waiting for the first pre-deploy jobs to pass"
+		if ds, err := m.st.ListDeployments(ctx, sv.ID, 1, ""); err == nil && len(ds) > 0 && ds[0].Status != store.DeployWaitingHook {
+			status = "the first pre-deploy jobs did not pass: fix them, then redeploy"
+		}
+	}
 
 	// Too many of the current revision: stop the extras (not running first, then newest).
 	for len(current) > desired {

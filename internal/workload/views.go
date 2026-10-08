@@ -262,14 +262,21 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 				return ServiceView{}, false, err
 			}
 		}
-		sv = store.Service{ID: auth.NewID("svc_"), EnvironmentID: env.ID, Name: name, DesiredCount: desired, CreatedAt: now}
+		held, _ := ctx.Value(holdKey{}).(bool)
+		sv = store.Service{ID: auth.NewID("svc_"), EnvironmentID: env.ID, Name: name, DesiredCount: desired, Held: held, CreatedAt: now}
 		if err := m.st.CreateService(ctx, sv, spec.Canonical(), actor); err != nil {
 			if errors.Is(err, store.ErrNameTaken) {
 				return ServiceView{}, false, ErrInvalid{fmt.Errorf("service %s already exists", name)}
 			}
 			return ServiceView{}, false, err
 		}
-		m.startDeployment(ctx, sv.ID, 0, 1, actor, "")
+		if held {
+			if _, err := m.recordDeployment(ctx, sv.ID, 0, 1, actor, store.DeployWaitingHook, ""); err != nil {
+				return ServiceView{}, false, err
+			}
+		} else {
+			m.startDeployment(ctx, sv.ID, 0, 1, actor, "")
+		}
 		created = true
 	case err != nil:
 		return ServiceView{}, false, err
@@ -337,6 +344,9 @@ func (m *Manager) rollout(ctx context.Context, sv store.Service, spec string, de
 	}
 	if rev != sv.Revision {
 		m.startDeployment(ctx, sv.ID, sv.Revision, rev, actor, msg)
+	}
+	if sv.Held {
+		return m.st.ReleaseService(ctx, sv.ID) // no pre-deploy jobs left to wait for
 	}
 	return nil
 }
@@ -587,6 +597,9 @@ func (m *Manager) PreDeployDone(ctx context.Context, depID string, ok bool, msg 
 		if err := m.st.SetServiceRevision(ctx, dep.ServiceID, dep.ToRev, now); err != nil {
 			m.log.Error("switch revision", "service", dep.ServiceID, "err", err)
 			return
+		}
+		if err := m.st.ReleaseService(ctx, dep.ServiceID); err != nil {
+			m.log.Error("release service", "service", dep.ServiceID, "err", err)
 		}
 		_ = m.st.SetDeploymentStatus(ctx, depID, store.DeployInProgress, "", nil) // the timeline says the jobs passed
 		m.DeploymentEvent(ctx, depID, "hooks-done", fmt.Sprintf("pre-deploy jobs succeeded; revision %d is now current", dep.ToRev))

@@ -14738,6 +14738,117 @@
           }
         }
       }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/git/build-settings": {
+      "get": {
+        "operationId": "getBuildSettings",
+        "tags": [
+          "builds"
+        ],
+        "summary": "A Git source's build settings: command overrides, build variable names and after-build checks",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildSettings"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "setBuildSettings",
+        "tags": [
+          "builds"
+        ],
+        "summary": "Change a Git source's build settings",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildSettingsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -16031,6 +16142,61 @@
                 "maximum": 100
               }
             }
+          },
+          {
+            "type": "object",
+            "properties": {
+              "releaseCommands": {
+                "type": "object",
+                "description": "Only when creating the service: these become its deploy hooks (jobs <service>-pre-N and <service>-post-N). The first tasks start once the pre-deploy commands pass.",
+                "properties": {
+                  "preDeploy": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "command"
+                      ],
+                      "properties": {
+                        "command": {
+                          "type": "string",
+                          "description": "shell command, run with sh -c in the service's image"
+                        },
+                        "timeout": {
+                          "type": "integer",
+                          "description": "seconds (default 3600)"
+                        },
+                        "retries": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  },
+                  "postDeploy": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "command"
+                      ],
+                      "properties": {
+                        "command": {
+                          "type": "string",
+                          "description": "shell command, run with sh -c in the service's image"
+                        },
+                        "timeout": {
+                          "type": "integer",
+                          "description": "seconds (default 3600)"
+                        },
+                        "retries": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         ]
       },
@@ -16519,6 +16685,17 @@
           },
           "historyLimit": {
             "type": "integer"
+          },
+          "order": {
+            "type": "integer",
+            "description": "deploy hooks of a service run one at a time, lowest order first (then oldest first)"
+          },
+          "entrypoint": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "replaces the image's ENTRYPOINT (release commands use [\"sh\", \"-c\"])"
           }
         }
       },
@@ -17037,11 +17214,12 @@
             "enum": [
               "queued",
               "building",
+              "checking",
               "succeeded",
               "failed",
               "skipped"
             ],
-            "description": "skipped: no changed file matched the path filters"
+            "description": "skipped: no changed file matched the path filters; checking: built, the after-build checks run in the image"
           },
           "image": {
             "type": "string"
@@ -17073,6 +17251,10 @@
           "baseSha": {
             "type": "string",
             "description": "the previous commit of the ref, which path filters compare with"
+          },
+          "checkRunId": {
+            "type": "string",
+            "description": "the run of the after-build checks (its logs)"
           }
         }
       },
@@ -19501,6 +19683,67 @@
             }
           }
         ]
+      },
+      "BuildSettings": {
+        "type": "object",
+        "properties": {
+          "installCommand": {
+            "type": "string",
+            "description": "Nixpacks install command override"
+          },
+          "buildCommand": {
+            "type": "string",
+            "description": "Nixpacks build command override"
+          },
+          "startCommand": {
+            "type": "string",
+            "description": "Nixpacks start command override"
+          },
+          "postBuild": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "after-build checks: shell commands run in order in the new image with the service's variables before it is deployed"
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "names of the build-time variables (values are never returned)"
+          }
+        }
+      },
+      "BuildSettingsInput": {
+        "type": "object",
+        "properties": {
+          "installCommand": {
+            "type": "string"
+          },
+          "buildCommand": {
+            "type": "string"
+          },
+          "startCommand": {
+            "type": "string"
+          },
+          "postBuild": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "variables": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": "build-time variables (Dockerfile build arguments and Nixpacks environment); null keeps a stored value, names left out are removed"
+          }
+        }
       }
     }
   }

@@ -116,4 +116,50 @@ synctl services redeploy api -p shop --skip-hooks | grep -q "revision" || fail "
 synctl projects update shop --rollback-window 5 | grep -q "rollback window: 5" || fail "synctl projects update"
 [ "$(api localhost:7070/api/v1/projects | json "d['items'][0]['rollbackWindow']")" = 5 ] || fail "rollback window not saved"
 echo "  ✓ synctl deployments, deployment, projects deployments, redeploy, projects update"
+echo "== hooks run one at a time, in order"
+api -X PUT "$JOBS/second" -d '{"kind":"pre-deploy","service":"api","entrypoint":["sh","-c"],"command":["sleep 2; echo second"],"order":2}' >/dev/null
+api -X PUT "$JOBS/first" -d '{"kind":"pre-deploy","service":"api","entrypoint":["sh","-c"],"command":["sleep 2; echo first"],"order":1}' >/dev/null
+api -X PUT "$SVC" -d "$(spec '' 5)" >/dev/null
+wait_for "ordered hooks passed" latest_is succeeded
+DEP=$(latest "['id']")
+order=$(api "$SVC/deployments/$DEP" | json "' '.join(r['job'] + ':' + r['status'] for r in d['runs'])")
+[ "$order" = "first:succeeded second:succeeded" ] || fail "hook order: $order"
+api "$SVC/deployments/$DEP" | json "[(r['startedAt'], r['finishedAt']) for r in d['runs']]" | python3 -c "
+import sys, ast
+(s1, f1), (s2, f2) = ast.literal_eval(sys.stdin.read())
+sys.exit(0 if s2 >= f1 else 1)" || fail "the second hook started before the first finished"
+echo "  ✓ pre-deploy jobs ran in their order, the second after the first finished"
+api -X PUT "$JOBS/first" -d '{"kind":"pre-deploy","service":"api","entrypoint":["sh","-c"],"command":["echo broken; exit 5"],"order":1}' >/dev/null
+rev=$(api "$SVC" | json "d['revision']")
+api -X PUT "$SVC" -d "$(spec '' 6)" >/dev/null
+wait_for "failing hook stopped the deployment" latest_is failed
+DEP=$(latest "['id']")
+[ "$(api "$SVC/deployments/$DEP" | json "' '.join(r['job'] for r in d['runs'])")" = first ] || fail "a job after the failing one ran"
+[ "$(api "$SVC" | json "d['revision']")" = "$rev" ] || fail "revision switched after a failing hook"
+api -X DELETE "$JOBS/first" >/dev/null; api -X DELETE "$JOBS/second" >/dev/null
+echo "  ✓ the first job failing stopped the deployment before the second ran; revision $rev kept running"
+
+echo "== release commands on a new service"
+WEB=$P/environments/production/services/web
+web_spec() { # release command
+  echo "{\"image\":\"busybox:1.37\",\"command\":[\"sh\",\"-c\",\"exec httpd -f -p 8080 -h /tmp\"],\"ports\":[{\"container\":8080}],\"resources\":{\"cpu\":0.05,\"memory\":16},\"desiredCount\":1,\"releaseCommands\":{\"preDeploy\":[{\"command\":\"$1\"}],\"postDeploy\":[{\"command\":\"echo deployed\"}]}}"
+}
+api -X PUT "$WEB" -d "$(web_spec 'sleep 8; echo migrated')" >/dev/null
+sleep 3
+[ "$(api "$WEB" | json "d['running'] + d['pending']")" = 0 ] || fail "tasks started before the release command passed"
+api "$JOBS" | json "sorted(j['name'] for j in d['items'] if j['spec'].get('service') == 'web')" | grep -q "'web-post-1', 'web-pre-1'" || fail "release command jobs: $(api "$JOBS")"
+wait_for "web runs after its release command" sh -c "[ \"\$(docker exec $E2E-ctl curl -fs -b /tmp/jar $WEB | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"running\"])')\" = 1 ]"
+[ "$(api "$WEB/deployments?limit=1" | json "d['items'][0]['status']")" = succeeded ] || fail "first web deployment"
+api -X PUT "$P/environments/production/services/bad" -d "$(web_spec 'exit 3')" >/dev/null
+BAD=$P/environments/production/services/bad
+wait_for "bad's release command failed" sh -c "docker exec $E2E-ctl curl -fs -b /tmp/jar '$BAD/deployments?limit=1' | grep -q '\"status\":\"failed\"'"
+sleep 3
+[ "$(api "$BAD" | json "d['running'] + d['pending']")" = 0 ] || fail "a service whose first release command failed started tasks"
+api "$BAD" | json "d['status']" | grep -q "did not pass" || fail "status of a held service: $(api "$BAD" | json "d['status']")"
+api -X PUT "$JOBS/bad-pre-1" -d '{"kind":"pre-deploy","service":"bad","entrypoint":["sh","-c"],"command":["echo fixed"]}' >/dev/null
+api -X POST "$BAD/redeploy" -d '{}' >/dev/null
+wait_for "bad runs after the fix" sh -c "[ \"\$(docker exec $E2E-ctl curl -fs -b /tmp/jar $BAD | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"running\"])')\" = 1 ]"
+code=$(x "$E2E-ctl" curl -s -o /dev/null -w '%{http_code}' -b /tmp/jar -H 'content-type: application/json' -H 'Origin: http://localhost:7070' -X PUT "$WEB" -d "$(web_spec 'echo again')")
+[ "$code" = 400 ] || fail "release commands on an existing service answered $code"
+echo "  ✓ a new service ran no task until its release command passed; a failing one stayed stopped until fixed and redeployed"
 echo "PASS"

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"syncloud/internal/auth"
+	"syncloud/internal/jobs"
 	"syncloud/internal/store"
 	"syncloud/internal/workload"
 )
@@ -371,6 +372,31 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 type applyRequest struct {
 	workload.Spec
 	DesiredCount *int `json:"desiredCount"`
+	// ReleaseCommands become the service's deploy hooks when it is created;
+	// the first tasks start once the pre-deploy ones pass (Phase 15b).
+	ReleaseCommands *releaseCommands `json:"releaseCommands,omitempty"`
+}
+
+// releaseCommands are shell commands run in the service's image.
+type releaseCommands struct {
+	PreDeploy  []hookCommand `json:"preDeploy"`
+	PostDeploy []hookCommand `json:"postDeploy"`
+}
+
+type hookCommand struct {
+	Command string `json:"command"`
+	Timeout int    `json:"timeout,omitempty"` // seconds
+	Retries int    `json:"retries,omitempty"`
+}
+
+// hookJobName names a service's nth hook job of a kind within the 32
+// characters of a name.
+func hookJobName(service, kind string, n int) string {
+	suffix := fmt.Sprintf("-%s-%d", strings.TrimSuffix(kind, "-deploy"), n)
+	if len(service)+len(suffix) > 32 {
+		service = strings.TrimRight(service[:32-len(suffix)], "-")
+	}
+	return service + suffix
 }
 
 // handleApplyService creates or updates a service (kubectl apply semantics).
@@ -391,10 +417,62 @@ func (s *Server) handleApplyService(w http.ResponseWriter, r *http.Request) {
 		desired = *req.DesiredCount
 	}
 	u, _ := currentUser(r.Context())
-	v, created, err := s.workloads.Apply(r.Context(), e, r.PathValue("service"), req.Spec, desired, u.ID)
+	ctx := r.Context()
+	var hooks []jobs.Spec
+	if rc := req.ReleaseCommands; rc != nil && (len(rc.PreDeploy) > 0 || len(rc.PostDeploy) > 0) {
+		if s.jobs == nil {
+			writeError(w, http.StatusBadRequest, CodeBadRequest, "release commands need the jobs subsystem")
+			return
+		}
+		if _, err := s.store.ServiceByName(ctx, e.ID, r.PathValue("service")); err == nil {
+			writeError(w, http.StatusBadRequest, CodeBadRequest, "releaseCommands only apply when creating a service; change them on its Deploy tab or with the jobs API")
+			return
+		}
+		for kind, list := range map[string][]hookCommand{jobs.KindPreDeploy: rc.PreDeploy, jobs.KindPostDeploy: rc.PostDeploy} {
+			for i, c := range list {
+				spec := jobs.Spec{Kind: kind, Service: r.PathValue("service"), Entrypoint: []string{"sh", "-c"}, Command: []string{strings.TrimSpace(c.Command)},
+					Timeout: c.Timeout, Retries: c.Retries, Order: i + 1}
+				if strings.TrimSpace(c.Command) == "" {
+					writeError(w, http.StatusBadRequest, CodeBadRequest, kind+" command "+fmt.Sprint(i+1)+" is empty")
+					return
+				}
+				if err := spec.Normalize(); err != nil {
+					writeError(w, http.StatusBadRequest, CodeBadRequest, kind+" command "+fmt.Sprint(i+1)+": "+err.Error())
+					return
+				}
+				hooks = append(hooks, spec)
+			}
+		}
+		// A service waiting for its first build has nothing to run yet: the
+		// build's deployment runs the pre-deploy jobs like any other.
+		if len(rc.PreDeploy) > 0 && req.Image != workload.AwaitingBuild {
+			ctx = workload.WithHeldFirstDeploy(ctx)
+		}
+	}
+	v, created, err := s.workloads.Apply(ctx, e, r.PathValue("service"), req.Spec, desired, u.ID)
 	if err != nil {
 		s.workloadError(w, "apply service", err)
 		return
+	}
+	if len(hooks) > 0 {
+		var problem error
+		for _, spec := range hooks {
+			name := hookJobName(v.Name, spec.Kind, spec.Order)
+			if _, err := s.jobs.Apply(r.Context(), e, name, spec); err != nil && problem == nil {
+				problem = fmt.Errorf("job %s: %w", name, err)
+			}
+		}
+		if sv, err := s.store.ServiceByID(r.Context(), v.ID); err == nil && sv.Held && v.Deployment != nil {
+			// Whatever jobs exist now run; none at all releases the service.
+			s.jobs.RunPreDeploy(r.Context(), sv, v.Revision, v.Deployment.ID)
+		}
+		if problem != nil {
+			s.workloadError(w, "release commands", workload.ErrInvalid{Err: problem})
+			return
+		}
+		if fresh, err := s.workloads.ServiceView(r.Context(), v.ID); err == nil {
+			v = fresh
+		}
 	}
 	action, status := "service:Update", http.StatusOK
 	if created {

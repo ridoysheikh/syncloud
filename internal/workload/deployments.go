@@ -25,6 +25,16 @@ func WithCause(ctx context.Context, c Cause) context.Context {
 	return context.WithValue(ctx, causeKey{}, c)
 }
 
+type holdKey struct{}
+
+// WithHeldFirstDeploy makes a service created under ctx wait for its
+// pre-deploy jobs before its first tasks start: the caller adds the jobs,
+// then starts them with DeployHooks.RunPreDeploy for the service's
+// deployment.
+func WithHeldFirstDeploy(ctx context.Context) context.Context {
+	return context.WithValue(ctx, holdKey{}, true)
+}
+
 // actorCircuitBreaker is the actor of automatic rollbacks.
 const actorCircuitBreaker = "circuit-breaker"
 

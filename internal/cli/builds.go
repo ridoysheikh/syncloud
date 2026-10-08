@@ -223,6 +223,89 @@ func (a *app) buildsCmd() *cobra.Command {
 			return a.printer().table(ss, []string{"SERVICE", "REPOSITORY", "WATCHING", "BUILDER", "CHECKED", "STATUS"}, rows)
 		},
 	}
+	printSettings := func(st client.BuildSettings) error {
+		if a.output == "json" {
+			return a.printer().json(st)
+		}
+		fmt.Fprintf(a.out, "Install command: %s\nBuild command:   %s\nStart command:   %s\n", orDash(st.InstallCommand), orDash(st.BuildCommand), orDash(st.StartCommand))
+		fmt.Fprintf(a.out, "Build variables: %s\n", orDash(strings.Join(st.Variables, ", ")))
+		fmt.Fprintln(a.out, "After-build checks:")
+		if len(st.PostBuild) == 0 {
+			fmt.Fprintln(a.out, "  -")
+		}
+		for i, c := range st.PostBuild {
+			fmt.Fprintf(a.out, "  %d. %s\n", i+1, c)
+		}
+		return nil
+	}
+	var installCmd, buildCmd, startCmd string
+	var checks, setVars, unsetVars []string
+	var noChecks bool
+	configure := &cobra.Command{
+		Use: "configure SERVICE", Short: "Change build commands, build variables and after-build checks", Args: cobra.ExactArgs(1),
+		Annotations: op("setBuildSettings"),
+		RunE: with(func(cmd *cobra.Command, c *client.Client, args []string) error {
+			cur, err := c.GetBuildSettings(ctx(cmd), s.project, s.env, args[0])
+			if err != nil {
+				return err
+			}
+			in := client.BuildSettingsInput{InstallCommand: cur.InstallCommand, BuildCommand: cur.BuildCommand, StartCommand: cur.StartCommand,
+				PostBuild: cur.PostBuild, Variables: map[string]*string{}}
+			f := cmd.Flags()
+			if f.Changed("install-cmd") {
+				in.InstallCommand = installCmd
+			}
+			if f.Changed("build-cmd") {
+				in.BuildCommand = buildCmd
+			}
+			if f.Changed("start-cmd") {
+				in.StartCommand = startCmd
+			}
+			if noChecks {
+				in.PostBuild = []string{}
+			}
+			if len(checks) > 0 {
+				in.PostBuild = checks
+			}
+			for _, k := range cur.Variables {
+				in.Variables[k] = nil // keep
+			}
+			for _, kv := range setVars {
+				k, v, ok := strings.Cut(kv, "=")
+				if !ok {
+					return fmt.Errorf("--var %q: want KEY=VALUE", kv)
+				}
+				in.Variables[k] = &v
+			}
+			for _, k := range unsetVars {
+				delete(in.Variables, k)
+			}
+			out, err := c.SetBuildSettings(ctx(cmd), s.project, s.env, args[0], in)
+			if err != nil {
+				return err
+			}
+			return printSettings(out)
+		}),
+	}
+	configure.Flags().StringVar(&installCmd, "install-cmd", "", "Nixpacks install command (empty: detected)")
+	configure.Flags().StringVar(&buildCmd, "build-cmd", "", "Nixpacks build command (empty: detected)")
+	configure.Flags().StringVar(&startCmd, "start-cmd", "", "Nixpacks start command (empty: detected)")
+	configure.Flags().StringArrayVar(&checks, "check", nil, "after-build check, a shell command run in the new image (repeat; replaces the list)")
+	configure.Flags().BoolVar(&noChecks, "no-checks", false, "remove the after-build checks")
+	configure.Flags().StringArrayVar(&setVars, "var", nil, "build variable KEY=VALUE (repeat)")
+	configure.Flags().StringArrayVar(&unsetVars, "unset-var", nil, "remove a build variable (repeat)")
+	b.AddCommand(configure,
+		&cobra.Command{
+			Use: "settings SERVICE", Short: "Show build commands, build variable names and after-build checks", Args: cobra.ExactArgs(1),
+			Annotations: op("getBuildSettings"),
+			RunE: with(func(cmd *cobra.Command, c *client.Client, args []string) error {
+				st, err := c.GetBuildSettings(ctx(cmd), s.project, s.env, args[0])
+				if err != nil {
+					return err
+				}
+				return printSettings(st)
+			}),
+		})
 	b.AddCommand(set, list, run, sources,
 		&cobra.Command{
 			Use: "source SERVICE", Short: "Show a service's Git source and webhook", Args: cobra.ExactArgs(1),

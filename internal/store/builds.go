@@ -35,11 +35,15 @@ type GitSource struct {
 	Repo         string
 	HookID       string
 	HookError    string
+	// BuildSettings is the builds package's JSON (command overrides and
+	// after-build checks); BuildVarsEnc its encrypted build-time variables.
+	BuildSettings string
+	BuildVarsEnc  []byte
 }
 
 const gitCols = `SELECT id, service_id, url, branch, dockerfile, context, token_enc, auto_deploy, poll_seconds, webhook_secret,
 	last_sha, last_checked_at, last_error, failures, created_at, tags, paths, builder, ref_shas, last_webhook_at,
-	connection_id, repo, hook_id, hook_error FROM git_sources`
+	connection_id, repo, hook_id, hook_error, build_settings, build_vars_enc FROM git_sources`
 
 func scanGit(r scanner) (GitSource, error) {
 	var g GitSource
@@ -48,7 +52,7 @@ func scanGit(r scanner) (GitSource, error) {
 	var paths, refs string
 	err := r.Scan(&g.ID, &g.ServiceID, &g.URL, &g.Branch, &g.Dockerfile, &g.Context, &g.TokenEnc, &g.AutoDeploy, &g.PollSeconds,
 		&g.WebhookSecret, &g.LastSHA, &checked, &g.LastError, &g.Failures, &created, &g.Tags, &paths, &g.Builder, &refs, &hooked,
-		&g.ConnectionID, &g.Repo, &g.HookID, &g.HookError)
+		&g.ConnectionID, &g.Repo, &g.HookID, &g.HookError, &g.BuildSettings, &g.BuildVarsEnc)
 	if err != nil {
 		return g, err
 	}
@@ -80,6 +84,19 @@ func (s *Store) PutGitSource(ctx context.Context, g GitSource) error {
 		g.ID, g.ServiceID, g.URL, g.Branch, g.Dockerfile, g.Context, g.TokenEnc, g.AutoDeploy, g.PollSeconds, g.WebhookSecret, g.CreatedAt.Unix(),
 		g.Tags, string(paths), g.Builder, g.ConnectionID, g.Repo)
 	return err
+}
+
+// SetGitBuildSettings stores a source's build settings and encrypted
+// build-time variables.
+func (s *Store) SetGitBuildSettings(ctx context.Context, serviceID, settings string, varsEnc []byte) error {
+	res, err := s.W.ExecContext(ctx, `UPDATE git_sources SET build_settings = ?, build_vars_enc = ? WHERE service_id = ?`, settings, varsEnc, serviceID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SetGitRefs stores the last seen commit of every watched ref.
@@ -183,29 +200,31 @@ func (s *Store) RecordGitCheck(ctx context.Context, id, sha, errMsg string, now 
 }
 
 type Build struct {
-	ID         string     `json:"id"`
-	ServiceID  string     `json:"serviceId"`
-	SHA        string     `json:"sha"`
-	Ref        string     `json:"ref"`
-	Trigger    string     `json:"trigger"`
-	Status     string     `json:"status"`
-	Image      string     `json:"image"`
-	RunID      string     `json:"runId"`
-	Message    string     `json:"message"`
-	Deployed   bool       `json:"deployed"`
-	BaseSHA    string     `json:"baseSha"`
+	ID        string `json:"id"`
+	ServiceID string `json:"serviceId"`
+	SHA       string `json:"sha"`
+	Ref       string `json:"ref"`
+	Trigger   string `json:"trigger"`
+	Status    string `json:"status"`
+	Image     string `json:"image"`
+	RunID     string `json:"runId"`
+	Message   string `json:"message"`
+	Deployed  bool   `json:"deployed"`
+	BaseSHA   string `json:"baseSha"`
+	// CheckRunID is the run of the after-build checks (Phase 15b).
+	CheckRunID string     `json:"checkRunId,omitempty"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	StartedAt  *time.Time `json:"startedAt"`
 	FinishedAt *time.Time `json:"finishedAt"`
 }
 
-const buildCols = `SELECT id, service_id, sha, ref, trigger, status, image, run_id, message, deployed, created_at, started_at, finished_at, base_sha FROM builds`
+const buildCols = `SELECT id, service_id, sha, ref, trigger, status, image, run_id, message, deployed, created_at, started_at, finished_at, base_sha, check_run_id FROM builds`
 
 func scanBuild(r scanner) (Build, error) {
 	var b Build
 	var created int64
 	var started, finished sql.NullInt64
-	err := r.Scan(&b.ID, &b.ServiceID, &b.SHA, &b.Ref, &b.Trigger, &b.Status, &b.Image, &b.RunID, &b.Message, &b.Deployed, &created, &started, &finished, &b.BaseSHA)
+	err := r.Scan(&b.ID, &b.ServiceID, &b.SHA, &b.Ref, &b.Trigger, &b.Status, &b.Image, &b.RunID, &b.Message, &b.Deployed, &created, &started, &finished, &b.BaseSHA, &b.CheckRunID)
 	b.CreatedAt, b.StartedAt, b.FinishedAt = time.Unix(created, 0).UTC(), timePtr(started), timePtr(finished)
 	return b, err
 }
@@ -221,13 +240,22 @@ func (s *Store) CreateBuild(ctx context.Context, b Build) error {
 }
 
 func (s *Store) UpdateBuild(ctx context.Context, b Build) error {
-	_, err := s.W.ExecContext(ctx, `UPDATE builds SET status = ?, run_id = ?, message = ?, deployed = ?, started_at = ?, finished_at = ? WHERE id = ?`,
-		b.Status, b.RunID, b.Message, b.Deployed, unixPtr(b.StartedAt), unixPtr(b.FinishedAt), b.ID)
+	_, err := s.W.ExecContext(ctx, `UPDATE builds SET status = ?, run_id = ?, message = ?, deployed = ?, started_at = ?, finished_at = ?, check_run_id = ? WHERE id = ?`,
+		b.Status, b.RunID, b.Message, b.Deployed, unixPtr(b.StartedAt), unixPtr(b.FinishedAt), b.CheckRunID, b.ID)
 	return err
 }
 
 func (s *Store) BuildByRun(ctx context.Context, runID string) (Build, error) {
 	b, err := scanBuild(s.R.QueryRowContext(ctx, buildCols+` WHERE run_id = ?`, runID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return b, ErrNotFound
+	}
+	return b, err
+}
+
+// BuildByCheckRun finds the build whose after-build checks a run is.
+func (s *Store) BuildByCheckRun(ctx context.Context, runID string) (Build, error) {
+	b, err := scanBuild(s.R.QueryRowContext(ctx, buildCols+` WHERE check_run_id = ?`, runID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return b, ErrNotFound
 	}

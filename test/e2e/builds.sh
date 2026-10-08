@@ -11,11 +11,11 @@ CTL_FLAGS="--registry-pull-host 127.0.0.1:5000 --build-node ctl-0"
 trap cleanup EXIT
 setup_cluster
 start_registry
-x sc-e2e-ctl docker load -q -i /opt/sc/buildkit.tar >/dev/null
+x $E2E-ctl docker load -q -i /opt/sc/buildkit.tar >/dev/null
 wait_mesh
 
 echo "== git repository"
-x sc-e2e-ctl sh -c '
+x $E2E-ctl sh -c '
   set -e
   git config --global user.email e2e@example.com && git config --global user.name e2e && git config --global init.defaultBranch main
   mkdir -p /srv/git && git init -q --bare /srv/git/web.git
@@ -24,9 +24,9 @@ x sc-e2e-ctl sh -c '
   printf "FROM busybox:1.37\nCOPY version /www/version\nCMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\n" > app/Dockerfile
   echo one > app/version
   git add -A && git commit -qm one && git push -q origin main'
-x -d sc-e2e-ctl sh -c "/opt/sc/gitserver -root /srv/git -listen 127.0.0.1:3000 > /var/log/gitserver.log 2>&1"
-for _ in $(seq 1 20); do x sc-e2e-ctl curl -fs "localhost:3000/web.git/info/refs?service=git-upload-pack" >/dev/null 2>&1 && break; sleep 0.5; done
-SHA1=$(x sc-e2e-ctl git -C /src/web rev-parse HEAD)
+x -d $E2E-ctl sh -c "/opt/sc/gitserver -root /srv/git -listen 127.0.0.1:3000 > /var/log/gitserver.log 2>&1"
+for _ in $(seq 1 20); do x $E2E-ctl curl -fs "localhost:3000/web.git/info/refs?service=git-upload-pack" >/dev/null 2>&1 && break; sleep 0.5; done
+SHA1=$(x $E2E-ctl git -C /src/web rev-parse HEAD)
 
 # Only ctl-0 runs services, so the deployed task is local.
 for w in w1 w2; do
@@ -61,7 +61,7 @@ wait_build() {
     sleep 2
   done
   echo "$b" >&2
-  x sc-e2e-ctl sh -c 'tail -20 /var/log/controller.log' >&2
+  x $E2E-ctl sh -c 'tail -20 /var/log/controller.log' >&2
   fail "build of ${1:0:12} did not reach $2"
 }
 # wait_serving IMAGE VERSION: until the service's spec is IMAGE and every
@@ -74,7 +74,7 @@ wait_serving() {
       ids=$(api "$SVC/tasks" | grep -o '"desired":"running","state":"running","ip":"[^"]*","containerId":"[^"]*"' | cut -d'"' -f16 || true)
       ok=1; [ -n "$ids" ] || ok=0
       for id in $ids; do
-        v=$(x sc-e2e-ctl docker exec "$id" wget -qO- localhost:8080/version 2>/dev/null || true)
+        v=$(x $E2E-ctl docker exec "$id" wget -qO- localhost:8080/version 2>/dev/null || true)
         [ "$v" = "$2" ] || ok=0
       done
     fi
@@ -97,19 +97,19 @@ api localhost:7070/api/v1/registry/repositories | grep -q '"name":"shop/web","ta
 wait_serving "@registry/shop/web:${SHA1:0:12}" one
 echo "  ✓ auto-deployed: the service serves version one"
 cid=$(api "$SVC/tasks" | grep -o '"desired":"running","state":"running","ip":"[^"]*","containerId":"[^"]*"' | cut -d'"' -f16 | head -1)
-envs=$(x sc-e2e-ctl docker exec "$cid" env)
+envs=$(x $E2E-ctl docker exec "$cid" env)
 echo "$envs" | grep -qx 'GREETING=hello' || fail "shared variable missing: $envs"
 echo "$envs" | grep -qx 'MODE=own' || fail "the service's own variable must win: $envs"
 echo "  ✓ the task has the shared variables, and the service's own value wins"
 
 echo "== webhook"
-x sc-e2e-ctl sh -c 'cd /src/web && echo two > app/version && git commit -qam two && git push -q origin main'
-SHA2=$(x sc-e2e-ctl git -C /src/web rev-parse HEAD)
+x $E2E-ctl sh -c 'cd /src/web && echo two > app/version && git commit -qam two && git push -q origin main'
+SHA2=$(x $E2E-ctl git -C /src/web rev-parse HEAD)
 body='{"ref":"refs/heads/main"}'
-code=$(x sc-e2e-ctl curl -s -o /dev/null -w '%{http_code}' -H 'X-Hub-Signature-256: sha256=00' -H 'X-GitHub-Event: push' "localhost:7070$HOOK" -d "$body")
+code=$(x $E2E-ctl curl -s -o /dev/null -w '%{http_code}' -H 'X-Hub-Signature-256: sha256=00' -H 'X-GitHub-Event: push' "localhost:7070$HOOK" -d "$body")
 [ "$code" = 401 ] || fail "badly signed webhook answered $code"
 sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')
-code=$(x sc-e2e-ctl curl -s -o /dev/null -w '%{http_code}' -H "X-Hub-Signature-256: sha256=$sig" -H 'X-GitHub-Event: push' "localhost:7070$HOOK" -d "$body")
+code=$(x $E2E-ctl curl -s -o /dev/null -w '%{http_code}' -H "X-Hub-Signature-256: sha256=$sig" -H 'X-GitHub-Event: push' "localhost:7070$HOOK" -d "$body")
 [ "$code" = 202 ] || fail "signed webhook answered $code"
 b=$(wait_build "$SHA2" succeeded)
 echo "$b" | grep -q '"trigger":"webhook"' || fail "not triggered by the webhook: $b"
@@ -117,8 +117,8 @@ wait_serving "@registry/shop/web:${SHA2:0:12}" two
 echo "  ✓ signed webhook (bad signature refused) built and deployed version two"
 
 echo "== broken commit"
-x sc-e2e-ctl sh -c 'cd /src/web && echo "RUN exit 3" >> app/Dockerfile && git commit -qam broken && git push -q origin main'
-SHA3=$(x sc-e2e-ctl git -C /src/web rev-parse HEAD)
+x $E2E-ctl sh -c 'cd /src/web && echo "RUN exit 3" >> app/Dockerfile && git commit -qam broken && git push -q origin main'
+SHA3=$(x $E2E-ctl git -C /src/web rev-parse HEAD)
 api -X POST "$SVC/builds" -d '{}' >/dev/null
 b=$(wait_build "$SHA3" failed)
 echo "$b" | grep -q '"deployed":false' || fail "a failed build was deployed"
@@ -136,18 +136,18 @@ echo "== watch paths"
 hook() {
   local body='{"ref":"refs/heads/main"}' sig
   sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')
-  x sc-e2e-ctl curl -fs -o /dev/null -H "X-Hub-Signature-256: sha256=$sig" -H 'X-GitHub-Event: push' "localhost:7070$HOOK" -d "$body" || fail "webhook refused"
+  x $E2E-ctl curl -fs -o /dev/null -H "X-Hub-Signature-256: sha256=$sig" -H 'X-GitHub-Event: push' "localhost:7070$HOOK" -d "$body" || fail "webhook refused"
 }
 src=$(api -X PUT "$SVC/git" -d '{"url":"http://127.0.0.1:3000/web.git","branch":"main","tags":"v*","context":"app","paths":["app/**","!app/docs/**"],"pollSeconds":15}')
 echo "$src" | grep -q '"paths":\["app/\*\*","!app/docs/\*\*"\]' || fail "paths not saved: $src"
 api -X PUT "$SVC/git" -d '{"url":"http://127.0.0.1:3000/web.git","paths":["a b"]}' >/dev/null 2>&1 && fail "an invalid path filter was accepted"
-x sc-e2e-ctl sh -c 'cd /src/web && mkdir -p app/docs && echo notes > app/docs/notes.md && echo readme > README.md && git add -A && git commit -qm docs && git push -q origin main'
-SHA4=$(x sc-e2e-ctl git -C /src/web rev-parse HEAD)
+x $E2E-ctl sh -c 'cd /src/web && mkdir -p app/docs && echo notes > app/docs/notes.md && echo readme > README.md && git add -A && git commit -qm docs && git push -q origin main'
+SHA4=$(x $E2E-ctl git -C /src/web rev-parse HEAD)
 hook
 b=$(wait_build "$SHA4" skipped)
 echo "$b" | grep -q '"deployed":false' || fail "a skipped build was deployed"
-x sc-e2e-ctl sh -c 'cd /src/web && sed -i "/RUN exit 3/d" app/Dockerfile && echo three > app/version && git commit -qam three && git push -q origin main'
-SHA5=$(x sc-e2e-ctl git -C /src/web rev-parse HEAD)
+x $E2E-ctl sh -c 'cd /src/web && sed -i "/RUN exit 3/d" app/Dockerfile && echo three > app/version && git commit -qam three && git push -q origin main'
+SHA5=$(x $E2E-ctl git -C /src/web rev-parse HEAD)
 hook
 b=$(wait_build "$SHA5" succeeded)
 echo "$b" | grep -q "\"baseSha\":\"$SHA4\"" || fail "not compared with the previous commit: $b"
@@ -155,8 +155,8 @@ wait_serving "@registry/shop/web:${SHA5:0:12}" three
 echo "  ✓ a commit changing only excluded or unwatched paths is skipped; one changing app/ builds and deploys"
 
 echo "== tags"
-x sc-e2e-ctl sh -c 'cd /src/web && git checkout -qb release && echo four > app/version && git commit -qam four && git tag -a v1.0.0 -m "release one" && git push -q origin v1.0.0 && git checkout -q main'
-SHA6=$(x sc-e2e-ctl git -C /src/web rev-parse 'v1.0.0^{commit}')
+x $E2E-ctl sh -c 'cd /src/web && git checkout -qb release && echo four > app/version && git commit -qam four && git tag -a v1.0.0 -m "release one" && git push -q origin v1.0.0 && git checkout -q main'
+SHA6=$(x $E2E-ctl git -C /src/web rev-parse 'v1.0.0^{commit}')
 hook
 b=$(wait_build "$SHA6" succeeded)
 echo "$b" | grep -q '"ref":"refs/tags/v1.0.0"' || fail "not built from the tag: $b"
@@ -166,20 +166,20 @@ api "$SVC/git" | grep -q "\"v1.0.0\":\"$SHA6\"" || fail "watched refs not listed
 echo "  ✓ a new tag matching v* is built (annotated tag peeled to its commit) and pushed as :v1.0.0"
 
 echo "== static site (no Dockerfile)"
-x sc-e2e-ctl sh -c '
+x $E2E-ctl sh -c '
   set -e
   git init -q --bare /srv/git/site.git && git clone -q /srv/git/site.git /src/site 2>/dev/null
   cd /src/site && echo "<h1>static ok</h1>" > index.html && git add -A && git commit -qm site && git push -q origin main'
 SITE=localhost:7070/api/v1/projects/shop/environments/production/services/site
 api -X PUT "$SITE" -d '{"image":"@build","ports":[{"container":80}],"resources":{"cpu":0.05,"memory":32}}' >/dev/null
 api -X PUT "$SITE/git" -d '{"url":"http://127.0.0.1:3000/site.git","branch":"main"}' >/dev/null
-SSHA=$(x sc-e2e-ctl git -C /src/site rev-parse HEAD)
+SSHA=$(x $E2E-ctl git -C /src/site rev-parse HEAD)
 for _ in $(seq 1 200); do api "$SITE/builds" | grep -q '"status":"\(succeeded\|failed\)"' && break; sleep 2; done
 api "$SITE/builds" | grep -q "\"sha\":\"$SSHA\"[^}]*\"status\":\"succeeded\"" || { api "$SITE/builds"; fail "static site build failed"; }
 ok=0
 for _ in $(seq 1 60); do
   cid=$(api "$SITE/tasks" | grep -o '"desired":"running","state":"running","ip":"[^"]*","containerId":"[^"]*"' | cut -d'"' -f16 | head -1 || true)
-  [ -n "$cid" ] && x sc-e2e-ctl docker exec "$cid" wget -qO- localhost:80/ 2>/dev/null | grep -q "static ok" && { ok=1; break; }
+  [ -n "$cid" ] && x $E2E-ctl docker exec "$cid" wget -qO- localhost:80/ 2>/dev/null | grep -q "static ok" && { ok=1; break; }
   sleep 2
 done
 [ $ok = 1 ] || fail "the static site is not served"
@@ -188,7 +188,7 @@ echo "  ✓ a repository with only index.html is built as a static site and serv
 
 if [ "${WITH_NIXPACKS:-0}" = 1 ]; then # downloads Nixpacks and a Nix base image: slow
   echo "== nixpacks (Node, no Dockerfile)"
-  x sc-e2e-ctl sh -c '
+  x $E2E-ctl sh -c '
     set -e
     git init -q --bare /srv/git/node.git && git clone -q /srv/git/node.git /src/node 2>/dev/null
     cd /src/node
@@ -203,7 +203,7 @@ if [ "${WITH_NIXPACKS:-0}" = 1 ]; then # downloads Nixpacks and a Nix base image
   ok=0
   for _ in $(seq 1 60); do
     cid=$(api "$NODE/tasks" | grep -o '"desired":"running","state":"running","ip":"[^"]*","containerId":"[^"]*"' | cut -d'"' -f16 | head -1 || true)
-    [ -n "$cid" ] && x sc-e2e-ctl docker exec "$cid" sh -c 'wget -qO- localhost:3000 || curl -fs localhost:3000' 2>/dev/null | grep -q "node ok" && { ok=1; break; }
+    [ -n "$cid" ] && x $E2E-ctl docker exec "$cid" sh -c 'wget -qO- localhost:3000 || curl -fs localhost:3000' 2>/dev/null | grep -q "node ok" && { ok=1; break; }
     sleep 2
   done
   [ $ok = 1 ] || fail "the Nixpacks-built app is not served"
@@ -211,10 +211,34 @@ if [ "${WITH_NIXPACKS:-0}" = 1 ]; then # downloads Nixpacks and a Nix base image
   echo "  ✓ a Node app without a Dockerfile is built with Nixpacks and served"
 fi
 
+echo "== build variables and after-build checks"
+BS="$SVC/git/build-settings"
+api -X PUT "$BS" -d '{"variables":{"BUILD_NOTE":"from-a-build-var"},"postBuild":["test \"$(cat /www/version)\" = five","test \"$GREETING\" = hello"]}' >/dev/null
+api "$BS" | grep -q 'from-a-build-var' && fail "a build variable value was returned"
+api "$BS" | grep -q '"variables":\["BUILD_NOTE"\]' || fail "build variable names: $(api "$BS")"
+x "$E2E-ctl" sh -c 'cd /src/web && printf "ARG BUILD_NOTE=none\nRUN mkdir -p /www && echo \"\$BUILD_NOTE\" > /www/note\n" >> app/Dockerfile && echo five > app/version && git commit -qam five && git push -q origin main'
+SHA7=$(x "$E2E-ctl" git -C /src/web rev-parse HEAD)
+hook
+b=$(wait_build "$SHA7" succeeded)
+echo "$b" | grep -q '"checkRunId":"run_' || fail "no after-build check run: $b"
+wait_serving "@registry/shop/web:${SHA7:0:12}" five
+cid=$(api "$SVC/tasks" | grep -o '"desired":"running","state":"running","ip":"[^"]*","containerId":"[^"]*"' | cut -d'"' -f16 | head -1)
+[ "$(x "$E2E-ctl" docker exec "$cid" cat /www/note)" = from-a-build-var ] || fail "the build variable did not reach the Dockerfile"
+echo "  ✓ a build variable became a Dockerfile build argument; the checks passed in the new image (with the service's variables) before it deployed"
+x "$E2E-ctl" sh -c 'cd /src/web && echo six > app/version && git commit -qam six && git push -q origin main'
+SHA8=$(x "$E2E-ctl" git -C /src/web rev-parse HEAD)
+hook
+b=$(wait_build "$SHA8" failed)
+echo "$b" | grep -q 'after-build check failed (exit 1)' || fail "failure reason: $b"
+echo "$b" | grep -q '"deployed":false' || fail "a build whose checks failed was deployed"
+wait_serving "@registry/shop/web:${SHA7:0:12}" five
+api -X PUT "$BS" -d '{"variables":{"BUILD_NOTE":null},"postBuild":[]}' | grep -q '"postBuild":\[\]' || fail "checks not removed"
+echo "  ✓ a build whose after-build check fails is not deployed; version five keeps serving"
+
 echo "== disconnect"
 api -X DELETE "$SVC/git" >/dev/null
 api "$SVC/git" >/dev/null 2>&1 && fail "source still present"
-code=$(x sc-e2e-ctl curl -s -o /dev/null -w '%{http_code}' -X POST "localhost:7070$HOOK" -d '{}')
+code=$(x $E2E-ctl curl -s -o /dev/null -w '%{http_code}' -X POST "localhost:7070$HOOK" -d '{}')
 [ "$code" = 404 ] || fail "webhook of a removed source answered $code"
 echo "  ✓ disconnected; its webhook is gone"
 echo "PASS"

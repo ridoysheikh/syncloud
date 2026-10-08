@@ -53,9 +53,12 @@ export interface Build {
   sha: string;
   ref: string;
   trigger: string;
-  status: "queued" | "building" | "succeeded" | "failed" | "skipped";
+  status:
+    "queued" | "building" | "checking" | "succeeded" | "failed" | "skipped";
   image: string;
   runId: string;
+  /** The after-build checks' run (Phase 15b). */
+  checkRunId?: string;
   message: string;
   deployed: boolean;
   createdAt: string;
@@ -66,6 +69,7 @@ export interface Build {
 const buildTone = {
   queued: "neutral",
   building: "info",
+  checking: "info",
   succeeded: "ok",
   failed: "bad",
   skipped: "neutral",
@@ -480,7 +484,12 @@ function SourcePanel({ path, src }: { path: string; src: GitSource }) {
 
 /** Polls faster while a build is queued or running. */
 export const buildsRefetch = (builds: Build[]) =>
-  builds.some((b) => b.status === "queued" || b.status === "building")
+  builds.some(
+    (b) =>
+      b.status === "queued" ||
+      b.status === "building" ||
+      b.status === "checking",
+  )
     ? 2000
     : 10_000;
 
@@ -661,6 +670,11 @@ export function BuildsTable({
       {shown?.runId && (
         <Panel title={`Build log ${shown.sha.slice(0, 12)}`} flush>
           <LogsView filter={{ task: shown.runId }} showSource={false} />
+        </Panel>
+      )}
+      {shown?.checkRunId && (
+        <Panel title={`After-build checks ${shown.sha.slice(0, 12)}`} flush>
+          <LogsView filter={{ task: shown.checkRunId }} showSource={false} />
         </Panel>
       )}
     </>

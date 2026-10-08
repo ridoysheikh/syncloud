@@ -96,7 +96,13 @@ case "$kind" in
     else
       [ -n "${providers% }" ] || { echo "Nixpacks does not recognize this app: add a $DOCKERFILE"; exit 1; }
       step "Nixpacks: ${providers% }"
-      /tmp/nixpacks build . --out .
+      # NIXPACKS_INSTALL_CMD, _BUILD_CMD and _START_CMD (the source's
+      # overrides) are read from the environment; build variables are --env.
+      set --
+      while IFS= read -r kv; do [ -n "$kv" ] && set -- "$@" --env "$kv"; done <<EOF
+${BUILD_VARS:-}
+EOF
+      /tmp/nixpacks build . --out . "$@"
       dfdir=.nixpacks
       dfname=Dockerfile
     fi
@@ -112,6 +118,12 @@ if [ "$kind" = static ]; then
 fi
 
 step "building with BuildKit ($kind)"
+# Build variables (KEY=VALUE lines) are the Dockerfile's build arguments.
+set --
+while IFS= read -r kv; do [ -n "$kv" ] && set -- "$@" --opt "build-arg:$kv"; done <<EOF
+${BUILD_VARS:-}
+EOF
+[ $# -eq 0 ] || step "build arguments: $(printf '%s\n' "${BUILD_VARS:-}" | sed 's/=.*//' | tr '\n' ' ')"
 exec buildctl-daemonless.sh build --progress=plain --frontend dockerfile.v0 \
   --local context=. --local dockerfile="$dfdir" --opt filename="$dfname" \
-  --import-cache "$CACHE" --export-cache "$CACHE,mode=max" --output "$OUTPUT"
+  --import-cache "$CACHE" --export-cache "$CACHE,mode=max" --output "$OUTPUT" "$@"

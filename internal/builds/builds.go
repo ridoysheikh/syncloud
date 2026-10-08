@@ -48,6 +48,8 @@ const (
 	BuildBuilding  = "building"
 	BuildSucceeded = "succeeded"
 	BuildFailed    = "failed"
+	// BuildChecking: built, and the after-build checks run in the image.
+	BuildChecking = "checking"
 	// BuildSkipped means no changed file matched the path filters.
 	BuildSkipped = "skipped"
 
@@ -753,6 +755,7 @@ func (m *Manager) buildSpec(ctx context.Context, sv store.Service, g store.GitSo
 	if env["BUILDER"] == "" {
 		env["BUILDER"] = "auto"
 	}
+	m.settingsEnv(g, env)
 	if m.cfg.SelfSignedCA != nil {
 		// Private networks: trust the platform's self-signed certificates.
 		regHost, _, _ := strings.Cut(host, ":")
@@ -797,11 +800,18 @@ func dockerTag(name string) string {
 	return t
 }
 
-// onRunFinished completes a build and deploys it when auto-deploy is on.
+// onRunFinished completes a build (or its after-build checks) and deploys
+// it when auto-deploy is on.
 func (m *Manager) onRunFinished(ctx context.Context, run store.JobRun) {
-	if run.Trigger != jobs.TriggerBuild {
-		return
+	switch run.Trigger {
+	case jobs.TriggerBuild:
+		m.buildFinished(ctx, run)
+	case jobs.TriggerCheck:
+		m.checkFinished(ctx, run)
 	}
+}
+
+func (m *Manager) buildFinished(ctx context.Context, run store.JobRun) {
 	b, err := m.st.BuildByRun(ctx, run.ID)
 	if err != nil {
 		return
@@ -831,7 +841,84 @@ func (m *Manager) onRunFinished(ctx context.Context, run store.JobRun) {
 		m.report(b, gitprovider.StateFailure, b.Message)
 		return
 	}
+	if g, err := m.st.GitSourceByService(ctx, b.ServiceID); err == nil {
+		if checks := parseStored(g).PostBuild; len(checks) > 0 {
+			m.startCheck(ctx, b, checks)
+			return
+		}
+	}
 	b.Status = BuildSucceeded
+	m.built(ctx, b)
+}
+
+// startCheck runs a build's after-build checks in its image.
+func (m *Manager) startCheck(ctx context.Context, b store.Build, checks []string) {
+	fail := func(msg string) {
+		b.Status, b.Message = BuildFailed, msg
+		_ = m.st.UpdateBuild(ctx, b)
+		m.bus.Publish(TopicBuild, b)
+		m.report(b, gitprovider.StateFailure, msg)
+		m.kickQueue()
+	}
+	sv, err := m.st.ServiceByID(ctx, b.ServiceID)
+	if err != nil {
+		fail("service not found")
+		return
+	}
+	spec, err := m.wl.SpecFor(ctx, sv.ID, sv.Revision)
+	if err != nil {
+		fail(err.Error())
+		return
+	}
+	spec.Image = b.Image
+	spec.Entrypoint, spec.Command = []string{"sh", "-c"}, []string{checkScript(checks)}
+	run, err := m.jobs.StartCheck(ctx, sv, spec)
+	if err != nil {
+		fail("after-build checks could not start: " + err.Error())
+		return
+	}
+	b.Status, b.CheckRunID, b.Message = BuildChecking, run.ID, "running after-build checks"
+	_ = m.st.UpdateBuild(ctx, b)
+	m.bus.Publish(TopicBuild, b)
+	m.report(b, gitprovider.StateRunning, "Built; running after-build checks")
+	m.kickQueue() // the builder is free while the checks run
+}
+
+// checkFinished deploys a build whose after-build checks passed.
+func (m *Manager) checkFinished(ctx context.Context, run store.JobRun) {
+	b, err := m.st.BuildByCheckRun(ctx, run.ID)
+	if err != nil || b.Status != BuildChecking {
+		return
+	}
+	now := m.now().UTC()
+	b.FinishedAt = &now
+	if run.Status != store.RunSucceeded {
+		b.Status, b.Message = BuildFailed, "after-build check "+strings.ReplaceAll(run.Status, "_", " ")
+		if run.ExitCode != nil {
+			b.Message += fmt.Sprintf(" (exit %d)", *run.ExitCode)
+		}
+		if run.Message != "" {
+			b.Message += ": " + run.Message
+		}
+		_ = m.st.UpdateBuild(ctx, b)
+		m.bus.Publish(TopicBuild, b)
+		m.log.Warn("after-build checks failed", "build", b.ID, "reason", b.Message)
+		m.report(b, gitprovider.StateFailure, b.Message)
+		return
+	}
+	b.Status, b.Message = BuildSucceeded, ""
+	m.built(ctx, b)
+}
+
+func (m *Manager) kickQueue() {
+	select {
+	case m.kick <- struct{}{}:
+	default:
+	}
+}
+
+// built deploys a succeeded build when auto-deploy is on, and reports it.
+func (m *Manager) built(ctx context.Context, b store.Build) {
 	state, desc := gitprovider.StateSuccess, "Built; deploy it from the dashboard"
 	if g, err := m.st.GitSourceByService(ctx, b.ServiceID); err == nil && g.AutoDeploy && m.newerDeployed(ctx, b) {
 		// Two pushes built at once: never roll back to the older commit

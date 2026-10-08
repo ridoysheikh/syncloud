@@ -43,6 +43,7 @@ import { ServicePlacementPanel } from "@/modules/projects/NodeLimits";
 import { confirmAction } from "@/ui/dialogs";
 import { lineDiff, withContext } from "@/lib/linediff";
 import { DeploymentsTable, useDeploymentActions } from "./Deployments";
+import { DeployTab } from "./DeployTab";
 
 interface Revision {
   revision: number;
@@ -62,6 +63,7 @@ type Tab =
   | "tasks"
   | "logs"
   | "deployments"
+  | "deploy"
   | "builds"
   | "variables"
   | "s3"
@@ -276,6 +278,7 @@ export function ServicePage() {
           "logs",
           "tasks",
           "deployments",
+          "deploy",
           "builds",
           "variables",
           "s3",
@@ -325,6 +328,9 @@ export function ServicePage() {
           service={name}
           currentRevision={svc.revision}
         />
+      )}
+      {tab === "deploy" && (
+        <DeployTab project={project} env={env} name={name} path={path} spec={svc.spec} />
       )}
       {tab === "builds" && <BuildsPanel path={path} />}
       {tab === "variables" && (

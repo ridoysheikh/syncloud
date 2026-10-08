@@ -495,6 +495,8 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/git", h: s.handleGetGitSource},
 		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/git", h: s.handleSetGitSource},
 		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/git", h: s.handleDeleteGitSource},
+		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/git/build-settings", h: s.handleGetBuildSettings},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/git/build-settings", h: s.handleSetBuildSettings},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/builds", h: s.handleServiceBuilds},
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/builds", h: s.handleStartBuild},
 		{Method: "GET", Path: "/api/v1/builds", h: s.handleRecentBuilds},

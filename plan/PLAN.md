@@ -2210,6 +2210,37 @@ The request: full deployment history with rollback options; commands after the b
 
 **New service wizard:** the Deploy step gains an optional "Release command", for example `npm run migrate`.
 
+**Progress 15b:** ✅ 2026-10-08.
+- **Hooks:**
+  - `advanceHooks` replaces the in-memory hook sets. From the store, it starts a deployment's first hook job without a run, waits on a running one, and ends the pre-deploy phase when all have passed or one has failed. A controller restart picks up where it stopped.
+  - Jobs sort by the new `order` field, then by age.
+  - Post-deploy jobs run the same way: a failure stops the rest and leaves the deployment as it is.
+  - A hook retry that cannot start fails the hook.
+  - A job's `entrypoint` replaces the image's ENTRYPOINT; release commands use `["sh","-c"]`.
+- **First deployment:**
+  - Creating a service with `releaseCommands` (`preDeploy` and `postDeploy` lists of `{command, timeout, retries}`) creates the jobs `<service>-pre-N` and `<service>-post-N`.
+  - For an image service, the first deployment is held: `services.held`, migration `00038_release_commands`. The reconciler runs no task until the pre-deploy jobs pass.
+  - A failure leaves the service stopped, with "the first pre-deploy jobs did not pass: fix them, then redeploy".
+  - A Git service waits for its first build anyway, and that build's deployment runs the jobs.
+- **Builds:**
+  - Git sources have build settings: Nixpacks install, build and start overrides (passed as `NIXPACKS_*_CMD`), build variables (encrypted; passed to Nixpacks as `--env` and to the Dockerfile as `--opt build-arg:`; only their names are returned), and after-build checks.
+  - API: `GET/PUT …/git/build-settings`. In the PUT, a variable set to null keeps its value.
+  - synctl: `builds settings` and `builds configure` (`--install-cmd`, `--check`, `--var`, `--unset-var`, `--no-checks`).
+  - A build with checks becomes `checking`. One `post-build` job run executes the checks in order (`set -e`) in the new image, with the service's variables and network. When they pass, the image is deployed; when one fails, the build fails with "after-build check failed (exit N)" and nothing is deployed.
+- **Web:**
+  - Service › Deploy holds:
+    - release commands: ordered pre- and post-deploy lists with timeout and retries, reorder and remove, and each job's last run;
+    - the build panel: checks, Nixpacks commands, and build variables whose values are write-only;
+    - rollout settings: circuit breaker, automatic rollback and drain time.
+  - The new-service wizard has a "Release command" field and shows it on the Review step.
+  - Builds show the `checking` status and the check run's log.
+- **Tests:**
+  - Unit: `TestBuildSettings` (variables are never stored or returned in the clear; null keeps a value) and `TestHookJobName`.
+  - e2e:
+    - `deployments.sh` adds hooks running in order, one at a time; a failing hook stopping the rest; and release commands holding a new service, including a failing one that is fixed and redeployed.
+    - `builds.sh` adds a build variable reaching a Dockerfile `ARG`; checks passing with the service's variables; a failing check blocking the deploy.
+    - `deploy.sh` passes. `builds.sh` now takes `E2E_PREFIX` too.
+
 #### 15c: Ports and domains
 
 **Ports** are edited in a form on a new Service › Networking tab: name, container port and protocol, plus the health check. Saving creates a new revision.

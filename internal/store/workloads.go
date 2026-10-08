@@ -53,8 +53,11 @@ type Service struct {
 	DesiredCount  int
 	Deleting      bool
 	Status        string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// Held: the first deployment waits on its pre-deploy jobs, so no task
+	// runs yet.
+	Held      bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type TaskDefinition struct {
@@ -301,13 +304,13 @@ func (s *Store) DeleteEnvironment(ctx context.Context, id string) error {
 
 // ── services ────────────────────────────────────────────────────────────────
 
-const serviceCols = `SELECT sv.id, sv.environment_id, p.name, e.name, sv.name, sv.revision, sv.desired_count, sv.deleting, sv.status, sv.created_at, sv.updated_at
+const serviceCols = `SELECT sv.id, sv.environment_id, p.name, e.name, sv.name, sv.revision, sv.desired_count, sv.deleting, sv.status, sv.held, sv.created_at, sv.updated_at
 	FROM services sv JOIN environments e ON e.id = sv.environment_id JOIN projects p ON p.id = e.project_id`
 
 func scanService(r scanner) (Service, error) {
 	var sv Service
 	var created, updated int64
-	err := r.Scan(&sv.ID, &sv.EnvironmentID, &sv.Project, &sv.Environment, &sv.Name, &sv.Revision, &sv.DesiredCount, &sv.Deleting, &sv.Status, &created, &updated)
+	err := r.Scan(&sv.ID, &sv.EnvironmentID, &sv.Project, &sv.Environment, &sv.Name, &sv.Revision, &sv.DesiredCount, &sv.Deleting, &sv.Status, &sv.Held, &created, &updated)
 	sv.CreatedAt, sv.UpdatedAt = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
 	return sv, err
 }
@@ -366,8 +369,8 @@ func (s *Store) CreateService(ctx context.Context, sv Service, spec string, crea
 		return ErrNameTaken
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO services (id, environment_id, name, revision, desired_count, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, ?)`,
-		sv.ID, sv.EnvironmentID, sv.Name, sv.DesiredCount, sv.CreatedAt.Unix(), sv.CreatedAt.Unix()); isUnique(err) {
+		`INSERT INTO services (id, environment_id, name, revision, desired_count, held, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, ?, ?)`,
+		sv.ID, sv.EnvironmentID, sv.Name, sv.DesiredCount, sv.Held, sv.CreatedAt.Unix(), sv.CreatedAt.Unix()); isUnique(err) {
 		return ErrNameTaken
 	} else if err != nil {
 		return err
@@ -409,6 +412,12 @@ func (s *Store) UpdateService(ctx context.Context, id, spec string, desired int,
 		return 0, err
 	}
 	return rev, tx.Commit()
+}
+
+// ReleaseService lets a held service run its tasks.
+func (s *Store) ReleaseService(ctx context.Context, id string) error {
+	_, err := s.W.ExecContext(ctx, `UPDATE services SET held = 0 WHERE id = ?`, id)
+	return err
 }
 
 func (s *Store) SetServiceStatus(ctx context.Context, id, status string) error {

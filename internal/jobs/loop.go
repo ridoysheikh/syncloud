@@ -3,6 +3,8 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"syncloud/internal/store"
@@ -201,55 +203,21 @@ func (m *Manager) HasPreDeploy(ctx context.Context, sv store.Service) bool {
 	return len(m.hookJobs(ctx, sv, KindPreDeploy)) > 0
 }
 
-// RunPreDeploy runs every pre-deploy job with the revision being deployed.
-func (m *Manager) RunPreDeploy(ctx context.Context, sv store.Service, toRev int, depID string) {
-	jobs := m.hookJobs(ctx, sv, KindPreDeploy)
-	set := map[string]bool{}
-	m.mu.Lock()
-	m.hooks[depID] = set
-	m.mu.Unlock()
-	for _, j := range jobs {
-		spec, _ := parseSpec(j.Spec)
-		t, err := m.target(ctx, store.Environment{ID: sv.EnvironmentID}, sv.Project, sv.Environment, &j, spec, toRev)
-		if err == nil {
-			var run store.JobRun
-			if run, err = m.start(ctx, t, "pre-deploy", 1, depID); err == nil {
-				m.mu.Lock()
-				set[run.ID] = true
-				m.mu.Unlock()
-				m.wl.DeploymentEvent(ctx, depID, "hook-started", fmt.Sprintf("pre-deploy job %s started", j.Name))
-				continue
-			}
-		}
-		m.wl.PreDeployDone(ctx, depID, false, fmt.Sprintf("job %s: %v", j.Name, err))
-		return
-	}
-	if len(jobs) == 0 {
-		m.wl.PreDeployDone(ctx, depID, true, "")
-	}
+// RunPreDeploy runs the service's pre-deploy jobs, one at a time in their
+// order, with the revision being deployed; the outcome comes back through
+// workload.Manager.PreDeployDone.
+func (m *Manager) RunPreDeploy(ctx context.Context, _ store.Service, _ int, depID string) {
+	m.advanceHooks(ctx, depID)
 }
 
-// RunPostDeploy starts post-deploy jobs; their outcome does not affect the deployment.
-func (m *Manager) RunPostDeploy(ctx context.Context, sv store.Service, dep store.Deployment) {
-	for _, j := range m.hookJobs(ctx, sv, KindPostDeploy) {
-		spec, _ := parseSpec(j.Spec)
-		t, err := m.target(ctx, store.Environment{ID: sv.EnvironmentID}, sv.Project, sv.Environment, &j, spec, dep.ToRev)
-		if err == nil {
-			if _, err = m.start(ctx, t, "post-deploy", 1, dep.ID); err == nil {
-				m.wl.DeploymentEvent(ctx, dep.ID, "hook-started", fmt.Sprintf("post-deploy job %s started", j.Name))
-			}
-		}
-		if err != nil {
-			m.log.Warn("post-deploy job", "job", j.Name, "err", err)
-		}
-	}
+// RunPostDeploy runs post-deploy jobs one at a time after a deployment
+// succeeded; a failure stops the rest but does not affect the deployment.
+func (m *Manager) RunPostDeploy(ctx context.Context, _ store.Service, dep store.Deployment) {
+	m.advanceHooks(ctx, dep.ID)
 }
 
-// CancelHooks stops the pre-deploy runs of a cancelled deployment.
+// CancelHooks stops the hook runs of a cancelled deployment.
 func (m *Manager) CancelHooks(ctx context.Context, depID string) {
-	m.mu.Lock()
-	delete(m.hooks, depID)
-	m.mu.Unlock()
 	runs, err := m.st.DeploymentRuns(ctx, depID)
 	if err != nil {
 		m.log.Warn("cancel hooks", "deployment", depID, "err", err)
@@ -262,24 +230,90 @@ func (m *Manager) CancelHooks(ctx context.Context, depID string) {
 	}
 }
 
-// hookDone collects pre-deploy results: one failure aborts the deployment;
-// all successes let it proceed.
-func (m *Manager) hookDone(ctx context.Context, depID, runID string, ok bool, msg string) {
-	m.mu.Lock()
-	set, tracked := m.hooks[depID]
-	if !tracked {
-		m.mu.Unlock()
-		// Controller restarted while hooks ran: decide on this run alone.
-		m.wl.PreDeployDone(ctx, depID, ok, msg)
+// orderedHookJobs is the service's hook jobs of a kind in the order they
+// run: by their order field, then oldest first.
+func (m *Manager) orderedHookJobs(ctx context.Context, sv store.Service, kind string) []store.Job {
+	jobs := m.hookJobs(ctx, sv, kind)
+	order := func(j store.Job) int {
+		s, _ := parseSpec(j.Spec)
+		return s.Order
+	}
+	sort.SliceStable(jobs, func(a, b int) bool {
+		oa, ob := order(jobs[a]), order(jobs[b])
+		if oa != ob {
+			return oa < ob
+		}
+		if !jobs[a].CreatedAt.Equal(jobs[b].CreatedAt) {
+			return jobs[a].CreatedAt.Before(jobs[b].CreatedAt)
+		}
+		return jobs[a].Name < jobs[b].Name
+	})
+	return jobs
+}
+
+// advanceHooks moves a deployment's hooks along: it starts the first job
+// without a run, waits on a running one, and finishes the pre-deploy phase
+// when all succeeded or one failed. It reads everything from the store, so
+// it picks up where it left off after a controller restart.
+func (m *Manager) advanceHooks(ctx context.Context, depID string) {
+	dep, err := m.st.DeploymentByID(ctx, depID)
+	if err != nil {
 		return
 	}
-	delete(set, runID)
-	done := !ok || len(set) == 0
-	if done {
-		delete(m.hooks, depID)
+	var kind string
+	switch dep.Status {
+	case store.DeployWaitingHook:
+		kind = KindPreDeploy
+	case store.DeploySucceeded:
+		kind = KindPostDeploy
+	default:
+		return // cancelled, superseded or failed meanwhile
 	}
-	m.mu.Unlock()
-	if done {
-		m.wl.PreDeployDone(ctx, depID, ok, msg)
+	sv, err := m.st.ServiceByID(ctx, dep.ServiceID)
+	if err != nil {
+		return
 	}
+	pre := kind == KindPreDeploy
+	done := func(ok bool, msg string) {
+		if pre {
+			m.wl.PreDeployDone(ctx, depID, ok, msg)
+		}
+	}
+	runs, _ := m.st.DeploymentRuns(ctx, depID)
+	latest := map[string]store.JobRun{} // job ID -> its newest run (runs are oldest first)
+	for _, r := range runs {
+		if r.Trigger == kind && r.JobID != "" {
+			latest[r.JobID] = r
+		}
+	}
+	for _, j := range m.orderedHookJobs(ctx, sv, kind) {
+		r, ran := latest[j.ID]
+		switch {
+		case !ran:
+			spec, _ := parseSpec(j.Spec)
+			t, err := m.target(ctx, store.Environment{ID: sv.EnvironmentID}, sv.Project, sv.Environment, &j, spec, dep.ToRev)
+			if err == nil {
+				_, err = m.start(ctx, t, kind, 1, depID)
+			}
+			if err != nil {
+				m.wl.DeploymentEvent(ctx, depID, "hook-failed", fmt.Sprintf("%s job %s could not start: %v", kind, j.Name, err))
+				done(false, fmt.Sprintf("job %s: %v", j.Name, err))
+				return
+			}
+			m.wl.DeploymentEvent(ctx, depID, "hook-started", fmt.Sprintf("%s job %s started", kind, j.Name))
+			return
+		case r.Status == store.RunPending || r.Status == store.RunRunning:
+			return
+		case r.Status == store.RunSucceeded:
+			continue
+		default:
+			msg := fmt.Sprintf("job %s %s", j.Name, strings.ReplaceAll(r.Status, "_", " "))
+			if r.Message != "" {
+				msg += ": " + r.Message
+			}
+			done(false, msg)
+			return
+		}
+	}
+	done(true, "")
 }
