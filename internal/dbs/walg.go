@@ -198,7 +198,9 @@ func archiveConfig(cfg map[string]any, spec Spec, st State) {
 	if spec.Postgres != nil && spec.Postgres.Backup != nil {
 		params["archive_command"] = "wal-g wal-push %p"
 		params["archive_timeout"] = "60s"
-		pgc["recovery_conf"] = map[string]string{"restore_command": "wal-g wal-fetch %f %p"}
+		// Bounded: with the archive unreachable, a member still starts
+		// from its own WAL and streaming instead of waiting on S3 forever.
+		pgc["recovery_conf"] = map[string]string{"restore_command": "timeout 30 wal-g wal-fetch %f %p"}
 		pgc["create_replica_methods"] = []string{"walg", "basebackup"}
 		pgc["walg"] = map[string]any{"command": "/usr/local/bin/walg-replica", "no_leader": false, "keep_data": false}
 		pgc["basebackup"] = map[string]any{"checkpoint": "fast"}

@@ -469,15 +469,38 @@ func (m *Manager) finish(ctx context.Context, run store.JobRun, status string, c
 	if m.OnFinished != nil {
 		defer m.OnFinished(ctx, run)
 	}
-	if (status == store.RunFailed || status == store.RunTimedOut) && run.Attempt <= spec.Retries {
+	retrying := (status == store.RunFailed || status == store.RunTimedOut) && run.Attempt <= spec.Retries
+	if run.DeploymentID != "" {
+		m.hookEvent(ctx, run, status, msg, retrying)
+	}
+	if retrying {
 		delay := time.Duration(10<<min(run.Attempt-1, 5)) * time.Second
 		m.log.Info("retrying job run", "run", run.ID, "attempt", run.Attempt+1, "in", delay)
 		time.AfterFunc(delay, func() { m.retry(context.Background(), run) })
 		return
 	}
-	if run.DeploymentID != "" {
+	if run.DeploymentID != "" && run.Trigger == KindPreDeploy {
 		m.hookDone(ctx, run.DeploymentID, run.ID, status == store.RunSucceeded, msg)
 	}
+}
+
+// hookEvent puts a finished hook run on its deployment's timeline.
+func (m *Manager) hookEvent(ctx context.Context, run store.JobRun, status, msg string, retrying bool) {
+	name := run.Trigger + " job"
+	if j, err := m.st.JobByID(ctx, run.JobID); err == nil {
+		name = run.Trigger + " job " + j.Name
+	}
+	kind, text := "hook-succeeded", name+" succeeded"
+	if status != store.RunSucceeded {
+		kind, text = "hook-failed", fmt.Sprintf("%s %s", name, strings.ReplaceAll(status, "_", " "))
+		if msg != "" {
+			text += ": " + msg
+		}
+		if retrying {
+			text += fmt.Sprintf("; retrying (attempt %d)", run.Attempt+1)
+		}
+	}
+	m.wl.DeploymentEvent(ctx, run.DeploymentID, kind, text)
 }
 
 func (m *Manager) retry(ctx context.Context, prev store.JobRun) {
@@ -492,7 +515,11 @@ func (m *Manager) retry(ctx context.Context, prev store.JobRun) {
 			t.service = &sv
 		}
 	}
-	run, err := m.start(ctx, t, "retry", prev.Attempt+1, prev.DeploymentID)
+	trigger := "retry"
+	if prev.Trigger == KindPreDeploy || prev.Trigger == KindPostDeploy {
+		trigger = prev.Trigger // a hook retry is still that hook
+	}
+	run, err := m.start(ctx, t, trigger, prev.Attempt+1, prev.DeploymentID)
 	if err != nil {
 		m.log.Error("retry job run", "run", prev.ID, "err", err)
 		return

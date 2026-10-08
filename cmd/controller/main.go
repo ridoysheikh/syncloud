@@ -506,6 +506,7 @@ func serve(args []string) error {
 	if cfg.SystemTasks {
 		regMaint = regmaint.New(st, regBrowser, sysMgr, execs, workloads, bus, log)
 		regMaint.RegistryHosts = func() []string { return []string{registryHost(), domains.Endpoints().RegistryHost} }
+		workloads.ImageAvailable = regMaint.ImageAvailable
 		go regMaint.Run(ctx)
 	}
 	logStore := logs.New(st, cfg.VictoriaLogsURL, log)

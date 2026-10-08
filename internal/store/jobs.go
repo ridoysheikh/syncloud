@@ -225,6 +225,11 @@ func (s *Store) JobRuns(ctx context.Context, jobID string, limit int, before str
 		ORDER BY created_at DESC, rowid DESC LIMIT ?`, jobID, before, before, limit)
 }
 
+// DeploymentRuns returns the hook runs of a deployment, oldest first.
+func (s *Store) DeploymentRuns(ctx context.Context, depID string) ([]JobRun, error) {
+	return s.queryRuns(ctx, `WHERE deployment_id = ? ORDER BY created_at, rowid`, depID)
+}
+
 func (s *Store) RunsIn(ctx context.Context, environmentID string, limit int) ([]JobRun, error) {
 	return s.queryRuns(ctx, `WHERE environment_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`, environmentID, limit)
 }

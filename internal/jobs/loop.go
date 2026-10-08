@@ -217,6 +217,7 @@ func (m *Manager) RunPreDeploy(ctx context.Context, sv store.Service, toRev int,
 				m.mu.Lock()
 				set[run.ID] = true
 				m.mu.Unlock()
+				m.wl.DeploymentEvent(ctx, depID, "hook-started", fmt.Sprintf("pre-deploy job %s started", j.Name))
 				continue
 			}
 		}
@@ -234,10 +235,29 @@ func (m *Manager) RunPostDeploy(ctx context.Context, sv store.Service, dep store
 		spec, _ := parseSpec(j.Spec)
 		t, err := m.target(ctx, store.Environment{ID: sv.EnvironmentID}, sv.Project, sv.Environment, &j, spec, dep.ToRev)
 		if err == nil {
-			_, err = m.start(ctx, t, "post-deploy", 1, "")
+			if _, err = m.start(ctx, t, "post-deploy", 1, dep.ID); err == nil {
+				m.wl.DeploymentEvent(ctx, dep.ID, "hook-started", fmt.Sprintf("post-deploy job %s started", j.Name))
+			}
 		}
 		if err != nil {
 			m.log.Warn("post-deploy job", "job", j.Name, "err", err)
+		}
+	}
+}
+
+// CancelHooks stops the pre-deploy runs of a cancelled deployment.
+func (m *Manager) CancelHooks(ctx context.Context, depID string) {
+	m.mu.Lock()
+	delete(m.hooks, depID)
+	m.mu.Unlock()
+	runs, err := m.st.DeploymentRuns(ctx, depID)
+	if err != nil {
+		m.log.Warn("cancel hooks", "deployment", depID, "err", err)
+		return
+	}
+	for _, r := range runs {
+		if r.Status == store.RunPending || r.Status == store.RunRunning {
+			_ = m.Cancel(ctx, r.ID)
 		}
 	}
 }

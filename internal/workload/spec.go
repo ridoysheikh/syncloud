@@ -31,6 +31,9 @@ type Spec struct {
 	// Health is probed by the agent (§5.6); traffic only reaches healthy tasks.
 	Health     *HealthCheck `json:"health,omitempty"`
 	Deployment Deployment   `json:"deployment"`
+	// RedeployedAt is set by the platform for a redeploy of an unchanged
+	// spec (Phase 15a), so the restart is a revision of its own.
+	RedeployedAt string `json:"redeployedAt,omitempty"`
 }
 
 // S3Ref is a bucket bound to the service: its tasks get <EnvPrefix>S3_BUCKET,

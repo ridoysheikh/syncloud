@@ -83,6 +83,9 @@ type Manager struct {
 	// ExtraUsage is per-node reservations outside service tasks (database
 	// members), counted when placing.
 	ExtraUsage func(ctx context.Context) map[string]Usage
+	// ImageAvailable reports whether an image can still be pulled (false
+	// once registry cleanup removed it); may be nil.
+	ImageAvailable func(ctx context.Context, image string) (bool, error)
 
 	queue    chan string
 	mu       sync.Mutex
@@ -90,6 +93,7 @@ type Manager struct {
 	specs    map[string]Spec        // "<service>:<revision>" -> spec (immutable)
 	failures map[string][]time.Time // service -> recent task failures
 	routes   routeCache
+	progress sync.Map // deployment ID -> tasks of the new revision last seen serving
 }
 
 func NewManager(st *store.Store, gw *agentgw.Gateway, reg *nodes.Registry, netReady NetworkReady, bus *events.Bus, log *slog.Logger) *Manager {
@@ -254,6 +258,7 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			if n, err := m.st.IncDeploymentFailures(ctx, dep.ID); err == nil {
 				dep.Failed = n
 			}
+			m.DeploymentEvent(ctx, dep.ID, "task-failed", taskFailure(t))
 		}
 	}
 	var active []store.Task
@@ -351,6 +356,9 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 				current = append(current, t)
 				changed = true
 			}
+			if hasDep && placed > 0 {
+				m.DeploymentEvent(ctx, dep.ID, "tasks-started", fmt.Sprintf("started %d %s of revision %d", placed, plural(placed, "task"), sv.Revision))
+			}
 		}
 	}
 
@@ -363,11 +371,24 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			servingNew++
 		}
 	}
+	if hasDep {
+		if last, _ := m.progress.Load(dep.ID); last == nil || last.(int) < servingNew {
+			m.progress.Store(dep.ID, servingNew)
+			if servingNew > 0 {
+				m.DeploymentEvent(ctx, dep.ID, "serving", fmt.Sprintf("%d of %d tasks of revision %d serve traffic", servingNew, desired, dep.ToRev))
+			}
+		}
+	}
+	retired := 0
 	for keepOld := max(desired-servingNew, 0); len(old) > keepOld; {
 		i := pickVictim(old)
 		m.stop(ctx, old[i], now)
 		old = append(old[:i], old[i+1:]...)
 		changed = true
+		retired++
+	}
+	if hasDep && retired > 0 {
+		m.DeploymentEvent(ctx, dep.ID, "drained", fmt.Sprintf("stopped %d old %s", retired, plural(retired, "task")))
 	}
 
 	// Deployment outcome (§5.4): done when every desired task of the new
@@ -381,16 +402,20 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			if *spec.Deployment.Rollback && dep.FromRev > 0 {
 				_ = m.st.FinishDeployment(ctx, dep.ID, store.DeployRolledBack, msg+"; rolled back to revision "+fmt.Sprint(dep.FromRev), now)
 				m.log.Warn("deployment failed; rolling back", "service", sv.Name, "revision", dep.ToRev, "to", dep.FromRev)
-				if _, err := m.rollback(ctx, sv, dep.FromRev, "circuit-breaker", "automatic rollback: "+msg); err != nil {
+				m.DeploymentEvent(ctx, dep.ID, store.DeployRolledBack, fmt.Sprintf("circuit breaker tripped (%s); rolling back to revision %d", msg, dep.FromRev))
+				if _, err := m.rollback(WithCause(ctx, Cause{Trigger: store.TriggerAutoRollback}), sv, dep.FromRev, actorCircuitBreaker, "automatic rollback: "+msg, false); err != nil {
 					m.log.Error("automatic rollback", "service", sv.ID, "err", err)
 				}
 				return
 			}
 			_ = m.st.FinishDeployment(ctx, dep.ID, store.DeployFailed, msg, now)
 			status = "deployment failed: " + msg
+			m.DeploymentEvent(ctx, dep.ID, store.DeployFailed, "circuit breaker tripped: "+msg)
 			changed = true
 		case servingNew >= desired && len(old) == 0:
 			_ = m.st.FinishDeployment(ctx, dep.ID, store.DeploySucceeded, "", now)
+			m.DeploymentEvent(ctx, dep.ID, store.DeploySucceeded, fmt.Sprintf("all %d tasks of revision %d serve traffic", desired, dep.ToRev))
+			m.progress.Delete(dep.ID)
 			if m.DeployHooks != nil {
 				m.DeployHooks.RunPostDeploy(context.WithoutCancel(ctx), sv, dep)
 			}
@@ -703,6 +728,8 @@ type DeployHooks interface {
 	RunPreDeploy(ctx context.Context, sv store.Service, toRev int, depID string)
 	// RunPostDeploy starts post-deploy jobs after a deployment succeeded.
 	RunPostDeploy(ctx context.Context, sv store.Service, dep store.Deployment)
+	// CancelHooks stops the pre-deploy runs of a cancelled deployment.
+	CancelHooks(ctx context.Context, depID string)
 }
 
 // takesTasks reports whether a node accepts a new task: schedulable nodes

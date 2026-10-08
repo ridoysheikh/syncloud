@@ -46,6 +46,7 @@ import { NewProjectPage, ProjectsPage } from "./projects/ProjectsPage";
 import { ProjectPage } from "./projects/ProjectPage";
 import { NewServiceWizard } from "./projects/NewServiceWizard";
 import { ServicePage } from "./compute/ServicePage";
+import { DeploymentPage } from "./compute/Deployments";
 import { TasksPage } from "./compute/TasksPage";
 import { JobsPage } from "./compute/JobsPage";
 import { IncidentsPage, ServiceHealthPage } from "./health/HealthPages";
@@ -96,6 +97,7 @@ export const modules: DashboardModule[] = [
       { path: "/projects/$project/$env", label: "Project", component: ProjectPage, hidden: true },
       { path: "/projects/$project/$env/new-service", label: "New service", component: NewServiceWizard, hidden: true },
       { path: "/projects/$project/$env/services/$name", label: "Service", component: ServicePage, hidden: true },
+      { path: "/projects/$project/$env/services/$name/deployments/$id", label: "Deployment", component: DeploymentPage, hidden: true },
     ],
   },
   {

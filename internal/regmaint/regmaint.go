@@ -149,19 +149,27 @@ func (r refs) checker(repo string, images []registry.Image) func(string) bool {
 	return func(d string) bool { return digests[d] }
 }
 
-// inUse collects private-registry images of every service's current and
-// previous revision (the rollback target) and of in-flight deployments.
+// inUse collects private-registry images of each service's latest
+// revisions, as many as its project's rollback window (Phase 15a, at least
+// the current and previous one), and of in-flight deployments.
 func (m *Manager) inUse(ctx context.Context) (refs, error) {
 	out := refs{}
 	services, err := m.st.ListServices(ctx)
 	if err != nil {
 		return nil, err
 	}
+	window := map[string]int{}
+	if projects, err := m.st.ListProjects(ctx); err == nil {
+		for _, p := range projects {
+			window[p.Name] = p.RollbackWindow
+		}
+	}
 	hosts := m.RegistryHosts()
 	for _, sv := range services {
-		revs := map[int]bool{sv.Revision: true}
-		if sv.Revision > 1 {
-			revs[sv.Revision-1] = true
+		keep := max(window[sv.Project], 2)
+		revs := map[int]bool{}
+		for rev := max(sv.Revision-keep+1, 1); rev <= sv.Revision; rev++ {
+			revs[rev] = true
 		}
 		if d, err := m.st.ActiveDeployment(ctx, sv.ID); err == nil {
 			revs[d.FromRev], revs[d.ToRev] = true, true
@@ -180,6 +188,20 @@ func (m *Manager) inUse(ctx context.Context) (refs, error) {
 		}
 	}
 	return out, nil
+}
+
+// ImageAvailable reports whether a service image can still be pulled:
+// images outside the private registry are assumed to be.
+func (m *Manager) ImageAvailable(ctx context.Context, image string) (bool, error) {
+	repo, tag, digest, ok := registry.ParseRef(image, m.RegistryHosts())
+	if !ok {
+		return true, nil
+	}
+	ref := tag
+	if digest != "" {
+		ref = digest
+	}
+	return m.browser.HasImage(ctx, repo, ref)
 }
 
 // Running reports whether a run is in progress.

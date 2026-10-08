@@ -390,12 +390,13 @@ func (c *Client) EffectiveFirewall(ctx context.Context, nodeID string) (Effectiv
 }
 
 type Project struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Description  string    `json:"description"`
-	Nodes        []string  `json:"nodes"` // allowed nodes; empty = any
-	Environments []string  `json:"environments"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description"`
+	Nodes          []string  `json:"nodes"` // allowed nodes; empty = any
+	Environments   []string  `json:"environments"`
+	RollbackWindow int       `json:"rollbackWindow"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 // SetProjectNodes limits the nodes a project's workloads run on (empty = any).
@@ -451,6 +452,8 @@ type HealthCheck struct {
 
 type Deployment struct {
 	ID           string     `json:"id"`
+	Service      string     `json:"service"`
+	Environment  string     `json:"environment"`
 	FromRevision int        `json:"fromRevision"`
 	ToRevision   int        `json:"toRevision"`
 	Status       string     `json:"status"`
@@ -458,11 +461,89 @@ type Deployment struct {
 	Message      string     `json:"message"`
 	StartedAt    time.Time  `json:"startedAt"`
 	FinishedAt   *time.Time `json:"finishedAt"`
+	Trigger      string     `json:"trigger"`
+	Actor        string     `json:"actor"`
+	ActorName    string     `json:"actorName"`
+	Image        string     `json:"image"`
+	Commit       *struct {
+		SHA string `json:"sha"`
+		Ref string `json:"ref"`
+	} `json:"commit"`
+	Changes []DeploymentChange `json:"changes"`
+	Hooks   []struct {
+		RunID   string `json:"runId"`
+		Trigger string `json:"trigger"`
+		Status  string `json:"status"`
+	} `json:"hooks"`
+}
+
+// DeploymentChange is one difference between the two revisions.
+type DeploymentChange struct {
+	Field string `json:"field"`
+	From  string `json:"from"`
+	To    string `json:"to"`
+}
+
+// DeploymentDetail is one deployment with its timeline and hook runs.
+type DeploymentDetail struct {
+	Deployment
+	Events []struct {
+		At      time.Time `json:"at"`
+		Kind    string    `json:"kind"`
+		Message string    `json:"message"`
+	} `json:"events"`
+	Runs []JobRun `json:"runs"`
+}
+
+// UpdateProject changes a project's description and rollback window
+// (nil leaves a field unchanged).
+func (c *Client) UpdateProject(ctx context.Context, project string, description *string, rollbackWindow *int) (Project, error) {
+	body := map[string]any{}
+	if description != nil {
+		body["description"] = *description
+	}
+	if rollbackWindow != nil {
+		body["rollbackWindow"] = *rollbackWindow
+	}
+	var out Project
+	return out, c.Do(ctx, "PUT", "/api/v1/projects/"+url.PathEscape(project), body, &out)
 }
 
 func (c *Client) ServiceDeployments(ctx context.Context, project, env, name string) ([]Deployment, error) {
 	var out list[Deployment]
 	return out.Items, c.Do(ctx, "GET", svcPath(project, env, name)+"/deployments", nil, &out)
+}
+
+func (c *Client) GetDeployment(ctx context.Context, project, env, name, id string) (DeploymentDetail, error) {
+	var out DeploymentDetail
+	return out, c.Do(ctx, "GET", svcPath(project, env, name)+"/deployments/"+url.PathEscape(id), nil, &out)
+}
+
+func (c *Client) CancelDeployment(ctx context.Context, project, env, name, id string) (Service, error) {
+	var out Service
+	return out, c.Do(ctx, "POST", svcPath(project, env, name)+"/deployments/"+url.PathEscape(id)+"/cancel", nil, &out)
+}
+
+func (c *Client) RedeployService(ctx context.Context, project, env, name string, runHooks bool) (Service, error) {
+	var out Service
+	return out, c.Do(ctx, "POST", svcPath(project, env, name)+"/redeploy", map[string]bool{"runHooks": runHooks}, &out)
+}
+
+// ProjectDeployments lists a project's deployments; env, service and status
+// narrow it when set.
+func (c *Client) ProjectDeployments(ctx context.Context, project, env, service, status string) ([]Deployment, error) {
+	q := url.Values{}
+	for k, v := range map[string]string{"environment": env, "service": service, "status": status} {
+		if v != "" {
+			q.Set(k, v)
+		}
+	}
+	path := "/api/v1/projects/" + url.PathEscape(project) + "/deployments"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	var out list[Deployment]
+	return out.Items, c.Do(ctx, "GET", path, nil, &out)
 }
 
 type Service struct {
@@ -590,9 +671,9 @@ func (c *Client) ScaleService(ctx context.Context, project, env, name string, de
 	return out, c.Do(ctx, "POST", svcPath(project, env, name)+"/scale", map[string]int{"desiredCount": desired}, &out)
 }
 
-func (c *Client) RollbackService(ctx context.Context, project, env, name string, revision int) (Service, error) {
+func (c *Client) RollbackService(ctx context.Context, project, env, name string, revision int, runHooks bool) (Service, error) {
 	var out Service
-	return out, c.Do(ctx, "POST", svcPath(project, env, name)+"/rollback", map[string]int{"revision": revision}, &out)
+	return out, c.Do(ctx, "POST", svcPath(project, env, name)+"/rollback", map[string]any{"revision": revision, "runHooks": runHooks}, &out)
 }
 
 func (c *Client) ServiceTasks(ctx context.Context, project, env, name string) ([]Task, error) {

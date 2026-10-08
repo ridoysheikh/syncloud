@@ -41,27 +41,93 @@ export interface Spec {
     retries?: number;
     startPeriod?: number;
   };
-  deployment?: { circuitBreaker?: boolean; rollback?: boolean };
+  deployment?: {
+    circuitBreaker?: boolean;
+    rollback?: boolean;
+    drainSeconds?: number;
+  };
+  /** Set by the platform on a redeploy; not user-editable. */
+  redeployedAt?: string;
+}
+
+export type DeploymentStatus =
+  | "waiting_hook"
+  | "in_progress"
+  | "succeeded"
+  | "failed"
+  | "rolled_back"
+  | "superseded"
+  | "cancelled";
+
+export type DeploymentTrigger =
+  | "manual"
+  | "git"
+  | "rollback"
+  | "auto-rollback"
+  | "variables"
+  | "redeploy"
+  | "config";
+
+/** One difference between two revisions; variables by name only. */
+export interface DeploymentChange {
+  field: string;
+  from?: string;
+  to?: string;
 }
 
 export interface Deployment {
   id: string;
+  serviceId: string;
+  /** Project listings only. */
+  service?: string;
+  environment?: string;
   fromRevision: number;
   toRevision: number;
-  status: "in_progress" | "succeeded" | "failed" | "rolled_back" | "superseded";
+  status: DeploymentStatus;
   failedTasks: number;
   message: string;
   startedAt: string;
   finishedAt: string | null;
+  trigger: DeploymentTrigger | "";
+  actor: string;
+  actorName?: string;
+  buildId?: string;
+  commit?: { sha: string; ref: string };
+  image: string;
+  changes: DeploymentChange[];
+  hooks: { runId: string; trigger: string; status: string }[];
+}
+
+export interface DeploymentEvent {
+  id: number;
+  at: string;
+  kind: string;
+  message: string;
 }
 
 export const deploymentTone = {
+  waiting_hook: "info",
   in_progress: "info",
   succeeded: "ok",
   failed: "bad",
   rolled_back: "warn",
   superseded: "neutral",
+  cancelled: "neutral",
 } as const;
+
+export const deploymentStatusLabel: Record<DeploymentStatus, string> = {
+  waiting_hook: "running pre-deploy",
+  in_progress: "in progress",
+  succeeded: "succeeded",
+  failed: "failed",
+  rolled_back: "rolled back",
+  superseded: "superseded",
+  cancelled: "cancelled",
+};
+
+/** Whether a deployment can still be cancelled. */
+export const deploymentActive = (d: Pick<Deployment, "status">) =>
+  d.status === "in_progress" || d.status === "waiting_hook";
 
 export interface Service {
   id: string;
@@ -122,6 +188,9 @@ export interface Project {
   /** Nodes the project's services and jobs may run on; empty = any. */
   nodes: string[];
   environments: string[];
+  /** Revisions whose images registry cleanup keeps for rollbacks. */
+  rollbackWindow: number;
+  createdAt: string;
 }
 
 export const taskTone = {

@@ -29,6 +29,8 @@ export interface ConfirmOptions {
   tone?: Tone;
   /** The user must type this (a name) before confirming. */
   typeToConfirm?: string;
+  /** A checkbox the user can tick; see confirmChoice. */
+  option?: { label: ReactNode; hint?: ReactNode; checked?: boolean };
 }
 
 export interface AlertOptions {
@@ -42,7 +44,7 @@ interface Pending {
   id: number;
   kind: "confirm" | "alert";
   opts: ConfirmOptions & AlertOptions;
-  resolve: (ok: boolean) => void;
+  resolve: (ok: boolean, option: boolean) => void;
 }
 
 let queue: Pending[] = [];
@@ -51,15 +53,37 @@ const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
 function push(kind: Pending["kind"], opts: ConfirmOptions & AlertOptions) {
-  return new Promise<boolean>((resolve) => {
-    queue = [...queue, { id: nextID++, kind, opts, resolve }];
+  return new Promise<{ ok: boolean; option: boolean }>((resolve) => {
+    queue = [
+      ...queue,
+      {
+        id: nextID++,
+        kind,
+        opts,
+        resolve: (ok, option) => resolve({ ok, option }),
+      },
+    ];
     emit();
   });
 }
 
 /** Asks the user to confirm; resolves true when they do. */
-export function confirmDialog(opts: ConfirmOptions | string): Promise<boolean> {
-  return push("confirm", typeof opts === "string" ? { title: opts } : opts);
+export async function confirmDialog(
+  opts: ConfirmOptions | string,
+): Promise<boolean> {
+  return (
+    await push("confirm", typeof opts === "string" ? { title: opts } : opts)
+  ).ok;
+}
+
+/**
+ * Asks the user to confirm, with the checkbox of opts.option: resolves
+ * whether they confirmed and whether the box was ticked.
+ */
+export function confirmChoice(
+  opts: ConfirmOptions,
+): Promise<{ ok: boolean; option: boolean }> {
+  return push("confirm", opts);
 }
 
 /** Tells the user something; resolves when they close it. */
@@ -67,10 +91,10 @@ export async function alertDialog(opts: AlertOptions | string): Promise<void> {
   await push("alert", typeof opts === "string" ? { title: opts } : opts);
 }
 
-function settle(p: Pending, ok: boolean) {
+function settle(p: Pending, ok: boolean, option = false) {
   queue = queue.filter((x) => x.id !== p.id);
   emit();
-  p.resolve(ok);
+  p.resolve(ok, option);
 }
 
 const subscribe = (l: () => void) => {
@@ -89,6 +113,7 @@ function PendingDialog({ p }: { p: Pending }) {
   const { opts } = p;
   const tone = opts.tone ?? "default";
   const [typed, setTyped] = useState("");
+  const [option, setOption] = useState(!!opts.option?.checked);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const blocked =
     p.kind === "confirm" &&
@@ -98,7 +123,7 @@ function PendingDialog({ p }: { p: Pending }) {
     if (!opts.typeToConfirm) confirmRef.current?.focus();
   }, [opts.typeToConfirm]);
   const Icon = tone === "default" ? Info : AlertTriangle;
-  const ok = () => !blocked && settle(p, true);
+  const ok = () => !blocked && settle(p, true, option);
   return (
     <Dialog
       open
@@ -144,6 +169,22 @@ function PendingDialog({ p }: { p: Pending }) {
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           {opts.message && (
             <div className="text-muted break-words">{opts.message}</div>
+          )}
+          {p.kind === "confirm" && opts.option && (
+            <label className="flex cursor-pointer items-start gap-2">
+              <input
+                type="checkbox"
+                checked={option}
+                onChange={(e) => setOption(e.target.checked)}
+                className="mt-0.5 size-3.5 shrink-0"
+              />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-fg">{opts.option.label}</span>
+                {opts.option.hint && (
+                  <span className="text-faint">{opts.option.hint}</span>
+                )}
+              </span>
+            </label>
           )}
           {p.kind === "confirm" && opts.typeToConfirm && (
             <form

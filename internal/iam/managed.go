@@ -33,7 +33,7 @@ var developerActions = []string{
 
 // Actions of deployers: read, deploy, scale, roll back, run jobs and builds.
 var deployerActions = []string{
-	"service:ApplyService", "service:ScaleService", "service:RollbackService", "task:RestartTask",
+	"service:ApplyService", "service:ScaleService", "service:RollbackService", "service:RedeployService", "service:CancelDeployment", "task:RestartTask",
 	"job:RunJob", "job:RunService", "job:CancelRun", "build:StartBuild", "build:DeployBuild", "registry:Pull", "registry:Push",
 }
 

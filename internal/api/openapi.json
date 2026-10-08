@@ -1334,6 +1334,61 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      },
+      "put": {
+        "operationId": "updateProject",
+        "tags": [
+          "projects"
+        ],
+        "summary": "Change a project's settings (fields left out keep their value)",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "rollbackWindow": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/projects/{project}/nodes": {
@@ -4504,6 +4559,10 @@
                 "properties": {
                   "revision": {
                     "type": "integer"
+                  },
+                  "runHooks": {
+                    "type": "boolean",
+                    "description": "run pre-deploy jobs with the old revision (default false: migrations are usually forward-only)"
                   }
                 },
                 "required": [
@@ -14401,6 +14460,284 @@
           }
         }
       }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/deployments/{id}": {
+      "get": {
+        "operationId": "getDeployment",
+        "tags": [
+          "services"
+        ],
+        "summary": "One deployment with its timeline, change summary and hook runs",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/deployments/{id}/cancel": {
+      "post": {
+        "operationId": "cancelDeployment",
+        "tags": [
+          "services"
+        ],
+        "summary": "Stop a running deployment (it rolls back to the revision before it) or one waiting on its pre-deploy jobs",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Service"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/redeploy": {
+      "post": {
+        "operationId": "redeployService",
+        "tags": [
+          "services"
+        ],
+        "summary": "Restart every task with a rolling deployment of the current spec (a new revision)",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runHooks": {
+                    "type": "boolean",
+                    "description": "run pre-deploy jobs (default true)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Service"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/deployments": {
+      "get": {
+        "operationId": "listProjectDeployments",
+        "tags": [
+          "projects"
+        ],
+        "summary": "Deployments of every service in a project, newest first",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "environment name"
+          },
+          {
+            "name": "service",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "service name"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "page size"
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "cursor: the next value of the previous page (the ID of its last item)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Deployment"
+                      }
+                    },
+                    "next": {
+                      "type": "string",
+                      "description": "cursor of the next page; empty at the end"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -15477,6 +15814,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "rollbackWindow": {
+            "type": "integer",
+            "description": "revisions whose images registry cleanup keeps for rollbacks"
           }
         }
       },
@@ -16018,7 +16359,8 @@
               "failed",
               "rolled_back",
               "superseded",
-              "waiting_hook"
+              "waiting_hook",
+              "cancelled"
             ]
           },
           "failedTasks": {
@@ -16035,6 +16377,88 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "git",
+              "rollback",
+              "auto-rollback",
+              "variables",
+              "redeploy",
+              "config"
+            ],
+            "description": "what started the deployment"
+          },
+          "actor": {
+            "type": "string",
+            "description": "user ID, or system"
+          },
+          "actorName": {
+            "type": "string",
+            "description": "the user's email"
+          },
+          "buildId": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "object",
+            "properties": {
+              "sha": {
+                "type": "string"
+              },
+              "ref": {
+                "type": "string"
+              }
+            },
+            "description": "the build's commit (git deployments)"
+          },
+          "image": {
+            "type": "string"
+          },
+          "changes": {
+            "type": "array",
+            "description": "what changed from fromRevision; variables by name only",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "hooks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "runId": {
+                  "type": "string"
+                },
+                "trigger": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "service": {
+            "type": "string",
+            "description": "project listings only"
+          },
+          "environment": {
+            "type": "string",
+            "description": "project listings only"
           }
         }
       },
@@ -19038,6 +19462,45 @@
             }
           }
         }
+      },
+      "DeploymentDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Deployment"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "runs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/JobRun"
+                }
+              }
+            }
+          }
+        ]
       }
     }
   }

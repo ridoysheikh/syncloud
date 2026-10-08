@@ -72,7 +72,7 @@ func (b *Browser) do(ctx context.Context, method, path, accept string, access []
 		defer resp.Body.Close()
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		if resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("not found: %s", strings.TrimSpace(string(msg)))
+			return nil, fmt.Errorf("%w: %s", ErrManifestNotFound, strings.TrimSpace(string(msg)))
 		}
 		return nil, fmt.Errorf("registry: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
@@ -172,6 +172,21 @@ func (b *Browser) manifest(ctx context.Context, repo, ref string) (manifest, str
 		m.MediaType = mt
 	}
 	return m, resp.Header.Get("Docker-Content-Digest"), mt, nil
+}
+
+// ErrManifestNotFound means the registry has no such repository, tag or blob.
+var ErrManifestNotFound = errors.New("not found")
+
+// HasImage reports whether repo has a manifest for ref (a tag or digest).
+func (b *Browser) HasImage(ctx context.Context, repo, ref string) (bool, error) {
+	resp, err := b.do(ctx, http.MethodHead, "/v2/"+repo+"/manifests/"+ref, manifestAccept, repoAccess(repo, "pull"))
+	if errors.Is(err, ErrManifestNotFound) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	resp.Body.Close()
+	return true, nil
 }
 
 // Images lists a repository's tags, newest first.

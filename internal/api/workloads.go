@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"syncloud/internal/auth"
 	"syncloud/internal/store"
@@ -471,13 +474,14 @@ func (s *Server) handleRollbackService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Revision int `json:"revision"`
+		Revision int  `json:"revision"`
+		RunHooks bool `json:"runHooks"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 	u, _ := currentUser(r.Context())
-	v, err := s.workloads.Rollback(r.Context(), sv.ID, req.Revision, u.ID)
+	v, err := s.workloads.Rollback(r.Context(), sv.ID, req.Revision, u.ID, req.RunHooks)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such revision")
 		return
@@ -485,7 +489,7 @@ func (s *Server) handleRollbackService(w http.ResponseWriter, r *http.Request) {
 		s.workloadError(w, "rollback service", err)
 		return
 	}
-	s.audit(r, u.ID, "service:Rollback", srnService(v), map[string]any{"toRevision": req.Revision, "newRevision": v.Revision})
+	s.audit(r, u.ID, "service:Rollback", srnService(v), map[string]any{"toRevision": req.Revision, "newRevision": v.Revision, "runHooks": req.RunHooks})
 	writeJSON(w, http.StatusOK, v)
 }
 
@@ -521,11 +525,36 @@ func (s *Server) handleServiceRevisions(w http.ResponseWriter, r *http.Request) 
 		Spec      workload.Spec `json:"spec"`
 		CreatedAt any           `json:"createdAt"`
 		CreatedBy string        `json:"createdBy"`
+		// ImageAvailable is false once registry cleanup removed the image,
+		// so the revision can no longer be rolled back to (Phase 15a).
+		ImageAvailable bool `json:"imageAvailable"`
 	}
 	out := make([]revView, 0, len(tds))
+	images := map[string]bool{}
 	for _, td := range tds {
 		spec, _ := workload.ParseSpec(td.Spec)
-		out = append(out, revView{Revision: td.Revision, Current: td.Revision == sv.Revision, Spec: spec, CreatedAt: td.CreatedAt, CreatedBy: td.CreatedBy})
+		out = append(out, revView{Revision: td.Revision, Current: td.Revision == sv.Revision, Spec: spec, CreatedAt: td.CreatedAt, CreatedBy: td.CreatedBy, ImageAvailable: true})
+		images[spec.Image] = true
+	}
+	if check := s.workloads.ImageAvailable; check != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		for img := range images {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ok, err := check(ctx, img)
+				mu.Lock()
+				images[img] = ok || err != nil // unknown counts as available
+				mu.Unlock()
+			}()
+		}
+		wg.Wait()
+		for i := range out {
+			out[i].ImageAvailable = out[i].Current || images[out[i].Spec.Image]
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
@@ -556,21 +585,4 @@ func (s *Server) handleRestartTask(w http.ResponseWriter, r *http.Request) {
 	u, _ := currentUser(r.Context())
 	s.audit(r, u.ID, "task:Restart", "srn:syncloud:task/"+id, nil)
 	w.WriteHeader(http.StatusAccepted)
-}
-
-func (s *Server) handleServiceDeployments(w http.ResponseWriter, r *http.Request) {
-	sv, ok := s.service(w, r)
-	if !ok {
-		return
-	}
-	limit, before, ok := pageParams(w, r, 50, 500)
-	if !ok {
-		return
-	}
-	ds, err := s.store.ListDeployments(r.Context(), sv.ID, limit, before)
-	if err != nil {
-		s.internalError(w, "list deployments", err)
-		return
-	}
-	writePage(w, ds, limit, func(d store.Deployment) string { return d.ID })
 }

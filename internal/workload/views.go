@@ -269,7 +269,7 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 			}
 			return ServiceView{}, false, err
 		}
-		m.startDeployment(ctx, sv.ID, 0, 1, "")
+		m.startDeployment(ctx, sv.ID, 0, 1, actor, "")
 		created = true
 	case err != nil:
 		return ServiceView{}, false, err
@@ -285,32 +285,15 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 				return ServiceView{}, false, err
 			}
 		}
-		if m.DeployHooks != nil && m.DeployHooks.HasPreDeploy(ctx, sv) {
-			// The new revision only becomes current after the pre-deploy
-			// hooks succeed (§5.11); until then the old one keeps running.
-			rev, changed, err := m.st.AddRevision(ctx, sv.ID, spec.Canonical(), actor, now)
-			if err != nil {
-				return ServiceView{}, false, err
+		// A redeploy marker survives edits that don't mention it, so applying
+		// the same spec again stays a no-op.
+		if spec.RedeployedAt == "" {
+			if cur, err := m.SpecFor(ctx, sv.ID, sv.Revision); err == nil {
+				spec.RedeployedAt = cur.RedeployedAt
 			}
-			if _, err := m.st.UpdateService(ctx, sv.ID, "", desired, actor, now); err != nil {
-				return ServiceView{}, false, err
-			}
-			if changed {
-				depID := auth.NewID("dep_")
-				if err := m.st.StartDeployment(ctx, store.Deployment{ID: depID, ServiceID: sv.ID, FromRev: sv.Revision, ToRev: rev,
-					Status: store.DeployWaitingHook, Message: "waiting for pre-deploy jobs", StartedAt: now}); err != nil {
-					return ServiceView{}, false, err
-				}
-				m.DeployHooks.RunPreDeploy(ctx, sv, rev, depID)
-			}
-		} else {
-			rev, err := m.st.UpdateService(ctx, sv.ID, spec.Canonical(), desired, actor, now)
-			if err != nil {
-				return ServiceView{}, false, err
-			}
-			if rev != sv.Revision {
-				m.startDeployment(ctx, sv.ID, sv.Revision, rev, "")
-			}
+		}
+		if err := m.rollout(ctx, sv, spec.Canonical(), desired, actor, true, ""); err != nil {
+			return ServiceView{}, false, err
 		}
 	}
 	m.routesDirty()
@@ -325,11 +308,42 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 // Serving reports whether a task receives traffic (running and healthy).
 func (m *Manager) Serving(ctx context.Context, t store.Task) bool { return m.serving(ctx, t) }
 
-// startDeployment records a rollout to toRev.
-func (m *Manager) startDeployment(ctx context.Context, serviceID string, fromRev, toRev int, msg string) {
-	err := m.st.StartDeployment(ctx, store.Deployment{ID: auth.NewID("dep_"), ServiceID: serviceID, FromRev: fromRev, ToRev: toRev,
-		Message: msg, StartedAt: m.now().UTC().Truncate(time.Second)})
+// rollout makes spec (canonical JSON) the service's next revision and
+// deploys it. With hooks and pre-deploy jobs, the new revision becomes
+// current only after they succeed (§5.11); until then the old one keeps
+// running.
+func (m *Manager) rollout(ctx context.Context, sv store.Service, spec string, desired int, actor string, hooks bool, msg string) error {
+	now := m.now().UTC().Truncate(time.Second)
+	if hooks && m.DeployHooks != nil && m.DeployHooks.HasPreDeploy(ctx, sv) {
+		rev, changed, err := m.st.AddRevision(ctx, sv.ID, spec, actor, now)
+		if err != nil {
+			return err
+		}
+		if _, err := m.st.UpdateService(ctx, sv.ID, "", desired, actor, now); err != nil {
+			return err
+		}
+		if changed {
+			depID, err := m.recordDeployment(ctx, sv.ID, sv.Revision, rev, actor, store.DeployWaitingHook, msg)
+			if err != nil {
+				return err
+			}
+			m.DeployHooks.RunPreDeploy(ctx, sv, rev, depID)
+		}
+		return nil
+	}
+	rev, err := m.st.UpdateService(ctx, sv.ID, spec, desired, actor, now)
 	if err != nil {
+		return err
+	}
+	if rev != sv.Revision {
+		m.startDeployment(ctx, sv.ID, sv.Revision, rev, actor, msg)
+	}
+	return nil
+}
+
+// startDeployment records a rollout to toRev.
+func (m *Manager) startDeployment(ctx context.Context, serviceID string, fromRev, toRev int, actor, msg string) {
+	if _, err := m.recordDeployment(ctx, serviceID, fromRev, toRev, actor, "", msg); err != nil {
 		m.log.Error("record deployment", "service", serviceID, "err", err)
 	}
 	if fromRev > 0 {
@@ -405,25 +419,38 @@ func (m *Manager) Scale(ctx context.Context, serviceID string, desired int, acto
 }
 
 // Rollback makes an earlier revision current again (as a new revision).
-func (m *Manager) Rollback(ctx context.Context, serviceID string, revision int, actor string) (ServiceView, error) {
+// Pre-deploy hooks run only with runHooks: migrations are usually forward-only.
+func (m *Manager) Rollback(ctx context.Context, serviceID string, revision int, actor string, runHooks bool) (ServiceView, error) {
 	sv, err := m.st.ServiceByID(ctx, serviceID)
 	if err != nil {
 		return ServiceView{}, err
 	}
-	return m.rollback(ctx, sv, revision, actor, fmt.Sprintf("rollback to revision %d", revision))
+	if sv.Deleting {
+		return ServiceView{}, ErrInvalid{errors.New("the service is being deleted")}
+	}
+	if revision == sv.Revision {
+		return ServiceView{}, ErrInvalid{fmt.Errorf("revision %d is already current", revision)}
+	}
+	return m.rollback(ctx, sv, revision, actor, fmt.Sprintf("rollback to revision %d", revision), runHooks)
 }
 
-func (m *Manager) rollback(ctx context.Context, sv store.Service, revision int, actor, msg string) (ServiceView, error) {
+func (m *Manager) rollback(ctx context.Context, sv store.Service, revision int, actor, msg string, runHooks bool) (ServiceView, error) {
 	td, err := m.st.TaskDefinition(ctx, sv.ID, revision)
-	if err != nil {
+	if errors.Is(err, store.ErrNotFound) {
+		return ServiceView{}, ErrInvalid{fmt.Errorf("revision %d no longer exists", revision)}
+	} else if err != nil {
 		return ServiceView{}, err
 	}
-	rev, err := m.st.UpdateService(ctx, sv.ID, td.Spec, sv.DesiredCount, actor, m.now())
-	if err != nil {
-		return ServiceView{}, err
+	if spec, err := ParseSpec(td.Spec); err == nil && m.ImageAvailable != nil {
+		if ok, err := m.ImageAvailable(ctx, spec.Image); err == nil && !ok {
+			return ServiceView{}, ErrInvalid{fmt.Errorf("the image of revision %d (%s) was removed by registry cleanup; raise the project's rollback window to keep more", revision, spec.Image)}
+		}
 	}
-	if rev != sv.Revision {
-		m.startDeployment(ctx, sv.ID, sv.Revision, rev, msg)
+	if _, ok := ctx.Value(causeKey{}).(Cause); !ok && actor != actorCircuitBreaker {
+		ctx = WithCause(ctx, Cause{Trigger: store.TriggerRollback})
+	}
+	if err := m.rollout(ctx, sv, td.Spec, sv.DesiredCount, actor, runHooks, msg); err != nil {
+		return ServiceView{}, err
 	}
 	m.Enqueue(sv.ID)
 	return m.ServiceView(ctx, sv.ID)
@@ -453,7 +480,7 @@ func (m *Manager) SetSharedEnv(ctx context.Context, env store.Environment, vars 
 			return redeployed, err
 		}
 		before := sv.Revision
-		v, _, err := m.Apply(ctx, env, sv.Name, spec, -1, actor)
+		v, _, err := m.Apply(WithCause(ctx, Cause{Trigger: store.TriggerVariables}), env, sv.Name, spec, -1, actor)
 		if err != nil {
 			return redeployed, fmt.Errorf("%s: %w", sv.Name, err)
 		}
@@ -554,14 +581,19 @@ func (m *Manager) PreDeployDone(ctx context.Context, depID string, ok bool, msg 
 	now := m.now().UTC()
 	if !ok {
 		_ = m.st.SetDeploymentStatus(ctx, depID, store.DeployFailed, "pre-deploy job failed: "+msg, &now)
+		m.DeploymentEvent(ctx, depID, store.DeployFailed, "pre-deploy job failed: "+msg)
 		m.log.Warn("deployment aborted by pre-deploy job", "service", dep.ServiceID, "revision", dep.ToRev, "reason", msg)
 	} else {
 		if err := m.st.SetServiceRevision(ctx, dep.ServiceID, dep.ToRev, now); err != nil {
 			m.log.Error("switch revision", "service", dep.ServiceID, "err", err)
 			return
 		}
-		_ = m.st.SetDeploymentStatus(ctx, depID, store.DeployInProgress, "pre-deploy jobs succeeded", nil)
+		_ = m.st.SetDeploymentStatus(ctx, depID, store.DeployInProgress, "", nil) // the timeline says the jobs passed
+		m.DeploymentEvent(ctx, depID, "hooks-done", fmt.Sprintf("pre-deploy jobs succeeded; revision %d is now current", dep.ToRev))
 		m.routesDirty()
+		if dep.FromRev > 0 {
+			go m.prePull(context.WithoutCancel(ctx), dep.ServiceID, dep.FromRev, dep.ToRev)
+		}
 	}
 	m.Enqueue(dep.ServiceID)
 	if v, err := m.ServiceView(ctx, dep.ServiceID); err == nil {

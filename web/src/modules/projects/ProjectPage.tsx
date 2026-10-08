@@ -34,10 +34,12 @@ import { ProjectNodesPanel } from "./NodeLimits";
 import { DatabasesTable } from "@/modules/databases/DatabasesPage";
 import { useDatabases } from "@/lib/databases";
 import { confirmAction } from "@/ui/dialogs";
+import { ProjectDeployments } from "@/modules/compute/Deployments";
 
 type Tab =
   | "services"
   | "databases"
+  | "deployments"
   | "metrics"
   | "traffic"
   | "logs"
@@ -52,7 +54,12 @@ export function ProjectPage() {
   };
   const { data: projects, isLoading } = useProjects();
   const { data: services = [] } = useServices();
-  const [tab, setTab] = useState<Tab>("services");
+  // ?tab=settings (links from elsewhere) opens that tab.
+  const [tab, setTab] = useState<Tab>(
+    () =>
+      (new URLSearchParams(window.location.search).get("tab") as Tab | null) ??
+      "services",
+  );
   const p = projects?.find((x) => x.name === params.project);
   if (!p) {
     return isLoading ? null : (
@@ -95,6 +102,7 @@ export function ProjectPage() {
             [
               "services",
               "databases",
+              "deployments",
               "metrics",
               "traffic",
               "logs",
@@ -129,6 +137,14 @@ export function ProjectPage() {
       </div>
       {tab === "services" && <ServiceGrid services={inEnv} newTo={newTo} />}
       {tab === "databases" && <ProjectDatabases project={p.name} env={env} />}
+      {tab === "deployments" && (
+        <ProjectDeployments
+          key={env}
+          project={p.name}
+          env={env}
+          services={inEnv.map((s) => s.name)}
+        />
+      )}
       {tab === "metrics" && (
         <MetricsPanel key={env} path={envPath(p.name, env)} by="service" />
       )}
@@ -155,7 +171,10 @@ export function ProjectPage() {
       )}
       {tab === "settings" && (
         <ProjectSettings
+          key={p.name}
           project={p.name}
+          description={p.description}
+          rollbackWindow={p.rollbackWindow}
           nodes={p.nodes ?? []}
           environments={p.environments}
           services={services.filter((s) => s.project === p.name)}
@@ -338,11 +357,15 @@ function SharedVariables({
 
 function ProjectSettings({
   project,
+  description,
+  rollbackWindow,
   nodes,
   environments,
   services,
 }: {
   project: string;
+  description: string;
+  rollbackWindow: number;
   nodes: string[];
   environments: string[];
   services: Service[];
@@ -378,6 +401,13 @@ function ProjectSettings({
   const err = addEnv.error ?? delEnv.error ?? delProject.error;
   return (
     <div className={cn("grid grid-cols-1 items-start lg:grid-cols-2", gap)}>
+      <div className="lg:col-span-2">
+        <ProjectGeneralPanel
+          project={project}
+          description={description}
+          rollbackWindow={rollbackWindow}
+        />
+      </div>
       <div className="lg:col-span-2">
         <ProjectNodesPanel
           project={project}
@@ -501,5 +531,83 @@ function ProjectDatabases({ project, env }: { project: string; env: string }) {
         </Panel>
       )}
     </>
+  );
+}
+
+/** A project's description and how many revisions stay rollback-ready. */
+function ProjectGeneralPanel({
+  project,
+  description,
+  rollbackWindow,
+}: {
+  project: string;
+  description: string;
+  rollbackWindow: number;
+}) {
+  const qc = useQueryClient();
+  const [desc, setDesc] = useState(description);
+  const [win, setWin] = useState(String(rollbackWindow));
+  const save = useMutation({
+    mutationFn: () =>
+      api("PUT", `/projects/${project}`, {
+        description: desc,
+        rollbackWindow: Number(win),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+  });
+  const n = Number(win);
+  const bad = !Number.isInteger(n) || n < 1 || n > 50;
+  const dirty = desc !== description || n !== rollbackWindow;
+  return (
+    <Panel
+      title="General"
+      actions={
+        <Button
+          variant="primary"
+          disabled={!dirty || bad || save.isPending}
+          onClick={() => save.mutate()}
+        >
+          {save.isPending ? "Saving…" : "Save"}
+        </Button>
+      }
+    >
+      <div
+        className={cn(
+          "grid grid-cols-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
+          gap,
+        )}
+      >
+        <Field label="Description">
+          <Input
+            value={desc}
+            maxLength={500}
+            onChange={(e) => setDesc(e.target.value)}
+            placeholder="What this project runs"
+          />
+        </Field>
+        <Field
+          label="Rollback window"
+          hint="The latest revisions of each service whose images registry cleanup keeps, so you can roll back to them (1–50)."
+        >
+          <Input
+            type="number"
+            min={1}
+            max={50}
+            value={win}
+            onChange={(e) => setWin(e.target.value)}
+            aria-invalid={bad}
+          />
+        </Field>
+      </div>
+      {save.error && (
+        <div className="mt-2">
+          <Alert>
+            {save.error instanceof ApiError
+              ? save.error.message
+              : "Could not save the project"}
+          </Alert>
+        </div>
+      )}
+    </Panel>
   );
 }

@@ -13,6 +13,7 @@ import (
 
 	"syncloud/internal/s3"
 	"syncloud/internal/store"
+	"syncloud/internal/workload"
 )
 
 // S3 endpoints, bindings and the bucket browser (§16).
@@ -308,7 +309,7 @@ func (s *Server) handleSetServiceS3(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, _ := currentUser(r.Context())
-	v, _, err := s.workloads.Apply(r.Context(), e, sv.Name, spec, -1, u.ID)
+	v, _, err := s.workloads.Apply(workload.WithCause(r.Context(), workload.Cause{Trigger: store.TriggerConfig}), e, sv.Name, spec, -1, u.ID)
 	if err != nil {
 		s.workloadError(w, "redeploy", err)
 		return

@@ -14,8 +14,11 @@ type Project struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	// Nodes are the node names the project's workloads may run on (empty = any).
-	Nodes     []string  `json:"nodes"`
-	CreatedAt time.Time `json:"createdAt"`
+	Nodes []string `json:"nodes"`
+	// RollbackWindow is how many of each service's latest revisions keep
+	// their images through registry cleanup (Phase 15a).
+	RollbackWindow int       `json:"rollbackWindow"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 type Environment struct {
@@ -122,7 +125,7 @@ func (s *Store) CreateProject(ctx context.Context, p Project, env Environment) e
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
-	rows, err := s.R.QueryContext(ctx, `SELECT id, name, description, nodes, created_at FROM projects ORDER BY name`)
+	rows, err := s.R.QueryContext(ctx, `SELECT id, name, description, nodes, rollback_window, created_at FROM projects ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +135,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 		var p Project
 		var at int64
 		var nodes string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &nodes, &at); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &nodes, &p.RollbackWindow, &at); err != nil {
 			return nil, err
 		}
 		p.Nodes = parseNodes(nodes)
@@ -154,13 +157,29 @@ func (s *Store) project(ctx context.Context, where string, arg any) (Project, er
 	var p Project
 	var at int64
 	var nodes string
-	err := s.R.QueryRowContext(ctx, `SELECT id, name, description, nodes, created_at FROM projects WHERE `+where, arg).Scan(&p.ID, &p.Name, &p.Description, &nodes, &at)
+	err := s.R.QueryRowContext(ctx, `SELECT id, name, description, nodes, rollback_window, created_at FROM projects WHERE `+where, arg).Scan(&p.ID, &p.Name, &p.Description, &nodes, &p.RollbackWindow, &at)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
 	p.Nodes = parseNodes(nodes)
 	p.CreatedAt = time.Unix(at, 0).UTC()
 	return p, err
+}
+
+// MaxRollbackWindow is the most revisions a project may keep images for
+// (task definitions beyond the GC retention are gone anyway).
+const MaxRollbackWindow = 50
+
+// UpdateProjectSettings sets a project's description and rollback window.
+func (s *Store) UpdateProjectSettings(ctx context.Context, id, description string, rollbackWindow int) error {
+	res, err := s.W.ExecContext(ctx, `UPDATE projects SET description = ?, rollback_window = ? WHERE id = ?`, description, rollbackWindow, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SetProjectNodes sets the nodes a project's workloads may run on (nil = any).
@@ -376,7 +395,11 @@ func (s *Store) UpdateService(ctx context.Context, id, spec string, desired int,
 		return 0, err
 	}
 	if spec != "" && spec != cur {
-		rev++
+		// After the newest revision, which may be one a pre-deploy job
+		// never let become current.
+		if err := tx.QueryRowContext(ctx, `SELECT max(revision) + 1 FROM task_definitions WHERE service_id = ?`, id).Scan(&rev); err != nil {
+			return 0, err
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO task_definitions (service_id, revision, spec, created_at, created_by) VALUES (?, ?, ?, ?, ?)`,
 			id, rev, spec, now.Unix(), createdBy); err != nil {
 			return 0, err
@@ -662,6 +685,20 @@ const (
 	DeploySuperseded = "superseded"
 )
 
+// Deployment triggers: what started a deployment.
+const (
+	TriggerManual       = "manual"
+	TriggerGit          = "git"
+	TriggerRollback     = "rollback"
+	TriggerAutoRollback = "auto-rollback"
+	TriggerVariables    = "variables"
+	TriggerRedeploy     = "redeploy"
+	TriggerConfig       = "config"
+)
+
+// DeployCancelled marks a deployment stopped by a user.
+const DeployCancelled = "cancelled"
+
 type Deployment struct {
 	ID         string     `json:"id"`
 	ServiceID  string     `json:"serviceId"`
@@ -672,6 +709,19 @@ type Deployment struct {
 	Message    string     `json:"message"`
 	StartedAt  time.Time  `json:"startedAt"`
 	FinishedAt *time.Time `json:"finishedAt"`
+	Trigger    string     `json:"trigger"`
+	Actor      string     `json:"actor"`
+	BuildID    string     `json:"buildId,omitempty"`
+	Image      string     `json:"image"`
+	Changes    string     `json:"-"` // JSON, decoded by the workload package
+}
+
+// DeploymentEvent is one step of a deployment's timeline.
+type DeploymentEvent struct {
+	ID      int64     `json:"id"`
+	At      time.Time `json:"at"`
+	Kind    string    `json:"kind"`
+	Message string    `json:"message"`
 }
 
 // StartDeployment supersedes any running deployment of the service and
@@ -682,6 +732,11 @@ func (s *Store) StartDeployment(ctx context.Context, d Deployment) error {
 		return err
 	}
 	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO deployment_events (deployment_id, at, kind, message)
+		SELECT id, ?, ?, ? FROM deployments WHERE service_id = ? AND status IN (?, ?)`,
+		d.StartedAt.Unix(), DeploySuperseded, "a newer deployment replaced it", d.ServiceID, DeployInProgress, DeployWaitingHook); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE deployments SET status = ?, finished_at = ? WHERE service_id = ? AND status IN (?, ?)`,
 		DeploySuperseded, d.StartedAt.Unix(), d.ServiceID, DeployInProgress, DeployWaitingHook); err != nil {
 		return err
@@ -690,20 +745,26 @@ func (s *Store) StartDeployment(ctx context.Context, d Deployment) error {
 	if status == "" {
 		status = DeployInProgress
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO deployments (id, service_id, from_rev, to_rev, status, message, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		d.ID, d.ServiceID, d.FromRev, d.ToRev, status, d.Message, d.StartedAt.Unix()); err != nil {
+	if d.Changes == "" {
+		d.Changes = "[]"
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO deployments (id, service_id, from_rev, to_rev, status, message, started_at, trigger, actor, build_id, image, changes)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.ServiceID, d.FromRev, d.ToRev, status, d.Message, d.StartedAt.Unix(), d.Trigger, d.Actor, d.BuildID, d.Image, d.Changes); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-const deploymentCols = `SELECT id, service_id, from_rev, to_rev, status, failed, message, started_at, finished_at FROM deployments`
+const deploymentCols = `SELECT id, service_id, from_rev, to_rev, status, failed, message, started_at, finished_at,
+	trigger, actor, build_id, image, changes FROM deployments`
 
 func scanDeployment(r scanner) (Deployment, error) {
 	var d Deployment
 	var started int64
 	var finished sql.NullInt64
-	err := r.Scan(&d.ID, &d.ServiceID, &d.FromRev, &d.ToRev, &d.Status, &d.Failed, &d.Message, &started, &finished)
+	err := r.Scan(&d.ID, &d.ServiceID, &d.FromRev, &d.ToRev, &d.Status, &d.Failed, &d.Message, &started, &finished,
+		&d.Trigger, &d.Actor, &d.BuildID, &d.Image, &d.Changes)
 	d.StartedAt = time.Unix(started, 0).UTC()
 	if finished.Valid {
 		t := time.Unix(finished.Int64, 0).UTC()
@@ -738,6 +799,81 @@ func (s *Store) ListDeployments(ctx context.Context, serviceID string, limit int
 			return nil, err
 		}
 		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// ProjectDeployment is a deployment with its service's name and environment.
+type ProjectDeployment struct {
+	Deployment
+	Service     string `json:"service"`
+	Environment string `json:"environment"`
+}
+
+// DeploymentFilter narrows ListProjectDeployments.
+type DeploymentFilter struct {
+	EnvironmentID string
+	Service       string // name
+	Status        string
+}
+
+// ListProjectDeployments returns the newest deployments of every service in
+// a project, older than the deployment before names when set.
+func (s *Store) ListProjectDeployments(ctx context.Context, projectID string, f DeploymentFilter, limit int, before string) ([]ProjectDeployment, error) {
+	rows, err := s.R.QueryContext(ctx, `SELECT d.id, d.service_id, d.from_rev, d.to_rev, d.status, d.failed, d.message, d.started_at, d.finished_at,
+		d.trigger, d.actor, d.build_id, d.image, d.changes, sv.name, e.name
+		FROM deployments d JOIN services sv ON sv.id = d.service_id JOIN environments e ON e.id = sv.environment_id
+		WHERE e.project_id = ? AND (? = '' OR e.id = ?) AND (? = '' OR sv.name = ?) AND (? = '' OR d.status = ?)
+		AND (? = '' OR (d.started_at, d.rowid) < (SELECT started_at, rowid FROM deployments WHERE id = ?))
+		ORDER BY d.started_at DESC, d.rowid DESC LIMIT ?`,
+		projectID, f.EnvironmentID, f.EnvironmentID, f.Service, f.Service, f.Status, f.Status, before, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ProjectDeployment
+	for rows.Next() {
+		var pd ProjectDeployment
+		d := &pd.Deployment
+		var started int64
+		var finished sql.NullInt64
+		if err := rows.Scan(&d.ID, &d.ServiceID, &d.FromRev, &d.ToRev, &d.Status, &d.Failed, &d.Message, &started, &finished,
+			&d.Trigger, &d.Actor, &d.BuildID, &d.Image, &d.Changes, &pd.Service, &pd.Environment); err != nil {
+			return nil, err
+		}
+		d.StartedAt = time.Unix(started, 0).UTC()
+		if finished.Valid {
+			t := time.Unix(finished.Int64, 0).UTC()
+			d.FinishedAt = &t
+		}
+		out = append(out, pd)
+	}
+	return out, rows.Err()
+}
+
+// AddDeploymentEvent appends a step to a deployment's timeline.
+func (s *Store) AddDeploymentEvent(ctx context.Context, depID, kind, message string, at time.Time) error {
+	_, err := s.W.ExecContext(ctx, `INSERT INTO deployment_events (deployment_id, at, kind, message) VALUES (?, ?, ?, ?)`,
+		depID, at.Unix(), kind, message)
+	return err
+}
+
+// DeploymentEvents returns a deployment's timeline, oldest first.
+func (s *Store) DeploymentEvents(ctx context.Context, depID string) ([]DeploymentEvent, error) {
+	rows, err := s.R.QueryContext(ctx, `SELECT id, at, kind, message FROM deployment_events WHERE deployment_id = ? ORDER BY id`, depID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DeploymentEvent{}
+	for rows.Next() {
+		var e DeploymentEvent
+		var at int64
+		if err := rows.Scan(&e.ID, &at, &e.Kind, &e.Message); err != nil {
+			return nil, err
+		}
+		e.At = time.Unix(at, 0).UTC()
+		out = append(out, e)
 	}
 	return out, rows.Err()
 }

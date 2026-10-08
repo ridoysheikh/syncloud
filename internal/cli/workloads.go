@@ -55,7 +55,59 @@ func (a *app) projectsCmd() *cobra.Command {
 	}
 	create.Flags().StringVar(&desc, "description", "", "description")
 	create.Flags().StringVar(&env, "environment", "production", "first environment")
+	var depEnv, depService, depStatus string
+	deployments := &cobra.Command{
+		Use: "deployments PROJECT", Short: "Deployments of every service in a project, newest first", Args: cobra.ExactArgs(1),
+		Annotations: op("listProjectDeployments"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			ds, err := c.ProjectDeployments(ctx(cmd), args[0], depEnv, depService, depStatus)
+			if err != nil {
+				return err
+			}
+			return a.printDeployments(ds, true)
+		},
+	}
+	deployments.Flags().StringVarP(&depEnv, "environment", "e", "", "only this environment")
+	deployments.Flags().StringVar(&depService, "service", "", "only this service")
+	deployments.Flags().StringVar(&depStatus, "status", "", "only this status (in_progress, succeeded, failed, rolled_back, cancelled, …)")
+	var updDesc string
+	var updWindow int
+	update := &cobra.Command{
+		Use: "update PROJECT", Short: "Change a project's description or rollback window", Args: cobra.ExactArgs(1),
+		Annotations: op("updateProject"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			var desc *string
+			var window *int
+			if cmd.Flags().Changed("description") {
+				desc = &updDesc
+			}
+			if cmd.Flags().Changed("rollback-window") {
+				window = &updWindow
+			}
+			if desc == nil && window == nil {
+				return errors.New("nothing to change: give --description or --rollback-window")
+			}
+			pr, err := c.UpdateProject(ctx(cmd), args[0], desc, window)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "Updated project %s (rollback window: %d revisions)\n", pr.Name, pr.RollbackWindow)
+			return nil
+		},
+	}
+	update.Flags().StringVar(&updDesc, "description", "", "description")
+	update.Flags().IntVar(&updWindow, "rollback-window", 10, "revisions whose images registry cleanup keeps (1–50)")
 	p.AddCommand(
+		update,
+		deployments,
 		a.projectNodesCmd(),
 		&cobra.Command{
 			Use: "list", Aliases: []string{"ls"}, Short: "List projects", Args: cobra.NoArgs,
@@ -286,6 +338,35 @@ func (a *app) servicesCmd() *cobra.Command {
 		}
 		return nil
 	}
+	var runHooks, skipHooks bool
+	rollbackCmd := &cobra.Command{
+		Use: "rollback NAME REVISION", Short: "Roll out an earlier revision again (pre-deploy jobs only with --run-hooks)", Args: cobra.ExactArgs(2),
+		Annotations: op("rollbackService"),
+		RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+			rev, err := strconv.Atoi(args[1])
+			if err != nil {
+				return errors.New("REVISION must be a number")
+			}
+			v, err := c.RollbackService(ctx(cmd), s.project, s.env, args[0], rev, runHooks)
+			if err != nil {
+				return err
+			}
+			return printSvc(v)
+		}),
+	}
+	rollbackCmd.Flags().BoolVar(&runHooks, "run-hooks", false, "run the pre-deploy jobs with the old revision (e.g. down-migrations)")
+	redeployCmd := &cobra.Command{
+		Use: "redeploy NAME", Short: "Restart every task with a rolling deployment of the current spec", Args: cobra.ExactArgs(1),
+		Annotations: op("redeployService"),
+		RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+			v, err := c.RedeployService(ctx(cmd), s.project, s.env, args[0], !skipHooks)
+			if err != nil {
+				return err
+			}
+			return printSvc(v)
+		}),
+	}
+	redeployCmd.Flags().BoolVar(&skipHooks, "skip-hooks", false, "don't run the pre-deploy jobs")
 
 	var all bool
 	list := &cobra.Command{
@@ -544,30 +625,96 @@ func (a *app) servicesCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				rows := make([][]string, 0, len(ds))
-				for _, d := range ds {
-					rows = append(rows, []string{fmt.Sprintf("%d → %d", d.FromRevision, d.ToRevision), d.Status, fmt.Sprint(d.FailedTasks), age(d.StartedAt), orDash(d.Message)})
-				}
-				return a.printer().table(ds, []string{"REVISIONS", "STATUS", "FAILED", "STARTED", "MESSAGE"}, rows)
+				return a.printDeployments(ds, false)
 			}),
 		},
 		&cobra.Command{
-			Use: "rollback NAME REVISION", Short: "Roll out an earlier revision again", Args: cobra.ExactArgs(2),
-			Annotations: op("rollbackService"),
+			Use: "deployment NAME ID", Short: "One deployment: what changed, its timeline and hook runs", Args: cobra.ExactArgs(2),
+			Annotations: op("getDeployment"),
 			RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
-				rev, err := strconv.Atoi(args[1])
+				d, err := c.GetDeployment(ctx(cmd), s.project, s.env, args[0], args[1])
 				if err != nil {
-					return errors.New("REVISION must be a number")
+					return err
 				}
-				v, err := c.RollbackService(ctx(cmd), s.project, s.env, args[0], rev)
+				return a.printDeployment(d)
+			}),
+		},
+		&cobra.Command{
+			Use: "cancel-deployment NAME ID", Short: "Stop a running deployment (it rolls back) or one waiting on its pre-deploy jobs", Args: cobra.ExactArgs(2),
+			Annotations: op("cancelDeployment"),
+			RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+				v, err := c.CancelDeployment(ctx(cmd), s.project, s.env, args[0], args[1])
 				if err != nil {
 					return err
 				}
 				return printSvc(v)
 			}),
 		},
+		redeployCmd,
+		rollbackCmd,
 	)
 	return svc
+}
+
+func (a *app) printDeployments(ds []client.Deployment, withService bool) error {
+	rows := make([][]string, 0, len(ds))
+	for _, d := range ds {
+		who := d.ActorName
+		if who == "" {
+			who = d.Actor
+		}
+		if d.Commit != nil {
+			who = shortSHA(d.Commit.SHA) + " " + d.Commit.Ref
+		}
+		row := []string{d.ID, fmt.Sprintf("%d → %d", d.FromRevision, d.ToRevision), d.Status, orDash(d.Trigger), orDash(who), age(d.StartedAt), orDash(d.Message)}
+		if withService {
+			row = append([]string{d.Environment + "/" + d.Service}, row...)
+		}
+		rows = append(rows, row)
+	}
+	head := []string{"ID", "REVISIONS", "STATUS", "TRIGGER", "BY", "STARTED", "MESSAGE"}
+	if withService {
+		head = append([]string{"SERVICE"}, head...)
+	}
+	return a.printer().table(ds, head, rows)
+}
+
+func (a *app) printDeployment(d client.DeploymentDetail) error {
+	if a.output == "json" {
+		return a.printer().json(d)
+	}
+	fmt.Fprintf(a.out, "Deployment %s: revision %d → %d, %s (%s)\n", d.ID, d.FromRevision, d.ToRevision, strings.ReplaceAll(d.Status, "_", " "), d.Trigger)
+	fmt.Fprintf(a.out, "Image:   %s\n", d.Image)
+	if d.Commit != nil {
+		fmt.Fprintf(a.out, "Commit:  %s (%s)\n", d.Commit.SHA, d.Commit.Ref)
+	}
+	if d.Message != "" {
+		fmt.Fprintf(a.out, "Message: %s\n", d.Message)
+	}
+	if len(d.Changes) > 0 {
+		fmt.Fprintln(a.out, "\nChanges:")
+		for _, ch := range d.Changes {
+			fmt.Fprintf(a.out, "  %-24s %s → %s\n", ch.Field, orDash(ch.From), orDash(ch.To))
+		}
+	}
+	fmt.Fprintln(a.out, "\nTimeline:")
+	for _, e := range d.Events {
+		fmt.Fprintf(a.out, "  %s  %-14s %s\n", e.At.Local().Format("15:04:05"), e.Kind, e.Message)
+	}
+	if len(d.Runs) > 0 {
+		fmt.Fprintln(a.out, "\nHook runs:")
+		for _, r := range d.Runs {
+			fmt.Fprintf(a.out, "  %s  %-11s %-10s %s %s\n", r.ID, r.Trigger, r.Status, r.Job, r.Message)
+		}
+	}
+	return nil
+}
+
+func shortSHA(s string) string {
+	if len(s) > 7 {
+		return s[:7]
+	}
+	return s
 }
 
 func (a *app) printTasks(ts []client.Task) error {

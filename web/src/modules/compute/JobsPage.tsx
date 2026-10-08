@@ -13,31 +13,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, IconButton, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { LogsView } from "@/modules/logs/LogsView";
-
-interface JobRun {
-  id: string;
-  job: string;
-  project: string;
-  environment: string;
-  service?: string;
-  trigger: string;
-  attempt: number;
-  status:
-    | "pending"
-    | "running"
-    | "succeeded"
-    | "failed"
-    | "timed_out"
-    | "cancelled"
-    | "skipped";
-  node: string;
-  exitCode: number | null;
-  message: string;
-  command: string[];
-  createdAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
-}
+import { duration, runTone, type JobRun } from "@/lib/jobs";
 
 interface Job {
   id: string;
@@ -53,25 +29,6 @@ interface Job {
   };
   nextRunAt: string | null;
   lastRun: JobRun | null;
-}
-
-const runTone = {
-  pending: "neutral",
-  running: "info",
-  succeeded: "ok",
-  failed: "bad",
-  timed_out: "bad",
-  cancelled: "neutral",
-  skipped: "warn",
-} as const;
-
-function duration(r: JobRun) {
-  if (!r.startedAt) return "—";
-  const end = r.finishedAt ? new Date(r.finishedAt) : new Date();
-  const s = Math.round(
-    (end.getTime() - new Date(r.startedAt).getTime()) / 1000,
-  );
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 const jobPath = (j: Job) =>

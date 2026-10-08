@@ -61,7 +61,7 @@ func TestArchiveConfig(t *testing.T) {
 	if p := pg(c)["parameters"].(map[string]any); p["archive_command"] != "wal-g wal-push %p" || p["archive_timeout"] != "60s" {
 		t.Errorf("on: %v", p)
 	}
-	if rc := pg(c)["recovery_conf"].(map[string]any); rc["restore_command"] != "wal-g wal-fetch %f %p" {
+	if rc := pg(c)["recovery_conf"].(map[string]any); rc["restore_command"] != "timeout 30 wal-g wal-fetch %f %p" {
 		t.Errorf("recovery_conf: %v", rc)
 	}
 	if m := pg(c)["create_replica_methods"].([]any); len(m) != 2 || m[0] != "walg" {

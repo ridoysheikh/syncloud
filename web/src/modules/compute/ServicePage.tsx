@@ -1,17 +1,16 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Minus, Plus, RotateCcw, Trash2 } from "lucide-react";
-import { usePaged } from "@/lib/paged";
+import { ExternalLink, GitCompare, Minus, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import {
-  deploymentTone,
+  deploymentActive,
+  deploymentStatusLabel,
   AWAITING_BUILD,
   servicePath,
   useProjects,
   useServices,
   useSharedVars,
-  type Deployment,
   type Spec,
   serviceState,
 } from "@/lib/workloads";
@@ -42,6 +41,8 @@ import { AutoscalingPanel } from "./AutoscalingPanel";
 import { Tabs } from "@/ui/Tabs";
 import { ServicePlacementPanel } from "@/modules/projects/NodeLimits";
 import { confirmAction } from "@/ui/dialogs";
+import { lineDiff, withContext } from "@/lib/linediff";
+import { DeploymentsTable, useDeploymentActions } from "./Deployments";
 
 interface Revision {
   revision: number;
@@ -49,6 +50,8 @@ interface Revision {
   spec: Spec;
   createdAt: string;
   createdBy: string;
+  /** False once registry cleanup removed the image (no rollback). */
+  imageAvailable: boolean;
 }
 
 type Tab =
@@ -88,6 +91,7 @@ export function ServicePage() {
       "metrics",
   );
 
+  const actions = useDeploymentActions();
   const scale = useMutation({
     mutationFn: (n: number) =>
       api("POST", `${path}/scale`, { desiredCount: n }),
@@ -151,6 +155,13 @@ export function ServicePage() {
               </IconButton>
             </div>
             <Button
+              disabled={actions.pending || svc.spec.image === AWAITING_BUILD}
+              onClick={() => void actions.redeploy(path)}
+              title="Restart every task with a rolling deployment"
+            >
+              <RefreshCw className="size-3.5" /> Redeploy
+            </Button>
+            <Button
               variant="danger"
               onClick={async () =>
                 (await confirmAction(`Delete ${name}? All its tasks stop.`)) && del.mutate()
@@ -174,11 +185,16 @@ export function ServicePage() {
         svc.deployment.status !== "succeeded" &&
         svc.deployment.status !== "superseded" && (
           <Alert
-            tone={svc.deployment.status === "in_progress" ? "info" : "warn"}
+            tone={deploymentActive(svc.deployment) ? "info" : "warn"}
           >
-            Deployment {svc.deployment.fromRevision} →{" "}
-            {svc.deployment.toRevision}:{" "}
-            {svc.deployment.status.replace("_", " ")}
+            <Link
+              to={`/projects/${project}/${env}/services/${name}/deployments/${svc.deployment.id}` as string}
+              className="underline-offset-2 hover:underline"
+            >
+              Deployment {svc.deployment.fromRevision} →{" "}
+              {svc.deployment.toRevision}:{" "}
+              {deploymentStatusLabel[svc.deployment.status]}
+            </Link>
             {svc.deployment.message && ` — ${svc.deployment.message}`}
           </Alert>
         )}
@@ -301,7 +317,15 @@ export function ServicePage() {
           showSource={false}
         />
       )}
-      {tab === "deployments" && <Deployments path={path} />}
+      {tab === "deployments" && (
+        <DeploymentsTable
+          path={`${path}/deployments`}
+          project={project}
+          env={env}
+          service={name}
+          currentRevision={svc.revision}
+        />
+      )}
       {tab === "builds" && <BuildsPanel path={path} />}
       {tab === "variables" && (
         <ServiceVariables
@@ -313,7 +337,9 @@ export function ServicePage() {
         />
       )}
       {tab === "s3" && <ServiceS3Panel path={path} />}
-      {tab === "revisions" && <Revisions path={path} />}
+      {tab === "revisions" && (
+        <Revisions path={path} project={project} window={projects?.find((x) => x.name === project)?.rollbackWindow} />
+      )}
       {tab === "placement" && (
         <ServicePlacementPanel
           path={path}
@@ -336,127 +362,155 @@ function ServiceTasks({ id, path }: { id: string; path: string }) {
   );
 }
 
-function Deployments({ path }: { path: string }) {
-  const q = usePaged<Deployment>(["deployments", path], `${path}/deployments`, {
-    refetchInterval: 5000,
-  });
-  const data = q.items;
-  return (
-    <Panel flush>
-      <DataTable
-        {...q.table}
-        rows={data}
-        rowKey={(d) => d.id}
-        columns={[
-          {
-            header: "Revisions",
-            cell: (d) => (
-              <span className="font-mono">
-                {d.fromRevision
-                  ? `${d.fromRevision} → ${d.toRevision}`
-                  : `→ ${d.toRevision}`}
-              </span>
-            ),
-          },
-          {
-            header: "Status",
-            cell: (d) => (
-              <StatusBadge tone={deploymentTone[d.status]}>
-                {d.status.replace("_", " ")}
-              </StatusBadge>
-            ),
-          },
-          {
-            header: "Failed tasks",
-            cell: (d) => (
-              <span className={d.failedTasks ? "text-bad" : "text-muted"}>
-                {d.failedTasks}
-              </span>
-            ),
-          },
-          {
-            header: "Started",
-            cell: (d) => (
-              <span className="text-muted">{since(d.startedAt)}</span>
-            ),
-          },
-          {
-            header: "Message",
-            className: "w-full",
-            cell: (d) => <span className="text-muted">{d.message || "—"}</span>,
-          },
-        ]}
-      />
-    </Panel>
-  );
-}
-
-function Revisions({ path }: { path: string }) {
-  const qc = useQueryClient();
-  const { data = [] } = useQuery({
+function Revisions({
+  path,
+  project,
+  window,
+}: {
+  path: string;
+  project: string;
+  window?: number;
+}) {
+  const { data = [], isLoading } = useQuery({
     queryKey: ["revisions", path],
     queryFn: async () =>
       (await api<{ items: Revision[] }>("GET", `${path}/revisions`)).items,
   });
-  const rollback = useMutation({
-    mutationFn: (rev: number) =>
-      api("POST", `${path}/rollback`, { revision: rev }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["revisions", path] });
-      qc.invalidateQueries({ queryKey: ["services"] });
-    },
-  });
+  const actions = useDeploymentActions();
+  const [compare, setCompare] = useState<number | null>(null);
+  const current = data.find((r) => r.current);
+  const other = data.find((r) => r.revision === compare);
   return (
-    <Panel flush>
-      <DataTable
-        rows={data}
-        rowKey={(r) => String(r.revision)}
-        columns={[
-          {
-            header: "Revision",
-            cell: (r) => <span className="font-mono">{r.revision}</span>,
-          },
-          {
-            header: "",
-            cell: (r) =>
-              r.current && <StatusBadge tone="ok">current</StatusBadge>,
-          },
-          {
-            header: "Image",
-            cell: (r) => <span className="font-mono">{r.spec.image}</span>,
-            className: "w-full",
-          },
-          {
-            header: "Created",
-            cell: (r) => (
-              <span className="text-muted">{since(r.createdAt)}</span>
-            ),
-          },
-          {
-            header: "",
-            cell: (r) =>
-              !r.current && (
-                <Button
-                  variant="ghost"
-                  onClick={async () =>
-                    (await confirmAction(`Roll out revision ${r.revision} again?`)) &&
-                    rollback.mutate(r.revision)
-                  }
-                >
-                  <RotateCcw className="size-3.5" /> Roll back
-                </Button>
+    <div className={cn("flex flex-col", gap)}>
+      <Panel
+        flush
+        title="Revisions"
+        actions={
+          window !== undefined && (
+            <Link
+              to={`/projects/${project}?tab=settings` as string}
+              className="text-muted hover:text-fg text-xs"
+            >
+              Images of the latest {window} revisions are kept for rollbacks
+            </Link>
+          )
+        }
+      >
+        <DataTable
+          rows={data}
+          rowKey={(r) => String(r.revision)}
+          empty={!isLoading && <p className="text-muted p-3 text-xs">No revisions.</p>}
+          columns={[
+            {
+              header: "Revision",
+              cell: (r) => (
+                <span className="flex items-center gap-1.5 whitespace-nowrap">
+                  <span className="font-mono">{r.revision}</span>
+                  {r.current && <StatusBadge tone="ok">current</StatusBadge>}
+                </span>
               ),
-          },
-        ]}
-      />
-    </Panel>
+            },
+            {
+              header: "Image",
+              className: "w-full",
+              cell: (r) => (
+                <span className="flex min-w-0 flex-col py-0.5">
+                  <span className="truncate font-mono" title={r.spec.image}>
+                    {r.spec.image}
+                  </span>
+                  {!r.imageAvailable && (
+                    <span className="text-warn">
+                      image removed by registry cleanup
+                    </span>
+                  )}
+                </span>
+              ),
+            },
+            {
+              header: "Created",
+              cell: (r) => (
+                <span className="text-muted whitespace-nowrap" title={new Date(r.createdAt).toLocaleString()}>
+                  {since(r.createdAt)}
+                </span>
+              ),
+            },
+            {
+              header: "",
+              cell: (r) =>
+                !r.current && (
+                  <span className="flex justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      onClick={() => setCompare(compare === r.revision ? null : r.revision)}
+                    >
+                      <GitCompare className="size-3.5" />
+                      {compare === r.revision ? "Hide" : "Compare"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      disabled={!r.imageAvailable || actions.pending}
+                      title={
+                        r.imageAvailable
+                          ? undefined
+                          : "Its image is gone; raise the project's rollback window to keep more"
+                      }
+                      onClick={() => void actions.rollback(path, r.revision)}
+                    >
+                      <RotateCcw className="size-3.5" /> Roll back
+                    </Button>
+                  </span>
+                ),
+            },
+          ]}
+        />
+      </Panel>
+      {current && other && (
+        <Panel title={`Revision ${other.revision} compared with the current revision ${current.revision}`}>
+          <SpecDiff from={other.spec} to={current.spec} />
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+/** A line diff of two specs, as the spec editor shows them. */
+function SpecDiff({ from, to }: { from: Spec; to: Spec }) {
+  const text = (s: Spec) => {
+    const { sharedEnv: _, s3: _s3, redeployedAt: _r, ...own } = s as Spec & { s3?: unknown };
+    return JSON.stringify(own, null, 2);
+  };
+  const lines = withContext(lineDiff(text(from), text(to)));
+  if (!lines.length)
+    return <p className="text-muted text-xs">The specs are the same apart from platform-set fields.</p>;
+  return (
+    <pre className="bg-bg border-line max-h-96 overflow-auto rounded-md border py-1 font-mono text-[11px] leading-relaxed">
+      {lines.map((l, i) =>
+        l === null ? (
+          <div key={i} className="text-faint px-2">
+            ⋯
+          </div>
+        ) : (
+          <div
+            key={i}
+            className={cn(
+              "px-2 whitespace-pre-wrap break-all",
+              l.kind === "add" && "bg-ok/10 text-ok",
+              l.kind === "del" && "bg-bad/10 text-bad",
+            )}
+          >
+            {l.kind === "add" ? "+ " : l.kind === "del" ? "- " : "  "}
+            {l.text}
+          </div>
+        ),
+      )}
+    </pre>
   );
 }
 
 function SpecEditor({ path, spec }: { path: string; spec: Spec }) {
   const qc = useQueryClient();
   const [text, setText] = useState(() => {
-    const { sharedEnv: _, s3: _s3, ...own } = spec as Spec & { s3?: unknown }; // set by the platform, not editable
+    const { sharedEnv: _, s3: _s3, redeployedAt: _r, ...own } = spec as Spec & { s3?: unknown }; // set by the platform, not editable
     return JSON.stringify(own, null, 2);
   });
   const [parseErr, setParseErr] = useState("");

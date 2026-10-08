@@ -2081,6 +2081,174 @@ One image runs every role, chosen by its command: Patroni-managed Postgres, PgBo
   - The tab fade mask and the Sankey link gradient are gone.
   - A Playwright contrast audit composites each text element's real background on all 104 routes at 1440 and 390 px: 0 below 8.5:1.
 
+### Phase 15: Deployments, release commands, ports and domains, project settings (user request, 2026-10-08)
+
+The request: full deployment history with rollback options; commands after the build and before the deployment (database migrations and similar); domain and port assignment for project services; better project settings.
+
+**What exists, and the gaps** (reviewed 2026-10-08):
+- **Deployments** (§5.4) record only `from_rev → to_rev`, status, failed tasks and a message.
+  - They don't record who or what started them, the commit, what changed, the timeline of steps, or the hook runs.
+  - History is per service only, and the table has no detail view.
+- **Rollback** makes an old revision current as a new revision, and skips pre-deploy hooks, which is right for forward-only migrations.
+  - Registry cleanup keeps the images of only the current and previous revisions, so rolling back further fails with a missing image.
+  - There is no way to cancel a running deployment, and no redeploy of the same revision (a rolling restart).
+- **Deploy hooks** (§5.11) work, but only as separate jobs on the Jobs page.
+  - Several pre-deploy jobs run in parallel; migrations need a fixed order.
+  - Post-deploy runs are not linked to their deployment.
+  - There is no step after the build (tests or checks on the new image before it is deployed), and no build, install or start command overrides for Nixpacks.
+- **Ports** are edited only in the raw task definition JSON.
+  - Every HTTP port gets its generated address `<service>-<env>-<project>.<base>`, and it cannot be renamed or turned off.
+  - Custom domains map a host to a port, with no path and no redirect.
+  - TCP and UDP ports cannot be public; only databases have public TCP endpoints.
+
+#### 15a: Deployment history and rollback
+
+**Data:** migration `00037_deployment_details`.
+- `deployments` gains:
+  - `trigger`: `manual`, `git`, `rollback`, `auto-rollback`, `variables`, `redeploy`, `api`, `scale-spec`;
+  - `actor`: a user ID, or `system`;
+  - `build_id`, with the build's commit SHA, ref and message joined in views;
+  - `image`;
+  - `changes`: a JSON summary of the spec diff from `from_rev`. It covers the image, command, resources, ports, health check, placement, and the names of variables added, removed or changed. Values are never stored.
+- New `deployment_events(id INTEGER PK, deployment_id, at, kind, message)` hold the timeline:
+  - `started`, `hook-started`, `hook-succeeded`, `hook-failed`, `tasks-started` (n), `task-healthy`, `task-failed`, `drained` (n), `breaker-tripped`, `rolled-back`, `cancelled`, `succeeded`, `failed`, `superseded`.
+  - The workload manager writes them where it already changes deployment state. They are kept as long as the deployment.
+- `job_runs.deployment_id` is now set for post-deploy runs too.
+
+**API:**
+- `GET …/services/{name}/deployments` returns the enriched rows, cursor-paged as before.
+- `GET …/services/{name}/deployments/{id}` returns the deployment with its events, hook runs, the change summary and the tasks of `to_rev`.
+- `GET /projects/{p}/deployments?environment=&service=&status=&limit=&before=` returns every service's deployments in a project, newest first.
+- `POST …/deployments/{id}/cancel` stops an in-progress deployment, or one waiting on its hooks. It returns to `from_rev` (status `cancelled`) and needs `service:RollbackService`.
+- `POST …/rollback {revision, runHooks}`: `runHooks` (default false) runs pre-deploy hooks with the old revision, for down-migrations written as idempotent hooks. Rolling back to a revision whose private-registry image is gone fails with a clear message.
+- `POST …/redeploy {runHooks}` performs a rolling restart.
+  - It creates a revision identical to the current one apart from the platform-set `spec.redeployedAt`, which the spec editor hides, like `sharedEnv`.
+  - Pre-deploy hooks run when `runHooks` is set (default true).
+
+**Rollback window:**
+- Registry cleanup keeps the images of each service's last **N revisions** (default 10).
+- Each project sets N in its settings, between 1 and 50 (GC keeps 50 task definitions per service, so a larger window could not be rolled back to anyway).
+- In the revisions list and the rollback dialog, an image cleanup has removed is marked "image removed", and that revision can't be selected.
+
+**Web:**
+- **Service › Deployments:**
+  - Columns: status, revisions, trigger (an icon and a label), commit (short SHA and first line of the message, linked to the build), who, started and duration, and badges for pre- and post-deploy hooks.
+  - A row opens the deployment page.
+  - Row actions: "Roll back to this", for a succeeded deployment that isn't current, and "Cancel", while the deployment is in progress.
+- **Deployment page** (`/projects/:p/:env/services/:name/deployments/:id`, full page):
+  - a header with status and actions (Cancel, Roll back to before this, Redeploy);
+  - the timeline;
+  - "What changed", the diff of the two revisions with variables shown by name only;
+  - hook runs with their logs, inline;
+  - the tasks of the new revision;
+  - logs from the deployment window.
+- **Revisions** gains a "Compare with current" diff.
+  - Its rollback dialog has a "Run pre-deploy hooks" checkbox, off by default, with a note on migrations.
+  - It shows the rollback window.
+- **Project › Deployments** (a new tab): the deployments of every service in the environment, with service and status filters, paged lazily.
+- A "Redeploy" button in the service header.
+
+**CLI:** `synctl deployments <svc>`, `synctl deployment <svc> <id>`, `synctl rollback <svc> [--revision N] [--run-hooks]`, `synctl redeploy <svc>`, `synctl deployment cancel <svc> <id>`.
+
+**Progress 15a:** ✅ 2026-10-08.
+- **Store:** migration `00037_deployment_details` adds `trigger`, `actor`, `build_id`, `image` and `changes` to deployments, a `deployment_events` table, and `projects.rollback_window`.
+  - `ListProjectDeployments` filters by environment, service and status, cursor-paged.
+  - Superseded deployments get a timeline event in the same transaction.
+- **Workload:**
+  - Apply, rollback and redeploy share one `rollout`.
+  - The cause comes from the context (`WithCause`) or the actor (`build:<id>` is git, the circuit breaker is auto-rollback).
+  - `Diff` summarizes the change; variables appear by name only, and health check, placement and rollout settings key by key.
+  - The reconciler writes timeline events: tasks started, serving n/N, old tasks stopped, task failures, outcome.
+  - `CancelDeployment`, `Redeploy` (the `redeployedAt` marker survives re-applies of the same spec), and `Rollback(…, runHooks)`, which refuses revisions whose image cleanup removed.
+- **Jobs:** hook runs post their start and outcome on the timeline; post-deploy runs are linked to their deployment; hook retries keep their hook trigger; `CancelHooks` stops a cancelled deployment's runs.
+- **Registry:** cleanup keeps the images of each service's latest `rollbackWindow` revisions; `ImageAvailable` checks with a manifest HEAD.
+- **API, CLI and IAM:**
+  - New endpoints: `GET …/deployments/{id}`, `POST …/deployments/{id}/cancel`, `POST …/redeploy`, `GET /projects/{p}/deployments` and `PUT /projects/{p}`; rollback takes `runHooks`.
+  - Revisions carry `imageAvailable`.
+  - synctl: `services deployment`, `cancel-deployment`, `redeploy [--skip-hooks]`, `rollback --run-hooks`, `projects deployments` and `projects update --rollback-window`.
+  - The Deployer policy gains redeploy and cancel.
+- **Web:**
+  - `modules/compute/Deployments.tsx`: the history table (trigger, commit or user, change summary, hook badges, duration, cancel and roll-back actions) and the deployment page (timeline, what changed, hook runs with their logs, tasks of the revision).
+  - The project's Deployments tab, with service and status filters.
+  - A Redeploy button on the service.
+  - Revisions with "image removed" and a "Compare" line diff.
+  - Rollback and redeploy dialogs with a "Run pre-deploy jobs" checkbox (`confirmChoice`).
+  - Project Settings › General holds the description and the rollback window.
+- **Fixes found on the way:**
+  - A spec change after a pre-deploy deployment that failed or was cancelled tried to reuse that unused revision number (UNIQUE error); revisions now follow the highest one.
+  - A database whose backup S3 endpoint is unreachable hung in archive recovery: `restore_command` is now bounded (`timeout 30`), so members start from local WAL and streaming.
+- **Tests:**
+  - Unit: `TestDiff` and `TestDeploymentHistoryAndActions`.
+  - e2e: the new `test/e2e/deployments.sh` and `deploy.sh` pass. `lib.sh` takes `E2E_PREFIX`, so they run beside a kept cluster, and `wait_mesh` counts the actual nodes.
+
+#### 15b: Release commands and build settings
+
+**Pre-deploy (release) commands:**
+- **Sequential runs:** each service's pre-deploy jobs run one at a time, in an `order` field (default: creation order). The first failure stops the rest and aborts the deployment, and the old revision keeps running.
+- **Revision and environment:** each run uses the new revision's image and variables (shared variables, S3, secrets), on the private network, so it can reach the environment's databases.
+- **Timeline:** the deployment timeline shows each one.
+
+**Post-deploy commands:**
+- They run after the deployment succeeds, in order, and are linked to it.
+- A failure raises an alert but changes nothing else.
+
+**After-build checks:**
+- A Git source has optional `postBuild` commands.
+- After a build pushes its image, each one runs in that image as a job run (trigger `post-build`) with the target service's variables.
+- The image is deployed only when all of them pass. Otherwise the build is `failed` with "after-build check failed: …", and the run's logs are linked.
+- They are meant for tests and checks on the exact image. Migrations belong in pre-deploy, which runs once per deployment, also on rollbacks you opt into and on manual deploys.
+
+**Build settings on the Git source:**
+- `installCommand`, `buildCommand` and `startCommand`: Nixpacks' `--install-cmd`, `--build-cmd` and `--start-cmd`.
+- `buildArgs`: Dockerfile `--build-arg`, a map whose values are stored encrypted.
+- `buildEnv`: passed to Nixpacks with `--env`.
+
+**Service › Deploy (a new tab):**
+- **Release commands:** ordered lists of pre-deploy and post-deploy commands, each with timeout and retries. They are edited inline and stored as the service's hook jobs (`<service>-pre-1`, …), with no trip to the Jobs page. Jobs made elsewhere show up here too.
+- **After-build checks and build commands**, when the service has a Git source.
+- **Rollout:** circuit breaker, automatic rollback, drain seconds, and the rollback window.
+
+**New service wizard:** the Deploy step gains an optional "Release command", for example `npm run migrate`.
+
+#### 15c: Ports and domains
+
+**Ports** are edited in a form on a new Service › Networking tab: name, container port and protocol, plus the health check. Saving creates a new revision.
+
+**Routing settings** live on the service, not the revision, so changing them does not redeploy. New `service_routing(service_id, port_name, generated BOOL DEFAULT 1, label TEXT)`:
+- `generated` turns the generated address off. A service with custom domains only is then reachable just at those.
+- `label` replaces the generated name: `api` serves `api.<base>`.
+  - Labels are unique across the cluster.
+  - A label can't be one of the platform's reserved names (`registry`, `git`, `db`, …).
+
+**Custom domains** gain:
+- `path`: a path prefix, routed as `Host && PathPrefix`, with the longest prefix winning. Two services can then share a host, for example `/api` and `/`.
+- `strip_prefix`;
+- `redirect_to`: the domain answers with a 301 to another host, which covers www to apex.
+
+**Public TCP and UDP ports:**
+- **Port assignment:** a public port is assigned from a range on the controller and edge nodes (default 20000–20999, set in Settings › Network). It is shown as `<base>:<port>`, with an allow-list of CIDRs as for databases.
+- **Traefik changes:** Traefik entrypoints are static, so assigning or releasing a port changes the Traefik system task's spec, which is rolled out one replica at a time (as with etcd, §13c). The dashboard says that ingress replicas restart.
+- **Port choice:** a port is chosen when it is made public and kept until it is released.
+
+**Project › Domains** (a new tab) lists every address in the project for the environment: generated, custom and TCP. Each row shows the service and port, DNS status and certificate status, with "Add domain" pointing at any service and port.
+
+#### 15d: Project settings
+
+The Settings tab is split into sections:
+- **General:** the description, and the project's ID and creation date.
+- **Environments:**
+  - Add one.
+  - Clone one from another: services, with their latest specs, scaled to 0 unless "start services" is set; shared variables; jobs; and security groups. Domains and public ports are not cloned.
+  - Delete one: you type its name, and its services must be deleted first, or "delete everything" is checked.
+- **Deploy policy** for each environment:
+  - **auto-deploy from Git:** when this is off, builds still run but deploying is manual;
+  - **a deploy lock**, with a reason: it blocks deployments, except rollbacks and cancels, until it is lifted. API callers and `synctl` get `423 Locked` with the reason.
+- **Rollback window** (15a).
+- **Node limits**, which already exist.
+- **Danger zone:** delete the project, after typing its name; only an empty project can be deleted, unless "delete everything" is checked.
+
+**Order:** 15a, then 15b, 15c and 15d. Each slice follows the usual workflow: unit tests, a DinD e2e (`test/e2e/deployments.sh`, extended per slice), screenshots, then this plan and a commit.
+
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)
 

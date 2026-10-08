@@ -5,14 +5,17 @@
 # mesh, fail.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
-NET=sc-e2e
+# E2E_PREFIX names the network and nodes (default sc-e2e), so a test can
+# run beside a kept cluster; scripts that use it say $E2E-ctl.
+E2E=${E2E_PREFIX:-sc-e2e}
+NET=$E2E
 # WORKERS: the worker nodes (WORKERS= for a single node); CTL_NETWORK: the
 # controller node's private network (off = a node outside the mesh, like
 # single-node development).
 WORKERS=${WORKERS-w1 w2}
 CTL_NETWORK=${CTL_NETWORK:-on}
-NODES=(sc-e2e-ctl)
-for w in $WORKERS; do NODES+=("sc-e2e-$w"); done
+NODES=($E2E-ctl)
+for w in $WORKERS; do NODES+=("$E2E-$w"); done
 BIN=$(mktemp -d)
 
 cleanup() {
@@ -76,7 +79,7 @@ fi
 echo "== nodes"
 docker network create "$NET" >/dev/null
 for n in "${NODES[@]}"; do
-  docker run -d --privileged --name "$n" --hostname "${n#sc-e2e-}" --network "$NET" -v "$BIN:/opt/sc:ro" \
+  docker run -d --privileged --name "$n" --hostname "${n#"$E2E"-}" --network "$NET" -v "$BIN:/opt/sc:ro" \
     syncloud-e2e-node dockerd -H unix:///var/run/docker.sock >/dev/null
 done
 for n in "${NODES[@]}"; do
@@ -84,32 +87,32 @@ for n in "${NODES[@]}"; do
   x "$n" docker load -q -i /opt/sc/busybox.tar >/dev/null
   if [ "${WITH_POSTGRES:-0}" = 1 ]; then x "$n" docker load -q -i /opt/sc/postgres.tar >/dev/null; fi
 done
-CTL_IP=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" sc-e2e-ctl)
+CTL_IP=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" $E2E-ctl)
 
 echo "== controller on $CTL_IP"
-x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false --base-domain off ${CTL_FLAGS:-} > /var/log/controller.log 2>&1"
-for _ in $(seq 1 30); do x sc-e2e-ctl curl -fs localhost:7070/api/v1/system/status >/dev/null 2>&1 && break; sleep 1; done
-x sc-e2e-ctl /opt/sc/syncloud-agent join --controller http://127.0.0.1:7070 --token-file /data/local-join.token --name ctl-0 --data-dir /agent >/dev/null
-x -d sc-e2e-ctl sh -c "/opt/sc/syncloud-agent run --data-dir /agent --network $CTL_NETWORK > /var/log/agent.log 2>&1"
+x -d $E2E-ctl sh -c "/opt/sc/syncloud-controller --dev --data-dir /data --listen 0.0.0.0:7070 --agent-listen 0.0.0.0:7443 --agent-advertise $CTL_IP:7443 --system-tasks=false --base-domain off ${CTL_FLAGS:-} > /var/log/controller.log 2>&1"
+for _ in $(seq 1 30); do x $E2E-ctl curl -fs localhost:7070/api/v1/system/status >/dev/null 2>&1 && break; sleep 1; done
+x $E2E-ctl /opt/sc/syncloud-agent join --controller http://127.0.0.1:7070 --token-file /data/local-join.token --name ctl-0 --data-dir /agent >/dev/null
+x -d $E2E-ctl sh -c "/opt/sc/syncloud-agent run --data-dir /agent --network $CTL_NETWORK > /var/log/agent.log 2>&1"
 
 # Root account and a join token for the workers.
-TOK=$(x sc-e2e-ctl cat /data/setup-token)
-SUF=$(x sc-e2e-ctl cat /data/recovery-key | tr -d '-' | tail -c 7 | tr -d '\n')
-x sc-e2e-ctl cp /data/recovery-key /root/recovery-key # setup deletes it; restore drills need it
-x sc-e2e-ctl curl -fs -c /tmp/jar -H 'content-type: application/json' localhost:7070/api/v1/setup \
+TOK=$(x $E2E-ctl cat /data/setup-token)
+SUF=$(x $E2E-ctl cat /data/recovery-key | tr -d '-' | tail -c 7 | tr -d '\n')
+x $E2E-ctl cp /data/recovery-key /root/recovery-key # setup deletes it; restore drills need it
+x $E2E-ctl curl -fs -c /tmp/jar -H 'content-type: application/json' localhost:7070/api/v1/setup \
   -d "{\"setupToken\":\"$TOK\",\"email\":\"e2e@example.com\",\"name\":\"E2E\",\"password\":\"e2e-password-123\",\"recoveryKeySuffix\":\"$SUF\"}" >/dev/null
-JOIN=$(x sc-e2e-ctl curl -fs -b /tmp/jar -H 'content-type: application/json' localhost:7070/api/v1/nodes/join-tokens -d '{"singleUse":false,"ttlMinutes":30}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+JOIN=$(x $E2E-ctl curl -fs -b /tmp/jar -H 'content-type: application/json' localhost:7070/api/v1/nodes/join-tokens -d '{"singleUse":false,"ttlMinutes":30}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 [ -n "$JOIN" ] || fail "no join token"
 for w in $WORKERS; do
-  x sc-e2e-$w /opt/sc/syncloud-agent join --controller "http://$CTL_IP:7070" --token "$JOIN" --name "$w" --data-dir /agent >/dev/null
+  x $E2E-$w /opt/sc/syncloud-agent join --controller "http://$CTL_IP:7070" --token "$JOIN" --name "$w" --data-dir /agent >/dev/null
   # w2 uses userspace WireGuard, so both implementations are tested together.
   mode=kernel; [ $w = w2 ] && mode=userspace
-  x -d -e SYNCLOUD_WIREGUARD_MODE=$mode sc-e2e-$w sh -c "/opt/sc/syncloud-agent run --data-dir /agent --network on > /var/log/agent.log 2>&1"
+  x -d -e SYNCLOUD_WIREGUARD_MODE=$mode $E2E-$w sh -c "/opt/sc/syncloud-agent run --data-dir /agent --network on > /var/log/agent.log 2>&1"
 done
 
 }
-api() { x sc-e2e-ctl curl -fsS -b /tmp/jar -H 'content-type: application/json' -H 'Origin: http://localhost:7070' "$@"; }
-mesh() { x sc-e2e-ctl curl -fs -b /tmp/jar localhost:7070/api/v1/network/mesh; }
+api() { x $E2E-ctl curl -fsS -b /tmp/jar -H 'content-type: application/json' -H 'Origin: http://localhost:7070' "$@"; }
+mesh() { x $E2E-ctl curl -fs -b /tmp/jar localhost:7070/api/v1/network/mesh; }
 wait_mesh() {
   echo "== waiting for the mesh"
   local ok=0 m applied handshakes
@@ -117,7 +120,7 @@ wait_mesh() {
     m=$(mesh || true)
     applied=$(echo "$m" | grep -o '"appliedGeneration":[1-9]' | wc -l || true)
     handshakes=$(echo "$m" | grep -o '"lastHandshake":"' | wc -l || true)
-    if [ "$applied" -eq 3 ] && [ "$handshakes" -ge 6 ]; then ok=1; break; fi
+    if [ "$applied" -eq ${#NODES[@]} ] && [ "$handshakes" -ge $((${#NODES[@]} * (${#NODES[@]} - 1))) ]; then ok=1; break; fi
     sleep 2
   done
   [ $ok = 1 ] || { echo "$m"; fail "mesh did not converge (applied=$applied handshakes=$handshakes)"; }
@@ -125,22 +128,22 @@ wait_mesh() {
 
 # start_vlogs runs VictoriaLogs on the controller node like the system task.
 start_vlogs() {
-  x sc-e2e-ctl docker load -q -i /opt/sc/vlogs.tar >/dev/null
-  x sc-e2e-ctl docker run -d --name vlogs -p 127.0.0.1:9428:9428 victoriametrics/victoria-logs:v1.53.0 -storageDataPath=/vlogs >/dev/null
+  x $E2E-ctl docker load -q -i /opt/sc/vlogs.tar >/dev/null
+  x $E2E-ctl docker run -d --name vlogs -p 127.0.0.1:9428:9428 victoriametrics/victoria-logs:v1.53.0 -storageDataPath=/vlogs >/dev/null
 }
 
 # start_vmetrics runs VictoriaMetrics on the controller node like the system task.
 start_vmetrics() {
-  x sc-e2e-ctl docker load -q -i /opt/sc/vmetrics.tar >/dev/null
-  x sc-e2e-ctl docker run -d --name vmetrics -p 127.0.0.1:8428:8428 victoriametrics/victoria-metrics:v1.153.0 -storageDataPath=/vm -search.latencyOffset=0s >/dev/null
+  x $E2E-ctl docker load -q -i /opt/sc/vmetrics.tar >/dev/null
+  x $E2E-ctl docker run -d --name vmetrics -p 127.0.0.1:8428:8428 victoriametrics/victoria-metrics:v1.153.0 -storageDataPath=/vm -search.latencyOffset=0s >/dev/null
 }
 
 # start_traefik runs Traefik on the controller node like the system task does,
 # polling the controller's dynamic config (§5.7).
 start_traefik() {
-  x sc-e2e-ctl docker load -q -i /opt/sc/traefik.tar >/dev/null
-  local tok; tok=$(x sc-e2e-ctl cat /data/traefik.token)
-  x sc-e2e-ctl docker run -d --name traefik --network host traefik:v3.7.13 \
+  x $E2E-ctl docker load -q -i /opt/sc/traefik.tar >/dev/null
+  local tok; tok=$(x $E2E-ctl cat /data/traefik.token)
+  x $E2E-ctl docker run -d --name traefik --network host traefik:v3.7.13 \
     --entrypoints.web.address=:8080 --entrypoints.websecure.address=:8443 --entrypoints.valkey.address=:6379 \
     --providers.http.endpoint=http://127.0.0.1:7070/internal/traefik/config --providers.http.pollInterval=2s \
     "--providers.http.headers.X-Syncloud-Token=$tok" >/dev/null
@@ -149,13 +152,13 @@ start_traefik() {
 # start_registry runs the private registry on the controller node like the
 # system task: token auth against the controller (§5.9).
 start_registry() {
-  x sc-e2e-ctl docker load -q -i /opt/sc/registry.tar >/dev/null
+  x $E2E-ctl docker load -q -i /opt/sc/registry.tar >/dev/null
   # Host networking on loopback, like the system task, so notifications
   # reach the controller's loopback API.
   local tok notify
-  tok=$(x sc-e2e-ctl cat /data/traefik.token)
+  tok=$(x $E2E-ctl cat /data/traefik.token)
   notify="[{\"name\":\"syncloud\",\"url\":\"http://127.0.0.1:7070/internal/registry/events\",\"headers\":{\"X-Syncloud-Token\":[\"$tok\"]},\"timeout\":\"3s\",\"threshold\":5,\"backoff\":\"10s\"}]"
-  x sc-e2e-ctl docker run -d --name registry --network host -v /data/registry/registry-token.crt:/etc/syncloud/registry-token.crt:ro \
+  x $E2E-ctl docker run -d --name registry --network host -v /data/registry/registry-token.crt:/etc/syncloud/registry-token.crt:ro \
     -e REGISTRY_HTTP_ADDR=127.0.0.1:5000 -e REGISTRY_HTTP_DEBUG_ADDR=127.0.0.1:5001 -e "REGISTRY_NOTIFICATIONS_ENDPOINTS=$notify" \
     -e REGISTRY_AUTH_TOKEN_REALM=http://127.0.0.1:7070/api/v1/registry/token -e REGISTRY_AUTH_TOKEN_SERVICE=syncloud-registry \
     -e REGISTRY_AUTH_TOKEN_ISSUER=syncloud -e REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE=/etc/syncloud/registry-token.crt \
