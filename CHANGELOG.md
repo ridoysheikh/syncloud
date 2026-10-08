@@ -2,7 +2,7 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
-## [Unreleased]
+## [0.1.1] - 2026-10-08
 
 ### Fixed
 
