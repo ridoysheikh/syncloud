@@ -42,6 +42,9 @@ type Config struct {
 	Settings func() traefik.Settings
 	// DatabaseEntrypoints are the public database entrypoints (name -> address).
 	DatabaseEntrypoints map[string]string
+	// ServiceEntrypoints returns the public service ports' entrypoints
+	// (Phase 15c; may be nil).
+	ServiceEntrypoints func() map[string]string
 }
 
 // Health is the controller's view of one edge.
@@ -115,10 +118,23 @@ func (m *Manager) Spec(nodeName, meshIP string) *agentv1.TaskSpec {
 			fmt.Sprintf("--providers.http.headers.%s=%s", m.cfg.TokenHeader, m.cfg.TraefikToken),
 			"--accesslog=true",
 			"--accesslog.format=json",
-		}, traefik.Entrypoints(m.cfg.DatabaseEntrypoints)...), m.settings()),
+		}, traefik.Entrypoints(m.entrypoints())...), m.settings()),
 		NetworkMode: "host",
 		System:      true,
 	}
+}
+
+func (m *Manager) entrypoints() map[string]string {
+	out := map[string]string{}
+	for k, v := range m.cfg.DatabaseEntrypoints {
+		out[k] = v
+	}
+	if m.cfg.ServiceEntrypoints != nil {
+		for k, v := range m.cfg.ServiceEntrypoints() {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 func (m *Manager) settings() traefik.Settings {

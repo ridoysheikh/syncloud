@@ -35,11 +35,13 @@ import { DatabasesTable } from "@/modules/databases/DatabasesPage";
 import { useDatabases } from "@/lib/databases";
 import { confirmAction } from "@/ui/dialogs";
 import { ProjectDeployments } from "@/modules/compute/Deployments";
+import { ProjectDomains } from "./ProjectDomains";
 
 type Tab =
   | "services"
   | "databases"
   | "deployments"
+  | "domains"
   | "metrics"
   | "traffic"
   | "logs"
@@ -103,6 +105,7 @@ export function ProjectPage() {
               "services",
               "databases",
               "deployments",
+              "domains",
               "metrics",
               "traffic",
               "logs",
@@ -144,6 +147,9 @@ export function ProjectPage() {
           env={env}
           services={inEnv.map((s) => s.name)}
         />
+      )}
+      {tab === "domains" && (
+        <ProjectDomains key={env} project={p.name} env={env} services={inEnv} />
       )}
       {tab === "metrics" && (
         <MetricsPanel key={env} path={envPath(p.name, env)} by="service" />

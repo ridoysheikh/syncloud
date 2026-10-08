@@ -632,24 +632,31 @@ func (s *Store) EnsureServiceVIP(ctx context.Context, serviceID string, pool Ind
 // ── custom domains ──────────────────────────────────────────────────────────
 
 type Domain struct {
-	ID        string    `json:"id"`
-	ServiceID string    `json:"serviceId"`
-	Host      string    `json:"host"`
-	PortName  string    `json:"port"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID        string `json:"id"`
+	ServiceID string `json:"serviceId"`
+	Host      string `json:"host"`
+	// Path is a path prefix ("" = the whole host); several services can
+	// share a host by path.
+	Path        string    `json:"path"`
+	PortName    string    `json:"port"`
+	StripPrefix bool      `json:"stripPrefix"`
+	RedirectTo  string    `json:"redirectTo"` // answer with a 301 to this host instead
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 func (s *Store) AddDomain(ctx context.Context, d Domain) error {
-	_, err := s.W.ExecContext(ctx, `INSERT INTO domains (id, service_id, host, port_name, created_at) VALUES (?, ?, ?, ?, ?)`,
-		d.ID, d.ServiceID, d.Host, d.PortName, d.CreatedAt.Unix())
+	_, err := s.W.ExecContext(ctx, `INSERT INTO domains (id, service_id, host, path, port_name, strip_prefix, redirect_to, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.ServiceID, d.Host, d.Path, d.PortName, d.StripPrefix, d.RedirectTo, d.CreatedAt.Unix())
 	if isUnique(err) {
 		return ErrNameTaken
 	}
 	return err
 }
 
-func (s *Store) DeleteDomain(ctx context.Context, serviceID, host string) error {
-	res, err := s.W.ExecContext(ctx, `DELETE FROM domains WHERE service_id = ? AND host = ?`, serviceID, host)
+// DeleteDomain removes a service's domain by ID, or every route of a host
+// when ref is a host name.
+func (s *Store) DeleteDomain(ctx context.Context, serviceID, ref string) error {
+	res, err := s.W.ExecContext(ctx, `DELETE FROM domains WHERE service_id = ? AND (id = ? OR host = ?)`, serviceID, ref, ref)
 	if err != nil {
 		return err
 	}
@@ -661,11 +668,8 @@ func (s *Store) DeleteDomain(ctx context.Context, serviceID, host string) error 
 
 // ListDomains returns custom domains of one service ("" = all).
 func (s *Store) ListDomains(ctx context.Context, serviceID string) ([]Domain, error) {
-	q, args := `SELECT id, service_id, host, port_name, created_at FROM domains ORDER BY host`, []any{}
-	if serviceID != "" {
-		q, args = `SELECT id, service_id, host, port_name, created_at FROM domains WHERE service_id = ? ORDER BY host`, []any{serviceID}
-	}
-	rows, err := s.R.QueryContext(ctx, q, args...)
+	rows, err := s.R.QueryContext(ctx, `SELECT id, service_id, host, path, port_name, strip_prefix, redirect_to, created_at FROM domains
+		WHERE ? = '' OR service_id = ? ORDER BY host, path`, serviceID, serviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -674,13 +678,77 @@ func (s *Store) ListDomains(ctx context.Context, serviceID string) ([]Domain, er
 	for rows.Next() {
 		var d Domain
 		var at int64
-		if err := rows.Scan(&d.ID, &d.ServiceID, &d.Host, &d.PortName, &at); err != nil {
+		if err := rows.Scan(&d.ID, &d.ServiceID, &d.Host, &d.Path, &d.PortName, &d.StripPrefix, &d.RedirectTo, &at); err != nil {
 			return nil, err
 		}
 		d.CreatedAt = time.Unix(at, 0).UTC()
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// PortRouting is how one port of a service is reached (Phase 15c).
+type PortRouting struct {
+	ServiceID  string
+	PortName   string
+	Generated  bool     // http: the generated address is served
+	Label      string   // http: replaces the generated name ("" = none)
+	PublicPort int      // tcp/udp: the public port (0 = not public)
+	Allow      []string // tcp/udp: client CIDRs (none = anyone)
+}
+
+// ListRouting returns the routing rows of one service ("" = all).
+func (s *Store) ListRouting(ctx context.Context, serviceID string) ([]PortRouting, error) {
+	rows, err := s.R.QueryContext(ctx, `SELECT service_id, port_name, generated, coalesce(label, ''), coalesce(public_port, 0), allow
+		FROM service_routing WHERE ? = '' OR service_id = ? ORDER BY service_id, port_name`, serviceID, serviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PortRouting
+	for rows.Next() {
+		var r PortRouting
+		var allow string
+		if err := rows.Scan(&r.ServiceID, &r.PortName, &r.Generated, &r.Label, &r.PublicPort, &allow); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(allow), &r.Allow)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// SetRouting replaces a service's routing rows in one transaction.
+// ErrNameTaken means a label or public port belongs to another service.
+func (s *Store) SetRouting(ctx context.Context, serviceID string, rs []PortRouting) error {
+	tx, err := s.W.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM service_routing WHERE service_id = ?`, serviceID); err != nil {
+		return err
+	}
+	for _, r := range rs {
+		var label, port any
+		if r.Label != "" {
+			label = r.Label
+		}
+		if r.PublicPort > 0 {
+			port = r.PublicPort
+		}
+		if r.Allow == nil {
+			r.Allow = []string{}
+		}
+		allow, _ := json.Marshal(r.Allow)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO service_routing (service_id, port_name, generated, label, public_port, allow) VALUES (?, ?, ?, ?, ?, ?)`,
+			serviceID, r.PortName, r.Generated, label, port, string(allow)); isUnique(err) {
+			return ErrNameTaken
+		} else if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ── deployments ─────────────────────────────────────────────────────────────

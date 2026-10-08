@@ -107,8 +107,19 @@ type Options struct {
 	// IsEdge reports edge nodes, which open HTTP and HTTPS (§8.5).
 	IsEdge func(nodeID string) bool
 	// PublicPorts are extra ports Traefik serves publicly on the
-	// controller and edge nodes (public databases, Phase 12e).
-	PublicPorts func() []string
+	// controller and edge nodes (public databases, Phase 12e; public
+	// service ports, Phase 15c).
+	PublicPorts func() []PublicPort
+}
+
+// PublicPort is a port the host firewall opens on the controller and edge
+// nodes.
+type PublicPort struct {
+	Port     string // number or range
+	Protocol string // tcp (default) or udp
+	Sources  []string
+	// Kind names the rule ("database", "service").
+	Kind string
 }
 
 type Manager struct {
@@ -267,21 +278,39 @@ func FirewallFor(self store.NodeNetwork, all []store.NodeNetwork, policies []sto
 			fw.ClusterSources = append(fw.ClusterSources, host)
 		}
 	}
-	var public []string
+	var public []PublicPort
 	if opts.PublicPorts != nil {
 		public = opts.PublicPorts()
+	}
+	rule := func(prefix string, p PublicPort) *agentv1.FirewallRule {
+		proto := p.Protocol
+		if proto == "" {
+			proto = "tcp"
+		}
+		kind := p.Kind
+		if kind == "" {
+			kind = "database"
+		}
+		desc := "public databases (built-in)"
+		if kind == "service" {
+			desc = "public service port (built-in)"
+		}
+		return &agentv1.FirewallRule{Id: "builtin:" + prefix + kind + "-" + proto + "-" + p.Port, Protocol: proto, Ports: p.Port, Sources: p.Sources, Description: desc}
 	}
 	if self.NodeName == ControllerNode {
 		for _, p := range opts.ControllerPorts {
 			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:controller-" + p, Protocol: "tcp", Ports: p, Description: "controller (built-in)"})
 		}
 		for _, p := range public {
-			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:database-" + p, Protocol: "tcp", Ports: p, Description: "public databases (built-in)"})
+			fw.Rules = append(fw.Rules, rule("", p))
 		}
 	}
 	if opts.IsEdge != nil && opts.IsEdge(self.NodeID) {
-		for _, p := range append([]string{"80", "443"}, public...) {
+		for _, p := range []string{"80", "443"} {
 			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:edge-" + p, Protocol: "tcp", Ports: p, Description: "edge node (built-in)"})
+		}
+		for _, p := range public {
+			fw.Rules = append(fw.Rules, rule("edge-", p))
 		}
 	}
 	for _, p := range policies {

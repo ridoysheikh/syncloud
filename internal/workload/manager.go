@@ -86,6 +86,11 @@ type Manager struct {
 	// ImageAvailable reports whether an image can still be pulled (false
 	// once registry cleanup removed it); may be nil.
 	ImageAvailable func(ctx context.Context, image string) (bool, error)
+	// PublicPortRange is where public TCP/UDP ports are assigned from (zero:
+	// DefaultPublicPorts); OnPublicPorts runs when the set of public ports
+	// changes (Traefik entrypoints and firewall rules follow it).
+	PublicPortRange [2]int
+	OnPublicPorts   func()
 
 	queue    chan string
 	mu       sync.Mutex
@@ -439,6 +444,12 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			}
 		}
 		if !stillStopping {
+			hadPublic := false
+			if rows, err := m.st.ListRouting(ctx, sv.ID); err == nil {
+				for _, r := range rows {
+					hadPublic = hadPublic || r.PublicPort > 0
+				}
+			}
 			if err := m.st.DeleteService(ctx, sv.ID); err != nil {
 				m.log.Error("delete service", "service", sv.ID, "err", err)
 				return
@@ -448,6 +459,9 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			m.bus.Publish(TopicService, map[string]any{"id": sv.ID, "deleted": true})
 			if m.OnChange != nil {
 				m.OnChange()
+			}
+			if hadPublic && m.OnPublicPorts != nil {
+				m.OnPublicPorts() // its entrypoints and firewall rules go
 			}
 			return
 		}

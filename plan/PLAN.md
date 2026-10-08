@@ -2258,10 +2258,34 @@ The request: full deployment history with rollback options; commands after the b
 
 **Public TCP and UDP ports:**
 - **Port assignment:** a public port is assigned from a range on the controller and edge nodes (default 20000–20999, set in Settings › Network). It is shown as `<base>:<port>`, with an allow-list of CIDRs as for databases.
-- **Traefik changes:** Traefik entrypoints are static, so assigning or releasing a port changes the Traefik system task's spec, which is rolled out one replica at a time (as with etcd, §13c). The dashboard says that ingress replicas restart.
+- **Traefik changes:** Traefik entrypoints are static, so assigning or releasing a port changes the Traefik system task's spec and re-sends the edge replicas. They restart together; the dashboard says so before a port is opened or closed. Changing an allow-list changes only firewall rules, so no replica restarts.
 - **Port choice:** a port is chosen when it is made public and kept until it is released.
 
 **Project › Domains** (a new tab) lists every address in the project for the environment: generated, custom and TCP. Each row shows the service and port, DNS status and certificate status, with "Add domain" pointing at any service and port.
+
+**Progress 15c:** ✅ 2026-10-08.
+- **Store:** migration `00039_routing` adds the `service_routing` table (`generated`, unique `label`, unique `public_port`, `allow`). It rebuilds `domains` with `path`, `strip_prefix`, `redirect_to` and `UNIQUE(host, path)`.
+- **Workload:**
+  - `Routing` and `SetRouting`. Labels follow DNS-label rules, cannot be reserved names (`registry`, `git`, `db`, `www`), and cannot collide with another service's generated address or a custom domain.
+  - Public ports are the lowest free in `--public-ports` (default 20000–20999). They are released on close and when the service is deleted. `OnPublicPorts` fires when the set or an allow-list changes.
+  - `Routes` honours labels and the generated-address switch.
+  - Custom domains carry their path, prefix stripping and redirect. Removing by host removes every path of it; removing by ID removes one.
+  - `PublicRoutes` sends traffic to serving tasks.
+- **Traefik:**
+  - HTTP routes get `Host && PathPrefix` (the longest rule wins), a `stripPrefix` middleware, and a permanent `redirectRegex` that keeps the path.
+  - Plain TCP routers use `HostSNI(*)` without TLS, and a new UDP section carries UDP routes. Both are served without a base domain too.
+  - Entrypoints are `tcp-N` and `udp-N` on the controller's system task and the edge replicas.
+  - The host firewall opens public ports (TCP or UDP) on the controller and edge nodes, with the allow-list as sources (`mesh.PublicPort`).
+- **API, CLI, web:**
+  - API: `GET/PUT …/routing`, `GET /projects/{p}/addresses` (with DNS and certificate state), and domain `path`, `stripPrefix` and `redirectTo`. Domain IDs are accepted on delete.
+  - CLI: `synctl services routing`, `services expose` (`--public`, `--private`, `--allow`, `--label`, `--no-generated`), `services domains add --path --strip-prefix --redirect-to`, and `projects addresses`.
+  - Service › Networking holds the addresses (generated, label, public port, allowed clients), custom domains (route with a path and prefix stripping, or redirect), and the ports and health check form, which saves a revision. The service's endpoints include path domains and `tcp://` and `udp://` addresses.
+  - Project › Domains lists every address with DNS and certificate state, and can add a domain for any service.
+- **Fixes found on the way:** after a controller restart the system Traefik spec was rendered before the workload manager existed, so Traefik restarted without its public entrypoints. It is now rendered again before agents connect, and restarts no longer touch Traefik (verified on the test cluster).
+- **Tests:**
+  - Unit: `TestRoutingAndDomains` and `TestServiceRoutesPathsRedirectsAndPublicPorts`.
+  - e2e: the new `test/e2e/ports.sh` (labels, the generated switch, shared host by path, redirects, a public TCP port carrying traffic, a UDP route, allow-lists, firewall rules, release on close and delete, synctl) and `services.sh` pass.
+  - On the test cluster, the system Traefik restarted once with `--entrypoints.tcp-20000.address=:20000` and served the port.
 
 #### 15d: Project settings
 

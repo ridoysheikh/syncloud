@@ -15,7 +15,27 @@ import (
 type Dynamic struct {
 	HTTP HTTPConfig `json:"http"`
 	TCP  *TCPConfig `json:"tcp,omitempty"`
+	UDP  *UDPConfig `json:"udp,omitempty"`
 	TLS  *TLSConfig `json:"tls,omitempty"`
+}
+
+// UDPConfig carries public UDP ports of services (Phase 15c).
+type UDPConfig struct {
+	Routers  map[string]UDPRouter  `json:"routers"`
+	Services map[string]UDPService `json:"services"`
+}
+
+type UDPRouter struct {
+	EntryPoints []string `json:"entryPoints"`
+	Service     string   `json:"service"`
+}
+
+type UDPService struct {
+	LoadBalancer UDPLoadBalancer `json:"loadBalancer"`
+}
+
+type UDPLoadBalancer struct {
+	Servers []TCPServer `json:"servers"` // {address}
 }
 
 // TCPConfig carries the public database endpoints (Phase 12e): TLS is
@@ -31,7 +51,7 @@ type TCPRouter struct {
 	EntryPoints []string   `json:"entryPoints"`
 	Middlewares []string   `json:"middlewares,omitempty"`
 	Service     string     `json:"service"`
-	TLS         *RouterTLS `json:"tls"`
+	TLS         *RouterTLS `json:"tls,omitempty"`
 }
 
 type TCPService struct {
@@ -54,11 +74,19 @@ type TCPIPAllowList struct {
 	SourceRange []string `json:"sourceRange"`
 }
 
-// TCPRoute is one public TLS endpoint (a database's).
+// TCPRoute is one public TLS endpoint (a database's), or with Plain a
+// public TCP port of a service passed through as is (Phase 15c).
 type TCPRoute struct {
 	Name, Entrypoint, Host string
 	Servers                []string // host:port
 	Allow                  []string // client CIDRs (empty: anyone)
+	Plain                  bool
+}
+
+// UDPRoute is a public UDP port of a service.
+type UDPRoute struct {
+	Name, Entrypoint string
+	Servers          []string // host:port
 }
 
 type HTTPConfig struct {
@@ -100,6 +128,7 @@ type Server struct {
 }
 
 type Middleware struct {
+	StripPrefix    *StripPrefix    `json:"stripPrefix,omitempty"`
 	RedirectScheme *RedirectScheme `json:"redirectScheme,omitempty"`
 	RedirectRegex  *RedirectRegex  `json:"redirectRegex,omitempty"`
 	Retry          *Retry          `json:"retry,omitempty"`
@@ -110,6 +139,10 @@ type Middleware struct {
 	Compress       *Compress       `json:"compress,omitempty"`
 	CircuitBreaker *CircuitBreaker `json:"circuitBreaker,omitempty"`
 	Buffering      *Buffering      `json:"buffering,omitempty"`
+}
+
+type StripPrefix struct {
+	Prefixes []string `json:"prefixes"`
 }
 
 type Retry struct {
@@ -128,6 +161,12 @@ type ServiceRoute struct {
 	OwnRetry    bool
 	// HealthPath makes Traefik probe each task too ("" = no check).
 	HealthPath string
+	// Path limits the route to a prefix ("" = the whole host); StripPrefix
+	// removes it before forwarding. RedirectTo answers with a permanent
+	// redirect to that host instead of forwarding (Phase 15c).
+	Path        string
+	StripPrefix bool
+	RedirectTo  string
 }
 
 type RedirectScheme struct {
@@ -181,8 +220,10 @@ type Provider struct {
 	// Settings returns the global settings (nil: the defaults).
 	Settings func() Settings
 	// TCPRoutes returns the public database endpoints (only served with a
-	// base domain: they need certificates).
+	// base domain: they need certificates) and public TCP ports of services.
 	TCPRoutes func() []TCPRoute
+	// UDPRoutes returns public UDP ports of services.
+	UDPRoutes func() []UDPRoute
 	// GitHost returns the built-in Git server's hostname ("" when it is
 	// off, §5.8); GitServerURL is where Traefik reaches it.
 	GitHost      func() string
@@ -233,6 +274,21 @@ func (p *Provider) Config() Dynamic {
 		if retry && !r.OwnRetry {
 			chain = append(chain, mwRetry)
 		}
+		rule := host(r.Host)
+		if r.Path != "" {
+			rule += " && " + pathPrefix(r.Path)
+			if r.StripPrefix {
+				mw := r.Name + "-strip"
+				d.HTTP.Middlewares[mw] = Middleware{StripPrefix: &StripPrefix{Prefixes: []string{r.Path}}}
+				chain = append([]string{mw}, chain...)
+			}
+		}
+		if r.RedirectTo != "" {
+			mw := r.Name + "-redirect"
+			d.HTTP.Middlewares[mw] = Middleware{RedirectRegex: &RedirectRegex{
+				Regex: `^https?://[^/]+(.*)`, Replacement: "https://" + hostOnly(r.RedirectTo) + "${1}", Permanent: true}}
+			chain = []string{mw}
+		}
 		servers := make([]Server, 0, len(r.Servers))
 		for _, u := range r.Servers {
 			servers = append(servers, Server{URL: u})
@@ -245,14 +301,14 @@ func (p *Provider) Config() Dynamic {
 		}
 		d.HTTP.Services[r.Name] = Service{LoadBalancer: lb}
 		if base == "" {
-			d.HTTP.Routers[r.Name] = Router{Rule: host(r.Host), EntryPoints: web, Middlewares: chain, Service: r.Name}
+			d.HTTP.Routers[r.Name] = Router{Rule: rule, EntryPoints: web, Middlewares: chain, Service: r.Name}
 			continue
 		}
-		d.HTTP.Routers[r.Name] = Router{Rule: host(r.Host), EntryPoints: websecure, Middlewares: chain, Service: r.Name, TLS: &RouterTLS{}}
+		d.HTTP.Routers[r.Name] = Router{Rule: rule, EntryPoints: websecure, Middlewares: chain, Service: r.Name, TLS: &RouterTLS{}}
 		if set.RedirectHTTPS {
-			d.HTTP.Routers[r.Name+"-http"] = Router{Rule: host(r.Host), EntryPoints: web, Middlewares: []string{"syncloud-https"}, Service: r.Name}
+			d.HTTP.Routers[r.Name+"-http"] = Router{Rule: rule, EntryPoints: web, Middlewares: []string{"syncloud-https"}, Service: r.Name}
 		} else {
-			d.HTTP.Routers[r.Name+"-http"] = Router{Rule: host(r.Host), EntryPoints: web, Middlewares: chain, Service: r.Name}
+			d.HTTP.Routers[r.Name+"-http"] = Router{Rule: rule, EntryPoints: web, Middlewares: chain, Service: r.Name}
 		}
 	}
 
@@ -261,6 +317,19 @@ func (p *Provider) Config() Dynamic {
 		d.HTTP.Routers["syncloud-dashboard"] = Router{Rule: "PathPrefix(`/`)", Priority: 1, EntryPoints: web, Service: svcController}
 		if p.RegistryURL != "" {
 			d.HTTP.Routers["syncloud-registry"] = Router{Rule: host(DevRegistryHost), EntryPoints: web, Service: svcRegistry}
+		}
+		// Plain TCP and UDP ports need no certificates.
+		if p.TCPRoutes != nil {
+			var plain []TCPRoute
+			for _, r := range p.TCPRoutes() {
+				if r.Plain {
+					plain = append(plain, r)
+				}
+			}
+			d.TCP = tcpConfig(plain)
+		}
+		if p.UDPRoutes != nil {
+			d.UDP = udpConfig(p.UDPRoutes())
 		}
 		return d
 	}
@@ -303,7 +372,29 @@ func (p *Provider) Config() Dynamic {
 	if p.TCPRoutes != nil {
 		d.TCP = tcpConfig(p.TCPRoutes())
 	}
+	if p.UDPRoutes != nil {
+		d.UDP = udpConfig(p.UDPRoutes())
+	}
 	return d
+}
+
+func udpConfig(routes []UDPRoute) *UDPConfig {
+	c := &UDPConfig{Routers: map[string]UDPRouter{}, Services: map[string]UDPService{}}
+	for _, r := range routes {
+		if len(r.Servers) == 0 {
+			continue
+		}
+		lb := UDPLoadBalancer{}
+		for _, a := range r.Servers {
+			lb.Servers = append(lb.Servers, TCPServer{Address: a})
+		}
+		c.Services[r.Name] = UDPService{LoadBalancer: lb}
+		c.Routers[r.Name] = UDPRouter{EntryPoints: []string{r.Entrypoint}, Service: r.Name}
+	}
+	if len(c.Routers) == 0 {
+		return nil
+	}
+	return c
 }
 
 func tcpConfig(routes []TCPRoute) *TCPConfig {
@@ -321,6 +412,9 @@ func tcpConfig(routes []TCPRoute) *TCPConfig {
 		}
 		c.Services[r.Name] = TCPService{LoadBalancer: lb}
 		rt := TCPRouter{Rule: hostSNI(r.Host), EntryPoints: []string{r.Entrypoint}, Service: r.Name, TLS: &RouterTLS{}}
+		if r.Plain {
+			rt.Rule, rt.TLS = "HostSNI(`*`)", nil // raw TCP: no TLS, any client
+		}
 		if len(r.Allow) > 0 {
 			mw := r.Name + "-allow"
 			c.Middlewares[mw] = TCPMiddleware{IPAllowList: &TCPIPAllowList{SourceRange: r.Allow}}
@@ -343,6 +437,25 @@ func hostSNI(h string) string {
 }
 
 var hostSafe = regexp.MustCompile(`^[a-z0-9.-]+$`)
+
+var pathSafe = regexp.MustCompile(`^(/[A-Za-z0-9._~!$&'()*+,;=:@%-]+)+$`)
+
+// pathPrefix builds a PathPrefix matcher; paths are validated before they
+// are stored.
+func pathPrefix(p string) string {
+	if !pathSafe.MatchString(p) || strings.Contains(p, "`") {
+		p = "/invalid.invalid"
+	}
+	return "PathPrefix(`" + p + "`)"
+}
+
+// hostOnly guards a redirect target.
+func hostOnly(h string) string {
+	if !hostSafe.MatchString(h) {
+		return "invalid.invalid"
+	}
+	return h
+}
 
 // host builds a Host matcher. Domains are validated before they are stored;
 // this is a last guard against breaking out of the rule's backticks.

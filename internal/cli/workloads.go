@@ -105,7 +105,39 @@ func (a *app) projectsCmd() *cobra.Command {
 	}
 	update.Flags().StringVar(&updDesc, "description", "", "description")
 	update.Flags().IntVar(&updWindow, "rollback-window", 10, "revisions whose images registry cleanup keeps (1–50)")
+	var addrEnv string
+	addresses := &cobra.Command{
+		Use: "addresses PROJECT", Aliases: []string{"domains"}, Short: "Every address of a project's services: generated, custom domains and public ports", Args: cobra.ExactArgs(1),
+		Annotations: op("listProjectAddresses"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			as, err := c.ProjectAddresses(ctx(cmd), args[0], addrEnv)
+			if err != nil {
+				return err
+			}
+			rows := make([][]string, 0, len(as))
+			for _, x := range as {
+				state := "-"
+				if x.DNS != nil && !x.DNS.Ready {
+					state = "waiting for DNS"
+				} else if x.Certificate != nil {
+					state = "certificate " + x.Certificate.Status
+				}
+				target := x.Service + ":" + x.Port
+				if x.RedirectTo != "" {
+					target = "→ " + x.RedirectTo
+				}
+				rows = append(rows, []string{x.Kind, x.Address, target, x.Protocol, state})
+			}
+			return a.printer().table(as, []string{"KIND", "ADDRESS", "TARGET", "PROTOCOL", "STATE"}, rows)
+		},
+	}
+	addresses.Flags().StringVarP(&addrEnv, "environment", "e", "production", "environment")
 	p.AddCommand(
+		addresses,
 		update,
 		deployments,
 		a.projectNodesCmd(),
@@ -496,21 +528,97 @@ func (a *app) servicesCmd() *cobra.Command {
 	_ = apply.MarkFlagRequired("file")
 
 	domains := &cobra.Command{Use: "domains", Short: "Custom domains of a service"}
-	var port string
-	add := &cobra.Command{
-		Use: "add SERVICE HOST", Short: "Route a custom domain to a service", Args: cobra.ExactArgs(2),
-		Annotations: op("addServiceDomain"),
+	printRouting := func(rs []client.PortRoute) error {
+		rows := make([][]string, 0, len(rs))
+		for _, r := range rs {
+			reach := "-"
+			switch {
+			case r.Protocol == "http" && r.Host != "":
+				reach = r.Host
+			case r.Protocol == "http":
+				reach = "generated address off"
+			case r.Public:
+				reach = r.Address
+				if len(r.Allow) > 0 {
+					reach += " (from " + strings.Join(r.Allow, ", ") + ")"
+				}
+			default:
+				reach = "private"
+			}
+			rows = append(rows, []string{r.Port, fmt.Sprint(r.Container), r.Protocol, reach})
+		}
+		return a.printer().table(rs, []string{"PORT", "CONTAINER", "PROTOCOL", "REACHED AT"}, rows)
+	}
+	var exPublic, exPrivate, exNoGenerated, exGenerated bool
+	var exLabel string
+	var exAllow []string
+	expose := &cobra.Command{
+		Use: "expose SERVICE PORT", Short: "Set how a port is reached: --public/--private (tcp, udp), --label or --no-generated (http)", Args: cobra.ExactArgs(2),
+		Annotations: op("setServiceRouting"),
 		RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
-			chk, err := c.AddServiceDomain(ctx(cmd), s.project, s.env, args[0], args[1], port)
+			in := client.RoutingInput{}
+			f := cmd.Flags()
+			if exPublic || exPrivate {
+				v := exPublic
+				in.Public = &v
+			}
+			if exNoGenerated || exGenerated {
+				v := exGenerated
+				in.Generated = &v
+			}
+			if f.Changed("label") {
+				in.Label = &exLabel
+			}
+			if f.Changed("allow") {
+				in.Allow = exAllow
+			}
+			rs, err := c.SetRouting(ctx(cmd), s.project, s.env, args[0], map[string]client.RoutingInput{args[1]: in})
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(a.out, "Routing %s to %s.\n", args[1], args[0])
+			return printRouting(rs)
+		}),
+	}
+	expose.Flags().BoolVar(&exPublic, "public", false, "tcp/udp: open a public port on the controller and edge nodes")
+	expose.Flags().BoolVar(&exPrivate, "private", false, "tcp/udp: close its public port")
+	expose.Flags().StringSliceVar(&exAllow, "allow", nil, "tcp/udp: only these client addresses or CIDRs")
+	expose.Flags().StringVar(&exLabel, "label", "", "http: serve LABEL.<base domain> instead of the generated name (empty: the generated name)")
+	expose.Flags().BoolVar(&exNoGenerated, "no-generated", false, "http: stop serving the generated address (custom domains only)")
+	expose.Flags().BoolVar(&exGenerated, "generated", false, "http: serve the generated address again")
+	svc.AddCommand(expose, &cobra.Command{
+		Use: "routing SERVICE", Aliases: []string{"ports"}, Short: "How each port of a service is reached", Args: cobra.ExactArgs(1),
+		Annotations: op("getServiceRouting"),
+		RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+			rs, err := c.GetRouting(ctx(cmd), s.project, s.env, args[0])
+			if err != nil {
+				return err
+			}
+			return printRouting(rs)
+		}),
+	})
+	var port string
+	var domOpts client.DomainOptions
+	add := &cobra.Command{
+		Use: "add SERVICE HOST", Short: "Route a custom domain (or a path of it) to a service, or redirect it", Args: cobra.ExactArgs(2),
+		Annotations: op("addServiceDomain"),
+		RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+			chk, err := c.AddServiceDomain(ctx(cmd), s.project, s.env, args[0], args[1], port, domOpts)
+			if err != nil {
+				return err
+			}
+			if domOpts.RedirectTo != "" {
+				fmt.Fprintf(a.out, "Redirecting %s to %s.\n", args[1], domOpts.RedirectTo)
+			} else {
+				fmt.Fprintf(a.out, "Routing %s%s to %s.\n", args[1], domOpts.Path, args[0])
+			}
 			printCheck(a, chk)
 			return nil
 		}),
 	}
 	add.Flags().StringVar(&port, "port", "", "http port name (default: the first)")
+	add.Flags().StringVar(&domOpts.Path, "path", "", "route only this path prefix, e.g. /api (several services can share a host)")
+	add.Flags().BoolVar(&domOpts.StripPrefix, "strip-prefix", false, "remove the path prefix before forwarding")
+	add.Flags().StringVar(&domOpts.RedirectTo, "redirect-to", "", "answer with a permanent redirect to this host instead (e.g. www to apex)")
 	domains.AddCommand(add,
 		&cobra.Command{
 			Use: "list SERVICE", Aliases: []string{"ls"}, Short: "List a service's custom domains", Args: cobra.ExactArgs(1),
@@ -526,13 +634,19 @@ func (a *app) servicesCmd() *cobra.Command {
 					if !d.DNS.Ready {
 						dns = "waiting for " + orDash(d.DNS.Record)
 					}
-					rows = append(rows, []string{d.Host, d.Port, dns})
+					target := d.Port
+					if d.RedirectTo != "" {
+						target = "→ " + d.RedirectTo
+					} else if d.StripPrefix {
+						target += " (prefix stripped)"
+					}
+					rows = append(rows, []string{d.ID, d.Host + d.Path, target, dns})
 				}
-				return a.printer().table(ds, []string{"HOST", "PORT", "DNS"}, rows)
+				return a.printer().table(ds, []string{"ID", "HOST", "TARGET", "DNS"}, rows)
 			}),
 		},
 		&cobra.Command{
-			Use: "remove SERVICE HOST", Aliases: []string{"rm"}, Short: "Stop routing a custom domain", Args: cobra.ExactArgs(2),
+			Use: "remove SERVICE HOST|ID", Aliases: []string{"rm"}, Short: "Stop routing a custom domain (every path of a host, or one by ID)", Args: cobra.ExactArgs(2),
 			Annotations: op("removeServiceDomain"),
 			RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
 				if err := c.RemoveServiceDomain(ctx(cmd), s.project, s.env, args[0], args[1]); err != nil {

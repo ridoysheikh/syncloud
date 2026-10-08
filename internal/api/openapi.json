@@ -5177,6 +5177,18 @@
                   "port": {
                     "type": "string",
                     "description": "http port name (default: the first)"
+                  },
+                  "path": {
+                    "type": "string",
+                    "description": "route only this path prefix (several services can share a host)"
+                  },
+                  "stripPrefix": {
+                    "type": "boolean",
+                    "description": "remove the prefix before forwarding"
+                  },
+                  "redirectTo": {
+                    "type": "string",
+                    "description": "answer with a permanent redirect to this host instead (the whole host; path empty)"
                   }
                 }
               }
@@ -5217,7 +5229,7 @@
         "tags": [
           "services"
         ],
-        "summary": "Stop routing a custom domain",
+        "summary": "Stop routing a custom domain: a domain ID, or a host (every path of it)",
         "parameters": [
           {
             "name": "project",
@@ -14849,6 +14861,192 @@
           }
         }
       }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/routing": {
+      "get": {
+        "operationId": "getServiceRouting",
+        "tags": [
+          "services"
+        ],
+        "summary": "How each port of a service is reached: generated address and label (http), public port (tcp, udp)",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PortRoute"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "setServiceRouting",
+        "tags": [
+          "services"
+        ],
+        "summary": "Change how ports are reached; does not redeploy. Making a tcp/udp port public assigns a port and restarts the Traefik replicas with a new entrypoint.",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ports": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/RoutingInput"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PortRoute"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/addresses": {
+      "get": {
+        "operationId": "listProjectAddresses",
+        "tags": [
+          "projects"
+        ],
+        "summary": "Every address of a project's services in one environment: generated addresses, custom domains (with DNS and certificate state) and public ports",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "environment name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ProjectAddress"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -16499,6 +16697,15 @@
           },
           "dns": {
             "$ref": "#/components/schemas/DomainCheck"
+          },
+          "path": {
+            "type": "string"
+          },
+          "stripPrefix": {
+            "type": "boolean"
+          },
+          "redirectTo": {
+            "type": "string"
           }
         }
       },
@@ -19742,6 +19949,144 @@
               ]
             },
             "description": "build-time variables (Dockerfile build arguments and Nixpacks environment); null keeps a stored value, names left out are removed"
+          }
+        }
+      },
+      "PortRoute": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "string"
+          },
+          "container": {
+            "type": "integer"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "http",
+              "tcp",
+              "udp"
+            ]
+          },
+          "generated": {
+            "type": "boolean",
+            "description": "http: the generated address is served"
+          },
+          "label": {
+            "type": "string",
+            "description": "http: serve <label>.<base domain> instead of the generated name"
+          },
+          "host": {
+            "type": "string",
+            "description": "http: the generated address, when served"
+          },
+          "public": {
+            "type": "boolean",
+            "description": "tcp/udp: has a public port on the controller and edge nodes"
+          },
+          "publicPort": {
+            "type": "integer"
+          },
+          "address": {
+            "type": "string",
+            "description": "tcp/udp: host:port clients connect to"
+          },
+          "allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "tcp/udp: client CIDRs (empty: anyone)"
+          }
+        }
+      },
+      "RoutingInput": {
+        "type": "object",
+        "properties": {
+          "generated": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "description": "fields left out keep their value"
+      },
+      "ProjectAddress": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "generated",
+              "domain",
+              "public"
+            ]
+          },
+          "service": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "port": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "domainId": {
+            "type": "string"
+          },
+          "redirectTo": {
+            "type": "string"
+          },
+          "stripPrefix": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "boolean"
+          },
+          "allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dns": {
+            "type": "object",
+            "description": "custom domains: whether DNS points here"
+          },
+          "certificate": {
+            "type": "object",
+            "properties": {
+              "issuer": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "notAfter": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "error": {
+                "type": "string"
+              }
+            }
           }
         }
       }

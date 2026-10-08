@@ -8,6 +8,7 @@ import (
 
 	"syncloud/internal/domain"
 	"syncloud/internal/store"
+	"syncloud/internal/workload"
 )
 
 type domainCheck struct {
@@ -67,8 +68,11 @@ func (s *Server) handleAddServiceDomain(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req struct {
-		Host string `json:"host"`
-		Port string `json:"port"`
+		Host        string `json:"host"`
+		Port        string `json:"port"`
+		Path        string `json:"path"`
+		StripPrefix bool   `json:"stripPrefix"`
+		RedirectTo  string `json:"redirectTo"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -84,13 +88,20 @@ func (s *Server) handleAddServiceDomain(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	d, err := s.workloads.AddDomain(r.Context(), sv.ID, host, req.Port)
+	in := workload.DomainInput{Host: host, Port: req.Port, Path: req.Path, StripPrefix: req.StripPrefix}
+	if req.RedirectTo != "" {
+		if in.RedirectTo, err = domain.Normalize(req.RedirectTo); err != nil {
+			writeError(w, http.StatusBadRequest, CodeBadRequest, "redirectTo: "+err.Error())
+			return
+		}
+	}
+	d, err := s.workloads.AddDomain(r.Context(), sv.ID, in)
 	if err != nil {
 		s.workloadError(w, "add domain", err)
 		return
 	}
 	u, _ := currentUser(r.Context())
-	s.audit(r, u.ID, "service:AddDomain", "srn:syncloud:service/"+sv.Project+"/"+sv.Environment+"/"+sv.Name, map[string]any{"host": host})
+	s.audit(r, u.ID, "service:AddDomain", "srn:syncloud:service/"+sv.Project+"/"+sv.Environment+"/"+sv.Name, map[string]any{"host": host, "path": d.Path, "redirectTo": d.RedirectTo})
 	writeJSON(w, http.StatusCreated, map[string]any{"domain": d, "dns": s.checkDomain(r.Context(), host)})
 }
 

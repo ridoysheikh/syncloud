@@ -29,6 +29,9 @@ type Controller struct {
 	// PublicPostgres is Traefik's entrypoint for public PostgreSQL databases
 	// (STARTTLS, routed by SNI; Phase 13).
 	PublicPostgres string
+	// PublicPorts is the range public TCP/UDP service ports are assigned
+	// from ("20000-20999"; Phase 15c).
+	PublicPorts string
 	// PostgresImage overrides PostgreSQL images per major version
 	// ("18=img,17=img").
 	PostgresImage string
@@ -97,6 +100,7 @@ func LoadController(args []string) (Controller, error) {
 	fs.StringVar(&c.PublicHTTPS, "public-https", env("SYNCLOUD_PUBLIC_HTTPS", ""), "Traefik HTTPS entrypoint (default :443)")
 	fs.StringVar(&c.PublicValkey, "public-valkey", env("SYNCLOUD_PUBLIC_VALKEY", ""), "Traefik entrypoint of public Valkey databases (default :6379, dev 127.0.0.1:16379)")
 	fs.StringVar(&c.PublicPostgres, "public-postgres", env("SYNCLOUD_PUBLIC_POSTGRES", ""), "Traefik entrypoint of public PostgreSQL databases (default :5432, dev 127.0.0.1:15432)")
+	fs.StringVar(&c.PublicPorts, "public-ports", env("SYNCLOUD_PUBLIC_PORTS", "20000-20999"), "the range public TCP/UDP service ports are assigned from (LOW-HIGH)")
 	fs.StringVar(&c.PostgresImage, "postgres-image", env("SYNCLOUD_POSTGRES_IMAGE", ""), "PostgreSQL images per major version, as VERSION=IMAGE[,VERSION=IMAGE] (default: the release's pinned images)")
 	fs.StringVar(&c.TraefikAdmin, "traefik-admin", env("SYNCLOUD_TRAEFIK_ADMIN", "127.0.0.1:8082"), "Traefik ping/metrics address (loopback)")
 	fs.BoolVar(&c.SystemTasks, "system-tasks", env("SYNCLOUD_SYSTEM_TASKS", "1") == "1", "run platform components (Traefik, metrics, logs) on the local node")

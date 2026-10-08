@@ -111,3 +111,52 @@ func TestTCPRoutesForPublicDatabases(t *testing.T) {
 		t.Errorf("router JSON: %s", b)
 	}
 }
+
+func TestServiceRoutesPathsRedirectsAndPublicPorts(t *testing.T) {
+	domain := ""
+	p := &Provider{ControllerURL: "http://127.0.0.1:7070", BaseDomain: func() string { return domain },
+		ServiceRoutes: func() []ServiceRoute {
+			return []ServiceRoute{
+				{Name: "dom-a", Host: "shop.example.com", Path: "/api", StripPrefix: true, Servers: []string{"http://10.91.1.2:8080"}},
+				{Name: "dom-b", Host: "shop.example.com", Servers: []string{"http://10.91.1.3:80"}},
+				{Name: "dom-c", Host: "www.shop.example.com", RedirectTo: "shop.example.com", Servers: []string{"http://10.91.1.3:80"}},
+			}
+		},
+		TCPRoutes: func() []TCPRoute {
+			return []TCPRoute{
+				{Name: "pub-tcp-20001", Entrypoint: "tcp-20001", Servers: []string{"10.91.1.4:5000"}, Plain: true, Allow: []string{"198.51.100.0/24"}},
+				{Name: "db-1", Entrypoint: "valkey", Host: "cache.db.example.com", Servers: []string{"10.91.1.2:6379"}},
+			}
+		},
+		UDPRoutes: func() []UDPRoute {
+			return []UDPRoute{{Name: "pub-udp-20002", Entrypoint: "udp-20002", Servers: []string{"10.91.1.5:53"}}}
+		},
+	}
+	// Without a base domain the plain TCP and UDP ports are still served.
+	d := p.Config()
+	if d.TCP == nil || len(d.TCP.Routers) != 1 || d.UDP == nil || d.UDP.Routers["pub-udp-20002"].EntryPoints[0] != "udp-20002" {
+		t.Fatalf("dev config: tcp %+v udp %+v", d.TCP, d.UDP)
+	}
+	domain = "example.com"
+	d = p.Config()
+	a := d.HTTP.Routers["dom-a"]
+	if a.Rule != "Host(`shop.example.com`) && PathPrefix(`/api`)" || a.Middlewares[0] != "dom-a-strip" ||
+		d.HTTP.Middlewares["dom-a-strip"].StripPrefix.Prefixes[0] != "/api" {
+		t.Errorf("path route: %+v", a)
+	}
+	if b := d.HTTP.Routers["dom-b"]; b.Rule != "Host(`shop.example.com`)" {
+		t.Errorf("host route: %+v", b)
+	}
+	c := d.HTTP.Routers["dom-c"]
+	if len(c.Middlewares) != 1 || d.HTTP.Middlewares[c.Middlewares[0]].RedirectRegex.Replacement != "https://shop.example.com${1}" {
+		t.Errorf("redirect: %+v %+v", c, d.HTTP.Middlewares[c.Middlewares[0]])
+	}
+	r := d.TCP.Routers["pub-tcp-20001"]
+	b, _ := json.Marshal(r)
+	if r.Rule != "HostSNI(`*`)" || r.TLS != nil || strings.Contains(string(b), `"tls"`) || len(r.Middlewares) != 1 {
+		t.Errorf("plain TCP router: %s", b)
+	}
+	if d.TCP.Routers["db-1"].TLS == nil {
+		t.Error("the database route lost TLS")
+	}
+}

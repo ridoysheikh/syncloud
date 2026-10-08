@@ -21,7 +21,7 @@ import { DataTable } from "@/ui/DataTable";
 import { Alert, Button, IconButton, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { since } from "@/lib/nodes";
-import { DomainsPanel } from "./DomainsPanel";
+import { NetworkingTab } from "./NetworkingTab";
 import { MetricsPanel } from "@/modules/projects/MetricsPanel";
 import {
   toRows,
@@ -58,6 +58,7 @@ interface Revision {
 type Tab =
   | "metrics"
   | "traffic"
+  | "networking"
   | "autoscaling"
   | "security"
   | "tasks"
@@ -232,18 +233,24 @@ export function ServicePage() {
               <>
                 <dt className="text-muted">Public</dt>
                 <dd className="flex flex-col gap-0.5">
-                  {svc.endpoints.map((e) => (
-                    <a
-                      key={e}
-                      href={e}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="hover:text-accent inline-flex min-w-0 items-center gap-1 font-mono"
-                    >
-                      <span className="break-all">{e}</span>{" "}
-                      <ExternalLink className="size-3 shrink-0" />
-                    </a>
-                  ))}
+                  {svc.endpoints.map((e) =>
+                    e.startsWith("http") ? (
+                      <a
+                        key={e}
+                        href={e}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="hover:text-accent inline-flex min-w-0 items-center gap-1 font-mono"
+                      >
+                        <span className="break-all">{e}</span>{" "}
+                        <ExternalLink className="size-3 shrink-0" />
+                      </a>
+                    ) : (
+                      <span key={e} className="font-mono break-all">
+                        {e}
+                      </span>
+                    ),
+                  )}
                 </dd>
               </>
             )}
@@ -263,16 +270,11 @@ export function ServicePage() {
           </dl>
         </Panel>
       )}
-      <DomainsPanel
-        path={path}
-        httpPorts={(svc.spec.ports ?? [])
-          .filter((p) => (p.protocol ?? "http") === "http")
-          .map((p) => p.name ?? String(p.container))}
-      />
       <Tabs
         tabs={[
           "metrics",
           "traffic",
+          "networking",
           "autoscaling",
           "security",
           "logs",
@@ -303,6 +305,7 @@ export function ServicePage() {
           <RequestsTail filter={{ project, environment: env, service: name }} />
         </div>
       )}
+      {tab === "networking" && <NetworkingTab path={path} spec={svc.spec} />}
       {tab === "autoscaling" && (
         <AutoscalingPanel
           path={path}

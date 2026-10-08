@@ -21,6 +21,11 @@ type Route struct {
 	// probes it too, so a task on a crashed node leaves the route within
 	// seconds (§5.6).
 	HealthPath string
+	// Path limits a custom domain's route to a prefix; StripPrefix removes
+	// it before forwarding; RedirectTo answers with a 301 to that host.
+	Path        string
+	StripPrefix bool
+	RedirectTo  string
 }
 
 // HostName is the default hostname of a service's HTTP port:
@@ -89,6 +94,15 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 	for _, d := range domains {
 		byService[d.ServiceID] = append(byService[d.ServiceID], d)
 	}
+	routing := map[string]map[string]store.PortRouting{}
+	if rows, err := m.st.ListRouting(ctx, ""); err == nil {
+		for _, r := range rows {
+			if routing[r.ServiceID] == nil {
+				routing[r.ServiceID] = map[string]store.PortRouting{}
+			}
+			routing[r.ServiceID][r.PortName] = r
+		}
+	}
 	running := map[string][]store.Task{}
 	for _, t := range tasks {
 		if t.IP != "" && m.serving(ctx, t) && (m.Reachable == nil || m.Reachable(t.ID)) {
@@ -105,7 +119,7 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 			continue
 		}
 		for i, p := range spec.HTTPPorts() {
-			r := Route{Name: fmt.Sprintf("svc-%s-%s", sv.ID, p.Name), Host: HostName(sv, p, i == 0, base), ServiceID: sv.ID}
+			r := Route{Name: fmt.Sprintf("svc-%s-%s", sv.ID, p.Name), Host: generatedHost(sv, p, i == 0, base, portRouting(routing[sv.ID], p.Name)), ServiceID: sv.ID}
 			if h := spec.Health; h != nil && h.Type == "http" && (h.Port == "" && i == 0 || h.Port == p.Name) {
 				r.HealthPath = h.Path
 				if r.HealthPath == "" {
@@ -123,10 +137,13 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 				r.Servers = append(r.Servers, "http://"+net.JoinHostPort(t.IP, fmt.Sprint(port)))
 			}
 			sort.Strings(r.Servers)
-			out = append(out, r)
+			if r.Host != "" { // the generated address is on
+				out = append(out, r)
+			}
 			for _, d := range byService[sv.ID] {
 				if d.PortName == p.Name {
-					out = append(out, Route{Name: "dom-" + strings.TrimPrefix(d.ID, "dom_"), Host: d.Host, Servers: r.Servers, ServiceID: sv.ID, HealthPath: r.HealthPath})
+					out = append(out, Route{Name: "dom-" + strings.TrimPrefix(d.ID, "dom_"), Host: d.Host, Servers: r.Servers, ServiceID: sv.ID,
+						HealthPath: r.HealthPath, Path: d.Path, StripPrefix: d.StripPrefix, RedirectTo: d.RedirectTo})
 				}
 			}
 		}
@@ -144,11 +161,16 @@ func portByName(s Spec, name string, def int) int {
 	return def
 }
 
-// ServiceEndpoints returns a service's public URLs.
-func ServiceEndpoints(sv store.Service, spec Spec, base, scheme, port string) []string {
+// ServiceEndpoints returns a service's generated public URLs.
+func ServiceEndpoints(sv store.Service, spec Spec, base, scheme, port string, routing []store.PortRouting) []string {
 	var out []string
+	rs := routingByPort(routing)
 	for i, p := range spec.HTTPPorts() {
-		u := scheme + "://" + HostName(sv, p, i == 0, base)
+		h := generatedHost(sv, p, i == 0, base, portRouting(rs, p.Name))
+		if h == "" {
+			continue
+		}
+		u := scheme + "://" + h
 		if port != "" {
 			u += ":" + port
 		}

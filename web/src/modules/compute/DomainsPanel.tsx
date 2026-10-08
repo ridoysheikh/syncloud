@@ -5,7 +5,14 @@ import { api, ApiError } from "@/lib/api";
 import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
-import { Alert, Button, IconButton, Input, StatusBadge } from "@/ui/controls";
+import {
+  Alert,
+  Button,
+  Field,
+  IconButton,
+  Input,
+  StatusBadge,
+} from "@/ui/controls";
 import { confirmAction } from "@/ui/dialogs";
 
 interface DomainCheck {
@@ -19,12 +26,17 @@ interface DomainCheck {
 interface ServiceDomain {
   id: string;
   host: string;
+  /** A path prefix ("" = the whole host). */
+  path: string;
   port: string;
+  stripPrefix: boolean;
+  /** Answers with a 301 to this host instead of routing. */
+  redirectTo: string;
   createdAt: string;
   dns: DomainCheck;
 }
 
-/** Custom domains of a service with live DNS status (§5.7). */
+/** Custom domains of a service with live DNS status (§5.7, Phase 15c). */
 export function DomainsPanel({
   path,
   httpPorts,
@@ -43,63 +55,131 @@ export function DomainsPanel({
   });
   const [host, setHost] = useState("");
   const [port, setPort] = useState("");
+  const [mode, setMode] = useState<"route" | "redirect">("route");
+  const [prefix, setPrefix] = useState("");
+  const [strip, setStrip] = useState(false);
+  const [redirectTo, setRedirectTo] = useState("");
   const add = useMutation({
-    mutationFn: () => api("POST", `${path}/domains`, { host, port }),
+    mutationFn: () =>
+      api(
+        "POST",
+        `${path}/domains`,
+        mode === "redirect"
+          ? { host, redirectTo }
+          : { host, port, path: prefix, stripPrefix: strip && !!prefix },
+      ),
     onSuccess: () => {
       setHost("");
+      setPrefix("");
+      setStrip(false);
+      setRedirectTo("");
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["services"] });
     },
   });
   const remove = useMutation({
-    mutationFn: (h: string) =>
-      api("DELETE", `${path}/domains/${encodeURIComponent(h)}`),
+    mutationFn: (id: string) =>
+      api("DELETE", `${path}/domains/${encodeURIComponent(id)}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["services"] });
     },
   });
+  const ready =
+    host.trim() &&
+    (mode === "route"
+      ? !prefix || prefix.startsWith("/")
+      : !!redirectTo.trim());
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (host.trim()) add.mutate();
+    if (ready) add.mutate();
   };
   if (httpPorts.length === 0) return null;
+  const select =
+    "bg-bg border-line-strong h-8 rounded-input border px-2 text-sm outline-none";
 
   return (
-    <Panel
-      title="Custom domains"
-      flush
-      actions={
-        <form onSubmit={submit} className="flex items-center gap-1.5">
+    <Panel title="Custom domains" flush>
+      <form
+        onSubmit={submit}
+        className="border-line flex flex-wrap items-end gap-1.5 border-b p-3"
+      >
+        <Field label="Domain">
           <Input
             value={host}
             onChange={(e) => setHost(e.target.value)}
             placeholder="shop.example.com"
-            className="h-7 w-48 font-mono"
+            className="w-56 font-mono"
+            spellCheck={false}
           />
-          {httpPorts.length > 1 && (
-            <select
-              value={port}
-              onChange={(e) => setPort(e.target.value)}
-              className="bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs"
-            >
-              {httpPorts.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          )}
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={add.isPending || !host.trim()}
+        </Field>
+        <Field label="Action">
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as typeof mode)}
+            className={select}
           >
-            Add domain
-          </Button>
-        </form>
-      }
-    >
+            <option value="route">Route to this service</option>
+            <option value="redirect">Redirect to another host</option>
+          </select>
+        </Field>
+        {mode === "route" ? (
+          <>
+            <Field label="Path prefix (optional)">
+              <Input
+                value={prefix}
+                onChange={(e) => setPrefix(e.target.value)}
+                placeholder="/api"
+                className="w-36 font-mono"
+                spellCheck={false}
+              />
+            </Field>
+            {httpPorts.length > 1 && (
+              <Field label="Port">
+                <select
+                  value={port}
+                  onChange={(e) => setPort(e.target.value)}
+                  className={select}
+                >
+                  {httpPorts.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {prefix && (
+              <label className="flex h-8 items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={strip}
+                  onChange={(e) => setStrip(e.target.checked)}
+                  className="size-3.5"
+                />
+                Strip the prefix
+              </label>
+            )}
+          </>
+        ) : (
+          <Field label="Redirect to">
+            <Input
+              value={redirectTo}
+              onChange={(e) => setRedirectTo(e.target.value)}
+              placeholder="example.com"
+              className="w-56 font-mono"
+              spellCheck={false}
+            />
+          </Field>
+        )}
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={add.isPending || !ready}
+        >
+          Add domain
+        </Button>
+      </form>
       {add.error && (
         <div className="p-2">
           <Alert>
@@ -115,19 +195,39 @@ export function DomainsPanel({
         empty={
           !isLoading && (
             <EmptyState icon={Globe} title="No custom domains">
-              Point your own domain at this service. HTTPS certificates are
-              issued automatically once DNS is in place.
+              Point your own domain, or a path of it, at this service. Several
+              services can share a domain by path. HTTPS certificates are issued
+              automatically once DNS is in place.
             </EmptyState>
           )
         }
         columns={[
           {
             header: "Domain",
-            cell: (d) => <span className="font-mono">{d.host}</span>,
+            cell: (d) => (
+              <span className="font-mono break-all">
+                {d.host}
+                {d.path}
+              </span>
+            ),
           },
           {
-            header: "Port",
-            cell: (d) => <span className="text-muted">{d.port}</span>,
+            header: "Target",
+            cell: (d) => (
+              <span className="text-muted whitespace-nowrap">
+                {d.redirectTo ? (
+                  <>
+                    redirects to{" "}
+                    <span className="text-fg font-mono">{d.redirectTo}</span>
+                  </>
+                ) : (
+                  <>
+                    port {d.port}
+                    {d.stripPrefix && ", prefix stripped"}
+                  </>
+                )}
+              </span>
+            ),
           },
           {
             header: "DNS",
@@ -140,7 +240,7 @@ export function DomainsPanel({
                   <StatusBadge tone="warn">waiting for DNS</StatusBadge>
                   <span className="text-muted">
                     Create{" "}
-                    <code className="text-fg font-mono">
+                    <code className="text-fg font-mono break-all">
                       {d.dns.record || `A record → this server`}
                     </code>
                     {d.dns.addresses.length > 0 && (
@@ -156,8 +256,8 @@ export function DomainsPanel({
               <IconButton
                 label="Remove domain"
                 onClick={async () =>
-                  (await confirmAction(`Stop routing ${d.host}?`)) &&
-                  remove.mutate(d.host)
+                  (await confirmAction(`Stop routing ${d.host}${d.path}?`)) &&
+                  remove.mutate(d.id)
                 }
               >
                 <Trash2 className="size-3.5" />

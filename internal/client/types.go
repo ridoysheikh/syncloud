@@ -778,11 +778,14 @@ type DomainCheck struct {
 }
 
 type ServiceDomain struct {
-	ID        string      `json:"id"`
-	Host      string      `json:"host"`
-	Port      string      `json:"port"`
-	CreatedAt time.Time   `json:"createdAt"`
-	DNS       DomainCheck `json:"dns"`
+	ID          string      `json:"id"`
+	Host        string      `json:"host"`
+	Path        string      `json:"path"`
+	Port        string      `json:"port"`
+	StripPrefix bool        `json:"stripPrefix"`
+	RedirectTo  string      `json:"redirectTo"`
+	CreatedAt   time.Time   `json:"createdAt"`
+	DNS         DomainCheck `json:"dns"`
 }
 
 func (c *Client) ListServiceDomains(ctx context.Context, project, env, name string) ([]ServiceDomain, error) {
@@ -790,11 +793,74 @@ func (c *Client) ListServiceDomains(ctx context.Context, project, env, name stri
 	return out.Items, c.Do(ctx, "GET", svcPath(project, env, name)+"/domains", nil, &out)
 }
 
-func (c *Client) AddServiceDomain(ctx context.Context, project, env, name, host, port string) (DomainCheck, error) {
+// DomainOptions are a custom domain's path prefix, prefix stripping and
+// redirect (Phase 15c).
+type DomainOptions struct {
+	Path        string `json:"path,omitempty"`
+	StripPrefix bool   `json:"stripPrefix,omitempty"`
+	RedirectTo  string `json:"redirectTo,omitempty"`
+}
+
+func (c *Client) AddServiceDomain(ctx context.Context, project, env, name, host, port string, opts DomainOptions) (DomainCheck, error) {
 	var out struct {
 		DNS DomainCheck `json:"dns"`
 	}
-	return out.DNS, c.Do(ctx, "POST", svcPath(project, env, name)+"/domains", map[string]string{"host": host, "port": port}, &out)
+	body := map[string]any{"host": host, "port": port, "path": opts.Path, "stripPrefix": opts.StripPrefix, "redirectTo": opts.RedirectTo}
+	return out.DNS, c.Do(ctx, "POST", svcPath(project, env, name)+"/domains", body, &out)
+}
+
+// PortRoute is how one port of a service is reached.
+type PortRoute struct {
+	Port       string   `json:"port"`
+	Container  int      `json:"container"`
+	Protocol   string   `json:"protocol"`
+	Generated  bool     `json:"generated"`
+	Label      string   `json:"label"`
+	Host       string   `json:"host"`
+	Public     bool     `json:"public"`
+	PublicPort int      `json:"publicPort"`
+	Address    string   `json:"address"`
+	Allow      []string `json:"allow"`
+}
+
+// RoutingInput changes one port's routing; nil fields keep their value.
+type RoutingInput struct {
+	Generated *bool    `json:"generated,omitempty"`
+	Label     *string  `json:"label,omitempty"`
+	Public    *bool    `json:"public,omitempty"`
+	Allow     []string `json:"allow,omitempty"`
+}
+
+func (c *Client) GetRouting(ctx context.Context, project, env, name string) ([]PortRoute, error) {
+	var out list[PortRoute]
+	return out.Items, c.Do(ctx, "GET", svcPath(project, env, name)+"/routing", nil, &out)
+}
+
+func (c *Client) SetRouting(ctx context.Context, project, env, name string, ports map[string]RoutingInput) ([]PortRoute, error) {
+	var out list[PortRoute]
+	return out.Items, c.Do(ctx, "PUT", svcPath(project, env, name)+"/routing", map[string]any{"ports": ports}, &out)
+}
+
+// ProjectAddress is one way into a project's service.
+type ProjectAddress struct {
+	Kind        string       `json:"kind"`
+	Service     string       `json:"service"`
+	Environment string       `json:"environment"`
+	Port        string       `json:"port"`
+	Protocol    string       `json:"protocol"`
+	Address     string       `json:"address"`
+	RedirectTo  string       `json:"redirectTo"`
+	Allow       []string     `json:"allow"`
+	DNS         *DomainCheck `json:"dns"`
+	Certificate *struct {
+		Issuer string `json:"issuer"`
+		Status string `json:"status"`
+	} `json:"certificate"`
+}
+
+func (c *Client) ProjectAddresses(ctx context.Context, project, env string) ([]ProjectAddress, error) {
+	var out list[ProjectAddress]
+	return out.Items, c.Do(ctx, "GET", "/api/v1/projects/"+url.PathEscape(project)+"/addresses?environment="+url.QueryEscape(env), nil, &out)
 }
 
 func (c *Client) RemoveServiceDomain(ctx context.Context, project, env, name, host string) error {

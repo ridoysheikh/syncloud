@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -247,12 +248,30 @@ func serve(args []string) error {
 	if err := gitServer.Load(ctx); err != nil {
 		return fmt.Errorf("load the built-in Git server settings: %w", err)
 	}
+	var workloads *workload.Manager // set below; routes need certificates too
+	// serviceEntrypoints are the Traefik entrypoints of public service ports
+	// (every interface, in development too: the dashboard is reached over
+	// the network at its sslip.io name).
+	serviceEntrypoints := func() map[string]string {
+		out := map[string]string{}
+		if workloads == nil {
+			return out
+		}
+		for _, r := range workloads.PublicRoutes(context.Background()) {
+			addr := ":" + fmt.Sprint(r.Port)
+			if r.Protocol == "udp" {
+				addr += "/udp"
+			}
+			out[r.Entrypoint()] = addr
+		}
+		return out
+	}
 	sysCfg := func(ep domain.Endpoints) system.Config {
 		return system.Config{
 			GitServer:       gitServer.Config(),
 			TraefikSettings: traefikExtras.Settings(),
 			ControllerURL:   controllerURL, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS,
-			AdminAddr: cfg.TraefikAdmin, TraefikToken: traefikToken, DatabaseEntrypoints: map[string]string{"valkey": cfg.PublicValkey, "postgres": cfg.PublicPostgres},
+			AdminAddr: cfg.TraefikAdmin, TraefikToken: traefikToken, DatabaseEntrypoints: mergeEntrypoints(map[string]string{"valkey": cfg.PublicValkey, "postgres": cfg.PublicPostgres}, serviceEntrypoints()),
 			RegistryRealm: ep.DashboardURL + "/api/v1/registry/token", RegistryTokenCert: regIssuer.CertPath,
 		}
 	}
@@ -276,14 +295,18 @@ func serve(args []string) error {
 	// Public databases open their engine's port on the controller and edges.
 	var dbMgr *dbs.Manager // set below
 	dbPorts := map[string]string{dbs.EngineValkey: portOf(cfg.PublicValkey), dbs.EnginePostgres: portOf(cfg.PublicPostgres)}
-	publicPorts := func() []string {
-		if dbMgr == nil {
-			return nil
+	publicPorts := func() []mesh.PublicPort {
+		var out []mesh.PublicPort
+		if dbMgr != nil {
+			for _, e := range dbMgr.PublicEngines(context.Background()) {
+				if p := dbPorts[e]; p != "" {
+					out = append(out, mesh.PublicPort{Port: p, Protocol: "tcp", Kind: "database"})
+				}
+			}
 		}
-		var out []string
-		for _, e := range dbMgr.PublicEngines(context.Background()) {
-			if p := dbPorts[e]; p != "" {
-				out = append(out, p)
+		if workloads != nil {
+			for _, r := range workloads.PublicRoutes(context.Background()) {
+				out = append(out, mesh.PublicPort{Port: fmt.Sprint(r.Port), Protocol: r.Protocol, Sources: r.Allow, Kind: "service"})
 			}
 		}
 		return out
@@ -291,7 +314,6 @@ func serve(args []string) error {
 	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts, IsEdge: isEdge, PublicPorts: publicPorts})
 	gw.AddHooks(meshMgr.Hooks())
 	go meshMgr.Run(ctx)
-	var workloads *workload.Manager // set below; routes need certificates too
 	certHosts := func(ep domain.Endpoints) []string {
 		if ep.BaseDomain == "" {
 			return nil
@@ -311,6 +333,11 @@ func serve(args []string) error {
 		return hosts
 	}
 	workloads = workload.NewManager(st, gw, registry, meshMgr.NetworkReady, bus, log)
+	if lo, hi, ok := portRange(cfg.PublicPorts); ok {
+		workloads.PublicPortRange = [2]int{lo, hi}
+	} else {
+		return fmt.Errorf("--public-ports %q: want LOW-HIGH within 1024–65535", cfg.PublicPorts)
+	}
 	workloads.OnChange = func() { certMgr.SetHosts(certHosts(domains.Endpoints())) }
 	certMgr.SetHosts(certHosts(domains.Endpoints()))
 	gw.AddHooks(workloads.Hooks())
@@ -518,18 +545,28 @@ func serve(args []string) error {
 	alertMgr := alerts.New(st, box, metricStore, logStore, healthMon, bus, log)
 	alertMgr.DashboardURL = func() string { return domains.Endpoints().DashboardURL }
 	go alertMgr.Run(ctx)
-	workload.Endpoints = func(sv store.Service, spec workload.Spec, custom []store.Domain) []string {
+	workload.Endpoints = func(sv store.Service, spec workload.Spec, custom []store.Domain, routing []store.PortRouting) []string {
 		scheme, port, base := "https", httpsPort, domains.Base()
 		if base == "" {
 			scheme, port = "http", devPort(httpPort)
 		}
-		out := workload.ServiceEndpoints(sv, spec, base, scheme, port)
+		out := workload.ServiceEndpoints(sv, spec, base, scheme, port, routing)
 		for _, d := range custom {
+			if d.RedirectTo != "" {
+				continue // not an address of the service
+			}
 			u := scheme + "://" + d.Host
 			if port != "" {
 				u += ":" + port
 			}
-			out = append(out, u)
+			out = append(out, u+d.Path)
+		}
+		for _, r := range routing {
+			for _, p := range spec.Ports {
+				if p.Name == r.PortName && r.PublicPort > 0 && p.Protocol != "http" {
+					out = append(out, p.Protocol+"://"+workload.PublicAddress(base, r.PublicPort))
+				}
+			}
 		}
 		return out
 	}
@@ -554,9 +591,21 @@ func serve(args []string) error {
 		}
 		return out
 	}, edge.Config{Image: system.ImageTraefik, TraefikToken: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: meshControllerURL,
-		Edges: pools.EdgeNodes, Settings: traefikExtras.Settings, DatabaseEntrypoints: map[string]string{"valkey": ":6379", "postgres": ":5432"}}, log)
+		Edges: pools.EdgeNodes, Settings: traefikExtras.Settings, DatabaseEntrypoints: map[string]string{"valkey": ":6379", "postgres": ":5432"},
+		ServiceEntrypoints: serviceEntrypoints}, log)
 	gw.AddHooks(edges.Hooks())
 	go edges.Run(ctx)
+	// The system specs were first rendered before the workload manager
+	// existed: render them again with the public ports' entrypoints before
+	// any agent connects, or Traefik would restart without them.
+	sysMgr.SetConfig(sysCfg(domains.Endpoints()))
+	// A public port added or removed: Traefik replicas get new entrypoints
+	// (they restart) and the host firewalls follow.
+	workloads.OnPublicPorts = func() {
+		sysMgr.SetConfig(sysCfg(domains.Endpoints()))
+		edges.Refresh(ctx)
+		meshMgr.Changed(context.Background())
+	}
 	traefikProvider := &traefik.Provider{
 		Token: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: controllerURL,
 		RegistryURL: "http://" + system.RegistryAddr, BaseDomain: domains.Base, HTTPSPort: httpsPort,
@@ -564,7 +613,8 @@ func serve(args []string) error {
 			var out []traefik.ServiceRoute
 			for _, r := range workloads.Routes(context.Background(), domains.Base()) {
 				chain, own := traefikExtras.Chain(r.ServiceID)
-				out = append(out, traefik.ServiceRoute{Name: r.Name, Host: r.Host, Servers: r.Servers, Middlewares: chain, OwnRetry: own, HealthPath: r.HealthPath})
+				out = append(out, traefik.ServiceRoute{Name: r.Name, Host: r.Host, Servers: r.Servers, Middlewares: chain, OwnRetry: own, HealthPath: r.HealthPath,
+					Path: r.Path, StripPrefix: r.StripPrefix, RedirectTo: r.RedirectTo})
 			}
 			return out
 		},
@@ -578,6 +628,20 @@ func serve(args []string) error {
 			var out []traefik.TCPRoute
 			for _, r := range dbMgr.PublicRoutes(context.Background(), domains.Base()) {
 				out = append(out, traefik.TCPRoute{Name: r.Name, Entrypoint: r.Entrypoint, Host: r.Host, Servers: r.Servers, Allow: r.Allow})
+			}
+			for _, r := range workloads.PublicRoutes(context.Background()) {
+				if r.Protocol == "tcp" {
+					out = append(out, traefik.TCPRoute{Name: r.Name, Entrypoint: r.Entrypoint(), Servers: r.Servers, Allow: r.Allow, Plain: true})
+				}
+			}
+			return out
+		},
+		UDPRoutes: func() []traefik.UDPRoute {
+			var out []traefik.UDPRoute
+			for _, r := range workloads.PublicRoutes(context.Background()) {
+				if r.Protocol == "udp" {
+					out = append(out, traefik.UDPRoute{Name: r.Name, Entrypoint: r.Entrypoint(), Servers: r.Servers})
+				}
 			}
 			return out
 		},
@@ -992,4 +1056,26 @@ func postgresImages(override string) (map[string]string, error) {
 		images[v] = img
 	}
 	return images, nil
+}
+
+// mergeEntrypoints combines Traefik entrypoint maps.
+func mergeEntrypoints(ms ...map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, m := range ms {
+		for k, v := range m {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// portRange parses "LOW-HIGH".
+func portRange(s string) (int, int, bool) {
+	a, b, ok := strings.Cut(strings.TrimSpace(s), "-")
+	if !ok {
+		return 0, 0, false
+	}
+	lo, err1 := strconv.Atoi(a)
+	hi, err2 := strconv.Atoi(b)
+	return lo, hi, err1 == nil && err2 == nil && lo >= 1024 && hi <= 65535 && lo <= hi
 }
