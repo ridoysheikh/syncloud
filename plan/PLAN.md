@@ -2568,6 +2568,12 @@ The Settings tab is split into sections:
     - all of it after a controller restart.
   - The full Go suite, vet and the doc link check pass.
 
+### Phase 18b: Replicas on a one-server cluster (user report, 2026-10-09) — ✅ done 2026-10-09
+
+- **Problem:** data members avoided each other's nodes with no fallback. On one server a replica could never be placed (`cannot place data 1: no node fits`), so the database stayed degraded, and the autoscaler could add more replicas that couldn't be placed either.
+- **Fix:** every member kind falls back to sharing a node when no other node fits, as Sentinels did. `View.SameNode` (the primary and replicas on one node) is shown as a note on the database page and in `synctl db get`. Moving co-located replicas once a node is added is left for later; recreating the replica (replicas to 0 and back) moves it.
+- **Checks (test cluster):** a Valkey limited to `w1` with a minimum of 1 replica became healthy, with failover ready and `sameNode`. Killing the primary promoted the replica in about 9 s, and the old primary rejoined as a replica. A crashed process is restarted by Docker (`unless-stopped`).
+
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)
 

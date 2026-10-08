@@ -35,9 +35,12 @@ type View struct {
 	Autoscale   AutoscaleStatus `json:"autoscale"`
 	// FailoverReady: every sentinel knows every replica and its peers, so a
 	// failed primary is replaced (false without replicas).
-	FailoverReady bool      `json:"failoverReady"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	FailoverReady bool `json:"failoverReady"`
+	// SameNode: the primary and its replicas run on one node (a one-server
+	// cluster), so they don't survive losing that node.
+	SameNode  bool      `json:"sameNode"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // PublicEndpoint is the database as reached from outside the cluster.
@@ -154,6 +157,13 @@ func (m *Manager) View(ctx context.Context, d store.Database) View {
 		}
 		v.Members = append(v.Members, x)
 	}
+	dataNodes := map[string]bool{}
+	for _, x := range v.Members {
+		if x.Kind == KindData {
+			dataNodes[x.NodeID] = true
+		}
+	}
+	v.SameNode = data > 1 && len(dataNodes) == 1
 	if d.Engine == EnginePostgres {
 		var data []Member
 		for _, x := range v.Members {

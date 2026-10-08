@@ -152,6 +152,14 @@ export function DatabasePage() {
         actions={<FailoverButton d={d} path={path} />}
       />
       {d.status && <Alert tone="warn">{d.status}</Alert>}
+      {d.sameNode && (
+        <Alert tone="info">
+          The primary and its replicas share one node, because the cluster has
+          no other node they may use. Replicas still serve reads and take over
+          if a container fails, but not if the node is lost. Add a node to
+          spread them out.
+        </Alert>
+      )}
       <Tabs
         tabs={pg ? postgresTabs : valkeyTabs}
         value={tab}

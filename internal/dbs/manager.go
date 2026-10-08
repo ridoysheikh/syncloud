@@ -611,8 +611,11 @@ func (m *Manager) reconcile(ctx context.Context, id string) {
 		ws := workload.Spec{Resources: workload.Resources{CPU: res, Memory: mem}, Placement: workload.Placement{Strategy: "spread", Nodes: spec.Nodes}}
 		ws = ws.WithProjectNodes(m.projectNodes(ctx, d.EnvironmentID)).Avoiding(avoid)
 		nodeID, why := m.wl.PlaceSpec(ctx, ws)
-		if nodeID == "" && kind == KindSentinel && len(avoid) > 0 {
-			// Fewer nodes than sentinels: share a node rather than run none.
+		if nodeID == "" && len(avoid) > 0 {
+			// Fewer nodes than members (one server): share a node rather
+			// than run none. A replica there still serves reads and
+			// survives a crashed container, though not a lost node; the
+			// view says so (SameNode).
 			nodeID, why = m.wl.PlaceSpec(ctx, ws.Avoiding(nil))
 		}
 		if nodeID == "" {

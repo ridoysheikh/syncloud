@@ -21,6 +21,7 @@ type dbView struct {
 	Version     string `json:"version"`
 	Health      string `json:"health"`
 	Status      string `json:"status"`
+	SameNode    bool   `json:"sameNode"`
 	Host        string `json:"host"`
 	ReadHost    string `json:"readHost"`
 	Port        int    `json:"port"`
@@ -362,6 +363,9 @@ func (a *app) databasesCmd() *cobra.Command {
 			fmt.Fprintf(a.out, "%s  (%s)  %s  %s %s\n", v.Name, v.owner(), v.Health, v.Engine, v.Version)
 			if v.Status != "" {
 				fmt.Fprintf(a.out, "status:     %s\n", v.Status)
+			}
+			if v.SameNode {
+				fmt.Fprintln(a.out, "note:       the primary and its replicas share one node (no other node may run them): they don't survive losing it")
 			}
 			fmt.Fprintf(a.out, "read-write: %s:%d\nread-only:  %s:%d\n", v.Host, v.Port, v.ReadHost, v.Port)
 			if v.Public.Enabled && v.Public.Available {

@@ -2,6 +2,12 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [Unreleased]
+
+### Fixed
+
+- On a single-server cluster, a Valkey or PostgreSQL database with replicas stayed **degraded** forever (`cannot place data 1: no node fits`): replicas had to go on another node, and there was none. They now share the node when no other may run them, as Sentinels already did, and the database page and `synctl db get` note that all members are on one node.
+
 ## [0.1.2] - 2026-10-09
 
 ### Added

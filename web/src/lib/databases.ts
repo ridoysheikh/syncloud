@@ -167,6 +167,8 @@ export interface Database {
     limitMiB: number;
   };
   status: string;
+  /** The primary and its replicas run on one node (a one-server cluster). */
+  sameNode?: boolean;
   health: DatabaseHealth;
   deleting: boolean;
   host: string;

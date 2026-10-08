@@ -65,6 +65,7 @@ If a cloud firewall sits in front of your servers, allow 21000–21999/tcp from 
 ## Failover and autoscaling
 
 - **Failover:** with replicas, three Sentinels on different nodes watch the primary. If it stops answering for 5 seconds, the most up-to-date replica is promoted, and clients only need to reconnect.
+- **One server:** members go to different nodes when there are enough. On a single-server cluster they share the node: replicas still serve reads and take over when a container fails, but not when the server is lost. The database page says so.
 - **Memory** (`maxmemory`) scales online: +50% above 85% used, −25% after 30 minutes under 40%.
 - **Read replicas** follow read CPU (60% of a core by default): one more after a minute above, one fewer after 10 minutes under half.
 
