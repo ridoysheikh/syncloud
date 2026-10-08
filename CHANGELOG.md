@@ -6,6 +6,7 @@ All notable changes are listed here. Versions follow [semantic versioning](https
 
 ### Fixed
 
+- The first PostgreSQL database never started on an installed server ("waiting for the PostgreSQL image: … read-only file system"): the controller downloaded the image into `/usr/local/lib/syncloud/downloads/images`, which its systemd sandbox makes read-only. It now downloads and unpacks under `/var/lib/syncloud/images`; archives placed by hand in either directory are used.
 - On a single-server cluster, a Valkey or PostgreSQL database with replicas stayed **degraded** forever (`cannot place data 1: no node fits`): replicas had to go on another node, and there was none. They now share the node when no other may run them, as Sentinels already did, and the database page and `synctl db get` note that all members are on one node.
 
 ## [0.1.2] - 2026-10-09

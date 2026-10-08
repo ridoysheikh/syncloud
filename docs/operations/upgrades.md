@@ -52,7 +52,7 @@ Set them in `/etc/syncloud/controller.env` (`SYNCLOUD_RELEASE_CHANNEL`, `SYNCLOU
 2. Copy them to the host as `/srv/syncloud/<version>/…`, and write the version into `/srv/syncloud/channels/stable`.
 3. Set `SYNCLOUD_RELEASE_URL=file:///srv/syncloud`.
 
-Put the release's `syncloud-postgres-*.tar.gz` files into `/usr/local/lib/syncloud/downloads/images/`. The controller loads them when a PostgreSQL database needs them.
+Put the release's `syncloud-postgres-*.tar.gz` files into `/var/lib/syncloud/images/` (or `/usr/local/lib/syncloud/downloads/images/`). The controller loads them when a PostgreSQL database needs them.
 
 ## Downgrading
 

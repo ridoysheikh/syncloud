@@ -49,8 +49,12 @@ type Seeder struct {
 	Source  upgrade.Source
 	Version string
 	// Dir holds archives placed by hand (air-gapped hosts): <Dir>/<archive>
-	// is used before anything is downloaded.
+	// is used before anything is downloaded. It may be read-only.
 	Dir string
+	// WorkDir is where archives are downloaded and unpacked: under the data
+	// directory, the one place the installed service may write
+	// (ProtectSystem=strict). An archive placed here is used too.
+	WorkDir string
 	// Arch is the archives' CPU architecture (default: the controller's).
 	Arch string
 	Log  *slog.Logger
@@ -154,22 +158,32 @@ func (s *Seeder) load(ctx context.Context, j *job, repo, tag string) error {
 		arch = runtime.GOARCH
 	}
 	name := Archive(repo, tag, arch)
-	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+	work := s.WorkDir
+	if work == "" {
+		work = s.Dir
+	}
+	if err := os.MkdirAll(work, 0o755); err != nil {
 		return err
 	}
-	file := filepath.Join(s.Dir, name)
-	placed := true
-	if _, err := os.Stat(file); err != nil {
-		placed = false
+	file, placed := "", false
+	for _, dir := range []string{s.Dir, work} {
+		if f := filepath.Join(dir, name); dir != "" && file == "" {
+			if _, err := os.Stat(f); err == nil {
+				file, placed = f, true
+			}
+		}
+	}
+	if file == "" {
 		if devVersion(s.Version) {
 			return fmt.Errorf("a development build has no release to take %s from: build it with make postgres-image and pass --postgres-image, or place %s in %s", repo+":"+tag, name, s.Dir)
 		}
+		file = filepath.Join(work, name)
 		s.setPhase(j, "downloading "+name)
 		if err := s.Source.FetchFile(ctx, s.Version, name, file); err != nil {
 			return fmt.Errorf("download %s: %w", name, err)
 		}
 	}
-	tmp, err := os.MkdirTemp(s.Dir, ".layout-*")
+	tmp, err := os.MkdirTemp(work, ".layout-*")
 	if err != nil {
 		return err
 	}

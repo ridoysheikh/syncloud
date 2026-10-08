@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/ridoysheikh/syncloud/internal/registry"
+	"github.com/ridoysheikh/syncloud/internal/upgrade"
 )
 
 // fakeRegistry is just enough of the registry API for a push.
@@ -187,6 +189,43 @@ func TestPackPushAndSeed(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, Archive("syncloud-system/postgres", "18-r1", "amd64"))); err != nil {
 		t.Fatal("an archive placed by hand was removed")
+	}
+
+	// The installed service may write only its data directory: a downloads
+	// directory that can't be created must not stop a download into
+	// WorkDir (a real install hung on "read-only file system").
+	name := Archive("syncloud-system/postgres", "18-r1", "amd64")
+	rel := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(rel, "0.1.0"), 0o755)
+	tarGz(t, layout, filepath.Join(rel, "0.1.0", name))
+	b, _ := os.ReadFile(filepath.Join(rel, "0.1.0", name))
+	_ = os.WriteFile(filepath.Join(rel, "0.1.0", "SHA256SUMS"), []byte(fmt.Sprintf("%x  %s\n", sha256.Sum256(b), name)), 0o644)
+	ro := t.TempDir()
+	if err := os.Chmod(ro, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(ro, 0o755)
+	fresh := &fakeRegistry{blobs: map[string][]byte{}, manifests: map[string][]byte{}}
+	srv2 := httptest.NewServer(fresh)
+	defer srv2.Close()
+	work := t.TempDir()
+	dl := &Seeder{Registry: &registry.Browser{URL: srv2.URL, Issuer: iss}, Source: upgrade.Source{Base: "file://" + rel}, Version: "0.1.0",
+		Dir: filepath.Join(ro, "images"), WorkDir: work, Arch: "amd64"}
+	for {
+		err := dl.Ensure(ctx, "@registry/syncloud-system/postgres:18-r1")
+		if err == nil {
+			break
+		}
+		if !errors.As(err, &p) || time.Now().After(deadline) {
+			t.Fatalf("download Ensure = %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(fresh.manifests) != 1 {
+		t.Fatalf("downloaded image not pushed: %d manifests", len(fresh.manifests))
+	}
+	if left, _ := os.ReadDir(work); len(left) != 0 {
+		t.Errorf("work directory not cleaned: %v", left)
 	}
 
 	// A development build has no release to download from.

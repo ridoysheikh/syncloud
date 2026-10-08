@@ -18,7 +18,7 @@ A database is either:
 
 Names are unique in the cluster.
 
-> **The first PostgreSQL database takes a few minutes longer.** Its image comes with the SynCloud release (about 400 MB). The controller downloads it once from the release, loads it into the built-in registry, and nodes pull it from there. The database shows *waiting for the PostgreSQL image* meanwhile. On an air-gapped host, put `syncloud-postgres-<tag>-linux-amd64.tar.gz` from the release into `/usr/local/lib/syncloud/downloads/images/` first. The image is built for x86-64 nodes.
+> **The first PostgreSQL database takes a few minutes longer.** Its image comes with the SynCloud release (about 400 MB). The controller downloads it once from the release, loads it into the built-in registry, and nodes pull it from there. The database shows *waiting for the PostgreSQL image* meanwhile. On an air-gapped host, put `syncloud-postgres-<tag>-linux-amd64.tar.gz` from the release into `/var/lib/syncloud/images/` first (or `/usr/local/lib/syncloud/downloads/images/`). The download needs about 1.5 GB free in `/var/lib/syncloud` while it is unpacked. The image is built for x86-64 nodes.
 
 ## Connect
 

@@ -466,6 +466,7 @@ func serve(args []string) error {
 		Source:   upgrade.Source{Base: cfg.ReleaseURL},
 		Version:  version.Version,
 		Dir:      filepath.Join(cfg.DownloadsDir, "images"),
+		WorkDir:  filepath.Join(cfg.DataDir, "images"),
 		Log:      log,
 	}
 	dbMgr.ImageReady = seeder.Ensure
