@@ -6,7 +6,7 @@ Thanks for helping! Bug reports, documentation fixes and code are all welcome.
 
 [Open an issue](https://github.com/ridoysheikh/syncloud/issues/new/choose) with:
 
-- the SynCloud version (**Settings → Updates**, or `syncloud-controller --version`);
+- the SynCloud version (**Settings → Updates**, or `syncloud-controller version`);
 - what you did, what you expected, and what happened;
 - relevant logs (`journalctl -u syncloud-controller`, `synctl logs …`), with secrets removed.
 

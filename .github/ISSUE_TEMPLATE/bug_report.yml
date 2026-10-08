@@ -6,7 +6,7 @@ body:
     id: version
     attributes:
       label: SynCloud version
-      description: Settings → Updates, or `syncloud-controller --version`
+      description: Settings → Updates, or `syncloud-controller version`
       placeholder: 0.1.0
     validations:
       required: true

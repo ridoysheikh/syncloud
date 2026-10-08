@@ -42,7 +42,7 @@ synctl system tasks                  # Traefik, registry, VictoriaMetrics, … a
 
 Search or open an issue on [GitHub](https://github.com/ridoysheikh/syncloud/issues). Include:
 
-- `syncloud-controller --version`, or the version at the bottom of **Settings → Updates**;
+- `syncloud-controller version`, or the version on **Settings → Updates**;
 - the output of `doctor`;
 - the relevant log lines.
 
