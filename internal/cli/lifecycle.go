@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"syncloud/internal/client"
+	"github.com/ridoysheikh/syncloud/internal/client"
 )
 
 // readRules reads {"rules": [...]} or a bare rules array from a file or stdin.

@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Settings are a Git source's build settings (Phase 15b): Nixpacks command

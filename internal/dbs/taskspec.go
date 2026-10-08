@@ -8,9 +8,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // Task ID prefixes of database containers.

@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"syncloud/internal/quota"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/quota"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Quotas and usage (§7.2).

@@ -10,10 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/jobs"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/jobs"
+	"github.com/ridoysheikh/syncloud/internal/registry"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // ── projects and environments ───────────────────────────────────────────────
@@ -59,6 +60,10 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := workload.ValidName(req.Name); err != nil {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "project name "+err.Error())
+		return
+	}
+	if req.Name == registry.SystemProject {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "project name "+req.Name+" is reserved for the platform")
 		return
 	}
 	if err := workload.ValidName(req.Environment); err != nil {

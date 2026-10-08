@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"syncloud/internal/store"
-	"syncloud/internal/upstream"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/upstream"
 )
 
 func (s *Server) requireUpstreams(w http.ResponseWriter) bool {

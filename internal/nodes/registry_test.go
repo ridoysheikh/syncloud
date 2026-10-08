@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"syncloud/internal/events"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // A controller restart must not make nodes Not ready (and reschedule their

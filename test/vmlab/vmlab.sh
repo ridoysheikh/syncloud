@@ -119,7 +119,7 @@ build() {
   (cd "$REPO" && make web >/dev/null)
   for c in controller agent synctl; do
     n=syncloud-$c; [ $c = synctl ] && n=synctl
-    (cd "$REPO" && CGO_ENABLED=0 GOOS=linux go build -ldflags "-X syncloud/internal/version.Version=0.0.0-lab" -o "$LAB/bin/$n" ./cmd/$c)
+    (cd "$REPO" && CGO_ENABLED=0 GOOS=linux go build -ldflags "-X github.com/ridoysheikh/syncloud/internal/version.Version=0.0.0-lab" -o "$LAB/bin/$n" ./cmd/$c)
   done
   cp "$REPO/scripts/install.sh" "$LAB/bin/"
 }

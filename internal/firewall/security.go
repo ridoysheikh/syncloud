@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 )
 
 // Names of the dynamic sets that record dropped flows (the drop log). Their

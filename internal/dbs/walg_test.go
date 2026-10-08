@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func TestBackupSpec(t *testing.T) {

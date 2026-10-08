@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/firewall"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/firewall"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 var policyNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)

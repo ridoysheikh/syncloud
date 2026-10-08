@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/discovery"
-	"syncloud/internal/mesh"
+	"github.com/ridoysheikh/syncloud/internal/discovery"
+	"github.com/ridoysheikh/syncloud/internal/mesh"
 )
 
 type ipamAddress struct {

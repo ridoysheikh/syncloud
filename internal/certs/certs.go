@@ -21,10 +21,10 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/events"
-	"syncloud/internal/pki"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/pki"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Status values.

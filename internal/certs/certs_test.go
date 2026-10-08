@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func newTestManager(t *testing.T, acme bool) (*Manager, *store.Store, *secrets.Box) {

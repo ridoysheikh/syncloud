@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"syncloud/internal/secgroup"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/secgroup"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func TestSpecNormalize(t *testing.T) {

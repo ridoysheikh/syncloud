@@ -9,8 +9,8 @@ import (
 	"slices"
 	"testing"
 
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func TestBundleRoundTrip(t *testing.T) {

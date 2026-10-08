@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/agent/docker"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/agent/docker"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 )
 
 // Health states reported in TaskStatus.health.

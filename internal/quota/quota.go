@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/metrics"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // Limits of a project or environment. Zero means unlimited.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Route is one public HTTP route to a service port (§5.7).

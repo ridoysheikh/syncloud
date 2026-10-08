@@ -16,3 +16,8 @@
 *.swp
 /.tools/
 /dist/
+
+# dependencies and logs anywhere
+node_modules/
+*.log
+.env

@@ -13,7 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"syncloud/internal/client"
+	"github.com/ridoysheikh/syncloud/internal/client"
 )
 
 // IAM administration, STS, the audit log, device login, quotas and usage (§7).

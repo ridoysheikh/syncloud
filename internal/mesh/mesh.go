@@ -14,10 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"syncloud/internal/agentgw"
-	"syncloud/internal/events"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/agentgw"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Address plan (§8).

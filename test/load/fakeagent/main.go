@@ -29,8 +29,8 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/proto"
 
-	"syncloud/internal/agent"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/agent"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 )
 
 func main() {

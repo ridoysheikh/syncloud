@@ -23,8 +23,8 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
-	"syncloud/internal/firewall"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/firewall"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 )
 
 // platform holds the userspace WireGuard device (when the kernel module is

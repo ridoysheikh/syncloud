@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"syncloud/internal/client"
+	"github.com/ridoysheikh/syncloud/internal/client"
 )
 
 func (a *app) configureCmd() *cobra.Command {

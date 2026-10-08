@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/cloud"
-	"syncloud/internal/nodepool"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/cloud"
+	"github.com/ridoysheikh/syncloud/internal/nodepool"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // Node pools and cloud providers (§6.5).

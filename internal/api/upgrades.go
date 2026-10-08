@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"syncloud/internal/upgrade"
-	"syncloud/internal/upgrade/rollout"
-	"syncloud/internal/version"
+	"github.com/ridoysheikh/syncloud/internal/upgrade"
+	"github.com/ridoysheikh/syncloud/internal/upgrade/rollout"
+	"github.com/ridoysheikh/syncloud/internal/version"
 )
 
 // systemTaskGrace is how long system tasks may take to start before the

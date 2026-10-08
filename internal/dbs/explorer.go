@@ -9,7 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // ErrUnavailable means no member can answer right now.

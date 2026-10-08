@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/agentgw"
-	"syncloud/internal/auth"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/agentgw"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // The platform etcd (Phase 13) is Patroni's coordination store for every
@@ -104,6 +104,10 @@ func (m *Manager) reconcileEtcd(ctx context.Context) {
 		return
 	}
 	if len(members) == 0 && !m.needsEtcd(ctx) {
+		return
+	}
+	// etcd runs from the default PostgreSQL image.
+	if err := m.imageReady(ctx, m.pgImage(pgDefaultVersion)); err != nil {
 		return
 	}
 	now := m.now().UTC()
@@ -284,6 +288,7 @@ func (m *Manager) etcdSpec(mb store.EtcdMember) *agentv1.TaskSpec {
 func (m *Manager) etcdSend(ctx context.Context, mb *store.EtcdMember) {
 	ts := m.etcdSpec(*mb)
 	mb.SpecHash = specHash(ts)
+	m.resolve(ts)
 	_ = m.st.UpdateEtcdMember(ctx, *mb, m.now().UTC())
 	err := m.gw.Send(mb.NodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_RunTask{RunTask: &agentv1.RunTask{Spec: ts}}})
 	if err != nil && !errors.Is(err, agentgw.ErrNotConnected) {

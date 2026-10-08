@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Ports and domains (Phase 15c): how each port of a service is reached.

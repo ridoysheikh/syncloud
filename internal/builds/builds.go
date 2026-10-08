@@ -20,15 +20,15 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/events"
-	"syncloud/internal/gitprovider"
-	"syncloud/internal/gitremote"
-	"syncloud/internal/jobs"
-	"syncloud/internal/registry"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/gitprovider"
+	"github.com/ridoysheikh/syncloud/internal/gitremote"
+	"github.com/ridoysheikh/syncloud/internal/jobs"
+	"github.com/ridoysheikh/syncloud/internal/registry"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 const (
@@ -1023,7 +1023,7 @@ func (m *Manager) sendStatus(r statusReport) {
 			target = dash + "/projects/" + sv.Project + "/" + sv.Environment + "/services/" + sv.Name + "?tab=builds"
 		}
 	}
-	st := gitprovider.Status{State: r.state, Context: "syncloud/" + sv.Project + "/" + sv.Environment + "/" + sv.Name, Description: r.desc, TargetURL: target}
+	st := gitprovider.Status{State: r.state, Context: "github.com/ridoysheikh/syncloud/" + sv.Project + "/" + sv.Environment + "/" + sv.Name, Description: r.desc, TargetURL: target}
 	if err := prov.SetStatus(ctx, g.Repo, r.b.SHA, st); err != nil {
 		m.log.Warn("set commit status", "repo", g.Repo, "sha", r.b.SHA[:12], "err", err)
 	}

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/store"
-	"syncloud/internal/system"
-	"syncloud/internal/traefik"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/system"
+	"github.com/ridoysheikh/syncloud/internal/traefik"
 )
 
 // Descriptions of the middleware presets (§5.7), for the dashboard and CLI.

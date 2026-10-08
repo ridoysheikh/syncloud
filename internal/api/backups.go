@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"syncloud/internal/backup"
+	"github.com/ridoysheikh/syncloud/internal/backup"
 )
 
 type backupSettings struct {

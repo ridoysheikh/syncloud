@@ -16,8 +16,8 @@ import (
 	"strconv"
 	"strings"
 
-	"syncloud/internal/firewall"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/firewall"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 )
 
 // Rule allows traffic to (inbound) or from (outbound) a group's members.

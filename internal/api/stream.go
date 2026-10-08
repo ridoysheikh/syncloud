@@ -8,7 +8,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/events"
 )
 
 const streamPingEvery = 20 * time.Second

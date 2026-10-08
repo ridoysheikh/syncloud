@@ -10,7 +10,7 @@ import (
 
 	yaml "go.yaml.in/yaml/v3"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // SettingCustom holds the custom configuration as YAML.

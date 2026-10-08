@@ -1,0 +1,30 @@
+name: Bug report
+description: Something doesn't work as documented
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: SynCloud version
+      description: Settings → Updates, or `syncloud-controller --version`
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "`journalctl -u syncloud-controller`, `synctl logs …`, or `syncloud-controller doctor`. Remove secrets."
+      render: text
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, number of nodes, anything unusual (NAT, private network, edge nodes)

@@ -19,9 +19,9 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
-	"syncloud/internal/events"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 const (

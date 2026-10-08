@@ -11,9 +11,9 @@ import (
 
 	"github.com/minio/minio-go/v7"
 
-	"syncloud/internal/s3"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/s3"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // S3 endpoints, bindings and the bucket browser (§16).

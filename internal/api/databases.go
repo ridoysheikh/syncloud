@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"syncloud/internal/dbs"
-	"syncloud/internal/metrics"
-	"syncloud/internal/secgroup"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/dbs"
+	"github.com/ridoysheikh/syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/secgroup"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // ── managed databases (Phase 12) ────────────────────────────────────────────

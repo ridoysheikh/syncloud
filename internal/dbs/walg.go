@@ -19,8 +19,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/store"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // WAL-G backups and point-in-time recovery (Phase 13c). Members archive
@@ -373,7 +373,7 @@ echo done`
 	if err := m.st.AddDatabaseBackup(ctx, run); err != nil {
 		return run, err
 	}
-	if err := m.gw.Send(src.NodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_RunTask{RunTask: &agentv1.RunTask{Spec: ts}}}); err != nil {
+	if err := m.gw.Send(src.NodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_RunTask{RunTask: &agentv1.RunTask{Spec: m.resolve(ts)}}}); err != nil {
 		m.finishBackup(ctx, d, run.ID, "failed", "could not reach the node: "+err.Error())
 		return run, err
 	}

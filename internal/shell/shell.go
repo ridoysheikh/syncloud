@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/agentgw"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/agentgw"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // TaskPrefix starts shell container task IDs.

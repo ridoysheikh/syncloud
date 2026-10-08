@@ -11,7 +11,7 @@ import (
 
 	"github.com/creack/pty"
 
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 )
 
 // runHost runs a command on the node itself (a node shell), as the user the

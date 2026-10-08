@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/iam"
-	"syncloud/internal/sigv"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/iam"
+	"github.com/ridoysheikh/syncloud/internal/sigv"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // as returns a second client (its own cookies) for another user.

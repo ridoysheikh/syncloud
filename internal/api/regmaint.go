@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 
-	"syncloud/internal/registry"
-	"syncloud/internal/regmaint"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/registry"
+	"github.com/ridoysheikh/syncloud/internal/regmaint"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func (s *Server) requireMaint(w http.ResponseWriter) bool {

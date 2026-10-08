@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/metrics"
 )
 
 // metricsRange reads ?range= (default 1h).

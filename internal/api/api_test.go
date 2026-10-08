@@ -15,13 +15,13 @@ import (
 	"testing/fstest"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/certs"
-	"syncloud/internal/domain"
-	"syncloud/internal/events"
-	"syncloud/internal/registry"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/certs"
+	"github.com/ridoysheikh/syncloud/internal/domain"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/registry"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 type testEnv struct {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/metrics"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // summaryWindow is how far back traffic tables and the map look.

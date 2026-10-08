@@ -24,15 +24,15 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
-	"syncloud/internal/agent/docker"
-	"syncloud/internal/agent/netcfg"
-	"syncloud/internal/agent/sysinfo"
-	"syncloud/internal/client"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/nodes"
-	"syncloud/internal/pki"
-	"syncloud/internal/upgrade"
-	"syncloud/internal/version"
+	"github.com/ridoysheikh/syncloud/internal/agent/docker"
+	"github.com/ridoysheikh/syncloud/internal/agent/netcfg"
+	"github.com/ridoysheikh/syncloud/internal/agent/sysinfo"
+	"github.com/ridoysheikh/syncloud/internal/client"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/nodes"
+	"github.com/ridoysheikh/syncloud/internal/pki"
+	"github.com/ridoysheikh/syncloud/internal/upgrade"
+	"github.com/ridoysheikh/syncloud/internal/version"
 )
 
 // State files under the agent's data directory.

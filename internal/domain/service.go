@@ -5,7 +5,7 @@ import (
 	"net"
 	"sync"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Endpoints are the public addresses derived from the base domain.

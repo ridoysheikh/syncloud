@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // View is a database as the API shows it.

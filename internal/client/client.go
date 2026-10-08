@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/sigv"
+	"github.com/ridoysheikh/syncloud/internal/sigv"
 )
 
 type Credentials struct {

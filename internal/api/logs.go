@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"syncloud/internal/logs"
+	"github.com/ridoysheikh/syncloud/internal/logs"
 )
 
 // logFilter reads the line filter. stream=access selects request lines

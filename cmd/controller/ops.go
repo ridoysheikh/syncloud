@@ -15,13 +15,13 @@ import (
 	"syscall"
 	"time"
 
-	"syncloud/internal/agent/docker"
-	"syncloud/internal/auth"
-	"syncloud/internal/backup"
-	"syncloud/internal/config"
-	"syncloud/internal/domain"
-	"syncloud/internal/store"
-	"syncloud/internal/system"
+	"github.com/ridoysheikh/syncloud/internal/agent/docker"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/backup"
+	"github.com/ridoysheikh/syncloud/internal/config"
+	"github.com/ridoysheikh/syncloud/internal/domain"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/system"
 )
 
 // restore unpacks a backup into the data directory (§13). The controller must

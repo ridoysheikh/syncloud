@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"syncloud/internal/dbs"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/dbs"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // PostgreSQL explorer and administration (§13 "Explorer and administration").

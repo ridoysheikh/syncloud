@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Credentials (§7.1): everyone manages their own; ?userId= manages another

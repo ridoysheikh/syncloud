@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"syncloud/internal/registry"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/registry"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // serviceRef names a service that runs an image.

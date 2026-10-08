@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/signal"
 
-	"syncloud/internal/cli"
+	"github.com/ridoysheikh/syncloud/internal/cli"
 )
 
 func main() {

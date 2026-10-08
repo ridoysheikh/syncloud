@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/domain"
-	"syncloud/internal/registry"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/domain"
+	"github.com/ridoysheikh/syncloud/internal/registry"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // handleRegistryToken implements the Docker registry token endpoint (§5.9).
@@ -273,6 +273,10 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 	repo, tag := q.Get("repository"), q.Get("tag")
 	if !repoNameRE.MatchString(repo) || tag == "" || strings.ContainsAny(tag, "/ ") {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "repository and tag are required")
+		return
+	}
+	if registry.IsSystemRepo(repo) {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "the platform's own images cannot be deleted")
 		return
 	}
 	if err := s.registryBrowser.DeleteTag(r.Context(), repo, tag); err != nil {

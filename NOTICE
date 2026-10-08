@@ -1,0 +1,12 @@
+SynCloud
+Copyright 2026 The SynCloud Authors
+
+This product includes software developed by The SynCloud Authors
+(https://github.com/ridoysheikh/syncloud).
+
+The managed PostgreSQL images (images/postgres) bundle third-party software
+under their own licenses, including PostgreSQL (PostgreSQL License),
+pg_duckdb (MIT), Patroni (MIT), PgBouncer (ISC), WAL-G (Apache-2.0),
+etcd (Apache-2.0), pgvector (PostgreSQL License), TimescaleDB Apache-2.0
+edition, PostGIS (GPL-2.0), pg_partman (PostgreSQL License), pg_cron
+(PostgreSQL License) and hypopg (PostgreSQL License).

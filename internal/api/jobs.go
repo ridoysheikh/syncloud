@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"syncloud/internal/jobs"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/jobs"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func (s *Server) jobError(w http.ResponseWriter, what string, err error) {

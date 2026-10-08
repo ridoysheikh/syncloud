@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"syncloud/internal/shell"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/shell"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Cloud Shell (§7.1): a terminal in the dashboard with synctl signed in as

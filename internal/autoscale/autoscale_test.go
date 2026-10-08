@@ -3,7 +3,7 @@ package autoscale
 import (
 	"testing"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func TestDecide(t *testing.T) {

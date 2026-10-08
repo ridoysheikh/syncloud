@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"syncloud/internal/mesh"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/mesh"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Load builds the model from the database: every group, service, task and

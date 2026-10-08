@@ -147,11 +147,11 @@ func TestGitHubApp(t *testing.T) {
 	if id, err := p.CreateHook(ctx, "acme/api", "https://x", "s"); err != nil || id != "" {
 		t.Fatalf("an app needs no repository hook: %q %v", id, err)
 	}
-	if err := p.SetStatus(ctx, "acme/api", "abc", Status{State: StateRunning, Context: "syncloud/web", Description: "Building", TargetURL: "https://d"}); err != nil {
+	if err := p.SetStatus(ctx, "acme/api", "abc", Status{State: StateRunning, Context: "github.com/ridoysheikh/syncloud/web", Description: "Building", TargetURL: "https://d"}); err != nil {
 		t.Fatal(err)
 	}
 	c, _ := rc.find("POST", "/repos/acme/api/statuses/abc")
-	if c.auth != "Bearer ghs_install" || c.body["state"] != "pending" || c.body["context"] != "syncloud/web" {
+	if c.auth != "Bearer ghs_install" || c.body["state"] != "pending" || c.body["context"] != "github.com/ridoysheikh/syncloud/web" {
 		t.Fatalf("status call %+v", c)
 	}
 }
@@ -213,11 +213,11 @@ func TestGitHubTokenGitLabGitea(t *testing.T) {
 	if c.auth != "PRIVATE-TOKEN glpat" || c.body["token"] != "tok" || c.body["push_events"] != true {
 		t.Fatalf("gitlab hook call %+v", c)
 	}
-	if err := gl.SetStatus(ctx, "grp/sub/app", "abc", Status{State: StateFailure, Context: "syncloud/x"}); err != nil {
+	if err := gl.SetStatus(ctx, "grp/sub/app", "abc", Status{State: StateFailure, Context: "github.com/ridoysheikh/syncloud/x"}); err != nil {
 		t.Fatal(err)
 	}
 	c, _ = rc.find("POST", "/api/v4/projects/grp%2Fsub%2Fapp/statuses/abc")
-	if c.body["state"] != "failed" || c.body["name"] != "syncloud/x" {
+	if c.body["state"] != "failed" || c.body["name"] != "github.com/ridoysheikh/syncloud/x" {
 		t.Fatalf("gitlab status %+v", c)
 	}
 
@@ -233,7 +233,7 @@ func TestGitHubTokenGitLabGitea(t *testing.T) {
 	if c.auth != "token gtok" || c.body["type"] != "gitea" {
 		t.Fatalf("gitea hook call %+v", c)
 	}
-	if err := gt.SetStatus(ctx, "gt-ann/app", "abc", Status{State: StateSuccess, Context: "syncloud/x"}); err != nil {
+	if err := gt.SetStatus(ctx, "gt-ann/app", "abc", Status{State: StateSuccess, Context: "github.com/ridoysheikh/syncloud/x"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := gt.Repo(ctx, "gt-ann/missing"); !IsNotFound(err) {

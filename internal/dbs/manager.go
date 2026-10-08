@@ -15,15 +15,15 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/agentgw"
-	"syncloud/internal/auth"
-	"syncloud/internal/events"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/nodes"
-	"syncloud/internal/secgroup"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/agentgw"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/nodes"
+	"github.com/ridoysheikh/syncloud/internal/secgroup"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 const (
@@ -65,6 +65,14 @@ type Manager struct {
 	// members and backups; the default version's image also runs the
 	// platform etcd.
 	PostgresImages map[string]string
+	// ImageReady reports whether an image can be pulled yet (images the
+	// release carries are loaded into the registry on first use): nil, or
+	// why members must wait. Nil means always ready.
+	ImageReady func(ctx context.Context, image string) error
+	// ResolveImage turns "@registry/…" into a pullable reference with node
+	// credentials; RegistryCA is a certificate nodes must trust for it.
+	ResolveImage func(image string) (ref, registryAuth string)
+	RegistryCA   func(ref string) string
 	// BaseDomain returns the platform's base domain ("" = none, so no
 	// public endpoints).
 	BaseDomain func() string
@@ -535,6 +543,15 @@ func (m *Manager) reconcile(ctx context.Context, id string) {
 	if st.LimitMiB == 0 {
 		st.LimitMiB = spec.Memory.Max
 	}
+	if d.Engine == EnginePostgres {
+		if err := m.imageReady(ctx, m.pgImage(d.Version)); err != nil {
+			if why := "waiting for the PostgreSQL image: " + err.Error(); why != d.Status {
+				_ = m.st.SetDatabaseStatus(ctx, id, why)
+				m.publish(ctx, id)
+			}
+			return
+		}
+	}
 	if d.Engine == EnginePostgres && !m.etcdUserReady(id) {
 		// Patroni needs its etcd user before any member starts.
 		if err := m.ensureEtcdUser(ctx, d, sec); err != nil {
@@ -747,9 +764,30 @@ func (m *Manager) taskSpec(d store.Database, spec Spec, st State, sec Secrets, m
 	return taskSpec(d, spec, st, sec, mb, dns, search)
 }
 
+// resolve fills in how the node pulls the image. It runs after the spec
+// hash is taken: pull credentials rotate, the member does not change.
+func (m *Manager) resolve(ts *agentv1.TaskSpec) *agentv1.TaskSpec {
+	if m.ResolveImage != nil {
+		ts.Image, ts.RegistryAuth = m.ResolveImage(ts.Image)
+	}
+	if m.RegistryCA != nil {
+		ts.RegistryCa = m.RegistryCA(ts.Image)
+	}
+	return ts
+}
+
+// imageReady is nil when image can be pulled.
+func (m *Manager) imageReady(ctx context.Context, image string) error {
+	if m.ImageReady == nil {
+		return nil
+	}
+	return m.ImageReady(ctx, image)
+}
+
 func (m *Manager) send(ctx context.Context, d store.Database, spec Spec, st State, sec Secrets, mb *store.DatabaseMember) {
 	ts := m.taskSpec(d, spec, st, sec, *mb)
 	mb.SpecHash = specHash(ts)
+	m.resolve(ts)
 	if err := m.st.UpdateDatabaseMember(ctx, *mb, m.now().UTC()); err != nil {
 		m.log.Warn("update database member", "member", mb.ID, "err", err)
 	}

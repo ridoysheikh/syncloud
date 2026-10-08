@@ -20,10 +20,10 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/gitprovider"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/gitprovider"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // HookPathGitHubApp receives a GitHub App's webhook: /api/v1/hooks/github-app/{id}.

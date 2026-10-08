@@ -9,8 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"syncloud/internal/iam"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/iam"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Authorization (§7): every authenticated route is an IAM action, named

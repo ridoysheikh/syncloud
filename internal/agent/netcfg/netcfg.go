@@ -18,10 +18,10 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"google.golang.org/protobuf/proto"
 
-	"syncloud/internal/agent/dnssrv"
-	"syncloud/internal/agent/docker"
-	"syncloud/internal/firewall"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/agent/dnssrv"
+	"github.com/ridoysheikh/syncloud/internal/agent/docker"
+	"github.com/ridoysheikh/syncloud/internal/firewall"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 )
 
 const (

@@ -14,9 +14,9 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"syncloud/internal/uninstall"
-	"syncloud/internal/upgrade"
-	"syncloud/internal/version"
+	"github.com/ridoysheikh/syncloud/internal/uninstall"
+	"github.com/ridoysheikh/syncloud/internal/upgrade"
+	"github.com/ridoysheikh/syncloud/internal/version"
 )
 
 // snapshotDB writes a consistent copy of the database (VACUUM INTO works
@@ -38,7 +38,7 @@ func upgradeCmd(args []string) error {
 	fs := flag.NewFlagSet("syncloud-controller upgrade", flag.ContinueOnError)
 	dataDir := fs.String("data-dir", envOr("SYNCLOUD_DATA_DIR", "/var/lib/syncloud"), "controller data directory")
 	to := fs.String("version", "", "version to install (default: the newest on the channel)")
-	releaseURL := fs.String("release-url", envOr("SYNCLOUD_RELEASE_URL", "https://get.syncloud.dev/releases"), "release location (https://, http:// or file://)")
+	releaseURL := fs.String("release-url", envOr("SYNCLOUD_RELEASE_URL", upgrade.DefaultReleaseURL), "release location (https://, http:// or file://)")
 	channel := fs.String("channel", envOr("SYNCLOUD_RELEASE_CHANNEL", "stable"), "release channel")
 	downloads := fs.String("downloads-dir", envOr("SYNCLOUD_DOWNLOADS_DIR", "/usr/local/lib/syncloud/downloads"), "where worker binaries are served from")
 	settle := fs.Duration("settle", 2*time.Minute, "how long the new controller must stay healthy")

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func TestBuildSettings(t *testing.T) {

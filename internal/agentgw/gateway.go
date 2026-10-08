@@ -21,10 +21,10 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/nodes"
-	"syncloud/internal/pki"
-	"syncloud/internal/store"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/nodes"
+	"github.com/ridoysheikh/syncloud/internal/pki"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Hooks let other controller components react to agents. Hooks run on the

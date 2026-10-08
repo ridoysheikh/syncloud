@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // probe reads every running member: sentinels say which member is primary,

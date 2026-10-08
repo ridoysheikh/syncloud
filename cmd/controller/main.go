@@ -26,51 +26,52 @@ import (
 	"time"
 	_ "time/tzdata" // job schedules use IANA timezones even on hosts without tzdata
 
-	"syncloud/internal/agentgw"
-	"syncloud/internal/alerts"
-	"syncloud/internal/api"
-	"syncloud/internal/auth"
-	"syncloud/internal/autoscale"
-	"syncloud/internal/backup"
-	"syncloud/internal/builds"
-	"syncloud/internal/certs"
-	"syncloud/internal/cli"
-	"syncloud/internal/config"
-	"syncloud/internal/dbs"
-	"syncloud/internal/discovery"
-	"syncloud/internal/domain"
-	"syncloud/internal/edge"
-	"syncloud/internal/events"
-	"syncloud/internal/execrelay"
-	"syncloud/internal/fwstats"
-	"syncloud/internal/gc"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/gitconn"
-	"syncloud/internal/gitremote"
-	"syncloud/internal/gitserver"
-	"syncloud/internal/health"
-	"syncloud/internal/jobs"
-	"syncloud/internal/logs"
-	"syncloud/internal/mesh"
-	"syncloud/internal/metrics"
-	"syncloud/internal/nodepool"
-	"syncloud/internal/nodes"
-	"syncloud/internal/pki"
-	"syncloud/internal/quota"
-	dockerregistry "syncloud/internal/registry"
-	"syncloud/internal/regmaint"
-	"syncloud/internal/s3"
-	"syncloud/internal/secrets"
-	"syncloud/internal/shell"
-	"syncloud/internal/store"
-	"syncloud/internal/system"
-	"syncloud/internal/traefik"
-	"syncloud/internal/upgrade"
-	"syncloud/internal/upgrade/rollout"
-	"syncloud/internal/upstream"
-	"syncloud/internal/version"
-	"syncloud/internal/web"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/agentgw"
+	"github.com/ridoysheikh/syncloud/internal/alerts"
+	"github.com/ridoysheikh/syncloud/internal/api"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/autoscale"
+	"github.com/ridoysheikh/syncloud/internal/backup"
+	"github.com/ridoysheikh/syncloud/internal/builds"
+	"github.com/ridoysheikh/syncloud/internal/certs"
+	"github.com/ridoysheikh/syncloud/internal/cli"
+	"github.com/ridoysheikh/syncloud/internal/config"
+	"github.com/ridoysheikh/syncloud/internal/dbs"
+	"github.com/ridoysheikh/syncloud/internal/discovery"
+	"github.com/ridoysheikh/syncloud/internal/domain"
+	"github.com/ridoysheikh/syncloud/internal/edge"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/execrelay"
+	"github.com/ridoysheikh/syncloud/internal/fwstats"
+	"github.com/ridoysheikh/syncloud/internal/gc"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/gitconn"
+	"github.com/ridoysheikh/syncloud/internal/gitremote"
+	"github.com/ridoysheikh/syncloud/internal/gitserver"
+	"github.com/ridoysheikh/syncloud/internal/health"
+	"github.com/ridoysheikh/syncloud/internal/jobs"
+	"github.com/ridoysheikh/syncloud/internal/logs"
+	"github.com/ridoysheikh/syncloud/internal/mesh"
+	"github.com/ridoysheikh/syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/nodepool"
+	"github.com/ridoysheikh/syncloud/internal/nodes"
+	"github.com/ridoysheikh/syncloud/internal/pki"
+	"github.com/ridoysheikh/syncloud/internal/quota"
+	dockerregistry "github.com/ridoysheikh/syncloud/internal/registry"
+	"github.com/ridoysheikh/syncloud/internal/regmaint"
+	"github.com/ridoysheikh/syncloud/internal/s3"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/shell"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/sysimage"
+	"github.com/ridoysheikh/syncloud/internal/system"
+	"github.com/ridoysheikh/syncloud/internal/traefik"
+	"github.com/ridoysheikh/syncloud/internal/upgrade"
+	"github.com/ridoysheikh/syncloud/internal/upgrade/rollout"
+	"github.com/ridoysheikh/syncloud/internal/upstream"
+	"github.com/ridoysheikh/syncloud/internal/version"
+	"github.com/ridoysheikh/syncloud/internal/web"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 func main() {
@@ -438,6 +439,18 @@ func serve(args []string) error {
 		}
 		return []string{mesh.Subnet(nn.SubnetIndex).Addr().Next().String()}, search
 	}
+	// The managed PostgreSQL images come with the release and are loaded
+	// into the built-in registry the first time a database needs one.
+	dbMgr.ResolveImage = workloads.ResolveImage
+	dbMgr.RegistryCA = workloads.RegistryCA
+	seeder := &sysimage.Seeder{
+		Registry: &dockerregistry.Browser{URL: "http://" + system.RegistryAddr, Issuer: regIssuer},
+		Source:   upgrade.Source{Base: cfg.ReleaseURL},
+		Version:  version.Version,
+		Dir:      filepath.Join(cfg.DownloadsDir, "images"),
+		Log:      log,
+	}
+	dbMgr.ImageReady = seeder.Ensure
 	gw.AddHooks(dbMgr.Hooks())
 	disco.Databases = dbMgr
 	workloads.ExtraUsage = dbMgr.Usage

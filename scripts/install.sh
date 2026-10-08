@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SynCloud controller installer (§5.0).
 #
-#   curl -fsSL https://get.syncloud.dev/install.sh | sudo bash
+#   curl -fsSL https://github.com/ridoysheikh/syncloud/releases/latest/download/install.sh | sudo bash
 #   sudo ./install.sh --from-dir ./bin            # use locally built binaries
 #   sudo ./install.sh --uninstall [--purge]
 #
 # Options:
-#   --version V         release to install (default: latest)
+#   --version V         release to install, e.g. 0.1.0 (default: the latest)
 #   --from-dir DIR      take syncloud-controller and syncloud-agent from DIR
 #   --base-domain D     use your own domain instead of <ip>.sslip.io
 #   --public-ip IP      skip public IP detection
@@ -15,7 +15,9 @@
 #   --force             continue when preflight checks fail
 set -euo pipefail
 
-RELEASE_URL="${SYNCLOUD_RELEASE_URL:-https://get.syncloud.dev/releases}"
+# A GitHub repository (releases are its assets) or a mirror with the plain
+# layout <url>/<version>/<file> and <url>/channels/stable.
+RELEASE_URL="${SYNCLOUD_RELEASE_URL:-https://github.com/ridoysheikh/syncloud}"
 # Release signing key (minisign). Empty until release signing is set up; then
 # downloads without a valid signature are refused.
 MINISIGN_PUBKEY="${SYNCLOUD_MINISIGN_PUBKEY:-}"
@@ -139,6 +141,26 @@ if ! command -v nft >/dev/null; then
 fi
 ok "nftables $(nft --version 2>/dev/null | awk '{print $2}')"
 
+# ── Release location ────────────────────────────────────────────────────────
+GITHUB_REPO=$(printf '%s' "$RELEASE_URL" | sed -n 's#^https://github\.com/\([^/]*/[^/]*\)/*$#\1#p')
+# resolve_version: "latest" becomes the newest stable release ("v" dropped).
+resolve_version() {
+  VERSION=${VERSION#v}
+  [ "$VERSION" = latest ] || return 0
+  if [ -n "$GITHUB_REPO" ]; then
+    loc=$(curl -fsSI "https://github.com/$GITHUB_REPO/releases/latest" | tr -d '\r' | sed -n 's#^[Ll]ocation: .*/releases/tag/##p')
+    VERSION=${loc#v}
+  else
+    VERSION=$(curl -fsSL "$RELEASE_URL/channels/stable" | tr -d '[:space:]')
+  fi
+  [ -n "$VERSION" ] || die "could not find the latest release at $RELEASE_URL"
+}
+# asset_url FILE: where a file of the release is.
+asset_url() {
+  if [ -n "$GITHUB_REPO" ]; then echo "https://github.com/$GITHUB_REPO/releases/download/v$VERSION/$1"
+  else echo "$RELEASE_URL/$VERSION/$1"; fi
+}
+
 # ── 2. Binaries ─────────────────────────────────────────────────────────────
 bold "Binaries"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
@@ -149,17 +171,18 @@ if [ -n "$FROM_DIR" ]; then
   done
   warn "using local binaries from $FROM_DIR (not signature-checked)"
 else
-  base="$RELEASE_URL/$VERSION"
+  resolve_version
+  ok "release $VERSION"
   for f in "syncloud-controller-linux-$ARCH" "syncloud-agent-linux-$ARCH" SHA256SUMS; do
-    curl -fsSL -o "$tmp/$f" "$base/$f" || die "download $base/$f failed"
+    curl -fsSL -o "$tmp/$f" "$(asset_url "$f")" || die "download $(asset_url "$f") failed"
   done
   if [ -n "$MINISIGN_PUBKEY" ]; then
     command -v minisign >/dev/null || die "minisign is required to verify the release signature"
-    curl -fsSL -o "$tmp/SHA256SUMS.minisig" "$base/SHA256SUMS.minisig" || die "signature download failed"
+    curl -fsSL -o "$tmp/SHA256SUMS.minisig" "$(asset_url SHA256SUMS.minisig)" || die "signature download failed"
     minisign -Vm "$tmp/SHA256SUMS" -P "$MINISIGN_PUBKEY" >/dev/null || die "release signature is invalid"
     ok "release signature verified"
   else
-    warn "release signing is not configured; checking SHA-256 checksums only"
+    ok "checking SHA-256 checksums"
   fi
   (cd "$tmp" && grep -E " (syncloud-controller|syncloud-agent)-linux-$ARCH\$" SHA256SUMS | sha256sum -c --quiet) || die "checksum mismatch"
   mv "$tmp/syncloud-controller-linux-$ARCH" "$tmp/syncloud-controller"
@@ -181,7 +204,7 @@ if [ -n "$FROM_DIR" ]; then
 else
   for a in amd64 arm64; do
     for b in syncloud-agent synctl; do
-      curl -fsSL -o "$DL_DIR/$b-linux-$a" "$RELEASE_URL/$VERSION/$b-linux-$a" || warn "could not download $b-linux-$a"
+      curl -fsSL -o "$DL_DIR/$b-linux-$a" "$(asset_url "$b-linux-$a")" || warn "could not download $b-linux-$a"
     done
   done
   (cd "$DL_DIR" && grep -E " (syncloud-agent|synctl)-linux-(amd64|arm64)\$" "$tmp/SHA256SUMS" | sha256sum -c --quiet --ignore-missing) || die "checksum mismatch in $DL_DIR"
@@ -207,6 +230,8 @@ SYNCLOUD_AGENT_ADVERTISE=$PUBLIC_IP:7443
 SYNCLOUD_PUBLIC_IP=$PUBLIC_IP
 SYNCLOUD_BASE_DOMAIN=$BASE_DOMAIN
 SYNCLOUD_ACME_EMAIL=$ACME_EMAIL
+# Where upgrades come from (the GitHub releases, or a mirror).
+SYNCLOUD_RELEASE_URL=$RELEASE_URL
 CONF
   chmod 600 "$ENV_FILE"
   ok "wrote $ENV_FILE"
@@ -217,7 +242,7 @@ fi
 cat > /etc/systemd/system/syncloud-controller.service <<'UNIT'
 [Unit]
 Description=SynCloud controller
-Documentation=https://syncloud.dev
+Documentation=https://github.com/ridoysheikh/syncloud/tree/main/docs
 After=network-online.target docker.service
 Wants=network-online.target
 

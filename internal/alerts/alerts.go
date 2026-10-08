@@ -17,13 +17,13 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/events"
-	"syncloud/internal/health"
-	"syncloud/internal/logs"
-	"syncloud/internal/metrics"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/health"
+	"github.com/ridoysheikh/syncloud/internal/logs"
+	"github.com/ridoysheikh/syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 const (

@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 
-	"syncloud/internal/firewall"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/firewall"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 )
 
 type platform struct{}

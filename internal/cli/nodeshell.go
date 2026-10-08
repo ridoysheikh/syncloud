@@ -10,7 +10,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/spf13/cobra"
 
-	"syncloud/internal/client"
+	"github.com/ridoysheikh/syncloud/internal/client"
 )
 
 // nodeID resolves a node name or ID.

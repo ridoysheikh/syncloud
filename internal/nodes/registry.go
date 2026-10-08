@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/events"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Thresholds from §5.6.

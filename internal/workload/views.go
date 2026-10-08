@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 	"regexp"
 	"slices"
 	"strings"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // ServiceView is a service as the API shows it.

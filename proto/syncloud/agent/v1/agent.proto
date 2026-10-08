@@ -4,7 +4,7 @@ syntax = "proto3";
 
 package syncloud.agent.v1;
 
-option go_package = "syncloud/internal/gen/syncloud/agent/v1;agentv1";
+option go_package = "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1;agentv1";
 
 service AgentGatewayService {
   // Connect is the long-lived agent stream. The first message must be Hello.

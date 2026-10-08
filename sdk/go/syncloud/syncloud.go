@@ -8,7 +8,7 @@
 //	svcs, err := c.ListServices(ctx, "shop", "production")
 package syncloud
 
-import "syncloud/internal/client"
+import "github.com/ridoysheikh/syncloud/internal/client"
 
 type (
 	Client      = client.Client

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func (s *Server) logRequests(next http.Handler) http.Handler {

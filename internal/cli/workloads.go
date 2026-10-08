@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"syncloud/internal/client"
+	"github.com/ridoysheikh/syncloud/internal/client"
 )
 
 // scope holds --project/--env, defaulting to $SYNCLOUD_PROJECT / $SYNCLOUD_ENV.

@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"slices"
 
-	"syncloud/internal/jobs"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/jobs"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // Project settings (Phase 15d): cloning environments, deploy policy and

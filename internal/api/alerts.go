@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"syncloud/internal/alerts"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/alerts"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func (s *Server) requireAlerts(w http.ResponseWriter) bool {

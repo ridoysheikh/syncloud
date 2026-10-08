@@ -20,8 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/store"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Line is one log line with its labels.

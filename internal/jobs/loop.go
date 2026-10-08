@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // JobView is a job as the API shows it.

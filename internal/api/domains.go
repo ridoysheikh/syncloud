@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"syncloud/internal/certs"
-	"syncloud/internal/domain"
+	"github.com/ridoysheikh/syncloud/internal/certs"
+	"github.com/ridoysheikh/syncloud/internal/domain"
 )
 
 // ACMEInfo describes the certificate issuer for the dashboard.

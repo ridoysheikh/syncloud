@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"time"
 
-	"syncloud/internal/nodes"
+	"github.com/ridoysheikh/syncloud/internal/nodes"
 )
 
 // StaticInfo returns facts that rarely change, sent in Hello.

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // SetupTokenTTL is how long the one-time setup token printed at install stays valid (§5.0).

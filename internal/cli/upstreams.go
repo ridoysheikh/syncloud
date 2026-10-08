@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"syncloud/internal/client"
+	"github.com/ridoysheikh/syncloud/internal/client"
 )
 
 func (a *app) upstreamsCmd() *cobra.Command {

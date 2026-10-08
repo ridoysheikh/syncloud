@@ -14,14 +14,14 @@ import (
 	"testing/fstest"
 	"time"
 
-	"syncloud/internal/agentgw"
-	"syncloud/internal/api"
-	"syncloud/internal/auth"
-	"syncloud/internal/events"
-	"syncloud/internal/nodes"
-	"syncloud/internal/pki"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/agentgw"
+	"github.com/ridoysheikh/syncloud/internal/api"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/nodes"
+	"github.com/ridoysheikh/syncloud/internal/pki"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 type cluster struct {

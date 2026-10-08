@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"strings"
 
-	"syncloud/internal/builds"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/builds"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func (s *Server) requireBuilds(w http.ResponseWriter) bool {

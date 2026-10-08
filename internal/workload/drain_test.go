@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"syncloud/internal/events"
-	"syncloud/internal/nodes"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/nodes"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func TestDrainTime(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 )
 
 // A fake VictoriaMetrics: records imports and answers range queries.

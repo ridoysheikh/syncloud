@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/events"
-	"syncloud/internal/metrics"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 const (

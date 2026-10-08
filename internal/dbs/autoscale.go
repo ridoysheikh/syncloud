@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // Autoscaling timings (Phase 12).

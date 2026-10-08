@@ -4197,7 +4197,7 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\x11TASK_STATE_FAILED\x10\x05\x12\x16\n" +
 	"\x12TASK_STATE_REMOVED\x10\x062k\n" +
 	"\x13AgentGatewayService\x12T\n" +
-	"\aConnect\x12!.syncloud.agent.v1.ConnectRequest\x1a\".syncloud.agent.v1.ConnectResponse(\x010\x01B1Z/syncloud/internal/gen/syncloud/agent/v1;agentv1b\x06proto3"
+	"\aConnect\x12!.syncloud.agent.v1.ConnectRequest\x1a\".syncloud.agent.v1.ConnectResponse(\x010\x01BHZFgithub.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1;agentv1b\x06proto3"
 
 var (
 	file_syncloud_agent_v1_agent_proto_rawDescOnce sync.Once

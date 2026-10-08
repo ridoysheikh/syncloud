@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/iam"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/iam"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // IAM administration (§7): users and service accounts, groups, policies and

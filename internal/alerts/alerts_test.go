@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"syncloud/internal/events"
-	"syncloud/internal/metrics"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 type fakeMetrics struct{ samples []metrics.Sample }

@@ -1,5 +1,8 @@
 name: ci
 
+# Checks only: releases are built locally and published with
+# scripts/release.sh (docs/development/releasing.md).
+
 on:
   push:
     branches: [main]
@@ -14,7 +17,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: gofmt
-        run: test -z "$(gofmt -l cmd internal)" || (gofmt -l cmd internal; exit 1)
+        run: test -z "$(gofmt -l cmd internal sdk tools)" || (gofmt -l cmd internal sdk tools; exit 1)
       - run: go vet ./...
       # Includes the OpenAPI ↔ routes and OpenAPI ↔ synctl parity checks (§5.1).
       - run: go test -race -timeout 5m ./...
@@ -27,6 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -34,27 +39,3 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-
-  postgres-image:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: make postgres-image
-
-  binaries:
-    runs-on: ubuntu-latest
-    needs: [go, web]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - run: make build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binaries
-          path: bin/

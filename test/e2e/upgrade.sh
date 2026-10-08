@@ -23,7 +23,7 @@ R=$BIN/releases
 mkdir -p "$R/$NEW" "$R/0.0.3-broken" "$R/channels"
 for c in controller agent synctl; do
   name=syncloud-$c; [ $c = synctl ] && name=synctl
-  CGO_ENABLED=0 GOOS=linux go build -ldflags "-X syncloud/internal/version.Version=$NEW" -o "$R/$NEW/$name-linux-$ARCH" ./cmd/$c
+  CGO_ENABLED=0 GOOS=linux go build -ldflags "-X github.com/ridoysheikh/syncloud/internal/version.Version=$NEW" -o "$R/$NEW/$name-linux-$ARCH" ./cmd/$c
 done
 (cd "$R/$NEW" && sha256sum ./* | sed 's| \./| |' > SHA256SUMS)
 printf '#!/bin/sh\n[ "$1" = version ] && { echo 0.0.3-broken; exit 0; }\necho "broken build" >&2\nexit 1\n' > "$R/0.0.3-broken/syncloud-controller-linux-$ARCH"

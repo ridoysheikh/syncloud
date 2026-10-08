@@ -180,3 +180,82 @@ func TestAlive(t *testing.T) {
 		t.Fatal("bogus PID alive")
 	}
 }
+
+// toServer sends every request (whatever its host) to a test server, so a
+// github.com base can be served locally.
+type toServer struct{ url string }
+
+func (r toServer) RoundTrip(req *http.Request) (*http.Response, error) {
+	out := req.Clone(req.Context())
+	out.URL.Scheme = "http"
+	out.URL.Host = strings.TrimPrefix(r.url, "http://")
+	out.Header.Set("X-Orig-Host", req.URL.Host)
+	return http.DefaultTransport.RoundTrip(out)
+}
+
+func TestGitHubSource(t *testing.T) {
+	arch := runtime.GOARCH
+	ctl := "syncloud-controller-linux-" + arch
+	agent := "syncloud-agent-linux-" + arch
+	sum := func(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+	assets := map[string]string{
+		ctl:          "ctl",
+		agent:        "agent",
+		"SHA256SUMS": sum("ctl") + "  " + ctl + "\n" + sum("agent") + "  " + agent + "\n",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Header.Get("X-Orig-Host")
+		switch {
+		case host == "github.com" && r.URL.Path == "/acme/cloud/releases/latest":
+			http.Redirect(w, r, "https://github.com/acme/cloud/releases/tag/v1.4.2", http.StatusFound)
+		case host == "github.com" && strings.HasPrefix(r.URL.Path, "/acme/cloud/releases/download/v1.4.2/"):
+			body, ok := assets[strings.TrimPrefix(r.URL.Path, "/acme/cloud/releases/download/v1.4.2/")]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write([]byte(body))
+		case host == "api.github.com" && r.URL.Path == "/repos/acme/cloud/releases":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"tag_name": "v1.5.0-rc.2", "draft": true},
+				{"tag_name": "v1.5.0-rc.1", "prerelease": true},
+				{"tag_name": "v1.4.2"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	src := Source{Base: "https://github.com/acme/cloud/", HTTP: &http.Client{Transport: toServer{srv.URL}}}
+	ctx := context.Background()
+
+	if v, err := src.Latest(ctx, "stable"); err != nil || v != "1.4.2" {
+		t.Fatalf("stable = %q, %v", v, err)
+	}
+	if v, err := src.Latest(ctx, "beta"); err != nil || v != "1.5.0-rc.1" {
+		t.Fatalf("beta = %q, %v (drafts are skipped, prereleases count)", v, err)
+	}
+	for _, v := range []string{"1.4.2", "v1.4.2"} {
+		got, err := src.Fetch(ctx, v, t.TempDir())
+		if err != nil {
+			t.Fatalf("Fetch(%s): %v", v, err)
+		}
+		if b, _ := os.ReadFile(got[ctl]); string(b) != "ctl" {
+			t.Fatalf("controller = %q", b)
+		}
+	}
+	if _, err := src.Fetch(ctx, "9.9.9", t.TempDir()); err == nil {
+		t.Fatal("a missing release was fetched")
+	}
+	for base, want := range map[string]bool{
+		"https://github.com/acme/cloud":       true,
+		"https://github.com/acme":             false,
+		"https://github.com/acme/cloud/extra": false,
+		"https://mirror.example.com/a/b":      false,
+		"http://github.com/acme/cloud":        false,
+	} {
+		if _, ok := (Source{Base: base}).githubRepo(); ok != want {
+			t.Errorf("githubRepo(%s) = %v", base, ok)
+		}
+	}
+}

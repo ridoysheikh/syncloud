@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"syncloud/internal/autoscale"
-	"syncloud/internal/metrics"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/autoscale"
+	"github.com/ridoysheikh/syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func (s *Server) requireAutoscaler(w http.ResponseWriter) bool {

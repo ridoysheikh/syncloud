@@ -7,8 +7,8 @@ import (
 	"maps"
 	"slices"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Project settings (Phase 15d): deploy locks, cloning environments, and

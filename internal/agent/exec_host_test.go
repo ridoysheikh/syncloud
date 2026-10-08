@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 )
 
 // collect runs a host session and returns its output and exit code.

@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 )
 
 // Names the rendered table refers to (kept in sync with the agent).

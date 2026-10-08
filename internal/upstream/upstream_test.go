@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func TestImageHost(t *testing.T) {

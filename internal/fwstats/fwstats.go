@@ -13,12 +13,12 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/firewall"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/logs"
-	"syncloud/internal/mesh"
-	"syncloud/internal/metrics"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/firewall"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/logs"
+	"github.com/ridoysheikh/syncloud/internal/mesh"
+	"github.com/ridoysheikh/syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Drop is a dropped flow seen by one node, with names for its addresses.

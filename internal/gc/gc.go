@@ -11,8 +11,8 @@ import (
 	"sort"
 	"time"
 
-	"syncloud/internal/store"
-	"syncloud/internal/upgrade"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/upgrade"
 )
 
 // KeepUpgrades is how many upgrade directories stay (newest first).

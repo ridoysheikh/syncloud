@@ -9,8 +9,8 @@ import (
 	"net/url"
 	"strings"
 
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/traefik"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/traefik"
 )
 
 // Release manifest: tested image versions for this SynCloud release.
@@ -20,14 +20,38 @@ const (
 	ImageVictoriaLogs    = "victoriametrics/victoria-logs:v1.53.0"
 	ImageRegistry        = "registry:3.1.2"
 	ImageForgejo         = "codeberg.org/forgejo/forgejo:13.0.5-rootless"
-	// ImagePostgres17 and ImagePostgres18 are built from images/postgres
-	// (make postgres-image), one per major version.
-	ImagePostgres17 = "ghcr.io/syncloud/postgres:17-r2"
-	ImagePostgres18 = "ghcr.io/syncloud/postgres:18-r1"
+	// PostgresTag17 and PostgresTag18 tag the managed PostgreSQL image,
+	// built from images/postgres per major version (make postgres-image).
+	PostgresTag17 = "17-r2"
+	PostgresTag18 = "18-r1"
 )
 
+// The managed PostgreSQL images ship inside each release, not on a public
+// registry: the release carries one archive per tag (PostgresArchive), and
+// the controller loads it into its own registry the first time a database
+// needs it. Nodes then pull it like any image built in the cluster.
+const (
+	// PostgresRepository is the images' repository in the built-in
+	// registry. Its project name is reserved.
+	PostgresRepository = "syncloud-system/postgres"
+	// PostgresLocalName is what make postgres-image tags local builds as.
+	PostgresLocalName = "syncloud-postgres"
+)
+
+// PostgresTags maps each offered major version to its image tag.
+var PostgresTags = map[string]string{"17": PostgresTag17, "18": PostgresTag18}
+
 // PostgresImages maps each offered PostgreSQL major version to its image.
-var PostgresImages = map[string]string{"17": ImagePostgres17, "18": ImagePostgres18}
+var PostgresImages = map[string]string{
+	"17": "@registry/" + PostgresRepository + ":" + PostgresTag17,
+	"18": "@registry/" + PostgresRepository + ":" + PostgresTag18,
+}
+
+// PostgresArchive is the release file that carries an image tag for one
+// CPU architecture (an OCI layout with gzip layers, as a tar.gz).
+func PostgresArchive(tag, arch string) string {
+	return PostgresLocalName + "-" + tag + "-linux-" + arch + ".tar.gz"
+}
 
 // GitServerAddr is where the built-in Git server listens (host network,
 // loopback): Traefik and the controller reach it there.

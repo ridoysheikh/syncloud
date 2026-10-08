@@ -16,10 +16,10 @@ import (
 	"strings"
 	"syscall"
 
-	"syncloud/internal/agent"
-	"syncloud/internal/uninstall"
-	"syncloud/internal/upgrade"
-	"syncloud/internal/version"
+	"github.com/ridoysheikh/syncloud/internal/agent"
+	"github.com/ridoysheikh/syncloud/internal/uninstall"
+	"github.com/ridoysheikh/syncloud/internal/upgrade"
+	"github.com/ridoysheikh/syncloud/internal/version"
 )
 
 const usage = `usage:

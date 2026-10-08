@@ -6,10 +6,10 @@ import (
 	"errors"
 	"sync"
 
-	"syncloud/internal/agentgw"
-	"syncloud/internal/auth"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/agentgw"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 type Relay struct {

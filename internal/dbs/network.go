@@ -8,8 +8,8 @@ import (
 	"net/netip"
 	"strings"
 
-	"syncloud/internal/secgroup"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/secgroup"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Network is a database's access list and public endpoint (Phase 12e).

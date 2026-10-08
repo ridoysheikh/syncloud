@@ -66,13 +66,19 @@ fi
 if [ "${WITH_POSTGRES:-0}" = 1 ]; then
   # PG_VERSIONS: the major versions whose images the nodes get (the first
   # one is $PG_IMAGE); the platform etcd runs from the default version's.
-  PG_IMAGES=()
+  # Releases load these into the registry; the tests hand the local builds
+  # to the nodes and name them with --postgres-image.
+  PG_IMAGES=() PG_FLAG=""
   for v in ${PG_VERSIONS:-18}; do
-    img=$(sed -n "s/.*ImagePostgres$v *= *\"\(.*\)\"/\1/p" internal/system/manifest.go)
+    img=syncloud-postgres:$(sed -n "s/.*PostgresTag$v *= *\"\(.*\)\"/\1/p" internal/system/manifest.go)
     docker image inspect "$img" >/dev/null 2>&1 || make -s "postgres-image-$v" >/dev/null
     PG_IMAGES+=("$img")
+    PG_FLAG+="${PG_FLAG:+,}$v=$img"
   done
   PG_IMAGE=${PG_IMAGES[0]}
+  # etcd runs from the default version's image, which must be listed too.
+  case ",$PG_FLAG" in *,18=*) ;; *) PG_FLAG+=",18=$PG_IMAGE" ;; esac
+  CTL_FLAGS="${CTL_FLAGS:-} --postgres-image $PG_FLAG"
   docker save "${PG_IMAGES[@]}" -o "$BIN/postgres.tar"
 fi
 

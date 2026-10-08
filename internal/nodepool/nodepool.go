@@ -18,13 +18,13 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/cloud"
-	"syncloud/internal/events"
-	"syncloud/internal/nodes"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/cloud"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/nodes"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // Spec is a pool's settings.

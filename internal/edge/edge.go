@@ -14,13 +14,13 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/agentgw"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/mesh"
-	"syncloud/internal/metrics"
-	"syncloud/internal/nodes"
-	"syncloud/internal/store"
-	"syncloud/internal/traefik"
+	"github.com/ridoysheikh/syncloud/internal/agentgw"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/mesh"
+	"github.com/ridoysheikh/syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/nodes"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/traefik"
 )
 
 // TaskID is the edge Traefik's task ID on every edge node.

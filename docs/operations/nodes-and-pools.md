@@ -1,5 +1,7 @@
 # Nodes and pools
 
+Joining a new server is covered in [Add nodes](../getting-started/add-nodes.md). This page is about running them.
+
 ## Joining and removing nodes
 
 | Task | Command |

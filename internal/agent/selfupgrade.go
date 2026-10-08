@@ -9,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/upgrade"
-	"syncloud/internal/version"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/upgrade"
+	"github.com/ridoysheikh/syncloud/internal/version"
 )
 
 // selfUpgrade receives a new agent binary in chunks and replaces this agent

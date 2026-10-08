@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func TestAddresses(t *testing.T) {

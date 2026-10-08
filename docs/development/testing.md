@@ -1,5 +1,7 @@
 # Testing
 
+Every change should pass the unit tests. Changes to how things run on nodes also get an end-to-end test.
+
 ## Unit tests
 
 ```sh

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"syncloud/internal/registry"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/registry"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func TestBuildSpec(t *testing.T) {

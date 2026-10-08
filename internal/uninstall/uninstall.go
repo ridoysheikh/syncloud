@@ -13,8 +13,8 @@ import (
 
 	"github.com/vishvananda/netlink"
 
-	"syncloud/internal/agent/docker"
-	"syncloud/internal/agent/netcfg"
+	"github.com/ridoysheikh/syncloud/internal/agent/docker"
+	"github.com/ridoysheikh/syncloud/internal/agent/netcfg"
 )
 
 type Options struct {

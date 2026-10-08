@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"syncloud/internal/jobs"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/jobs"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // Deployment history and actions (Phase 15a).

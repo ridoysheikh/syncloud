@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"syncloud/internal/domain"
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/domain"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 type domainCheck struct {

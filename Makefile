@@ -1,7 +1,9 @@
 .PHONY: all build controller agent synctl web proto test vet fmt dev dev-controller dev-agent dev-web clean release e2e postgres-image
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
-LDFLAGS := -s -w -X syncloud/internal/version.Version=$(VERSION)
+# The version without the tag's "v" (v0.1.0 → 0.1.0).
+VERSION ?= $(patsubst v%,%,$(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev))
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+LDFLAGS := -s -w -X github.com/ridoysheikh/syncloud/internal/version.Version=$(VERSION) -X github.com/ridoysheikh/syncloud/internal/version.Commit=$(COMMIT)
 DEV_DATA := $(CURDIR)/.data
 
 all: build
@@ -18,11 +20,12 @@ agent:
 synctl:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/synctl ./cmd/synctl
 
-## postgres-image: the managed PostgreSQL images (Patroni, WAL-G, etcd, extensions), one per major version, tagged as pinned in internal/system
-POSTGRES_MAJORS := $(shell sed -n 's/.*ImagePostgres\([0-9]*\) *= *".*/\1/p' internal/system/manifest.go)
+## postgres-image: build the managed PostgreSQL images (Patroni, WAL-G, etcd, extensions) locally, one per major version, as syncloud-postgres:<tag> (tags pinned in internal/system)
+POSTGRES_MAJORS := $(shell sed -n 's/.*PostgresTag\([0-9]*\) *= *".*/\1/p' internal/system/manifest.go)
+pg_tag = $(shell sed -n 's/.*PostgresTag$(1) *= *"\(.*\)"/\1/p' internal/system/manifest.go)
 postgres-image: $(addprefix postgres-image-,$(POSTGRES_MAJORS))
 postgres-image-%:
-	docker build --build-arg PG_MAJOR=$* -t $(shell sed -n 's/.*ImagePostgres$* *= *"\(.*\)"/\1/p' internal/system/manifest.go) images/postgres
+	docker build --build-arg PG_MAJOR=$* -t syncloud-postgres:$(call pg_tag,$*) images/postgres
 
 web: web/node_modules
 	cd web && pnpm run build
@@ -32,17 +35,51 @@ web/node_modules: web/package.json web/pnpm-lock.yaml
 	cd web && pnpm install --frozen-lockfile
 	@touch $@
 
-## release: linux binaries for amd64/arm64 plus SHA256SUMS in dist/ (what install.sh downloads)
+## release: build a release locally into dist/ (make release VERSION=0.1.0):
+##   raw binaries (what install.sh and upgrades fetch), tar.gz bundles per
+##   platform, the PostgreSQL image archives, install.sh and SHA256SUMS.
+##   RELEASE_IMAGES=0 skips the images (they need make postgres-image first).
+RELEASE_IMAGES ?= 1
 release: web
 	rm -rf dist && mkdir -p dist
+	@echo "== binaries $(VERSION)"
 	for arch in amd64 arm64; do \
 	  for cmd in controller agent; do \
 	    CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o dist/syncloud-$$cmd-linux-$$arch ./cmd/$$cmd || exit 1; \
 	  done; \
-	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o dist/synctl-linux-$$arch ./cmd/synctl || exit 1; \
+	  for os in linux darwin; do \
+	    CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o dist/synctl-$$os-$$arch ./cmd/synctl || exit 1; \
+	  done; \
 	done
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/synctl-windows-amd64.exe ./cmd/synctl
 	cp scripts/install.sh dist/
-	cd dist && sha256sum syncloud-* synctl-* > SHA256SUMS
+	@echo "== bundles"
+	set -e; for arch in amd64 arm64; do \
+	  b=syncloud_$(VERSION)_linux_$$arch; mkdir -p dist/.pkg/$$b; \
+	  cp dist/syncloud-controller-linux-$$arch dist/.pkg/$$b/syncloud-controller; \
+	  cp dist/syncloud-agent-linux-$$arch dist/.pkg/$$b/syncloud-agent; \
+	  cp dist/synctl-linux-$$arch dist/.pkg/$$b/synctl; \
+	  cp scripts/install.sh LICENSE README.md dist/.pkg/$$b/; \
+	  tar -C dist/.pkg --owner=0 --group=0 -czf dist/$$b.tar.gz $$b; \
+	done
+	set -e; for t in darwin_amd64 darwin_arm64 windows_amd64; do \
+	  b=synctl_$(VERSION)_$$t; mkdir -p dist/.pkg/$$b; \
+	  src=dist/synctl-$$(echo $$t | tr _ -); [ -f $$src ] || src=$$src.exe; \
+	  cp $$src dist/.pkg/$$b/$$(basename $$src | sed 's/-.*\.exe$$/.exe/; s/-.*//'); \
+	  cp LICENSE dist/.pkg/$$b/; \
+	  tar -C dist/.pkg --owner=0 --group=0 -czf dist/$$b.tar.gz $$b; \
+	done
+	rm -rf dist/.pkg
+ifeq ($(RELEASE_IMAGES),1)
+	@echo "== PostgreSQL images (linux/amd64)"
+	set -e; for major in $(POSTGRES_MAJORS); do \
+	  tag=$$(sed -n "s/.*PostgresTag$$major *= *\"\(.*\)\"/\1/p" internal/system/manifest.go); \
+	  docker image inspect syncloud-postgres:$$tag >/dev/null 2>&1 || $(MAKE) postgres-image-$$major; \
+	  go run ./tools/imagepack syncloud-postgres:$$tag $$tag dist/syncloud-postgres-$$tag-linux-amd64.tar.gz; \
+	done
+endif
+	cd dist && sha256sum * > SHA256SUMS
+	@echo "== dist/"; ls -lh dist
 
 ## e2e: multi-node tests in Docker-in-Docker containers (needs Docker, privileged containers)
 e2e:
@@ -87,7 +124,7 @@ vet:
 	cd web && pnpm run typecheck
 
 fmt:
-	gofmt -w cmd internal
+	gofmt -w cmd internal sdk tools
 
 ## dev: controller on :7070, its local agent (ctl-0), and Vite on :5173 (open http://localhost:5173)
 dev: web/node_modules

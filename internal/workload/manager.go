@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/agentgw"
-	"syncloud/internal/auth"
-	"syncloud/internal/events"
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/mesh"
-	"syncloud/internal/nodes"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/agentgw"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/mesh"
+	"github.com/ridoysheikh/syncloud/internal/nodes"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Event topics.

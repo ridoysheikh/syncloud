@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"syncloud/internal/gitprovider"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/gitprovider"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func newManager(t *testing.T) (*Manager, *store.Store) {

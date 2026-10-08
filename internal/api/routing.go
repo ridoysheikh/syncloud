@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/store"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // Ports and domains (Phase 15c).

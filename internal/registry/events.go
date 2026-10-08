@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // EventsRetention is how long individual registry events are kept.

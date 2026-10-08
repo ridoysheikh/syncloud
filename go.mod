@@ -1,4 +1,4 @@
-module syncloud
+module github.com/ridoysheikh/syncloud
 
 go 1.27.0
 

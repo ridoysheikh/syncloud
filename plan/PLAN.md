@@ -2455,6 +2455,61 @@ The Settings tab is split into sections:
 - **Width:** parents and children are full-width rows. The group buttons used to shrink to their content.
 - **Checks:** Playwright over 24 routes found one current entry each, the expected one. All entries are 211 px wide. A closed group reopens on navigation and can be closed again.
 
+### Phase 17: Public GitHub repository, releases and documentation (user request, 2026-10-08)
+
+**Decisions (user):**
+- Repository: `github.com/ridoysheikh/syncloud`, public, Apache-2.0.
+- Releases are **built locally** and published as GitHub release files; GitHub builds nothing.
+- A release carries tar.gz bundles **and** raw binaries.
+- The managed PostgreSQL images **ship inside the release**: no public registry.
+- The first release is `v0.1.0`.
+
+**Packaging:**
+- **Go module:** `github.com/ridoysheikh/syncloud`, so `go install …/cmd/synctl@latest` and the Go SDK work. The proto `go_package`, the ldflags (version and commit) and the scripts follow.
+- **`make release VERSION=X`** builds into `dist/`:
+  - raw binaries: controller and agent for linux amd64/arm64, and synctl for linux, macOS and windows;
+  - `syncloud_<v>_linux_<arch>.tar.gz`: controller, agent, synctl, install.sh, LICENSE and README;
+  - `synctl_<v>_<os>_<arch>.tar.gz`;
+  - `syncloud-postgres-<tag>-linux-amd64.tar.gz`;
+  - `install.sh` and `SHA256SUMS`.
+- **`scripts/release.sh X`** checks the tree, tag and CHANGELOG section, runs vet and test, builds, verifies the checksums and the version, tags, pushes the tag, and runs `gh release create` with the CHANGELOG notes. A version with a suffix is a prerelease. It also has `--dry-run`, `--draft` and `--no-images`.
+- **CI:** gofmt, vet, tests and the web build only. The release workflow and the image-push job were removed.
+- **Release source** (`internal/upgrade`): a base of `https://github.com/<owner>/<repo>` uses the release-asset layout:
+  - the `stable` channel is resolved through the `releases/latest` redirect;
+  - `beta` through the REST API, including prereleases;
+  - `v` prefixes are optional.
+
+  Mirrors and `file://` keep the plain layout. `FetchFile` streams a large file and checks it against `SHA256SUMS`. The defaults of `--release-url` and install.sh are the repository, and install.sh writes `SYNCLOUD_RELEASE_URL` to the env file.
+- **PostgreSQL images in the release:**
+  - `tools/imagepack` turns `docker save` (an OCI layout) into a layout with gzip layers (`registry.CompressLayout`). It's 1.2 GB down to 433–488 MB per tag.
+  - The pins are now tags (`PostgresTag17/18`), and the default images are `@registry/syncloud-system/postgres:<tag>`.
+  - `internal/sysimage.Seeder.Ensure`, called by the database manager before members and etcd start, loads an archive into the built-in registry (`Browser.PushLayout`), in the background. It takes the archive from `<downloads>/images/` if one was placed by hand (air-gapped hosts), else downloads it from the controller's own version's release. Meanwhile the database shows "waiting for the PostgreSQL image: …".
+  - Database task specs resolve `@registry/` with node pull tokens and the registry CA, after the spec hash, as services do.
+  - `syncloud-system` is a reserved project name. Its repositories can't get lifecycle policies or be deleted by hand.
+  - `--postgres-image` still overrides (development, e2e: `syncloud-postgres:<tag>` from `make postgres-image`).
+  - The images are linux/amd64 only. This host has no arm64 emulation, and adding it would change the host kernel's binfmt setup.
+
+**Documentation:**
+- **`README.md`:** what it is, install, first deploy, how it works, a docs table, status, contributing and the license.
+- **`docs/README.md`:** a map routed by goal ("I want to…").
+- **Short pages:**
+  - `getting-started/`: requirements, install (options, bundle, mirror and offline), first app, add nodes, synctl;
+  - `guides/`: services, deployments, release commands and jobs, Git builds, domains and ports, scaling, PostgreSQL (overview, administration, backups), Valkey, S3 storage, monitoring, access control, network security, integrations;
+  - `operations/`: upgrades, backup and restore, nodes and pools, Traefik, troubleshooting, data retention, uninstall;
+  - `reference/`: synctl, API, configuration, architecture;
+  - `development/`: building, testing, releasing.
+- The old long pages were split into these. Every command was checked against `synctl --help`, and a link and anchor check passes.
+- **Repository files:** `LICENSE` (Apache-2.0), `NOTICE`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, issue forms and a PR template.
+
+**Checks:**
+- **Unit tests:**
+  - `TestGitHubSource`: redirect, prerelease channel, `v` prefixes, layout detection;
+  - `TestPackPushAndSeed`: CompressLayout, PushLayout against a fake registry, Ensure from a placed archive, and the development-build refusal.
+- **Full suite:** the Go suite and vet pass.
+- **Local build:** `make release VERSION=0.1.0` built every file, and `synctl version` prints `0.1.0 (<commit>)`.
+- **Test cluster:** with the new controller and placed archives, the real registry received the 18-r1 image. The `orders` database member and the platform etcd were recreated from `registry.<base>/syncloud-system/postgres:18-r1` and are healthy.
+- **Before publishing:** gitleaks over the whole history found only test fixtures, and there were no large blobs.
+
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)
 

@@ -15,13 +15,13 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/events"
-	"syncloud/internal/execrelay"
-	"syncloud/internal/registry"
-	"syncloud/internal/store"
-	"syncloud/internal/system"
-	"syncloud/internal/workload"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/execrelay"
+	"github.com/ridoysheikh/syncloud/internal/registry"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/system"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // TopicRun carries a store.GCRun whenever a run starts or finishes.
@@ -88,6 +88,9 @@ func (m *Manager) GetPolicy(ctx context.Context, repo string) (Policy, error) {
 func (m *Manager) SetPolicy(ctx context.Context, repo string, rules []registry.Rule, actor string) (Policy, error) {
 	if repo == "" || strings.ContainsAny(repo, " :@") {
 		return Policy{}, ErrInvalid{errors.New("invalid repository name")}
+	}
+	if registry.IsSystemRepo(repo) {
+		return Policy{}, ErrInvalid{errors.New("the platform's own images have no lifecycle policy")}
 	}
 	if err := registry.ValidateRules(rules); err != nil {
 		return Policy{}, ErrInvalid{err}

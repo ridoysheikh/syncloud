@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func pgSpec(p PostgresSpec, replicas int) Spec {

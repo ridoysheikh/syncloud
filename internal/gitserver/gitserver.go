@@ -24,12 +24,12 @@ import (
 	"sync"
 	"time"
 
-	"syncloud/internal/domain"
-	"syncloud/internal/execrelay"
-	"syncloud/internal/gitconn"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
-	"syncloud/internal/system"
+	"github.com/ridoysheikh/syncloud/internal/domain"
+	"github.com/ridoysheikh/syncloud/internal/execrelay"
+	"github.com/ridoysheikh/syncloud/internal/gitconn"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/system"
 )
 
 const (

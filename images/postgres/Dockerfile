@@ -8,6 +8,9 @@
 ARG PG_MAJOR=18
 FROM pgduckdb/pgduckdb:${PG_MAJOR}-v1.1.1
 ARG PG_MAJOR
+LABEL org.opencontainers.image.source="https://github.com/ridoysheikh/syncloud" \
+      org.opencontainers.image.description="SynCloud managed PostgreSQL: Patroni, PgBouncer, WAL-G and extensions" \
+      org.opencontainers.image.licenses="Apache-2.0"
 
 ARG WALG_VERSION=v3.0.9
 ARG ETCD_VERSION=v3.7.2
@@ -31,7 +34,9 @@ RUN set -eux; \
         patroni python3-etcd python3-psycopg2 \
         pgbouncer; \
     # WAL-G (Apache 2): continuous archiving and backups to S3.
-    curl -fsSL -o /usr/local/bin/wal-g "https://github.com/wal-g/wal-g/releases/download/${WALG_VERSION}/wal-g-pg-22.04-${TARGETARCH}"; \
+    # WAL-G names arm64 builds "aarch64".
+    walg_arch=$([ "${TARGETARCH}" = arm64 ] && echo aarch64 || echo "${TARGETARCH}"); \
+    curl -fsSL -o /usr/local/bin/wal-g "https://github.com/wal-g/wal-g/releases/download/${WALG_VERSION}/wal-g-pg-22.04-${walg_arch}"; \
     chmod 0755 /usr/local/bin/wal-g; \
     wal-g --version; \
     # etcd (Apache 2): the platform's coordination store for Patroni. It

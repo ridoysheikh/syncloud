@@ -16,11 +16,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"syncloud/internal/api"
-	"syncloud/internal/auth"
-	"syncloud/internal/events"
-	"syncloud/internal/secrets"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/api"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/secrets"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Operations deliberately without a dedicated command, and why.

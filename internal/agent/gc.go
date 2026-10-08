@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"syncloud/internal/agent/docker"
-	"syncloud/internal/agent/sysinfo"
-	"syncloud/internal/upgrade"
+	"github.com/ridoysheikh/syncloud/internal/agent/docker"
+	"github.com/ridoysheikh/syncloud/internal/agent/sysinfo"
+	"github.com/ridoysheikh/syncloud/internal/upgrade"
 )
 
 // diskPressure is the disk use above which unused images are pruned.

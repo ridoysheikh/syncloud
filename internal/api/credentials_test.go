@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"syncloud/internal/client"
-	"syncloud/internal/sigv"
+	"github.com/ridoysheikh/syncloud/internal/client"
+	"github.com/ridoysheikh/syncloud/internal/sigv"
 )
 
 // signIn completes setup so the env's cookie jar holds a root session.

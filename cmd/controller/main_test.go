@@ -4,7 +4,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"syncloud/internal/config"
+	"github.com/ridoysheikh/syncloud/internal/config"
 )
 
 func TestDevAddress(t *testing.T) {

@@ -10,8 +10,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"syncloud/internal/execrelay"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/execrelay"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // execControl is a JSON text message on the exec WebSocket.

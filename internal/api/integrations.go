@@ -11,10 +11,10 @@ import (
 	"net/url"
 	"strings"
 
-	"syncloud/internal/gitconn"
-	"syncloud/internal/gitprovider"
-	"syncloud/internal/gitserver"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/gitconn"
+	"github.com/ridoysheikh/syncloud/internal/gitprovider"
+	"github.com/ridoysheikh/syncloud/internal/gitserver"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 func (s *Server) requireGitConns(w http.ResponseWriter) bool {

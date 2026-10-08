@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	agentv1 "syncloud/internal/gen/syncloud/agent/v1"
-	"syncloud/internal/pki"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
+	"github.com/ridoysheikh/syncloud/internal/pki"
 )
 
 // certHolder lets the TLS config pick up a renewed certificate.

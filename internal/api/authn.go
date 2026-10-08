@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"syncloud/internal/auth"
-	"syncloud/internal/sigv"
-	"syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/sigv"
+	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
 // Credential types a request can authenticate with (§7.1).
