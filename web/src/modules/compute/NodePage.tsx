@@ -5,28 +5,27 @@ import { TerminalSquare, TriangleAlert } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import {
   bytes,
+  CONTROLLER_NODE,
   pct,
   since,
-  statusLabel,
-  statusTone,
   useNodes,
   type Node,
 } from "@/lib/nodes";
-import { serviceUrl, taskTone, useTasks, type Task } from "@/lib/workloads";
+import { useTasks, type Task } from "@/lib/workloads";
+import { ControllerTag, NodeStatus, tasksOn } from "@/entities/nodes";
+import { TasksTable } from "@/entities/tasks";
 import { HistoryChart, type HistorySeries } from "@/charts/HistoryChart";
 import { formatBytes } from "@/modules/projects/MetricsPanel";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { StatTile } from "@/ui/StatTile";
-import { DataTable, type Column } from "@/ui/DataTable";
 import { RangePicker, refetchFor, type Range } from "@/ui/RangePicker";
 import { Tabs } from "@/ui/Tabs";
 import { Terminal } from "@/ui/Terminal";
-import { Alert, Button, StatusBadge } from "@/ui/controls";
+import { Alert, Button } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
 
-const CONTROLLER = "ctl-0";
 const nodesPath: string = "/compute/nodes";
 
 interface Series {
@@ -71,16 +70,11 @@ const fmtCount = (v: number) => `${Math.round(v)}`;
 export function NodePage() {
   const { name } = useParams({ strict: false }) as { name: string };
   const { data: nodes, isLoading } = useNodes();
-  const { data: allTasks = [] } = useTasks();
+  const { data: allTasks = [], isLoading: tasksLoading } = useTasks();
   const [tab, setTab] = useState<Tab>("overview");
   const node = nodes?.find((n) => n.name === name);
   const tasks = useMemo(
-    () =>
-      node
-        ? allTasks.filter(
-            (t) => t.nodeId === node.id && t.desired === "running",
-          )
-        : [],
+    () => (node ? tasksOn(allTasks, node) : []),
     [allTasks, node],
   );
 
@@ -108,27 +102,10 @@ export function NodePage() {
         title={
           <span className="flex items-center gap-2">
             {node.name}
-            {node.name === CONTROLLER && (
-              <span className="text-faint text-[10px] font-normal uppercase">
-                controller
-              </span>
-            )}
+            <ControllerTag name={node.name} />
           </span>
         }
-        status={
-          <span className="flex items-center gap-1">
-            <StatusBadge tone={statusTone[node.status]}>
-              {statusLabel[node.status]}
-            </StatusBadge>
-            {node.draining ? (
-              <StatusBadge tone="warn">draining</StatusBadge>
-            ) : (
-              !node.schedulable && (
-                <StatusBadge tone="neutral">no new tasks</StatusBadge>
-              )
-            )}
-          </span>
-        }
+        status={<NodeStatus node={node} />}
         actions={<ScheduleActions node={node} />}
       />
       <Tabs
@@ -144,7 +121,11 @@ export function NodePage() {
         }
       />
       {tab === "overview" && <Overview node={node} tasks={tasks} />}
-      {tab === "tasks" && <NodeTasks tasks={tasks} />}
+      {tab === "tasks" && (
+        <Panel title={`Tasks on this node (${tasks.length})`} flush>
+          <TasksTable tasks={tasks} loading={tasksLoading} showNode={false} />
+        </Panel>
+      )}
       {tab === "shell" && <NodeShell node={node} />}
     </div>
   );
@@ -284,7 +265,7 @@ function Details({ node }: { node: Node }) {
         ? "no (draining)"
         : node.schedulable
           ? "yes"
-          : node.name === CONTROLLER
+          : node.name === CONTROLLER_NODE
             ? "only projects or services that name it"
             : "no (cordoned)",
     ],
@@ -388,60 +369,6 @@ function NodeCharts({ node }: { node: Node }) {
           {chart("Memory by service", lines(c?.serviceMemory), formatBytes)}
         </div>
       )}
-    </Panel>
-  );
-}
-
-function NodeTasks({ tasks }: { tasks: Task[] }) {
-  const columns: Column<Task>[] = [
-    {
-      header: "Service",
-      cell: (t) => (
-        <Link
-          to={serviceUrl({
-            project: t.project,
-            environment: t.environment,
-            name: t.service,
-          })}
-          className="hover:text-accent"
-        >
-          {t.project}/{t.environment}/{t.service}
-        </Link>
-      ),
-    },
-    {
-      header: "State",
-      cell: (t) => (
-        <StatusBadge tone={taskTone[t.state]}>{t.state}</StatusBadge>
-      ),
-    },
-    { header: "Health", cell: (t) => t.health || "—" },
-    { header: "Revision", cell: (t) => t.revision },
-    {
-      header: "IP",
-      cell: (t) => <span className="font-mono">{t.ip || "—"}</span>,
-    },
-    {
-      header: "Started",
-      cell: (t) => (t.startedAt ? since(t.startedAt) : "—"),
-    },
-    {
-      header: "Task",
-      cell: (t) => <span className="text-faint font-mono">{t.id}</span>,
-    },
-  ];
-  return (
-    <Panel title={`Tasks on this node (${tasks.length})`} flush>
-      <DataTable
-        columns={columns}
-        rows={tasks}
-        rowKey={(t) => t.id}
-        empty={
-          <p className="text-faint px-2 py-3 text-xs md:px-3">
-            No tasks run here.
-          </p>
-        }
-      />
     </Panel>
   );
 }

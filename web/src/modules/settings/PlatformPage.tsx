@@ -9,6 +9,8 @@ import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { StatusBadge } from "@/ui/controls";
+import { NodeLink } from "@/entities/nodes";
+import { TaskState } from "@/entities/tasks";
 import { cn, gap } from "@/ui/cn";
 import { GitServerPanel } from "@/modules/integrations/GitServerPanel";
 
@@ -26,7 +28,6 @@ interface SystemTask {
   updatedAt: string;
 }
 
-const tone = { running: "ok", pulling: "info", starting: "info", pending: "neutral", exited: "bad", failed: "bad", removed: "neutral" } as const;
 const key = ["system", "tasks"];
 
 /** Platform components run by the controller as system tasks (D20, §5.0). */
@@ -78,15 +79,10 @@ export function PlatformPage() {
             },
             {
               header: "State",
-              cell: (t) => (
-                <div className="flex flex-col items-start gap-0.5">
-                  <StatusBadge tone={tone[t.state]}>{t.state}</StatusBadge>
-                  {t.error && <span className="text-bad max-w-xs truncate" title={t.error}>{t.error}</span>}
-                </div>
-              ),
+              cell: (t) => <TaskState state={t.state} error={t.error} />,
             },
             { header: "Image", cell: (t) => <span className="font-mono">{t.image}</span> },
-            { header: "Node", cell: (t) => t.node },
+            { header: "Node", cell: (t) => <NodeLink name={t.node} /> },
             { header: "Container", cell: (t) => <span className="text-muted font-mono">{t.containerId ? t.containerId.slice(0, 12) : "—"}</span> },
             { header: "Started", cell: (t) => <span className="text-muted">{t.state === "running" ? since(t.startedAt) : "—"}</span> },
           ]}

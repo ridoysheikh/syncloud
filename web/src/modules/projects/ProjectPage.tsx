@@ -1,24 +1,21 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ExternalLink, GitBranch, Plus } from "lucide-react";
+import { Boxes, Plus } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import {
-  AWAITING_BUILD,
   envPath,
   useProjects,
   useServices,
   useSharedVars,
   type Service,
-  serviceState,
-  serviceUrl,
 } from "@/lib/workloads";
-import { since } from "@/lib/nodes";
+import { ServiceCard } from "@/entities/services";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { EmptyState } from "@/ui/EmptyState";
-import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
-import { cn, gap, pad } from "@/ui/cn";
+import { Alert, Button, Field, Input } from "@/ui/controls";
+import { cn, gap } from "@/ui/cn";
 import { useLazyList } from "@/ui/paging";
 import { MetricsPanel } from "./MetricsPanel";
 import { LogsView } from "@/modules/logs/LogsView";
@@ -226,66 +223,11 @@ function ServiceGrid({
         )}
       >
         {lazy.shown.map((s) => (
-          <ServiceCard key={s.id} s={s} />
+          <ServiceCard key={s.id} service={s} />
         ))}
       </div>
       {lazy.more}
     </div>
-  );
-}
-
-function ServiceCard({ s }: { s: Service }) {
-  const st = serviceState(s);
-  const to: string = serviceUrl(s);
-  const built =
-    s.spec.image === AWAITING_BUILD ||
-    s.spec.image.startsWith(`@registry/${s.project}/${s.name}:`);
-  return (
-    <Link
-      to={to}
-      className={cn(
-        "bg-surface border-line hover:border-line-strong flex min-w-0 flex-col gap-1.5 rounded-md border transition-colors",
-        pad,
-      )}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-sm font-semibold">{s.name}</span>
-        <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
-      </div>
-      <div
-        className="text-muted flex items-center gap-1 truncate font-mono text-xs"
-        title={s.spec.image}
-      >
-        {built && <GitBranch className="size-3 shrink-0" />}
-        {s.spec.image === AWAITING_BUILD
-          ? "waiting for the first build"
-          : s.spec.image}
-      </div>
-      <div className="text-muted flex items-center justify-between gap-2 text-xs">
-        <span>
-          <span className="text-fg font-mono">
-            {s.running}/{s.desiredCount}
-          </span>{" "}
-          tasks · rev {s.revision}
-        </span>
-        <span className="text-faint">{since(s.updatedAt)}</span>
-      </div>
-      {s.endpoints.length > 0 ? (
-        <span className="text-faint inline-flex items-center gap-1 truncate font-mono text-xs">
-          <ExternalLink className="size-3 shrink-0" />
-          {s.endpoints[0]!.replace(/^https?:\/\//, "")}
-        </span>
-      ) : (
-        <span className="text-faint truncate font-mono text-xs">
-          {s.dnsName || "internal"}
-        </span>
-      )}
-      {s.status && s.spec.image !== AWAITING_BUILD && (
-        <span className="text-bad truncate text-xs" title={s.status}>
-          {s.status}
-        </span>
-      )}
-    </Link>
   );
 }
 

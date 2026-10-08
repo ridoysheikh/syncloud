@@ -6,6 +6,7 @@ import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
+import { NodeLink } from "@/entities/nodes";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
 
@@ -157,7 +158,7 @@ export function UpdatesPage() {
           rows={agents.data?.nodes ?? []}
           rowKey={(n) => n.id}
           columns={[
-            { header: "Node", cell: (n) => <span className="font-medium">{n.name}</span> },
+            { header: "Node", cell: (n) => <NodeLink id={n.id} name={n.name} className="font-medium" /> },
             {
               header: "Agent",
               cell: (n) => (

@@ -12,7 +12,6 @@ import {
   useServices,
   useSharedVars,
   type Spec,
-  serviceState,
 } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
@@ -31,7 +30,8 @@ import {
   type VarRow,
 } from "@/modules/projects/VarsEditor";
 import { BuildsPanel } from "./BuildsPanel";
-import { TasksTable } from "./TasksPage";
+import { TasksTable } from "@/entities/tasks";
+import { ServiceState, ServiceTaskDots } from "@/entities/services";
 import { ServiceS3Panel } from "@/modules/storage/StoragePages";
 import { useTasks } from "@/lib/workloads";
 import { LogsView } from "@/modules/logs/LogsView";
@@ -120,7 +120,6 @@ export function ServicePage() {
       </Alert>
     ) : null;
   }
-  const st = serviceState(svc);
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader
@@ -137,7 +136,12 @@ export function ServicePage() {
           </Link>,
         ]}
         title={name}
-        status={<StatusBadge tone={st.tone}>{st.label}</StatusBadge>}
+        status={
+          <span className="flex items-center gap-2">
+            <ServiceState service={svc} />
+            <ServiceTaskDots service={svc} />
+          </span>
+        }
         actions={
           <>
             <div className="border-line flex items-center rounded-sm border">

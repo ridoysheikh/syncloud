@@ -11,6 +11,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Meter } from "@/ui/Meter";
 import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
+import { NodeLink } from "@/entities/nodes";
 import { cn, gap } from "@/ui/cn";
 import { useLazyList } from "@/ui/paging";
 import { confirmAction } from "@/ui/dialogs";
@@ -463,7 +464,7 @@ export function EdgeNodesPage() {
             )
           }
           columns={[
-            { header: "Node", cell: (e) => <span className="font-medium">{e.node}</span> },
+            { header: "Node", cell: (e) => <NodeLink id={e.nodeId} name={e.node} className="font-medium" /> },
             { header: "Health", cell: (e) => <StatusBadge tone={e.state === "healthy" ? "ok" : e.state === "starting" ? "info" : "bad"}>{e.state}</StatusBadge> },
             { header: "Public address", cell: (e) => <span className="font-mono">{e.address || "—"}</span> },
             { header: "Mesh address", cell: (e) => <span className="text-muted font-mono">{e.meshIp}</span> },

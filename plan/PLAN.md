@@ -2338,6 +2338,59 @@ The Settings tab is split into sections:
 
 **Order:** 15a, then 15b, 15c and 15d. Each slice follows the usual workflow: unit tests, a DinD e2e (`test/e2e/deployments.sh`, extended per slice), screenshots, then this plan and a commit.
 
+### Phase 16: Shared entity components (user request, 2026-10-08)
+
+**Problem:** tasks, nodes and services are drawn by hand on each page, so they look and behave differently:
+- three task tables (Tasks, the node's Tasks tab, and the service and deployment tables), each with different columns;
+- a node is shown as plain text on most pages (database members, platform components, edges, IPAM, Traefik replicas, updates), a link on some, and with status badges copied in three places;
+- service state badges and cards are written separately on the project, projects and overview pages.
+
+**Design:** one module per entity under `web/src/entities/`, and every page uses it. A new `ui/HoverCard` primitive supports them:
+- **HoverCard:** opens after 300 ms on hover or keyboard focus, in a portal, flipping to stay inside the viewport. On touch it does not open, and the link just navigates. The card's content mounts only while it is open, so a table of links costs nothing.
+- **`entities/nodes.tsx`:**
+  - `NodeStatus`: the status, plus draining or no new tasks.
+  - `NodeUsage`: CPU, memory and disk meters.
+  - `NodeLink` (by name or ID): a status dot and the name, linking to the node, with a hover card showing the status, usage, task count, versions and last seen. An unknown name renders as text.
+  - `NodeCard`: a card for grid views.
+  - `NodesTable`: moved here, with a task count column.
+- **`entities/tasks.tsx`:**
+  - `TaskState`: the state (or "stopping"), the health, and the error or unreachable note.
+  - `TaskDots`: one dot per wanted task (running, starting, missing), for cards and headers.
+  - `TasksTable`: the only task table. Columns can be hidden (service, node). It has filter chips with counts (all, running, starting, problems) and a search over ID, service, node and IP. Rows link the node and service and keep the shell and restart actions. It replaces the node page's own table.
+- **`entities/services.tsx`:**
+  - `ServiceState`: the badge.
+  - `ServiceLink`: the state dot and `project/env/name`, with a hover card showing the state, image, tasks, revision and address.
+  - `ServiceCard`: moved from the project page, with `TaskDots`.
+- **Live data without extra subscriptions:** links read the cached `nodes` and `services` queries (`useNodeIndex` and `useServiceIndex`, without stream listeners). The pages that already list them keep them live.
+- **Adoption:**
+  - **Tasks:** the Tasks page, the service, deployment and node pages.
+  - **Nodes:** the nodes page (a table and card toggle, remembered per browser), the overview, node limits, database members, platform components, edges, IPAM, Traefik replicas and updates.
+  - **Services:** the project, projects and overview pages, the service header, and task tables.
+
+**Tests:**
+- `tsc` and the build.
+- The overflow and contrast sweeps on the changed routes at 390 and 1440 px.
+- Playwright: hovering a node link shows the card, the task filters narrow the rows, and the nodes card view renders.
+
+**Progress:** ✅ 2026-10-08.
+- **New:** `ui/HoverCard`, `entities/nodes.tsx`, `entities/tasks.tsx`, `entities/services.tsx` and `entities/TaskDots.tsx`. `useNodeIndex`, `useServiceIndex` and `useTaskIndex` share the caches without stream listeners. `CONTROLLER_NODE` replaces three copies of `"ctl-0"`.
+- **Removed:** `compute/NodesTable.tsx`, the old `TasksTable`, the node page's own task table, `ServiceCard` from the project page, and the hand-written state badges on the platform and database member tables.
+- **Nodes:**
+  - The nodes page has a table and cards toggle, remembered per browser.
+  - The node table has a Tasks column (running, plus starting).
+  - Node links with hover cards: tasks, database members, platform components, edges, IPAM (nodes, addresses, top talkers), Traefik replicas and agent updates.
+- **Tasks:**
+  - The table shortens task IDs (the full ID is in the tooltip) and has a Health column.
+  - Filter chips appear only when the tasks differ in state, and the search only above 8 tasks.
+  - The restart button spins while it works.
+- **Services:**
+  - The cards and the service header show `TaskDots`, and project cards show them for all their tasks.
+  - Service links in task tables open a hover card.
+- **Checks:**
+  - `tsc` and the build pass.
+  - The overflow and contrast sweep over 13 changed routes at 390 and 1440 px found nothing.
+  - Playwright: the node and service hover cards open, the cards view renders, and there are no console errors beyond the pre-login 401.
+
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)
 

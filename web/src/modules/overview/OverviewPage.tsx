@@ -26,7 +26,7 @@ import { StatTile } from "@/ui/StatTile";
 import { RangePicker, refetchFor, type Range } from "@/ui/RangePicker";
 import { Alert, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
-import { NodesTable } from "../compute/NodesTable";
+import { NodesTable } from "@/entities/nodes";
 
 // Module routes are registered at runtime, so links to them use plain strings.
 const to = (p: string): string => p;

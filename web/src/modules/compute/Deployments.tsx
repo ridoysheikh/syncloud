@@ -48,7 +48,7 @@ import { Alert, Button, IconButton, StatusBadge } from "@/ui/controls";
 import { alertDialog, confirmAction, confirmChoice } from "@/ui/dialogs";
 import { cn, gap } from "@/ui/cn";
 import { LogsView } from "@/modules/logs/LogsView";
-import { TasksTable } from "./TasksPage";
+import { TasksTable } from "@/entities/tasks";
 
 /* Deployment history, the deployment page and their actions (Phase 15a). */
 
@@ -709,6 +709,7 @@ export function DeploymentPage() {
           tasks={revTasks}
           loading={tasks.isLoading}
           showService={false}
+          toolbar={false}
         />
       </Panel>
     </div>

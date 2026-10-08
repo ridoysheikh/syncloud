@@ -46,6 +46,10 @@ export interface Node {
 }
 
 const key = ["nodes"];
+const fetchNodes = async () => (await api<{ items: Node[] }>("GET", "/nodes")).items;
+
+/** The controller's own agent. */
+export const CONTROLLER_NODE = "ctl-0";
 
 /** All nodes, kept live from the event stream (node.updated / node.removed). */
 export function useNodes() {
@@ -74,10 +78,18 @@ export function useNodes() {
 
   return useQuery({
     queryKey: key,
-    queryFn: async () => (await api<{ items: Node[] }>("GET", "/nodes")).items,
+    queryFn: fetchNodes,
     // Live updates arrive over the stream; refetch occasionally to heal missed events.
     refetchInterval: 60_000,
   });
+}
+
+/**
+ * The nodes for references (links, cards) without a stream listener of their
+ * own: they share the cache the pages listing nodes keep live.
+ */
+export function useNodeIndex() {
+  return useQuery({ queryKey: key, queryFn: fetchNodes, staleTime: 30_000, refetchInterval: 60_000 });
 }
 
 export const statusTone: Record<NodeStatus, "ok" | "warn" | "bad" | "neutral"> = {

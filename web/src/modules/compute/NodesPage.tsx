@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, Plus } from "lucide-react";
+import { Check, Copy, LayoutGrid, Plus, Rows3 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useNodes, type Node } from "@/lib/nodes";
 import { PageHeader } from "@/ui/PageHeader";
@@ -8,9 +8,32 @@ import { Panel } from "@/ui/Panel";
 import { StatTile } from "@/ui/StatTile";
 import { Dialog } from "@/ui/Dialog";
 import { Alert, Button, Field, IconButton } from "@/ui/controls";
-import { cn, gap } from "@/ui/cn";
-import { NodesTable } from "./NodesTable";
+import { cn, gap, pad } from "@/ui/cn";
+import { NodeGrid, NodesTable } from "@/entities/nodes";
 import { confirmAction } from "@/ui/dialogs";
+
+type View = "table" | "cards";
+const VIEW_KEY = "syncloud.nodes.view";
+
+/** The remembered table/cards choice; storage can be unavailable. */
+function useView() {
+  const [view, set] = useState<View>(() => {
+    try {
+      return localStorage.getItem(VIEW_KEY) === "cards" ? "cards" : "table";
+    } catch {
+      return "table";
+    }
+  });
+  const setView = (v: View) => {
+    set(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* not remembered */
+    }
+  };
+  return [view, setView] as const;
+}
 
 interface JoinToken {
   id: string;
@@ -24,6 +47,7 @@ export function NodesPage() {
   const { data: nodes = [], isLoading } = useNodes();
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
+  const [view, setView] = useView();
 
   const remove = useMutation({
     mutationFn: (id: string) => api("DELETE", `/nodes/${id}`),
@@ -82,17 +106,36 @@ export function NodesPage() {
           hint="joined, never connected"
         />
       </div>
-      <Panel title={`Nodes (${nodes.length})`} flush>
-        <NodesTable
-          nodes={nodes}
-          loading={isLoading}
-          onSchedule={(n, action) => schedule.mutate({ id: n.id, action })}
-          onDelete={async (n) =>
-            (await confirmAction(
-              `Remove node ${n.name}? Its certificate stops working immediately and it must join again.`,
-            )) && remove.mutate(n.id)
-          }
-        />
+      <Panel
+        title={`Nodes (${nodes.length})`}
+        flush
+        actions={
+          <span className="flex items-center" role="group" aria-label="View">
+            <IconButton label="Table" aria-pressed={view === "table"} onClick={() => setView("table")} className={cn(view === "table" && "text-fg bg-hover")}>
+              <Rows3 className="size-3.5" />
+            </IconButton>
+            <IconButton label="Cards" aria-pressed={view === "cards"} onClick={() => setView("cards")} className={cn(view === "cards" && "text-fg bg-hover")}>
+              <LayoutGrid className="size-3.5" />
+            </IconButton>
+          </span>
+        }
+      >
+        {view === "cards" && nodes.length > 0 ? (
+          <div className={pad}>
+            <NodeGrid nodes={nodes} />
+          </div>
+        ) : (
+          <NodesTable
+            nodes={nodes}
+            loading={isLoading}
+            onSchedule={(n, action) => schedule.mutate({ id: n.id, action })}
+            onDelete={async (n) =>
+              (await confirmAction(
+                `Remove node ${n.name}? Its certificate stops working immediately and it must join again.`,
+              )) && remove.mutate(n.id)
+            }
+          />
+        )}
       </Panel>
       <AddNodeDialog open={adding} onClose={() => setAdding(false)} />
     </div>

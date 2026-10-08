@@ -22,6 +22,8 @@ import { DataTable, type Column } from "@/ui/DataTable";
 import { RangePicker, refetchFor, type Range } from "@/ui/RangePicker";
 import { Tabs } from "@/ui/Tabs";
 import { Alert, Button, IconButton, StatusBadge } from "@/ui/controls";
+import { NodeLink } from "@/entities/nodes";
+import { TaskState } from "@/entities/tasks";
 import { cn, gap } from "@/ui/cn";
 import { fmtOps } from "./DatabasesPage";
 import { CapacityStep, DataStep, specOf } from "./NewDatabaseWizard";
@@ -592,30 +594,11 @@ function Members({ d }: { d: Database }) {
     },
     {
       header: "Node",
-      cell: (m) => (
-        <Link
-          to={`/compute/nodes/${m.node}` as string}
-          className="hover:text-accent"
-        >
-          {m.node || "—"}
-        </Link>
-      ),
+      cell: (m) => <NodeLink name={m.node} />,
     },
     {
       header: "State",
-      cell: (m) => (
-        <StatusBadge
-          tone={
-            m.state === "running"
-              ? "ok"
-              : m.state === "pending" || m.state === "pulling"
-                ? "info"
-                : "warn"
-          }
-        >
-          {m.state}
-        </StatusBadge>
-      ),
+      cell: (m) => <TaskState state={m.state} compact />,
     },
     // Live stats come from the Valkey probe; PostgreSQL metrics are Phase 13d.
     ...(d.engine === "valkey"

@@ -236,6 +236,28 @@ export function useServices() {
   });
 }
 
+/**
+ * Services for references (links, cards) without a stream listener of their
+ * own; the pages listing services keep the shared cache live.
+ */
+export function useServiceIndex() {
+  return useQuery({
+    queryKey: ["services"],
+    queryFn: async () =>
+      (await api<{ items: Service[] }>("GET", "/services")).items,
+    staleTime: 30_000,
+  });
+}
+
+/** Active tasks for references, sharing the Tasks page's cache. */
+export function useTaskIndex() {
+  return useQuery({
+    queryKey: ["tasks"],
+    queryFn: async () => (await api<{ items: Task[] }>("GET", "/tasks")).items,
+    staleTime: 15_000,
+  });
+}
+
 export function useProjects() {
   return useQuery({
     queryKey: ["projects"],

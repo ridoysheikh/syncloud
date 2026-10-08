@@ -11,6 +11,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Meter } from "@/ui/Meter";
 import { Alert, Button, Input, StatusBadge } from "@/ui/controls";
+import { NodeLink } from "@/entities/nodes";
 import { cn, gap } from "@/ui/cn";
 
 interface Address {
@@ -78,7 +79,7 @@ export function IpamPage() {
           rowKey={(n) => n.nodeId}
           empty={!isLoading && <EmptyState icon={Globe} title="No node has joined the private network yet" />}
           columns={[
-            { header: "Node", cell: (n) => <span className="font-medium">{n.node}</span> },
+            { header: "Node", cell: (n) => <NodeLink id={n.nodeId} name={n.node} className="font-medium" /> },
             { header: "Mesh address", cell: (n) => <span className="font-mono">{n.meshIp}</span> },
             { header: "Subnet", cell: (n) => <span className="font-mono">{n.subnet}</span> },
             { header: "Gateway / DNS", cell: (n) => <span className="text-muted font-mono">{n.gateway}</span> },
@@ -103,7 +104,7 @@ export function IpamPage() {
             { header: "Address", cell: (a) => <span className="font-mono">{a.ip}</span> },
             { header: "Owner", className: "w-full", cell: (a) => <span>{serviceLink(a.owner.replace(" (job run)", ""))}{a.kind === "run" && <span className="text-faint"> job run</span>}</span> },
             { header: "Task", cell: (a) => <span className="text-muted font-mono">{a.ownerId}</span> },
-            { header: "Node", cell: (a) => <span className="text-muted">{a.node}</span> },
+            { header: "Node", cell: (a) => <NodeLink name={a.node} className="text-muted" /> },
             { header: "Since", cell: (a) => <span className="text-muted whitespace-nowrap">{when(a.since)}</span> },
             {
               header: "",
@@ -331,7 +332,7 @@ export function ThroughputPanels() {
             columns={[
               { header: "Task", cell: (t) => <span className="font-mono">{t.key}</span> },
               { header: "Service", className: "w-full", cell: (t) => serviceLink(t.owner) },
-              { header: "Node", cell: (t) => <span className="text-muted">{t.node}</span> },
+              { header: "Node", cell: (t) => <NodeLink name={t.node} className="text-muted" /> },
               { header: "In", cell: (t) => <span className="font-mono">{fmtRate(t.rxBps)}</span> },
               { header: "Out", cell: (t) => <span className="font-mono">{fmtRate(t.txBps)}</span> },
             ]}

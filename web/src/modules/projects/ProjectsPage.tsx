@@ -15,6 +15,7 @@ import { Panel } from "@/ui/Panel";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap, pad } from "@/ui/cn";
+import { TaskDots } from "@/entities/TaskDots";
 import { useLazyList } from "@/ui/paging";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
@@ -116,7 +117,7 @@ function ProjectCard({
           </span>
         ))}
       </div>
-      <div className="text-muted flex gap-3 text-xs">
+      <div className="text-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
         <span>
           <span className="text-fg font-mono">{services.length}</span> service
           {services.length === 1 ? "" : "s"}
@@ -127,6 +128,14 @@ function ProjectCard({
           </span>{" "}
           tasks
         </span>
+        {desired > 0 && (
+          <TaskDots
+            running={running}
+            starting={services.reduce((n, s) => n + s.pending, 0)}
+            desired={desired}
+            max={16}
+          />
+        )}
       </div>
     </Link>
   );

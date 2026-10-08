@@ -2,13 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { api, ApiError } from "@/lib/api";
-import { bytes, pct, statusLabel, statusTone, useNodes } from "@/lib/nodes";
+import { bytes, CONTROLLER_NODE, pct, useNodes } from "@/lib/nodes";
+import { ControllerTag, NodeStatus } from "@/entities/nodes";
 import { useTasks, type Service } from "@/lib/workloads";
 import { Panel } from "@/ui/Panel";
 import { Alert, Button, StatusBadge } from "@/ui/controls";
 import { cn } from "@/ui/cn";
-
-const CONTROLLER = "ctl-0";
 
 /**
  * Checkboxes over the cluster's nodes. `limit` restricts the choice to a
@@ -34,7 +33,11 @@ function NodeChecklist({
     return [...all]
       .filter((n) => !limit?.length || limit.includes(n))
       .sort((a, b) =>
-        a === CONTROLLER ? -1 : b === CONTROLLER ? 1 : a.localeCompare(b),
+        a === CONTROLLER_NODE
+          ? -1
+          : b === CONTROLLER_NODE
+            ? 1
+            : a.localeCompare(b),
       );
   }, [nodes, value, limit]);
   const toggle = (n: string) =>
@@ -55,15 +58,9 @@ function NodeChecklist({
                 onChange={() => toggle(name)}
               />
               <span className="font-medium">{name}</span>
-              {name === CONTROLLER && (
-                <span className="text-faint text-[10px] uppercase">
-                  controller
-                </span>
-              )}
+              <ControllerTag name={name} />
               {n ? (
-                <StatusBadge tone={statusTone[n.status]}>
-                  {statusLabel[n.status]}
-                </StatusBadge>
+                <NodeStatus node={n} />
               ) : (
                 <StatusBadge tone="neutral">not joined</StatusBadge>
               )}

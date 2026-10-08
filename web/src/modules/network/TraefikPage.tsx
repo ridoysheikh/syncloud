@@ -6,6 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
 import { Alert, Button, Field, Input, StatusBadge, Toggle } from "@/ui/controls";
+import { NodeLink } from "@/entities/nodes";
 import { cn, gap } from "@/ui/cn";
 
 export interface TraefikSettings {
@@ -289,7 +290,7 @@ export function TraefikPage() {
             {data.replicas.map((r) => (
               <div key={r.role + r.node} className="flex items-center gap-2">
                 <StatusBadge tone={stateTone(r.state)}>{r.state || "unknown"}</StatusBadge>
-                <span className="font-medium">{r.node}</span>
+                <NodeLink name={r.node} className="font-medium" />
                 <span className="text-faint">{r.role === "edge" ? "edge node" : "controller"}</span>
                 {r.error && (
                   <span className="text-bad truncate" title={r.error}>
