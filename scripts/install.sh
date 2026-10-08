@@ -82,10 +82,12 @@ uninstall() {
 # ── 0. Preflight ────────────────────────────────────────────────────────────
 PREFLIGHT_FAILED=0
 bold "Preflight checks"
-. /etc/os-release 2>/dev/null || true
-case "${ID:-}:${VERSION_ID:-}" in
-  ubuntu:22.04|ubuntu:24.04|ubuntu:26.04|debian:12|debian:13) ok "OS: $PRETTY_NAME" ;;
-  *) warn "OS ${PRETTY_NAME:-unknown} is not tested (Ubuntu 22.04/24.04, Debian 12)" ;;
+# Read in a subshell: os-release defines VERSION, which would replace --version.
+os_id=$( (. /etc/os-release && echo "$ID:$VERSION_ID") 2>/dev/null || true)
+os_name=$( (. /etc/os-release && echo "$PRETTY_NAME") 2>/dev/null || true)
+case "$os_id" in
+  ubuntu:22.04|ubuntu:24.04|ubuntu:26.04|debian:12|debian:13) ok "OS: $os_name" ;;
+  *) warn "OS ${os_name:-unknown} is not tested (Ubuntu 22.04/24.04/26.04, Debian 12/13)" ;;
 esac
 case "$(uname -m)" in
   x86_64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;;
