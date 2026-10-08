@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { ChevronDown, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { modules } from "@/modules";
@@ -6,14 +6,61 @@ import type { DashboardModule } from "@/modules/types";
 import { readPref, writePref } from "@/lib/storage";
 import { cn } from "@/ui/cn";
 
-function isActive(path: string, current: string) {
-  return path === "/" ? current === "/" : current === path || current.startsWith(path + "/");
+// The router's own "active" marking is a URL prefix test that would also set
+// aria-current on parents (/projects on /projects/quotas); only exact matches
+// may agree with activeNav, which owns aria-current here.
+const exact = { exact: true, includeSearch: false } as const;
+
+const segments = (path: string) => path.split("/").filter(Boolean);
+
+/** Whether route pattern `prefix` is a whole-segment prefix of `path` ("/compute/nodes" of "/compute/nodes/$name"). */
+function isPrefix(prefix: string, path: string) {
+  const a = segments(prefix);
+  const b = segments(path);
+  return a.length <= b.length && a.every((x, i) => x === b[i]);
+}
+
+const visible = modules.flatMap((m) => m.pages.filter((p) => !p.hidden).map((p) => ({ module: m, page: p })));
+
+/**
+ * The nav entry for the route the router matched (its pattern, e.g.
+ * "/projects/$project/$env/services/$name"): the page itself when it is in
+ * the nav, else the nav page that is its longest whole-segment prefix (in its
+ * own module first, then anywhere: a project's new-database wizard lives
+ * under Projects), else the module's first page. Pattern matching, not URL prefixes, so "/projects/quotas"
+ * never also lights "/projects" and a project called "quotas" lights
+ * Projects.
+ */
+export function activeNav(pattern: string): { module: string; path: string } | null {
+  const own = modules.find((m) => m.pages.some((p) => p.path === pattern));
+  const direct = visible.find((v) => v.page.path === pattern);
+  if (direct) return { module: direct.module.id, path: direct.page.path };
+  const longest = (xs: typeof visible) =>
+    xs.filter((v) => v.page.path !== "/" && isPrefix(v.page.path, pattern)).sort((x, y) => segments(y.page.path).length - segments(x.page.path).length)[0];
+  const hit = longest(visible.filter((v) => v.module === own)) ?? longest(visible) ?? visible.find((v) => v.module === own);
+  return hit ? { module: hit.module.id, path: hit.page.path } : null;
 }
 
 /** Modular side nav built from the module registry (§10.1). Collapses to an icon rail. */
 export function SideNav({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
-  const current = useRouterState({ select: (s) => s.location.pathname });
+  // The matched route's pattern (the deepest match), not the raw URL.
+  const pattern = useRouterState({ select: (s) => s.matches[s.matches.length - 1]?.fullPath ?? s.location.pathname });
   const [closed, setClosed] = useState<Record<string, boolean>>(() => readPref("nav.closedGroups", {}));
+  const active = activeNav(pattern === "" ? "/" : pattern);
+  const navRef = useRef<HTMLDivElement>(null);
+  // Bring the active entry into view when the route changes (long navs scroll).
+  // Navigating into a closed group opens it; it can be closed again after.
+  useEffect(() => {
+    if (active && closed[active.module]) {
+      const next = { ...closed, [active.module]: false };
+      setClosed(next);
+      writePref("nav.closedGroups", next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.module, active?.path]);
+  useEffect(() => {
+    navRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView({ block: "nearest" });
+  }, [active?.path, collapsed, active && closed[active.module]]);
 
   const toggleGroup = (id: string) => {
     const next = { ...closed, [id]: !closed[id] };
@@ -29,12 +76,18 @@ export function SideNav({ collapsed, onToggle }: { collapsed: boolean; onToggle:
       )}
       aria-label="Main"
     >
-      <div className="flex-1 overflow-y-auto py-1.5">
+      <div ref={navRef} className="flex flex-1 flex-col gap-px overflow-y-auto px-1.5 py-1.5">
         {modules.map((m) =>
           collapsed ? (
-            <RailItem key={m.id} module={m} current={current} />
+            <RailItem key={m.id} module={m} active={active?.module === m.id} />
           ) : (
-            <Group key={m.id} module={m} current={current} open={!closed[m.id]} onToggle={() => toggleGroup(m.id)} />
+            <Group
+              key={m.id}
+              module={m}
+              activePath={active?.module === m.id ? active.path : null}
+              open={!closed[m.id]}
+              onToggle={() => toggleGroup(m.id)}
+            />
           ),
         )}
       </div>
@@ -52,57 +105,63 @@ export function SideNav({ collapsed, onToggle }: { collapsed: boolean; onToggle:
 
 function Group({
   module: m,
-  current,
+  activePath,
   open,
   onToggle,
 }: {
   module: DashboardModule;
-  current: string;
+  /** The active nav page of this module, if the current route is in it. */
+  activePath: string | null;
   open: boolean;
   onToggle: () => void;
 }) {
   const pages = m.pages.filter((p) => !p.hidden);
   const Icon = m.icon;
-  const groupActive = pages.some((p) => isActive(p.path, current));
-  // Only the most specific match is highlighted (/registry vs /registry/repos).
-  const best = pages
-    .filter((p) => isActive(p.path, current))
-    .sort((a, b) => b.path.length - a.path.length)[0];
 
   // A module with a single page is a plain link.
   if (pages.length === 1) {
     const p = pages[0]!;
+    const on = activePath === p.path;
     return (
-      <Link to={p.path} className={itemClass(isActive(p.path, current))}>
+      <Link to={p.path} activeOptions={exact} className={itemClass(on)} aria-current={on ? "page" : undefined}>
         <Icon className="size-4 shrink-0" strokeWidth={1.75} />
-        <span className="truncate">{m.label}</span>
+        <span className="min-w-0 flex-1 truncate">{m.label}</span>
       </Link>
     );
   }
   return (
-    <div>
-      <button onClick={onToggle} className={cn(itemClass(false), groupActive && "text-fg")} aria-expanded={open}>
-        <Icon className="size-4 shrink-0" strokeWidth={1.75} />
-        <span className="flex-1 truncate text-left">{m.label}</span>
-        <ChevronDown className={cn("size-3.5 transition-transform", !open && "-rotate-90")} />
+    <div className="flex flex-col gap-px">
+      <button onClick={onToggle} className={cn(itemClass(false), activePath && "text-fg")} aria-expanded={open}>
+        <Icon className={cn("size-4 shrink-0", activePath && "text-accent")} strokeWidth={1.75} />
+        <span className="min-w-0 flex-1 truncate text-left">{m.label}</span>
+        <ChevronDown className={cn("size-3.5 shrink-0 transition-transform", !open && "-rotate-90")} />
       </button>
       {open &&
-        pages.map((p) => (
-          <Link key={p.path} to={p.path} className={cn(itemClass(p === best), "pl-9.5")}>
-            <span className="truncate">{p.label}</span>
-          </Link>
-        ))}
+        pages.map((p) => {
+          const on = activePath === p.path;
+          return (
+            <Link key={p.path} to={p.path} activeOptions={exact} className={cn(itemClass(on), "pl-8")} aria-current={on ? "page" : undefined}>
+              <span className="min-w-0 flex-1 truncate">{p.label}</span>
+            </Link>
+          );
+        })}
     </div>
   );
 }
 
-function RailItem({ module: m, current }: { module: DashboardModule; current: string }) {
+function RailItem({ module: m, active }: { module: DashboardModule; active: boolean }) {
   const first = m.pages.find((p) => !p.hidden);
   if (!first) return null;
   const Icon = m.icon;
-  const active = m.pages.some((p) => isActive(p.path, current));
   return (
-    <Link to={first.path} title={m.label} aria-label={m.label} className={cn(itemClass(active), "justify-center px-0")}>
+    <Link
+      to={first.path}
+      activeOptions={exact}
+      title={m.label}
+      aria-label={m.label}
+      aria-current={active ? "page" : undefined}
+      className={cn(itemClass(active), "justify-center px-0")}
+    >
       <Icon className="size-4" strokeWidth={1.75} />
     </Link>
   );
@@ -110,7 +169,7 @@ function RailItem({ module: m, current }: { module: DashboardModule; current: st
 
 function itemClass(active: boolean) {
   return cn(
-    "mx-1.5 flex h-7 items-center gap-2 rounded-sm px-2 text-[13px] transition-colors",
+    "flex h-7 w-full min-w-0 shrink-0 items-center gap-2 rounded-sm px-2 text-[13px] transition-colors",
     active ? "bg-raised text-fg shadow-[inset_2px_0_0_var(--color-accent)]" : "text-muted hover:text-fg hover:bg-hover",
   );
 }

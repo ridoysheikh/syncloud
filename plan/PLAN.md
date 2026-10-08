@@ -2444,6 +2444,17 @@ The Settings tab is split into sections:
   - The overflow and contrast sweep on 15 form routes at 390 and 1440 px found nothing.
   - Playwright: picking a node card sets `aria-checked`, arrow keys move a card choice, and there are no page errors.
 
+### Phase 16c: Side nav location and width (user request, 2026-10-08) — ✅ done 2026-10-08
+
+- **Active entry from the matched route:** the active entry comes from the router's matched route pattern (`activeNav`), not URL prefixes. A nav page matches itself; a detail page matches its longest whole-segment prefix, in its own module first, then anywhere; failing that, its module's first page.
+  - "/projects/quotas" no longer also lights Projects.
+  - `/projects/…/new-database` lights Projects.
+  - `/device` lights API & CLI.
+- **TanStack's own marking:** TanStack `Link` marks `aria-current` with a loose prefix test, so nav links pass `activeOptions={exact}`. Exactly one entry is current on every route.
+- **Groups:** navigating into a closed group opens it (it can be closed again), and the current entry scrolls into view. The group of the current page shows an accent icon.
+- **Width:** parents and children are full-width rows. The group buttons used to shrink to their content.
+- **Checks:** Playwright over 24 routes found one current entry each, the expected one. All entries are 211 px wide. A closed group reopens on navigation and can be closed again.
+
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)
 
