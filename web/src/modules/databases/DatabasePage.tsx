@@ -361,6 +361,8 @@ interface Credentials {
   haUrl?: string;
   publicUrl?: string;
   publicReadUrl?: string;
+  publicPlainUrl?: string;
+  publicPlainReadUrl?: string;
 }
 
 function Connection({ d, path }: { d: Database; path: string }) {
@@ -378,6 +380,8 @@ function Connection({ d, path }: { d: Database; path: string }) {
     pg
       ? `postgresql://app:${hidden}@${host}:${port}/${d.name.replace(/-/g, "_")}${tls ? "?sslmode=require" : ""}`
       : `${tls ? "rediss" : "redis"}://default:${hidden}@${host}:${port}`;
+  const publicUrl = (host = "", port: number, tls: boolean) =>
+    pg && !tls ? url(host, port) + "?sslmode=disable" : url(host, port, tls);
   return (
     <Panel
       title="Connect"
@@ -427,37 +431,25 @@ function Connection({ d, path }: { d: Database; path: string }) {
             copy={show && !!c?.haUrl}
           />
         )}
-        {d.public.enabled && d.public.available && (
+        {d.public.enabled && d.public.available && d.public.port > 0 && (
           <>
+            {publicRows(d).map(([label, key, host, port, tls]) => (
+              <Line
+                key={key}
+                label={label}
+                value={show && c?.[key] ? c[key] : publicUrl(host, port, tls)}
+                copy={show && !!c?.[key]}
+              />
+            ))}
             <Line
-              label="Public URL"
+              label={pg ? "psql" : "redis-cli"}
               value={
-                show && c?.publicUrl
-                  ? c.publicUrl
-                  : url(d.public.host, d.public.port, true)
+                pg
+                  ? `psql "${show && c?.publicUrl ? c.publicUrl : publicUrl(d.public.host, d.public.port, true)}"`
+                  : `redis-cli --tls -u ${show && c?.publicUrl ? c.publicUrl : publicUrl(d.public.host, d.public.port, true)}`
               }
               copy={show && !!c?.publicUrl}
             />
-            <Line
-              label="Public read"
-              value={
-                show && c?.publicReadUrl
-                  ? c.publicReadUrl
-                  : url(d.public.readHost, d.public.port, true)
-              }
-              copy={show && !!c?.publicReadUrl}
-            />
-            {!pg && (
-              <Line
-                label="redis-cli"
-                value={`redis-cli --tls --sni ${d.public.host} -u ${
-                  show && c?.publicUrl
-                    ? c.publicUrl
-                    : url(d.public.host, d.public.port, true)
-                }`}
-                copy={show && !!c?.publicUrl}
-              />
-            )}
           </>
         )}
         {creds.error && <Alert>{errText(creds.error)}</Alert>}
@@ -465,9 +457,9 @@ function Connection({ d, path }: { d: Database; path: string }) {
           Inside the cluster, the services on the access list connect over the
           private network ({accessSummary(d)}).
           {d.public.enabled && d.public.available
-            ? pg
-              ? " From outside, use the public URL: TLS is required (sslmode=require), with libpq 14 or later, which sends the host name (SNI)."
-              : " From outside, use the public URL: TLS is required (rediss://), and the client must send the host name (SNI). Client libraries do; redis-cli and valkey-cli need --sni."
+            ? d.public.requireTls
+              ? " From outside, use a public URL: the database requires TLS."
+              : " From outside, use a public URL: TLS, or plain from trusted networks only, since a plain connection sends the password unencrypted."
             : " Turn on the public endpoint under Connectivity to connect from outside the cluster."}{" "}
           {pg
             ? "Any PostgreSQL driver works. Send writes to the read-write host; the read-only host spreads reads over the replicas. The HA URL lists every member, so the driver finds the primary even while the controller is down."
@@ -478,6 +470,33 @@ function Connection({ d, path }: { d: Database; path: string }) {
     </Panel>
   );
 }
+
+type PublicRow = [
+  label: string,
+  key: "publicUrl" | "publicReadUrl" | "publicPlainUrl" | "publicPlainReadUrl",
+  host: string | undefined,
+  port: number,
+  tls: boolean,
+];
+
+/** The public URLs: TLS, and plain unless the database requires TLS. */
+function publicRows(d: Database): PublicRow[] {
+  const p = d.public;
+  const rows: PublicRow[] = [
+    ["Public URL", "publicUrl", p.host, p.port, true],
+    ["Public read", "publicReadUrl", p.readHost, p.readPort, true],
+  ];
+  if (!p.requireTls) {
+    rows.push(
+      ["Plain URL", "publicPlainUrl", p.host, p.port, false],
+      ["Plain read", "publicPlainReadUrl", p.readHost, p.readPort, false],
+    );
+  }
+  return rows;
+}
+
+const publicAddr = (host = "", port: number) =>
+  port ? `${host}:${port}` : `${host} (port being assigned)`;
 
 const accessSummary = (d: Database) =>
   d.network.access.length ? d.network.access.join(", ") : "nobody is on it yet";
@@ -492,6 +511,7 @@ function Connectivity({ d, path }: { d: Database; path: string }) {
       allow: d.network.public.allow
         .filter((a) => a !== "0.0.0.0/0" && a !== "::/0")
         .join("\n"),
+      requireTls: !!d.network.public.requireTls,
     }),
     [d.network],
   );
@@ -501,7 +521,11 @@ function Connectivity({ d, path }: { d: Database; path: string }) {
     mutationFn: () =>
       api<Database>("PUT", `${path}/network`, {
         access: f.access,
-        public: { enabled: f.public, allow: allowList(f.allow) },
+        public: {
+          enabled: f.public,
+          allow: allowList(f.allow),
+          requireTls: f.requireTls,
+        },
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["databases"] }),
   });
@@ -516,11 +540,17 @@ function Connectivity({ d, path }: { d: Database; path: string }) {
             <>
               <Line
                 label="Public"
-                value={`${d.public.host}:${d.public.port}`}
+                value={publicAddr(d.public.host, d.public.port)}
               />
               <Line
                 label="Public read"
-                value={`${d.public.readHost}:${d.public.port}`}
+                value={publicAddr(d.public.readHost, d.public.readPort)}
+              />
+              <Line
+                label="Connections"
+                value={d.public.requireTls ? "TLS only" : "TLS or plain"}
+                mono={false}
+                copy={false}
               />
             </>
           ) : (
@@ -532,9 +562,11 @@ function Connectivity({ d, path }: { d: Database; path: string }) {
           )}
           <p className="text-faint pt-1 text-xs">
             The public endpoint is served by Traefik on the controller and edge
-            nodes. It terminates TLS with the platform's certificate for the
-            host name and forwards to the current primary (the replicas for the
-            read-only host), following failovers within seconds.
+            nodes, on two ports of the database's own. It terminates TLS with
+            the platform's certificate and forwards to the current primary (the
+            replicas for the read-only port), following failovers within
+            seconds. The engine's shared port {d.public.sniPort || d.port} also
+            takes TLS connections that send the host name (SNI).
           </p>
         </div>
       </Panel>
@@ -557,10 +589,12 @@ function Connectivity({ d, path }: { d: Database; path: string }) {
               name={d.name}
               enabled={f.public}
               allow={f.allow}
-              port={d.public.port || d.port}
+              requireTls={f.requireTls}
+              port={d.public.port || undefined}
               engine={d.engine}
               onEnabled={(v) => setF((x) => ({ ...x, public: v }))}
               onAllow={(v) => setF((x) => ({ ...x, allow: v }))}
+              onRequireTls={(v) => setF((x) => ({ ...x, requireTls: v }))}
             />
           </div>
           {save.error && <Alert>{errText(save.error)}</Alert>}
@@ -573,7 +607,9 @@ function Connectivity({ d, path }: { d: Database; path: string }) {
               Save
             </Button>
             <span className="text-faint text-xs">
-              Applies within seconds, without restarts.
+              Applies within seconds; the database doesn't restart. Turning the
+              public endpoint on or off adds or removes its ports, which
+              restarts Traefik for a moment.
             </span>
           </div>
         </div>

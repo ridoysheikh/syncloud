@@ -200,9 +200,14 @@ func Entrypoints(addrs map[string]string) []string {
 
 // TLSOptions is Traefik's tls.options entry.
 type TLSOptions struct {
-	MinVersion string `json:"minVersion"`
-	SNIStrict  bool   `json:"sniStrict,omitempty"`
+	MinVersion    string   `json:"minVersion"`
+	SNIStrict     bool     `json:"sniStrict,omitempty"`
+	ALPNProtocols []string `json:"alpnProtocols,omitempty"`
 }
+
+// alpnProtocols are Traefik's defaults plus "postgresql": libpq 17 and later
+// offer only that, and Traefik refuses a handshake with no common protocol.
+var alpnProtocols = []string{"h2", "http/1.1", "acme-tls/1", "postgresql"}
 
 // Buffering limits request bodies.
 type Buffering struct {
@@ -243,5 +248,5 @@ func (s Settings) tlsOptions() map[string]TLSOptions {
 	if s.MinTLS == "1.3" {
 		v = "VersionTLS13"
 	}
-	return map[string]TLSOptions{"default": {MinVersion: v, SNIStrict: s.SNIStrict}}
+	return map[string]TLSOptions{"default": {MinVersion: v, SNIStrict: s.SNIStrict, ALPNProtocols: alpnProtocols}}
 }

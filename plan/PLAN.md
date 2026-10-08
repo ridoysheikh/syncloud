@@ -2510,6 +2510,64 @@ The Settings tab is split into sections:
 - **Test cluster:** with the new controller and placed archives, the real registry received the 18-r1 image. The `orders` database member and the platform etcd were recreated from `registry.<base>/syncloud-system/postgres:18-r1` and are healthy.
 - **Before publishing:** gitleaks over the whole history found only test fixtures, and there were no large blobs.
 
+### Phase 18: Public database ports with TLS and plain connections (user request, 2026-10-09) — ✅ done 2026-10-09
+
+**Problem (found on a real install):**
+- The public endpoint was TLS-only and routed by SNI on a shared port (Valkey `:6379`, PostgreSQL `:5432`). Clients that don't send SNI (`redis-cli` without `--sni`, libpq before 14) got Traefik's self-signed default certificate (`certificate verify failed`).
+- Plain clients (`redis://`, `sslmode=disable`) got Traefik's HTTP error text (`Protocol error, got "H"`). A plain connection carries no host name, so a shared port can't tell databases apart.
+- The user wants both databases to take TLS **and** plain connections.
+
+**Design:**
+- **A port per endpoint.** Turning the public endpoint on assigns two ports from `--public-db-ports` (default `21000-21999`, kept apart from the service range `--public-ports`; the controller refuses overlapping ranges):
+  - `port`: read-write, to the primary;
+  - `readPort`: read-only, to the replicas (the primary when there are none).
+  - The ports are kept while the endpoint is on and freed when it's turned off. Clients can't choose them. Existing public databases get theirs when the controller starts.
+- **Both kinds of connection on each port.** Each port is its own Traefik entrypoint (`db-<port>`) with two catch-all routers:
+  - TLS (`HostSNI(*)`, TLS terminated by Traefik). PostgreSQL's STARTTLS (SSLRequest) is handled by Traefik.
+  - plain (`HostSNI(*)` without TLS), unless the database's **Require TLS** is on (`public.requireTls`, off by default).
+  - Both carry the IP allow-list.
+- **Certificates without SNI.** Traefik's default certificate (the `default` TLS store) is the platform's base-domain certificate instead of Traefik's self-signed one.
+  - A client that sends SNI gets the database's own certificate, as before.
+  - One that doesn't gets a valid Let's Encrypt chain for the base domain. `redis-cli` and libpq's `sslmode=require` check the chain only (or nothing), so they connect.
+  - Clients that check the host name send SNI anyway.
+- **The shared SNI ports stay** (`<name>.db.<base>:6379/5432`, TLS-only), so existing URLs keep working.
+- **Opening a port** adds an entrypoint, so Traefik restarts (as for a public service port). The firewall opens the port on the controller and edges with the allow-list as sources.
+- **URLs:**
+  - `publicUrl` / `publicReadUrl`: TLS on the dedicated ports (`rediss://…:<port>`, `postgresql://…:<port>/db?sslmode=require`);
+  - `publicPlainUrl` / `publicPlainReadUrl`: plain (`redis://…`, `?sslmode=disable`), absent with Require TLS.
+- **Dashboard and CLI:**
+  - The Connect panel lists TLS and plain URLs and a `redis-cli` / `psql` command.
+  - Connectivity has a **Require TLS** toggle and says that plain connections send the password unencrypted.
+  - `synctl db network NAME --require-tls on|off`; `synctl db get/network` print the ports.
+
+**Checks:**
+- Unit tests for port assignment, freeing, the backfill and the Traefik routers.
+- DinD e2e:
+  - Valkey: `redis-cli` with plain, `--tls` without `--sni`, and `--tls --sni`;
+  - PostgreSQL: `psql` with `sslmode=disable`, `require` and `verify-full`;
+  - Require TLS refuses plain connections;
+  - after a controller restart, everything still works.
+
+**Progress:**
+- ✅ Done 2026-10-09:
+  - `store.DatabasePublic` gained `port`, `readPort` and `requireTls`.
+  - `dbs.assignPorts`, under a lock, assigns and frees ports at creation, on network changes and at start (the backfill). `PublicPorts` feeds the entrypoints (`db-<port>`) and the firewall. `--public-db-ports` is refused when it overlaps `--public-ports`.
+  - Traefik: catch-all TLS and plain routers per port. `tls.stores.default.defaultCertificate` is the base-domain certificate, redacted in the dashboard view.
+  - **Found while testing:** libpq 17+ offers only the ALPN `postgresql`, and Traefik's defaults refused it (`SSL error: no application protocol`), on the shared port 5432 too. The default TLS options now list Traefik's protocols plus `postgresql`.
+  - synctl: `--require-tls`, the ports in `db get/create/network`, and plain URLs in `db credentials`.
+  - Dashboard: the Require TLS toggle, the ports in Endpoints, and the TLS and plain URLs plus a `redis-cli`/`psql` line in Connect.
+  - Docs: Valkey, PostgreSQL, troubleshooting, configuration, requirements. CHANGELOG 0.1.2.
+- **Checks:**
+  - `TestPublicPortsAssignedAndFreed`: backfill, kept ports, stale ports cleared, a full range, reuse, Require TLS, no SNI routes without a base domain.
+  - `TestDedicatedDatabasePortsAndDefaultCertificate`.
+  - Test cluster:
+    - the existing `orders` got 21000/21001 at start; a new `kv` got 21002/21003, and a port sent by the client was ignored;
+    - Valkey: plain, `--tls` without SNI, `--tls --sni` and the read-only port answer, and without SNI the base-domain certificate is served;
+    - PostgreSQL (psql 18): `disable`, `prefer`, `require`, `require` with `sslsni=0`, direct TLS and the read-only port work;
+    - Require TLS refuses plain connections and drops the plain URLs; turning it off brings them back;
+    - all of it after a controller restart.
+  - The full Go suite, vet and the doc link check pass.
+
 ### Later (v2+)
 Preview environments, blue/green and canary through weighted Traefik routing, log archive to S3, connection tracking view, domain-based egress rules, OIDC SSO, cosign verification, a one-click templates marketplace (as in Coolify), and a cost view. Managed databases are a separate future track (§17). (Replicated volumes are dropped per D2.)
 

@@ -41,19 +41,26 @@ Changes apply within seconds, without restarts.
 
 ### From outside the cluster
 
-Turn on the **public endpoint**, and the database is served with TLS at `<db>.db.<base-domain>:6379` (and `<db>-ro…`):
+Turn on the **public endpoint**, and the database gets two ports of its own on the controller and the edge nodes, from 21000–21999: one read-write (the primary) and one read-only (the replicas, or the primary when there are none).
 
 ```sh
 synctl db network sessions --public on --allow 203.0.113.0/24
-redis-cli --tls --sni sessions.db.<base-domain> -u 'rediss://default:<password>@sessions.db.<base-domain>:6379'
+synctl db credentials sessions        # publicUrl, publicPlainUrl, … with the ports
+redis-cli --tls -u 'rediss://default:<password>@sessions.db.<base-domain>:21000'   # TLS
+redis-cli -u 'redis://default:<password>@sessions.db.<base-domain>:21000'          # plain
 ```
 
-The endpoint is TLS only, and the client must send the host name (SNI): one port serves every public database, and the name says which one. Client libraries do this on their own; `redis-cli` and `valkey-cli` need `--sni`. The dashboard's **Connect** panel has the command ready to copy.
+Each port takes **TLS and plain** connections. The dashboard's **Connect** panel lists both URLs and a `redis-cli` command to copy.
 
-- **`certificate verify failed`**: SNI is missing (add `--sni`), or the certificate is still being issued in the first minute after turning the endpoint on.
-- **`Protocol error, got "H"`** or **`I/O error`**: the client connected without TLS (`redis://`). Use `rediss://` or `--tls`.
+- **TLS:** Traefik terminates TLS with the database's Let's Encrypt certificate. A client that sends no host name (SNI), such as `redis-cli` without `--sni`, gets the platform's certificate instead, which still verifies, so no extra flags are needed.
+- **Plain:** a plain connection sends the password and your data unencrypted. Use it only from networks you trust, and limit the allowed addresses. To refuse plain connections, turn on **Require TLS** under **Connectivity**, or run `synctl db network sessions --require-tls on`.
+- **Shared port:** the older address `<db>.db.<base-domain>:6379` still works for TLS clients that send SNI.
+- **Traefik restart:** turning the endpoint on or off restarts Traefik for a moment, because the ports are added or removed.
 
-With your own base domain, point `*.db.<your-domain>` at the controller or the edge nodes.
+If a cloud firewall sits in front of your servers, allow 21000–21999/tcp from the client addresses. With your own base domain, point `*.db.<your-domain>` at the controller or the edge nodes.
+
+- **`certificate verify failed`**: the certificate is still being issued, in the first minute after turning the endpoint on.
+- **`Protocol error, got "H"`** or **`I/O error`** with `redis://`: you used the shared port 6379, which is TLS only, or the database requires TLS. Use its own port, or `rediss://`.
 
 ## Failover and autoscaling
 

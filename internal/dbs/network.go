@@ -125,21 +125,35 @@ func PublicReadHost(d store.Database, base string) string { return d.Name + "-ro
 
 // ── public endpoints ────────────────────────────────────────────────────────
 
-// PublicRoute is one TLS endpoint Traefik serves for a database.
+// PublicRoute is one endpoint Traefik serves for a database: TLS by SNI
+// on the engine's shared entrypoint (Host set), or any TLS or plain
+// connection on a dedicated port (Port set, Host empty).
 type PublicRoute struct {
 	Name       string // router/service name
 	Entrypoint string
 	Host       string
+	Port       int
+	Plain      bool     // the plain (non-TLS) router of a dedicated port
 	Servers    []string // host:port of members
 	Allow      []string
 }
 
-// PublicRoutes are the TCP routes of every public database (none without a
-// base domain). The read-write route targets the current primary.
+// DefaultPublicPorts is where dedicated public database ports come from.
+var DefaultPublicPorts = [2]int{21000, 21999}
+
+// PortEntrypoint is the Traefik entrypoint of a dedicated port.
+func PortEntrypoint(port int) string { return fmt.Sprintf("db-%d", port) }
+
+// PublicPort is a dedicated port to open, with its allowed sources.
+type PublicPort struct {
+	Port  int
+	Allow []string
+}
+
+// PublicRoutes are the TCP routes of every public database. The SNI routes
+// need a base domain; the dedicated ports work without one. The read-write
+// routes target the current primary.
 func (m *Manager) PublicRoutes(ctx context.Context, base string) []PublicRoute {
-	if base == "" {
-		return nil
-	}
 	dbs, err := m.st.ListDatabases(ctx)
 	if err != nil {
 		return nil
@@ -164,18 +178,122 @@ func (m *Manager) PublicRoutes(ctx context.Context, base string) []PublicRoute {
 			ro = rw
 		}
 		short := strings.TrimPrefix(d.ID, "db_")
-		out = append(out,
-			PublicRoute{Name: "db-" + short, Entrypoint: eng.Entrypoint, Host: PublicHost(d, base), Servers: rw, Allow: n.Public.Allow},
-			PublicRoute{Name: "db-" + short + "-ro", Entrypoint: eng.Entrypoint, Host: PublicReadHost(d, base), Servers: ro, Allow: n.Public.Allow})
+		if base != "" {
+			out = append(out,
+				PublicRoute{Name: "db-" + short, Entrypoint: eng.Entrypoint, Host: PublicHost(d, base), Servers: rw, Allow: n.Public.Allow},
+				PublicRoute{Name: "db-" + short + "-ro", Entrypoint: eng.Entrypoint, Host: PublicReadHost(d, base), Servers: ro, Allow: n.Public.Allow})
+		}
+		for _, p := range []struct {
+			port    int
+			suffix  string
+			servers []string
+		}{{n.Public.Port, "-port", rw}, {n.Public.ReadPort, "-ro-port", ro}} {
+			if p.port == 0 {
+				continue
+			}
+			r := PublicRoute{Name: "db-" + short + p.suffix, Entrypoint: PortEntrypoint(p.port), Port: p.port, Servers: p.servers, Allow: n.Public.Allow}
+			out = append(out, r)
+			if !n.Public.RequireTLS {
+				r.Name, r.Plain = r.Name+"-plain", true
+				out = append(out, r)
+			}
+		}
 	}
 	return out
+}
+
+// PublicPorts are the dedicated ports of every public database, for the
+// Traefik entrypoints and the firewall. They need no base domain: plain
+// connections work without one.
+func (m *Manager) PublicPorts(ctx context.Context) []PublicPort {
+	dbs, err := m.st.ListDatabases(ctx)
+	if err != nil {
+		return nil
+	}
+	var out []PublicPort
+	for _, d := range dbs {
+		n := d.ParseNetwork()
+		if !n.Public.Enabled || d.Deleting {
+			continue
+		}
+		for _, p := range []int{n.Public.Port, n.Public.ReadPort} {
+			if p > 0 {
+				out = append(out, PublicPort{Port: p, Allow: n.Public.Allow})
+			}
+		}
+	}
+	return out
+}
+
+func (m *Manager) publicPortRange() (int, int) {
+	if r := m.PublicPortRange; r[0] > 0 && r[1] >= r[0] {
+		return r[0], r[1]
+	}
+	return DefaultPublicPorts[0], DefaultPublicPorts[1]
+}
+
+// assignPorts gives every public database its two dedicated ports and frees
+// those of databases no longer public. It reports whether anything changed.
+func (m *Manager) assignPorts(ctx context.Context) (bool, error) {
+	m.portMu.Lock()
+	defer m.portMu.Unlock()
+	dbs, err := m.st.ListDatabases(ctx)
+	if err != nil {
+		return false, err
+	}
+	used := map[int]bool{}
+	for _, d := range dbs {
+		if n := d.ParseNetwork(); n.Public.Enabled && !d.Deleting {
+			used[n.Public.Port], used[n.Public.ReadPort] = true, true
+		}
+	}
+	lo, hi := m.publicPortRange()
+	next := lo
+	free := func() int {
+		for ; next <= hi; next++ {
+			if !used[next] {
+				used[next] = true
+				return next
+			}
+		}
+		return 0
+	}
+	changed := false
+	for _, d := range dbs {
+		n := d.ParseNetwork()
+		want := n
+		if n.Public.Enabled && !d.Deleting {
+			if want.Public.Port == 0 {
+				want.Public.Port = free()
+			}
+			if want.Public.ReadPort == 0 {
+				want.Public.ReadPort = free()
+			}
+			if want.Public.Port == 0 || want.Public.ReadPort == 0 {
+				m.log.Warn("no free public database port", "database", d.Name, "range", fmt.Sprintf("%d-%d", lo, hi))
+			}
+		} else {
+			want.Public.Port, want.Public.ReadPort = 0, 0
+		}
+		if want.Public.Port == n.Public.Port && want.Public.ReadPort == n.Public.ReadPort {
+			continue
+		}
+		b, _ := json.Marshal(want)
+		if err := m.st.SetDatabaseNetwork(ctx, d.ID, string(b), m.now().UTC()); err != nil {
+			return changed, err
+		}
+		changed = true
+	}
+	return changed, nil
 }
 
 // PublicHosts are the names that need certificates.
 func (m *Manager) PublicHosts(ctx context.Context, base string) []string {
 	var out []string
 	for _, r := range m.PublicRoutes(ctx, base) {
-		out = append(out, r.Host)
+		if r.Host != "" {
+			out = append(out, r.Host)
+		}
 	}
 	return out
 }
@@ -230,6 +348,10 @@ func (m *Manager) SetNetwork(ctx context.Context, id string, n Network, exists f
 		return View{}, ErrInvalid{err}
 	}
 	old := d.ParseNetwork()
+	n.Public.Port, n.Public.ReadPort = 0, 0 // the controller assigns them
+	if n.Public.Enabled {
+		n.Public.Port, n.Public.ReadPort = old.Public.Port, old.Public.ReadPort
+	}
 	b, _ := json.Marshal(n)
 	if err := m.st.SetDatabaseNetwork(ctx, id, string(b), m.now().UTC()); err != nil {
 		return View{}, err
@@ -240,11 +362,24 @@ func (m *Manager) SetNetwork(ctx context.Context, id string, n Network, exists f
 	if strings.Join(old.Access, ",") != strings.Join(n.Access, ",") {
 		m.event(ctx, id, "network", strings.Join(old.Access, " "), strings.Join(n.Access, " "), "access list", actor)
 	}
+	if old.Public.RequireTLS != n.Public.RequireTLS {
+		m.event(ctx, id, "network", tlsMode(old.Public.RequireTLS), tlsMode(n.Public.RequireTLS), "public connections", actor)
+	}
+	if _, err := m.assignPorts(ctx); err != nil {
+		return View{}, err
+	}
 	m.publish(ctx, id)
 	m.changed()
 	m.networkChanged()
 	d, _ = m.st.DatabaseByID(ctx, id)
 	return m.View(ctx, d), nil
+}
+
+func tlsMode(requireTLS bool) string {
+	if requireTLS {
+		return "TLS only"
+	}
+	return "TLS or plain"
 }
 
 func onOff(b bool) string {

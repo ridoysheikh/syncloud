@@ -109,26 +109,32 @@ export function PublicFields({
   name,
   enabled,
   allow,
+  requireTls,
   port,
   engine,
   onEnabled,
   onAllow,
+  onRequireTls,
 }: {
   name: string;
   enabled: boolean;
   /** One address or CIDR per line. */
   allow: string;
-  port: number;
+  requireTls: boolean;
+  /** The read-write port, once assigned. */
+  port?: number;
   engine: string;
   onEnabled: (v: boolean) => void;
   onAllow: (v: string) => void;
+  onRequireTls: (v: boolean) => void;
 }) {
   const base = useBaseDomain();
   const host = `${name || "NAME"}.db.${base || "<base domain>"}`;
+  const at = port ? `${host}:${port}` : `${host}:<port>`;
   const example =
     engine === "postgres"
-      ? `postgresql://app:…@${host}:${port}/${(name || "NAME").replace(/-/g, "_")}?sslmode=require`
-      : `rediss://default:…@${host}:${port}`;
+      ? `postgresql://app:…@${at}/${(name || "NAME").replace(/-/g, "_")}`
+      : `redis${requireTls ? "s" : "[s]"}://default:…@${at}`;
   return (
     <div className="flex flex-col gap-3 text-xs">
       <Toggle
@@ -138,12 +144,11 @@ export function PublicFields({
         hint={
           <>
             Reachable from outside the cluster at{" "}
-            <code className="font-mono">
-              {host}:{port}
-            </code>{" "}
-            over TLS (<code className="font-mono">{example}</code>
-            ). Traefik picks the database by the host name the client sends
-            (SNI), terminates TLS with its certificate and forwards to the
+            <code className="font-mono">{at}</code> (
+            <code className="font-mono">{example}</code>). The database gets two
+            ports of its own, read-write and read-only
+            {port ? "" : ", assigned when the endpoint is turned on"}. Traefik
+            terminates TLS with the platform's certificate and forwards to the
             current primary.
           </>
         }
@@ -153,6 +158,18 @@ export function PublicFields({
           The platform has no base domain yet, so the endpoint stays off until
           one is set under Settings › Domains.
         </p>
+      )}
+      {enabled && (
+        <Toggle
+          checked={requireTls}
+          onChange={onRequireTls}
+          label="Require TLS"
+          hint={
+            requireTls
+              ? "Only TLS connections are accepted."
+              : "TLS and plain connections are both accepted. A plain connection sends the password and data unencrypted over the internet: use it only from trusted networks, with the allowed addresses below."
+          }
+        />
       )}
       {enabled && (
         <Field

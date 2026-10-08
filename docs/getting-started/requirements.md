@@ -22,7 +22,8 @@ The platform itself uses about 650 MB on the controller and about 300 MB on a wo
 | 7443/tcp | your nodes | nodes connect to the controller (mutual TLS) |
 | 51820/udp | between all nodes | the private network (WireGuard) |
 | 20000–20999 tcp/udp | the internet, optional | public TCP/UDP ports you open for services |
-| 5432, 6379 tcp | the internet, optional | public database endpoints you turn on |
+| 21000–21999 tcp | the internet, optional | public database endpoints you turn on |
+| 5432, 6379 tcp | the internet, optional | the same, on shared ports (TLS clients that send SNI) |
 
 Nodes always dial out to the controller, so workers behind NAT work as long as WireGuard traffic between them can pass.
 

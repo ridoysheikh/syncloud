@@ -250,6 +250,9 @@ func serve(args []string) error {
 		return fmt.Errorf("load the built-in Git server settings: %w", err)
 	}
 	var workloads *workload.Manager // set below; routes need certificates too
+	// The database manager is created further down, after loops that already
+	// read these lists; until then they leave databases out.
+	var dbRef atomic.Pointer[dbs.Manager]
 	// serviceEntrypoints are the Traefik entrypoints of public service ports
 	// (every interface, in development too: the dashboard is reached over
 	// the network at its sslip.io name).
@@ -264,6 +267,11 @@ func serve(args []string) error {
 				addr += "/udp"
 			}
 			out[r.Entrypoint()] = addr
+		}
+		if dbMgr := dbRef.Load(); dbMgr != nil {
+			for _, p := range dbMgr.PublicPorts(context.Background()) {
+				out[dbs.PortEntrypoint(p.Port)] = ":" + fmt.Sprint(p.Port)
+			}
 		}
 		return out
 	}
@@ -294,9 +302,6 @@ func serve(args []string) error {
 		return false
 	}
 	// Public databases open their engine's port on the controller and edges.
-	// The database manager is created further down, after loops that already
-	// read these lists; until then they leave databases out.
-	var dbRef atomic.Pointer[dbs.Manager]
 	dbPorts := map[string]string{dbs.EngineValkey: portOf(cfg.PublicValkey), dbs.EnginePostgres: portOf(cfg.PublicPostgres)}
 	publicPorts := func() []mesh.PublicPort {
 		var out []mesh.PublicPort
@@ -305,6 +310,9 @@ func serve(args []string) error {
 				if p := dbPorts[e]; p != "" {
 					out = append(out, mesh.PublicPort{Port: p, Protocol: "tcp", Kind: "database"})
 				}
+			}
+			for _, p := range dbMgr.PublicPorts(context.Background()) {
+				out = append(out, mesh.PublicPort{Port: fmt.Sprint(p.Port), Protocol: "tcp", Sources: p.Allow, Kind: "database"})
 			}
 		}
 		if workloads != nil {
@@ -340,6 +348,13 @@ func serve(args []string) error {
 		workloads.PublicPortRange = [2]int{lo, hi}
 	} else {
 		return fmt.Errorf("--public-ports %q: want LOW-HIGH within 1024–65535", cfg.PublicPorts)
+	}
+	dbLo, dbHi, ok := portRange(cfg.PublicDBPorts)
+	if !ok {
+		return fmt.Errorf("--public-db-ports %q: want LOW-HIGH within 1024–65535", cfg.PublicDBPorts)
+	}
+	if r := workloads.PublicPortRange; dbLo <= r[1] && r[0] <= dbHi {
+		return fmt.Errorf("--public-db-ports %s overlaps --public-ports %s", cfg.PublicDBPorts, cfg.PublicPorts)
 	}
 	workloads.OnChange = func() { certMgr.SetHosts(certHosts(domains.Endpoints())) }
 	certMgr.SetHosts(certHosts(domains.Endpoints()))
@@ -421,6 +436,7 @@ func serve(args []string) error {
 	dbMgr := dbs.New(st, gw, workloads, registry, box, bus, log)
 	dbMgr.Metrics = metricStore
 	dbMgr.BaseDomain = domains.Base
+	dbMgr.PublicPortRange = [2]int{dbLo, dbHi}
 	dbMgr.PostgresImages, err = postgresImages(cfg.PostgresImage)
 	if err != nil {
 		return err
@@ -625,6 +641,11 @@ func serve(args []string) error {
 		edges.Refresh(ctx)
 		meshMgr.Changed(context.Background())
 	}
+	// A database's public ports also become entrypoints (Phase 18).
+	dbMgr.OnNetworkChange = func() {
+		certMgr.SetHosts(certHosts(domains.Endpoints()))
+		workloads.OnPublicPorts()
+	}
 	traefikProvider := &traefik.Provider{
 		Token: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: controllerURL,
 		RegistryURL: "http://" + system.RegistryAddr, BaseDomain: domains.Base, HTTPSPort: httpsPort,
@@ -646,7 +667,7 @@ func serve(args []string) error {
 		TCPRoutes: func() []traefik.TCPRoute {
 			var out []traefik.TCPRoute
 			for _, r := range dbMgr.PublicRoutes(context.Background(), domains.Base()) {
-				out = append(out, traefik.TCPRoute{Name: r.Name, Entrypoint: r.Entrypoint, Host: r.Host, Servers: r.Servers, Allow: r.Allow})
+				out = append(out, traefik.TCPRoute{Name: r.Name, Entrypoint: r.Entrypoint, Host: r.Host, Servers: r.Servers, Allow: r.Allow, Plain: r.Plain})
 			}
 			for _, r := range workloads.PublicRoutes(context.Background()) {
 				if r.Protocol == "tcp" {
@@ -670,6 +691,15 @@ func serve(args []string) error {
 				out = append(out, traefik.Certificate{CertFile: p.CertPEM, KeyFile: p.KeyPEM})
 			}
 			return out
+		},
+		// Clients without SNI (redis-cli, older libpq) on a database port get
+		// the platform's certificate, a valid chain, not Traefik's own.
+		DefaultCertificate: func() *traefik.Certificate {
+			p, ok := certMgr.PairFor(domains.Base())
+			if !ok {
+				return nil
+			}
+			return &traefik.Certificate{CertFile: p.CertPEM, KeyFile: p.KeyPEM}
 		},
 	}
 

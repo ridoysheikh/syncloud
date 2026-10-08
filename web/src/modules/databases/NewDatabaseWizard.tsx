@@ -74,6 +74,7 @@ export interface Form {
   access: string[] | null;
   public: boolean;
   allow: string;
+  requireTls: boolean;
   /** PostgreSQL: add-ons, parameters and replication (§13c2). */
   pg: PgConfigForm;
   /** PostgreSQL: WAL-G backups to this S3 endpoint and bucket ("" = off). */
@@ -177,6 +178,7 @@ export function NewDatabaseWizard() {
     access: null,
     public: false,
     allow: "",
+    requireTls: false,
     pg: {
       extensions: [],
       parameters: {},
@@ -232,7 +234,11 @@ export function NewDatabaseWizard() {
         spec: specOf(f),
         network: {
           access,
-          public: { enabled: f.public, allow: allowList(f.allow) },
+          public: {
+            enabled: f.public,
+            allow: allowList(f.allow),
+            requireTls: f.requireTls,
+          },
         },
       }),
     onSuccess: (d) => {
@@ -443,10 +449,11 @@ export function NewDatabaseWizard() {
                     name={f.name}
                     enabled={f.public}
                     allow={f.allow}
-                    port={port}
+                    requireTls={f.requireTls}
                     engine={f.engine}
                     onEnabled={(v) => set("public", v)}
                     onAllow={(v) => set("allow", v)}
+                    onRequireTls={(v) => set("requireTls", v)}
                   />
                 </Section>
               </div>
@@ -739,7 +746,8 @@ function Review({
       "Public",
       f.public ? (
         <span className="font-mono">
-          {f.name}.db.{base || "<base domain>"}:{port} (TLS)
+          {f.name}.db.{base || "<base domain>"} on its own ports (
+          {f.requireTls ? "TLS only" : "TLS or plain"})
           {allowList(f.allow).length
             ? ` from ${allowList(f.allow).join(", ")}`
             : " from anywhere"}

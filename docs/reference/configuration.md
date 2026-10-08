@@ -15,7 +15,8 @@ The installer writes `/etc/syncloud/controller.env`. Every flag of `syncloud-con
 | `--acme`, `--acme-email`, `--acme-directory`, `--acme-ca-file` | Let's Encrypt | certificate issuing |
 | `--public-http`, `--public-https` | `:80`, `:443` | Traefik's entrypoints |
 | `--public-ports` | `20000-20999` | the range of public TCP/UDP service ports |
-| `--public-postgres`, `--public-valkey` | `:5432`, `:6379` | public database endpoints |
+| `--public-db-ports` | `21000-21999` | the range of public database ports (two per public database); must not overlap `--public-ports` |
+| `--public-postgres`, `--public-valkey` | `:5432`, `:6379` | the shared public database ports (TLS with SNI) |
 | `--controller-schedulable` | `0` | whether general services may run on the controller node |
 | `--build-node` | any node | run Git builds on this node |
 | `--registry-pull-host` | `registry.<base-domain>` | the host nodes pull built-in registry images from |
@@ -49,7 +50,8 @@ The agent is configured when it joins (`syncloud-agent join`). Its state lives i
 | 7443/tcp | controller (agent gateway) | nodes |
 | 51820/udp | every node (WireGuard) | other nodes |
 | 20000–20999 tcp/udp | Traefik | the internet, for ports you make public |
-| 5432, 6379/tcp | Traefik | the internet, for public databases |
+| 21000–21999/tcp | Traefik | the internet, for public databases (TLS or plain) |
+| 5432, 6379/tcp | Traefik | the internet, for public databases (TLS with SNI) |
 | 7070/tcp | controller API, on loopback | Traefik |
 
 ## Files

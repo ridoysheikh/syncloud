@@ -2,11 +2,34 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
-## [0.1.1] - 2026-10-08
+## [0.1.2] - 2026-10-09
+
+### Added
+
+- **Public databases take TLS and plain connections.** A public Valkey or PostgreSQL database gets two ports of its own, from 21000–21999 (`--public-db-ports`): read-write and read-only. Each takes TLS (`rediss://`, `sslmode=require`) and plain (`redis://`, `sslmode=disable`) connections, so a plain connection now reaches the right database too.
+- **Require TLS**, per database (**Connectivity**, or `synctl db network NAME --require-tls on`), refuses plain connections.
+- The **Connect** panel and `synctl db credentials` show the TLS and plain URLs with the database's ports, and a ready `redis-cli` or `psql` command.
+
+### Changed
+
+- Clients that send no host name (SNI) now get the platform's Let's Encrypt certificate instead of Traefik's self-signed one. `redis-cli --tls` works without `--sni`, and so do older PostgreSQL clients.
+- The shared ports 6379 and 5432 still work as before: TLS only, for clients that send SNI.
 
 ### Fixed
 
 - After a controller restart, public database endpoints served Traefik's self-signed default certificate (`certificate verify failed`) until a database's network settings changed: the certificate list was built before the database manager started. Their firewall ports had the same start-up gap.
+- PostgreSQL clients built on libpq 17 or later couldn't connect over TLS through Traefik (`SSL error: no application protocol`): Traefik didn't accept their `postgresql` ALPN protocol.
+
+### Upgrading
+
+- Public databases get their two ports when the upgraded controller starts. Their old addresses keep working.
+- If a cloud firewall sits in front of your servers, allow **21000–21999/tcp** from your clients. SynCloud opens the ports in the servers' own firewall.
+- Turning a public endpoint on or off restarts Traefik for a moment, because ports are added or removed (as for public service ports).
+
+## [0.1.1] - 2026-10-08
+
+### Fixed
+
 - The Valkey guide's `redis-cli` command for public endpoints failed with `certificate verify failed`: redis-cli sends the host name (SNI) only with `--sni`. The docs and the dashboard now show a working command, and say that public endpoints need TLS with SNI.
 - Setup's recovery key check didn't say that dashes aren't counted, so typing the last group with its dash never matched. The check now accepts the characters with or without dashes, or the whole key, and the installer prints the 6 characters to type.
 - The installer ignored `--version` (and failed to find the latest release) because reading `/etc/os-release` replaced its `VERSION` setting. The `install.sh` of the 0.1.0 release has been replaced with the fixed one.

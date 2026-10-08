@@ -40,10 +40,16 @@ type DatabaseNetwork struct {
 	Public DatabasePublic `json:"public"`
 }
 
-// DatabasePublic is the TLS endpoint Traefik serves from outside the cluster.
+// DatabasePublic is the endpoint Traefik serves from outside the cluster.
 type DatabasePublic struct {
 	Enabled bool     `json:"enabled"`
 	Allow   []string `json:"allow"` // client CIDRs
+	// RequireTLS refuses plain connections on the dedicated ports.
+	RequireTLS bool `json:"requireTls,omitempty"`
+	// Port and ReadPort are the dedicated read-write and read-only ports,
+	// assigned by the controller while the endpoint is on (Phase 18).
+	Port     int `json:"port,omitempty"`
+	ReadPort int `json:"readPort,omitempty"`
 }
 
 // ParseNetwork returns the database's network settings with defaults.

@@ -110,7 +110,7 @@ export interface DatabaseMember {
 export interface DatabaseNetwork {
   /** Internal peers allowed in: project:P, environment:P/E, service:P/E/S, a CIDR or cluster. */
   access: string[];
-  public: { enabled: boolean; allow: string[] };
+  public: { enabled: boolean; allow: string[]; requireTls?: boolean };
 }
 
 export interface PublicEndpoint {
@@ -120,8 +120,13 @@ export interface PublicEndpoint {
   reason?: string;
   host?: string;
   readHost?: string;
+  /** Own read-write and read-only ports: TLS, and plain unless requireTls (0 until assigned). */
   port: number;
+  readPort: number;
+  /** The engine's shared port: TLS only, the host name (SNI) picks the database. */
+  sniPort: number;
   tls: boolean;
+  requireTls: boolean;
 }
 
 export interface DatabaseEngine {

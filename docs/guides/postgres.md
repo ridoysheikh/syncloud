@@ -34,10 +34,15 @@ Apps connect as `app`, which owns the database `orders` (a `-` in the name becom
 
 ```sh
 synctl db network orders --add-access environment:billing/production
-synctl db network orders --public on --allow 203.0.113.0/24     # a public TLS endpoint
+synctl db network orders --public on --allow 203.0.113.0/24     # a public endpoint
 ```
 
-The public endpoint is TLS only (`sslmode=require` or stricter) and needs a client that sends the host name (SNI), which libpq does from version 14. With an older `psql` or driver, Traefik can't tell which database you mean.
+The public endpoint gives the database two ports of its own, from 21000–21999: read-write and read-only. `synctl db credentials orders` prints the URLs. Each port takes:
+
+- **TLS:** `sslmode=require`, `verify-full`, and PostgreSQL 17's direct TLS (`sslnegotiation=direct`). Clients that send no host name (SNI) work too.
+- **Plain:** `sslmode=disable`. It sends the password and data unencrypted, so use it only from trusted networks. **Require TLS** under **Connectivity** (`synctl db network orders --require-tls on`) refuses plain connections.
+
+The older shared address `orders.db.<base-domain>:5432` still works for TLS clients that send SNI (libpq 14 or later). Turning the endpoint on or off restarts Traefik for a moment. If a cloud firewall sits in front of your servers, allow 21000–21999/tcp.
 
 ## Size and replicas
 

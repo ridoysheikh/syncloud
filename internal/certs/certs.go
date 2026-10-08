@@ -317,6 +317,17 @@ func (m *Manager) Pairs() []Pair {
 	return out
 }
 
+// PairFor returns host's certificate and key, if it has one.
+func (m *Manager) PairFor(host string) (Pair, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.cache[host]
+	if !ok || !slices.Contains(m.hosts, host) {
+		return Pair{}, false
+	}
+	return Pair{CertPEM: e.rec.CertPEM, KeyPEM: e.keyPEM}, true
+}
+
 // ServeHTTP answers HTTP-01 challenges at /.well-known/acme-challenge/{token}.
 func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	token := strings.TrimPrefix(r.URL.Path, ChallengePrefix)

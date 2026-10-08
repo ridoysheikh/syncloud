@@ -48,8 +48,14 @@ type PublicEndpoint struct {
 	Reason    string `json:"reason,omitempty"`
 	Host      string `json:"host,omitempty"`
 	ReadHost  string `json:"readHost,omitempty"`
-	Port      int    `json:"port"`
-	TLS       bool   `json:"tls"`
+	// Port and ReadPort take TLS and, unless RequireTLS, plain connections
+	// (zero until assigned). SNIPort is the engine's shared TLS port, where
+	// the host name picks the database.
+	Port       int  `json:"port"`
+	ReadPort   int  `json:"readPort"`
+	SNIPort    int  `json:"sniPort"`
+	TLS        bool `json:"tls"`
+	RequireTLS bool `json:"requireTls"`
 }
 
 // Member is one container of a database.
@@ -195,7 +201,8 @@ func (m *Manager) baseDomain() string {
 // public describes the public endpoint.
 func (m *Manager) public(d store.Database) PublicEndpoint {
 	eng, _ := EngineByName(d.Engine)
-	p := PublicEndpoint{Enabled: d.ParseNetwork().Public.Enabled, Port: eng.Port, TLS: true}
+	n := d.ParseNetwork()
+	p := PublicEndpoint{Enabled: n.Public.Enabled, Port: n.Public.Port, ReadPort: n.Public.ReadPort, SNIPort: eng.Port, TLS: true, RequireTLS: n.Public.RequireTLS}
 	base := m.baseDomain()
 	if base == "" {
 		p.Reason = "the platform has no base domain yet; public endpoints need one for their certificates"
@@ -230,9 +237,12 @@ type Credentials struct {
 	URL      string `json:"url"`                // redis://default:…@host:6379
 	ReadURL  string `json:"readUrl"`            // read-only endpoint
 	// PublicURL and PublicReadURL reach the database from outside the
-	// cluster over TLS (only while the public endpoint is on).
-	PublicURL     string `json:"publicUrl,omitempty"`
-	PublicReadURL string `json:"publicReadUrl,omitempty"`
+	// cluster over TLS (only while the public endpoint is on); the plain
+	// ones without TLS (absent when the database requires TLS).
+	PublicURL          string `json:"publicUrl,omitempty"`
+	PublicReadURL      string `json:"publicReadUrl,omitempty"`
+	PublicPlainURL     string `json:"publicPlainUrl,omitempty"`
+	PublicPlainReadURL string `json:"publicPlainReadUrl,omitempty"`
 	// HAURL (PostgreSQL) lists every member: libpq-compatible clients find
 	// the primary themselves, so they follow a failover even while the
 	// controller (which moves the endpoints) is down.
@@ -253,9 +263,10 @@ func (m *Manager) Credentials(ctx context.Context, d store.Database) (Credential
 		path, publicQuery = "/"+c.Database, "?sslmode=require"
 	}
 	userinfo := url.UserPassword(c.Username, sec.Password).String()
-	build := func(scheme, host string) string {
-		return scheme + "://" + userinfo + "@" + net.JoinHostPort(host, fmt.Sprint(eng.Port)) + path
+	buildPort := func(scheme, host string, port int) string {
+		return scheme + "://" + userinfo + "@" + net.JoinHostPort(host, fmt.Sprint(port)) + path
 	}
+	build := func(scheme, host string) string { return buildPort(scheme, host, eng.Port) }
 	c.URL, c.ReadURL = build(eng.Scheme, c.Host), build(eng.Scheme, c.ReadHost)
 	if d.Engine == EnginePostgres {
 		members, _ := m.st.DatabaseMembers(ctx, d.ID)
@@ -269,8 +280,15 @@ func (m *Manager) Credentials(ctx context.Context, d store.Database) (Credential
 			c.HAURL = eng.Scheme + "://" + userinfo + "@" + strings.Join(hosts, ",") + path + "?target_session_attrs=read-write"
 		}
 	}
-	if p := m.public(d); p.Enabled && p.Available {
-		c.PublicURL, c.PublicReadURL = build(eng.TLSScheme, p.Host)+publicQuery, build(eng.TLSScheme, p.ReadHost)+publicQuery
+	if p := m.public(d); p.Enabled && p.Available && p.Port > 0 && p.ReadPort > 0 {
+		c.PublicURL, c.PublicReadURL = buildPort(eng.TLSScheme, p.Host, p.Port)+publicQuery, buildPort(eng.TLSScheme, p.ReadHost, p.ReadPort)+publicQuery
+		if !p.RequireTLS {
+			plainQuery := ""
+			if d.Engine == EnginePostgres {
+				plainQuery = "?sslmode=disable"
+			}
+			c.PublicPlainURL, c.PublicPlainReadURL = buildPort(eng.Scheme, p.Host, p.Port)+plainQuery, buildPort(eng.Scheme, p.ReadHost, p.ReadPort)+plainQuery
+		}
 	}
 	return c, nil
 }

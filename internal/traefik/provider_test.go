@@ -112,6 +112,35 @@ func TestTCPRoutesForPublicDatabases(t *testing.T) {
 	}
 }
 
+func TestDedicatedDatabasePortsAndDefaultCertificate(t *testing.T) {
+	routes := []TCPRoute{
+		{Name: "db-1-port", Entrypoint: "db-21000", Servers: []string{"10.91.1.2:6379"}, Allow: []string{"203.0.113.0/24"}},
+		{Name: "db-1-port-plain", Entrypoint: "db-21000", Servers: []string{"10.91.1.2:6379"}, Allow: []string{"203.0.113.0/24"}, Plain: true},
+	}
+	var def *Certificate
+	p := &Provider{ControllerURL: "http://127.0.0.1:7070", BaseDomain: func() string { return "example.com" },
+		TCPRoutes: func() []TCPRoute { return routes }, DefaultCertificate: func() *Certificate { return def }}
+	c := p.Config()
+	tlsR, plainR := c.TCP.Routers["db-1-port"], c.TCP.Routers["db-1-port-plain"]
+	if tlsR.Rule != "HostSNI(`*`)" || tlsR.TLS == nil || tlsR.EntryPoints[0] != "db-21000" || len(tlsR.Middlewares) != 1 {
+		t.Errorf("TLS router: %+v", tlsR)
+	}
+	if plainR.Rule != "HostSNI(`*`)" || plainR.TLS != nil || len(plainR.Middlewares) != 1 {
+		t.Errorf("plain router: %+v", plainR)
+	}
+	if c.TLS.Stores != nil {
+		t.Error("a default certificate store without a certificate")
+	}
+	def = &Certificate{CertFile: "CERT", KeyFile: "KEY"}
+	if st := p.Config().TLS.Stores["default"]; st.DefaultCertificate == nil || st.DefaultCertificate.CertFile != "CERT" {
+		t.Errorf("default store: %+v", st)
+	}
+	b, _ := json.Marshal(p.Redacted())
+	if strings.Contains(string(b), "KEY") {
+		t.Errorf("the default certificate's key is not redacted: %s", b)
+	}
+}
+
 func TestServiceRoutesPathsRedirectsAndPublicPorts(t *testing.T) {
 	domain := ""
 	p := &Provider{ControllerURL: "http://127.0.0.1:7070", BaseDomain: func() string { return domain },

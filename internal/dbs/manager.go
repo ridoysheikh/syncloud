@@ -76,6 +76,9 @@ type Manager struct {
 	// BaseDomain returns the platform's base domain ("" = none, so no
 	// public endpoints).
 	BaseDomain func() string
+	// PublicPortRange is where dedicated public ports come from (zero:
+	// DefaultPublicPorts).
+	PublicPortRange [2]int
 	// Metrics stores member samples (nil = none).
 	Metrics Recorder
 	// S3 resolves a registered S3 endpoint (by name or ID) for WAL-G.
@@ -85,6 +88,8 @@ type Manager struct {
 	qmu    sync.Mutex
 	queued map[string]bool
 	cl     clients
+
+	portMu sync.Mutex // assignPorts
 
 	mu        sync.Mutex
 	live      map[string]*Live // member ID -> last probe
@@ -250,6 +255,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
 	if err := NormalizeNetwork(&n, req.Exists); err != nil {
 		return View{}, ErrInvalid{err}
 	}
+	n.Public.Port, n.Public.ReadPort = 0, 0 // assigned below, once it exists
 	nb, _ := json.Marshal(n)
 	d.Network = string(nb)
 	secrets := Secrets{Password: randomPassword(), AdminPassword: randomPassword()}
@@ -295,6 +301,11 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
 		m.event(ctx, d.ID, "restore", restore.SourceName, d.Name, "from backup "+restore.Backup+" to "+target, req.Actor)
 	}
 	m.Enqueue(d.ID)
+	if n.Public.Enabled {
+		if _, err := m.assignPorts(ctx); err != nil {
+			m.log.Error("assign public ports", "database", d.Name, "err", err)
+		}
+	}
 	m.networkChanged()
 	full, err := m.st.DatabaseByID(ctx, d.ID)
 	if err != nil {
@@ -451,6 +462,12 @@ func (m *Manager) Enqueue(id string) {
 func (m *Manager) Run(ctx context.Context) {
 	t := time.NewTicker(probeEvery)
 	defer t.Stop()
+	// Public databases from before dedicated ports get theirs.
+	if changed, err := m.assignPorts(ctx); err != nil {
+		m.log.Error("assign public ports", "err", err)
+	} else if changed {
+		m.networkChanged()
+	}
 	m.probeAll(ctx) // know every database's state right after a restart
 	for {
 		select {

@@ -27,17 +27,21 @@ type dbView struct {
 	Network     struct {
 		Access []string `json:"access"`
 		Public struct {
-			Enabled bool     `json:"enabled"`
-			Allow   []string `json:"allow"`
+			Enabled    bool     `json:"enabled"`
+			Allow      []string `json:"allow"`
+			RequireTLS bool     `json:"requireTls"`
 		} `json:"public"`
 	} `json:"network"`
 	Public struct {
-		Enabled   bool   `json:"enabled"`
-		Available bool   `json:"available"`
-		Reason    string `json:"reason"`
-		Host      string `json:"host"`
-		ReadHost  string `json:"readHost"`
-		Port      int    `json:"port"`
+		Enabled    bool   `json:"enabled"`
+		Available  bool   `json:"available"`
+		Reason     string `json:"reason"`
+		Host       string `json:"host"`
+		ReadHost   string `json:"readHost"`
+		Port       int    `json:"port"`
+		ReadPort   int    `json:"readPort"`
+		SNIPort    int    `json:"sniPort"`
+		RequireTLS bool   `json:"requireTls"`
 	} `json:"public"`
 	Spec struct {
 		Memory         struct{ Min, Max int } `json:"memory"`
@@ -219,7 +223,7 @@ func (a *app) databasesCmd() *cobra.Command {
 			}
 			fmt.Fprintf(a.out, "Created database %s (%s): %s:%d, read-only %s\n", v.Name, v.owner(), v.Host, v.Port, v.ReadHost)
 			if v.Public.Enabled && v.Public.Available {
-				fmt.Fprintf(a.out, "Public endpoint (TLS): %s:%d, read-only %s\n", v.Public.Host, v.Public.Port, v.Public.ReadHost)
+				fmt.Fprintf(a.out, "Public endpoint: %s\n", v.publicLine())
 			} else if v.Public.Enabled {
 				fmt.Fprintf(a.out, "Public endpoint unavailable: %s\n", v.Public.Reason)
 			}
@@ -231,16 +235,17 @@ func (a *app) databasesCmd() *cobra.Command {
 	create.Flags().StringVar(&engine, "engine", "valkey", "database engine (synctl db engines)")
 	create.Flags().StringVar(&version, "version", "", "engine version (default: the newest)")
 	create.Flags().BoolVar(&standalone, "standalone", false, "create outside any project even when $SYNCLOUD_PROJECT is set")
-	create.Flags().BoolVar(&public, "public", false, "serve a TLS endpoint <name>.db.<base-domain> outside the cluster")
+	create.Flags().BoolVar(&public, "public", false, "serve the database outside the cluster at <name>.db.<base-domain> on its own ports (TLS or plain)")
 	create.Flags().StringSliceVar(&allow, "allow", nil, "client addresses allowed on the public endpoint (IP or CIDR; default anywhere)")
 	create.Flags().StringSliceVar(&access, "access", nil, "internal peers allowed in: project:P, environment:P/E, service:P/E/S, a CIDR or cluster (default: a project database's own environment)")
 
-	var netPublic string
+	var netPublic, netRequireTLS string
 	var netAllow, netAccess, addAccess, removeAccess []string
 	network := &cobra.Command{
 		Use: "network NAME", Short: "Show or change who may connect: the internal access list and the public endpoint", Args: cobra.ExactArgs(1),
 		Example: `  synctl db network sessions --public on --allow 203.0.113.0/24
   synctl db network sessions --add-access environment:billing/production
+  synctl db network sessions --require-tls on
   synctl db network sessions --public off`,
 		Annotations: op("setDatabaseNetwork"),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -249,7 +254,7 @@ func (a *app) databasesCmd() *cobra.Command {
 				return err
 			}
 			ch := cmd.Flags().Changed
-			if ch("public") || ch("allow") || ch("access") || ch("add-access") || ch("remove-access") {
+			if ch("public") || ch("allow") || ch("access") || ch("add-access") || ch("remove-access") || ch("require-tls") {
 				n := v.Network
 				switch netPublic {
 				case "":
@@ -259,6 +264,15 @@ func (a *app) databasesCmd() *cobra.Command {
 					n.Public.Enabled = false
 				default:
 					return errors.New("--public is on or off")
+				}
+				switch netRequireTLS {
+				case "":
+				case "on", "true", "yes":
+					n.Public.RequireTLS = true
+				case "off", "false", "no":
+					n.Public.RequireTLS = false
+				default:
+					return errors.New("--require-tls is on or off")
 				}
 				if ch("allow") {
 					n.Public.Allow = netAllow
@@ -294,13 +308,14 @@ func (a *app) databasesCmd() *cobra.Command {
 			case !v.Public.Available:
 				fmt.Fprintf(a.out, "public:     on, unavailable: %s\n", v.Public.Reason)
 			default:
-				fmt.Fprintf(a.out, "public:     %s:%d (TLS), read-only %s\n", v.Public.Host, v.Public.Port, v.Public.ReadHost)
+				fmt.Fprintf(a.out, "public:     %s\n", v.publicLine())
 				fmt.Fprintf(a.out, "allowed:    %s\n", strings.Join(v.Network.Public.Allow, ", "))
 			}
 			return nil
 		},
 	}
 	network.Flags().StringVar(&netPublic, "public", "", "on or off")
+	network.Flags().StringVar(&netRequireTLS, "require-tls", "", "on: refuse plain connections on the public ports; off: take TLS and plain")
 	network.Flags().StringSliceVar(&netAllow, "allow", nil, "replace the public allow-list (IP or CIDR)")
 	network.Flags().StringSliceVar(&netAccess, "access", nil, "replace the internal access list")
 	network.Flags().StringSliceVar(&addAccess, "add-access", nil, "add internal peers")
@@ -350,7 +365,7 @@ func (a *app) databasesCmd() *cobra.Command {
 			}
 			fmt.Fprintf(a.out, "read-write: %s:%d\nread-only:  %s:%d\n", v.Host, v.Port, v.ReadHost, v.Port)
 			if v.Public.Enabled && v.Public.Available {
-				fmt.Fprintf(a.out, "public:     %s:%d (TLS), read-only %s\n", v.Public.Host, v.Public.Port, v.Public.ReadHost)
+				fmt.Fprintf(a.out, "public:     %s\n", v.publicLine())
 			}
 			fmt.Fprintf(a.out, "access:     %s\n", orDash(strings.Join(v.Network.Access, ", ")))
 			fmt.Fprintf(a.out, "memory:     %d MiB now (%d–%d), %s used\nreplicas:   %d now (%d–%d)\n", v.State.MemoryMiB, v.Spec.Memory.Min, v.Spec.Memory.Max,
@@ -462,9 +477,9 @@ func (a *app) databasesCmd() *cobra.Command {
 			if a.output == "json" {
 				return a.printer().json(c)
 			}
-			for _, k := range []string{"url", "readUrl", "haUrl", "publicUrl", "publicReadUrl", "host", "readHost", "port", "database", "username", "password"} {
+			for _, k := range []string{"url", "readUrl", "haUrl", "publicUrl", "publicReadUrl", "publicPlainUrl", "publicPlainReadUrl", "host", "readHost", "port", "database", "username", "password"} {
 				if v, ok := c[k]; ok {
-					fmt.Fprintf(a.out, "%-14s %v\n", k+":", v)
+					fmt.Fprintf(a.out, "%-20s %v\n", k+":", v)
 				}
 			}
 			return nil
@@ -745,4 +760,17 @@ func printReply(a *app, v any, indent string) {
 		b, _ := json.Marshal(x)
 		fmt.Fprintln(a.out, indent+string(b))
 	}
+}
+
+// publicLine describes the public endpoint's ports.
+func (v dbView) publicLine() string {
+	p := v.Public
+	if p.Port == 0 || p.ReadPort == 0 {
+		return fmt.Sprintf("%s (ports being assigned); TLS with SNI on %d", p.Host, p.SNIPort)
+	}
+	conn := "TLS or plain"
+	if p.RequireTLS {
+		conn = "TLS only"
+	}
+	return fmt.Sprintf("%s:%d, read-only %s:%d (%s); TLS with SNI also on %d", p.Host, p.Port, p.ReadHost, p.ReadPort, conn, p.SNIPort)
 }

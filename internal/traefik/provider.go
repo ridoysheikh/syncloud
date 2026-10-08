@@ -77,10 +77,12 @@ type TCPIPAllowList struct {
 // TCPRoute is one public TLS endpoint (a database's), or with Plain a
 // public TCP port of a service passed through as is (Phase 15c).
 type TCPRoute struct {
+	// Host picks the route by SNI; empty takes any TLS connection on the
+	// entrypoint (a dedicated port).
 	Name, Entrypoint, Host string
 	Servers                []string // host:port
 	Allow                  []string // client CIDRs (empty: anyone)
-	Plain                  bool
+	Plain                  bool     // no TLS: any plain connection on the entrypoint
 }
 
 // UDPRoute is a public UDP port of a service.
@@ -184,6 +186,13 @@ type RedirectRegex struct {
 type TLSConfig struct {
 	Certificates []Certificate         `json:"certificates,omitempty"`
 	Options      map[string]TLSOptions `json:"options,omitempty"`
+	Stores       map[string]TLSStore   `json:"stores,omitempty"`
+}
+
+// TLSStore sets the certificate for connections no other one matches,
+// such as clients that send no SNI.
+type TLSStore struct {
+	DefaultCertificate *Certificate `json:"defaultCertificate,omitempty"`
 }
 
 // Certificate holds PEM content inline (Traefik accepts content or a path).
@@ -207,6 +216,9 @@ type Provider struct {
 	HTTPSPort string
 	// Certificates returns the TLS certificates to serve.
 	Certificates func() []Certificate
+	// DefaultCertificate is served when no other certificate matches the
+	// SNI, or there is none (nil: Traefik's self-signed one).
+	DefaultCertificate func() *Certificate
 	// ServiceRoutes returns the routes of user services.
 	ServiceRoutes func() []ServiceRoute
 	// Middlewares returns the preset middlewares routes refer to.
@@ -369,6 +381,11 @@ func (p *Provider) Config() Dynamic {
 	if p.Certificates != nil {
 		d.TLS.Certificates = p.Certificates()
 	}
+	if p.DefaultCertificate != nil {
+		if c := p.DefaultCertificate(); c != nil {
+			d.TLS.Stores = map[string]TLSStore{"default": {DefaultCertificate: c}}
+		}
+	}
 	if p.TCPRoutes != nil {
 		d.TCP = tcpConfig(p.TCPRoutes())
 	}
@@ -412,6 +429,9 @@ func tcpConfig(routes []TCPRoute) *TCPConfig {
 		}
 		c.Services[r.Name] = TCPService{LoadBalancer: lb}
 		rt := TCPRouter{Rule: hostSNI(r.Host), EntryPoints: []string{r.Entrypoint}, Service: r.Name, TLS: &RouterTLS{}}
+		if r.Host == "" {
+			rt.Rule = "HostSNI(`*`)" // TLS with any name, or none
+		}
 		if r.Plain {
 			rt.Rule, rt.TLS = "HostSNI(`*`)", nil // raw TCP: no TLS, any client
 		}
@@ -559,13 +579,19 @@ func MergeCustom(out, custom map[string]any) {
 func (p *Provider) Redacted() map[string]any {
 	out := p.Merged()
 	if tls, ok := out["tls"].(map[string]any); ok {
-		if certs, ok := tls["certificates"].([]any); ok {
-			for _, c := range certs {
-				if m, ok := c.(map[string]any); ok {
-					for _, k := range []string{"certFile", "keyFile"} {
-						if s, ok := m[k].(string); ok {
-							m[k] = fmt.Sprintf("(PEM, %d bytes, redacted)", len(s))
-						}
+		certs, _ := tls["certificates"].([]any)
+		if stores, ok := tls["stores"].(map[string]any); ok {
+			for _, st := range stores {
+				if m, ok := st.(map[string]any); ok && m["defaultCertificate"] != nil {
+					certs = append(certs, m["defaultCertificate"])
+				}
+			}
+		}
+		for _, c := range certs {
+			if m, ok := c.(map[string]any); ok {
+				for _, k := range []string{"certFile", "keyFile"} {
+					if s, ok := m[k].(string); ok {
+						m[k] = fmt.Sprintf("(PEM, %d bytes, redacted)", len(s))
 					}
 				}
 			}

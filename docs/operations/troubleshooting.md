@@ -36,7 +36,7 @@ synctl system tasks                  # Traefik, registry, VictoriaMetrics, … a
 | **Build waits** | No node has room for a build (0.25 CPU, 512 MB), or BuildKit isn't running (`synctl system tasks`). |
 | **Webhook doesn't trigger builds** | The Git host can't reach your dashboard URL. Builds still start on the next poll (every minute). |
 | **PostgreSQL waits for its image** | The controller is downloading the image from the release. With no internet access, place the archive by hand ([PostgreSQL](../guides/postgres.md#create-one)). |
-| **Public database: `certificate verify failed`, or `Protocol error, got "H"`** | The client must use TLS and send the host name (SNI). For `redis-cli`, add `--tls --sni <db>.db.<domain>`; see [Valkey](../guides/valkey.md#from-outside-the-cluster). |
+| **Public database: `certificate verify failed`, or `Protocol error, got "H"`** | Connect to the database's own port (21000–21999, shown by `synctl db credentials`), not the shared 6379/5432. Its own port takes TLS and plain connections, unless **Require TLS** is on. See [Valkey](../guides/valkey.md#from-outside-the-cluster). |
 | **Backups warning in the header** | No backup destination, or the last backup failed: **Settings → Backups** shows why. |
 
 ## Still stuck?
