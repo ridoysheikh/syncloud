@@ -53,7 +53,7 @@ type PostgresSpec struct {
 	MaxConnections int `json:"maxConnections"`
 	// Extensions are the enabled add-ons (§13c2); nil on clusters from
 	// before them means all.
-	Extensions []string `json:"extensions"`
+	Extensions store.NullList[string] `json:"extensions"`
 	// Parameters override PostgreSQL settings from the curated catalog.
 	Parameters map[string]string `json:"parameters,omitempty"`
 	// Replication is how members replicate and fail over.

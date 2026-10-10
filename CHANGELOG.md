@@ -2,6 +2,17 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [Unreleased]
+
+### Changed
+
+- Tab rows stay on one row. When the tabs don't fit, arrows appear at the clipped end, a mouse wheel scrolls the row sideways, and the selected tab stays in view without the page jumping. Arrow keys move between tabs.
+
+### Fixed
+
+- Some tabs crashed with "Cannot read properties of null (reading 'map')" when a list was empty (for example a group with no members). The API now always sends empty lists as `[]`.
+- A tab or page that fails to load now shows the error with **Try again** in its place. Before, the whole page went blank; now the tabs and the rest of the dashboard keep working, and switching tabs clears the error.
+
 ## [0.1.4] - 2026-10-10
 
 ### Changed

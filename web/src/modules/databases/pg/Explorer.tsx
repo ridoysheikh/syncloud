@@ -45,6 +45,7 @@ import {
 } from "./shared";
 import { confirmAction } from "@/ui/dialogs";
 import { Select } from "@/ui/select";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 
 type Selection =
   | { kind: "database" }
@@ -328,16 +329,18 @@ function DatabaseView({ path, db }: { path: string; db: string }) {
         value={tab}
         onChange={setTab}
       />
-      {tab === "extensions" && <Extensions path={path} db={db} />}
-      {tab === "privileges" && (
-        <Panel title="Privileges on the database">
-          <PrivilegesEditor
-            path={path}
-            db={db}
-            object={{ kind: "database", name: db }}
-          />
-        </Panel>
-      )}
+      <ErrorBoundary resetKey={tab}>
+        {tab === "extensions" && <Extensions path={path} db={db} />}
+        {tab === "privileges" && (
+          <Panel title="Privileges on the database">
+            <PrivilegesEditor
+              path={path}
+              db={db}
+              object={{ kind: "database", name: db }}
+            />
+          </Panel>
+        )}
+      </ErrorBoundary>
     </div>
   );
 }
@@ -657,165 +660,167 @@ function ObjectView({
         onChange={setTab}
         label={(t) => (t === "ddl" ? "DDL" : t)}
       />
-      {o && tab === "columns" && (
-        <Panel flush>
-          <DataTable
-            rows={o.columns}
-            rowKey={(c) => c.name}
-            columns={[
-              {
-                header: "Column",
-                cell: (c) => <span className="font-mono">{c.name}</span>,
-              },
-              {
-                header: "Type",
-                cell: (c) => <span className="font-mono">{c.type}</span>,
-              },
-              {
-                header: "Null",
-                cell: (c) =>
-                  c.notNull ? (
-                    "not null"
-                  ) : (
-                    <span className="text-faint">null</span>
+      <ErrorBoundary resetKey={`${object.name}/${tab}`}>
+        {o && tab === "columns" && (
+          <Panel flush>
+            <DataTable
+              rows={o.columns}
+              rowKey={(c) => c.name}
+              columns={[
+                {
+                  header: "Column",
+                  cell: (c) => <span className="font-mono">{c.name}</span>,
+                },
+                {
+                  header: "Type",
+                  cell: (c) => <span className="font-mono">{c.type}</span>,
+                },
+                {
+                  header: "Null",
+                  cell: (c) =>
+                    c.notNull ? (
+                      "not null"
+                    ) : (
+                      <span className="text-faint">null</span>
+                    ),
+                },
+                {
+                  header: "Default",
+                  className: "whitespace-normal",
+                  cell: (c) => (
+                    <span className="font-mono">
+                      {c.identity
+                        ? `identity (${c.identity})`
+                        : c.generated
+                          ? `generated: ${c.generated}`
+                          : (c.default ?? "")}
+                    </span>
                   ),
-              },
-              {
-                header: "Default",
-                className: "whitespace-normal",
-                cell: (c) => (
-                  <span className="font-mono">
-                    {c.identity
-                      ? `identity (${c.identity})`
-                      : c.generated
-                        ? `generated: ${c.generated}`
-                        : (c.default ?? "")}
-                  </span>
-                ),
-              },
-              {
-                header: "Keys",
-                cell: (c) =>
-                  o.constraints
-                    .filter(
-                      (k) =>
-                        ["primary key", "unique", "foreign key"].includes(
-                          k.kind,
-                        ) && keyColumns(k.definition).includes(c.name),
-                    )
-                    .map((k) =>
-                      k.kind === "primary key"
-                        ? "PK"
-                        : k.kind === "unique"
-                          ? "UQ"
-                          : `FK → ${k.references}`,
-                    )
-                    .join(", "),
-              },
-              {
-                header: "Comment",
-                className: "whitespace-normal",
-                cell: (c) => <span className="text-muted">{c.comment}</span>,
-              },
-            ]}
-          />
-        </Panel>
-      )}
-      {tab === "data" && (
-        <DataView path={path} db={db} schema={schema} table={object.name} />
-      )}
-      {o && tab === "indexes" && (
-        <Panel flush>
-          <DataTable
-            rows={o.indexes}
-            rowKey={(i) => i.name}
-            empty={<EmptyState icon={Search} title="No indexes" />}
-            columns={[
-              {
-                header: "Index",
-                cell: (i) => (
-                  <span className="font-mono">
-                    {i.name}
-                    {!i.valid && <span className="text-bad"> invalid</span>}
-                  </span>
-                ),
-              },
-              {
-                header: "Definition",
-                className: "whitespace-normal",
-                cell: (i) => (
-                  <span className="font-mono">
-                    {i.definition.replace(
-                      /^CREATE (UNIQUE )?INDEX \S+ ON /,
-                      "",
-                    )}
-                  </span>
-                ),
-              },
-              { header: "Size", cell: (i) => bytes(i.sizeBytes) },
-              { header: "Scans", cell: (i) => i.scans.toLocaleString() },
-            ]}
-          />
-        </Panel>
-      )}
-      {o && tab === "constraints" && (
-        <Panel flush>
-          <DataTable
-            rows={o.constraints}
-            rowKey={(k) => k.name}
-            empty={<EmptyState icon={Search} title="No constraints" />}
-            columns={[
-              {
-                header: "Constraint",
-                cell: (k) => <span className="font-mono">{k.name}</span>,
-              },
-              { header: "Kind", cell: (k) => k.kind },
-              {
-                header: "Definition",
-                className: "whitespace-normal",
-                cell: (k) => <span className="font-mono">{k.definition}</span>,
-              },
-            ]}
-          />
-        </Panel>
-      )}
-      {o && tab === "triggers" && (
-        <Panel flush>
-          <DataTable
-            rows={o.triggers}
-            rowKey={(t) => t.name}
-            empty={<EmptyState icon={Search} title="No triggers" />}
-            columns={[
-              {
-                header: "Trigger",
-                cell: (t) => <span className="font-mono">{t.name}</span>,
-              },
-              { header: "Enabled", cell: (t) => (t.enabled ? "yes" : "no") },
-              {
-                header: "Definition",
-                className: "whitespace-normal",
-                cell: (t) => <span className="font-mono">{t.definition}</span>,
-              },
-            ]}
-          />
-        </Panel>
-      )}
-      {o && tab === "ddl" && (
-        <Panel>
-          <SqlBlock sql={o.ddl} />
-          {o.partitionList && o.partitionList.length > 0 && (
-            <div className="mt-2 text-xs">
-              <h3 className="text-muted mb-1 font-medium">Partitions</h3>
-              <SqlBlock sql={o.partitionList.join("\n")} />
-            </div>
-          )}
-        </Panel>
-      )}
-      {tab === "privileges" && privRef && (
-        <Panel>
-          <PrivilegesEditor path={path} db={db} object={privRef} />
-        </Panel>
-      )}
+                },
+                {
+                  header: "Keys",
+                  cell: (c) =>
+                    o.constraints
+                      .filter(
+                        (k) =>
+                          ["primary key", "unique", "foreign key"].includes(
+                            k.kind,
+                          ) && keyColumns(k.definition).includes(c.name),
+                      )
+                      .map((k) =>
+                        k.kind === "primary key"
+                          ? "PK"
+                          : k.kind === "unique"
+                            ? "UQ"
+                            : `FK → ${k.references}`,
+                      )
+                      .join(", "),
+                },
+                {
+                  header: "Comment",
+                  className: "whitespace-normal",
+                  cell: (c) => <span className="text-muted">{c.comment}</span>,
+                },
+              ]}
+            />
+          </Panel>
+        )}
+        {tab === "data" && (
+          <DataView path={path} db={db} schema={schema} table={object.name} />
+        )}
+        {o && tab === "indexes" && (
+          <Panel flush>
+            <DataTable
+              rows={o.indexes}
+              rowKey={(i) => i.name}
+              empty={<EmptyState icon={Search} title="No indexes" />}
+              columns={[
+                {
+                  header: "Index",
+                  cell: (i) => (
+                    <span className="font-mono">
+                      {i.name}
+                      {!i.valid && <span className="text-bad"> invalid</span>}
+                    </span>
+                  ),
+                },
+                {
+                  header: "Definition",
+                  className: "whitespace-normal",
+                  cell: (i) => (
+                    <span className="font-mono">
+                      {i.definition.replace(
+                        /^CREATE (UNIQUE )?INDEX \S+ ON /,
+                        "",
+                      )}
+                    </span>
+                  ),
+                },
+                { header: "Size", cell: (i) => bytes(i.sizeBytes) },
+                { header: "Scans", cell: (i) => i.scans.toLocaleString() },
+              ]}
+            />
+          </Panel>
+        )}
+        {o && tab === "constraints" && (
+          <Panel flush>
+            <DataTable
+              rows={o.constraints}
+              rowKey={(k) => k.name}
+              empty={<EmptyState icon={Search} title="No constraints" />}
+              columns={[
+                {
+                  header: "Constraint",
+                  cell: (k) => <span className="font-mono">{k.name}</span>,
+                },
+                { header: "Kind", cell: (k) => k.kind },
+                {
+                  header: "Definition",
+                  className: "whitespace-normal",
+                  cell: (k) => <span className="font-mono">{k.definition}</span>,
+                },
+              ]}
+            />
+          </Panel>
+        )}
+        {o && tab === "triggers" && (
+          <Panel flush>
+            <DataTable
+              rows={o.triggers}
+              rowKey={(t) => t.name}
+              empty={<EmptyState icon={Search} title="No triggers" />}
+              columns={[
+                {
+                  header: "Trigger",
+                  cell: (t) => <span className="font-mono">{t.name}</span>,
+                },
+                { header: "Enabled", cell: (t) => (t.enabled ? "yes" : "no") },
+                {
+                  header: "Definition",
+                  className: "whitespace-normal",
+                  cell: (t) => <span className="font-mono">{t.definition}</span>,
+                },
+              ]}
+            />
+          </Panel>
+        )}
+        {o && tab === "ddl" && (
+          <Panel>
+            <SqlBlock sql={o.ddl} />
+            {o.partitionList && o.partitionList.length > 0 && (
+              <div className="mt-2 text-xs">
+                <h3 className="text-muted mb-1 font-medium">Partitions</h3>
+                <SqlBlock sql={o.partitionList.join("\n")} />
+              </div>
+            )}
+          </Panel>
+        )}
+        {tab === "privileges" && privRef && (
+          <Panel>
+            <PrivilegesEditor path={path} db={db} object={privRef} />
+          </Panel>
+        )}
+      </ErrorBoundary>
     </div>
   );
 }

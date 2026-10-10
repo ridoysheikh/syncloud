@@ -23,6 +23,7 @@ import { cn, gap } from "@/ui/cn";
 import { Tabs } from "@/ui/Tabs";
 import { confirmAction } from "@/ui/dialogs";
 import { Select } from "@/ui/select";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 
 export type Severity = "info" | "warning" | "critical";
 
@@ -164,12 +165,14 @@ export function AlertsPage() {
         value={tab}
         onChange={setTab}
       />
-      {tab === "active" && (
-        <ActiveTab rows={active.data ?? []} loading={active.isLoading} />
-      )}
-      {tab === "rules" && <RulesTab />}
-      {tab === "channels" && <ChannelsTab />}
-      {tab === "history" && <HistoryTab />}
+      <ErrorBoundary resetKey={tab}>
+        {tab === "active" && (
+          <ActiveTab rows={active.data ?? []} loading={active.isLoading} />
+        )}
+        {tab === "rules" && <RulesTab />}
+        {tab === "channels" && <ChannelsTab />}
+        {tab === "history" && <HistoryTab />}
+      </ErrorBoundary>
     </div>
   );
 }

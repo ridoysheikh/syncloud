@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -140,7 +139,7 @@ func (s *Server) handleTailLogs(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			b, _ := json.Marshal(l)
+			b, _ := marshalClient(l)
 			fmt.Fprintf(w, "data: %s\n\n", b)
 			_ = rc.Flush()
 		}

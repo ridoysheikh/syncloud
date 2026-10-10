@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -29,13 +31,29 @@ type apiError struct {
 	Message string `json:"message"`
 }
 
+// clientJSON is how responses and stream events are encoded: as
+// encoding/json does, except that an empty (nil) list or map is [] or {},
+// never null, so clients can always iterate it. A list whose nil means
+// something else than empty is a store.NullList and stays null. JSON for
+// clients is never inlined in HTML: "→" and ">" stay readable.
+var clientJSON = jsonv2.JoinOptions(json.DefaultOptionsV1(), jsonv2.FormatNilSliceAsNull(false),
+	jsonv2.FormatNilMapAsNull(false), jsontext.EscapeForHTML(false))
+
+// marshalClient encodes v for a client (see clientJSON).
+func marshalClient(v any) ([]byte, error) { return jsonv2.Marshal(v, clientJSON) }
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	// Encoded before anything is sent, so a value that cannot be encoded
+	// is an error response, not an empty or cut-off body.
+	b, err := marshalClient(v)
+	if err != nil {
+		status = http.StatusInternalServerError
+		b, _ = marshalClient(map[string]apiError{"error": {Code: CodeInternal, Message: "encode response: " + err.Error()}})
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false) // JSON for clients, never inlined in HTML: keep "→" and ">" readable
-	_ = enc.Encode(v)
+	_, _ = w.Write(append(b, '\n'))
 }
 
 func writeError(w http.ResponseWriter, status int, code, msg string) {

@@ -25,6 +25,7 @@ import { Terminal } from "@/ui/Terminal";
 import { Alert, Button } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 
 const nodesPath: string = "/compute/nodes";
 
@@ -120,13 +121,15 @@ export function NodePage() {
               : t
         }
       />
-      {tab === "overview" && <Overview node={node} tasks={tasks} />}
-      {tab === "tasks" && (
-        <Panel title={`Tasks on this node (${tasks.length})`} flush>
-          <TasksTable tasks={tasks} loading={tasksLoading} showNode={false} />
-        </Panel>
-      )}
-      {tab === "shell" && <NodeShell node={node} />}
+      <ErrorBoundary resetKey={tab}>
+        {tab === "overview" && <Overview node={node} tasks={tasks} />}
+        {tab === "tasks" && (
+          <Panel title={`Tasks on this node (${tasks.length})`} flush>
+            <TasksTable tasks={tasks} loading={tasksLoading} showNode={false} />
+          </Panel>
+        )}
+        {tab === "shell" && <NodeShell node={node} />}
+      </ErrorBoundary>
     </div>
   );
 }

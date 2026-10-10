@@ -38,6 +38,7 @@ import {
   DeployLockBanner,
   EnvironmentsPanel,
 } from "./ProjectSettings";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 
 type Tab =
   | "services"
@@ -141,55 +142,57 @@ export function ProjectPage() {
           })}
         </div>
       </div>
-      {tab === "services" && <ServiceGrid services={inEnv} newTo={newTo} />}
-      {tab === "databases" && <ProjectDatabases project={p.name} env={env} />}
-      {tab === "deployments" && (
-        <ProjectDeployments
-          key={env}
-          project={p.name}
-          env={env}
-          services={inEnv.map((s) => s.name)}
-        />
-      )}
-      {tab === "domains" && (
-        <ProjectDomains key={env} project={p.name} env={env} services={inEnv} />
-      )}
-      {tab === "metrics" && (
-        <MetricsPanel key={env} path={envPath(p.name, env)} by="service" />
-      )}
-      {tab === "traffic" && (
-        <div className={cn("flex flex-col", gap)}>
-          <TrafficPanel
+      <ErrorBoundary resetKey={tab}>
+        {tab === "services" && <ServiceGrid services={inEnv} newTo={newTo} />}
+        {tab === "databases" && <ProjectDatabases project={p.name} env={env} />}
+        {tab === "deployments" && (
+          <ProjectDeployments
             key={env}
-            path={`${envPath(p.name, env)}/traffic`}
-            scope="environment"
+            project={p.name}
+            env={env}
+            services={inEnv.map((s) => s.name)}
           />
-          <RequestsTail filter={{ project: p.name, environment: env }} />
-        </div>
-      )}
-      {tab === "logs" && (
-        <LogsView key={env} filter={{ project: p.name, environment: env }} />
-      )}
-      {tab === "variables" && (
-        <SharedVariables
-          key={env}
-          project={p.name}
-          env={env}
-          services={inEnv}
-        />
-      )}
-      {tab === "settings" && (
-        <ProjectSettings
-          key={p.name}
-          project={p.name}
-          projectId={p.id}
-          createdAt={p.createdAt}
-          description={p.description}
-          rollbackWindow={p.rollbackWindow}
-          nodes={p.nodes ?? []}
-          services={services.filter((s) => s.project === p.name)}
-        />
-      )}
+        )}
+        {tab === "domains" && (
+          <ProjectDomains key={env} project={p.name} env={env} services={inEnv} />
+        )}
+        {tab === "metrics" && (
+          <MetricsPanel key={env} path={envPath(p.name, env)} by="service" />
+        )}
+        {tab === "traffic" && (
+          <div className={cn("flex flex-col", gap)}>
+            <TrafficPanel
+              key={env}
+              path={`${envPath(p.name, env)}/traffic`}
+              scope="environment"
+            />
+            <RequestsTail filter={{ project: p.name, environment: env }} />
+          </div>
+        )}
+        {tab === "logs" && (
+          <LogsView key={env} filter={{ project: p.name, environment: env }} />
+        )}
+        {tab === "variables" && (
+          <SharedVariables
+            key={env}
+            project={p.name}
+            env={env}
+            services={inEnv}
+          />
+        )}
+        {tab === "settings" && (
+          <ProjectSettings
+            key={p.name}
+            project={p.name}
+            projectId={p.id}
+            createdAt={p.createdAt}
+            description={p.description}
+            rollbackWindow={p.rollbackWindow}
+            nodes={p.nodes ?? []}
+            services={services.filter((s) => s.project === p.name)}
+          />
+        )}
+      </ErrorBoundary>
     </div>
   );
 }

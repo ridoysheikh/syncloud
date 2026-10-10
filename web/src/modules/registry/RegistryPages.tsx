@@ -18,6 +18,7 @@ import { cn, gap } from "@/ui/cn";
 import { useLazyList } from "@/ui/paging";
 import { Tabs } from "@/ui/Tabs";
 import { confirmAction } from "@/ui/dialogs";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 
 interface Repository {
   name: string;
@@ -456,116 +457,118 @@ export function RepositoriesPage() {
               }
             />
           )}
-          {tab === "lifecycle" && current ? (
-            <LifecyclePanel key={current} repo={current} />
-          ) : tab === "activity" && current ? (
-            <ActivityPanel repo={current} />
-          ) : (
-            <Panel title={current || "Images"} flush>
-              <DataTable
-                rows={images.data ?? []}
-                rowKey={(i) => i.tag}
-                empty={
-                  current &&
-                  !images.isLoading && (
-                    <EmptyState icon={Boxes} title="No tags" />
-                  )
-                }
-                columns={[
-                  {
-                    header: "Tag",
-                    cell: (i) => (
-                      <span className="flex items-center gap-1 font-mono">
-                        {i.tag}
-                        <CopyText text={`@registry/${current}:${i.tag}`} />
-                      </span>
-                    ),
-                  },
-                  {
-                    header: "Digest",
-                    cell: (i) => (
-                      <span className="text-muted font-mono" title={i.digest}>
-                        {i.digest.slice(7, 19)}
-                      </span>
-                    ),
-                  },
-                  { header: "Size", cell: (i) => bytes(i.sizeBytes) },
-                  {
-                    header: "Platforms",
-                    cell: (i) => (
-                      <span className="text-muted">
-                        {i.platforms.join(", ") || "—"}
-                      </span>
-                    ),
-                  },
-                  {
-                    header: "Created",
-                    cell: (i) => (
-                      <span className="text-muted">
-                        {i.created ? since(i.created) : "—"}
-                      </span>
-                    ),
-                  },
-                  {
-                    header: "Last pull",
-                    cell: (i) => (
-                      <span
-                        className="text-muted whitespace-nowrap"
-                        title={`${i.pulls} pulls`}
-                      >
-                        {i.lastPulledAt ? since(i.lastPulledAt) : "never"}
-                        {i.pulls > 0 && (
-                          <span className="text-faint"> · {i.pulls}×</span>
-                        )}
-                      </span>
-                    ),
-                  },
-                  {
-                    header: "In use by",
-                    className: "w-full",
-                    cell: (i) =>
-                      i.inUseBy.length === 0 ? (
-                        <span className="text-faint">—</span>
-                      ) : (
-                        <span className="flex flex-wrap gap-x-2">
-                          {i.inUseBy.map((u) => {
-                            const to: string = serviceUrl({
-                              project: u.project,
-                              environment: u.environment,
-                              name: u.service,
-                            });
-                            return (
-                              <Link
-                                key={to}
-                                to={to}
-                                className="hover:text-accent"
-                              >
-                                {u.project}/{u.environment}/{u.service}
-                              </Link>
-                            );
-                          })}
+          <ErrorBoundary resetKey={`${current}/${tab}`}>
+            {tab === "lifecycle" && current ? (
+              <LifecyclePanel key={current} repo={current} />
+            ) : tab === "activity" && current ? (
+              <ActivityPanel repo={current} />
+            ) : (
+              <Panel title={current || "Images"} flush>
+                <DataTable
+                  rows={images.data ?? []}
+                  rowKey={(i) => i.tag}
+                  empty={
+                    current &&
+                    !images.isLoading && (
+                      <EmptyState icon={Boxes} title="No tags" />
+                    )
+                  }
+                  columns={[
+                    {
+                      header: "Tag",
+                      cell: (i) => (
+                        <span className="flex items-center gap-1 font-mono">
+                          {i.tag}
+                          <CopyText text={`@registry/${current}:${i.tag}`} />
                         </span>
                       ),
-                  },
-                  {
-                    header: "",
-                    cell: (i) => (
-                      <IconButton
-                        label="Delete tag"
-                        onClick={async () =>
-                          (await confirmAction(
-                            `Delete ${current}:${i.tag}? Tags with the same digest are deleted too.`,
-                          )) && del.mutate(i.tag)
-                        }
-                      >
-                        <Trash2 className="size-3.5" />
-                      </IconButton>
-                    ),
-                  },
-                ]}
-              />
-            </Panel>
-          )}
+                    },
+                    {
+                      header: "Digest",
+                      cell: (i) => (
+                        <span className="text-muted font-mono" title={i.digest}>
+                          {i.digest.slice(7, 19)}
+                        </span>
+                      ),
+                    },
+                    { header: "Size", cell: (i) => bytes(i.sizeBytes) },
+                    {
+                      header: "Platforms",
+                      cell: (i) => (
+                        <span className="text-muted">
+                          {i.platforms.join(", ") || "—"}
+                        </span>
+                      ),
+                    },
+                    {
+                      header: "Created",
+                      cell: (i) => (
+                        <span className="text-muted">
+                          {i.created ? since(i.created) : "—"}
+                        </span>
+                      ),
+                    },
+                    {
+                      header: "Last pull",
+                      cell: (i) => (
+                        <span
+                          className="text-muted whitespace-nowrap"
+                          title={`${i.pulls} pulls`}
+                        >
+                          {i.lastPulledAt ? since(i.lastPulledAt) : "never"}
+                          {i.pulls > 0 && (
+                            <span className="text-faint"> · {i.pulls}×</span>
+                          )}
+                        </span>
+                      ),
+                    },
+                    {
+                      header: "In use by",
+                      className: "w-full",
+                      cell: (i) =>
+                        i.inUseBy.length === 0 ? (
+                          <span className="text-faint">—</span>
+                        ) : (
+                          <span className="flex flex-wrap gap-x-2">
+                            {i.inUseBy.map((u) => {
+                              const to: string = serviceUrl({
+                                project: u.project,
+                                environment: u.environment,
+                                name: u.service,
+                              });
+                              return (
+                                <Link
+                                  key={to}
+                                  to={to}
+                                  className="hover:text-accent"
+                                >
+                                  {u.project}/{u.environment}/{u.service}
+                                </Link>
+                              );
+                            })}
+                          </span>
+                        ),
+                    },
+                    {
+                      header: "",
+                      cell: (i) => (
+                        <IconButton
+                          label="Delete tag"
+                          onClick={async () =>
+                            (await confirmAction(
+                              `Delete ${current}:${i.tag}? Tags with the same digest are deleted too.`,
+                            )) && del.mutate(i.tag)
+                          }
+                        >
+                          <Trash2 className="size-3.5" />
+                        </IconButton>
+                      ),
+                    },
+                  ]}
+                />
+              </Panel>
+            )}
+          </ErrorBoundary>
         </div>
       </div>
     </div>

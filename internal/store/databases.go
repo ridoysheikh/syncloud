@@ -36,8 +36,8 @@ type DatabaseNetwork struct {
 	// Access lists the internal peers allowed in. Absent (nil) means the
 	// default: a project database's own environment; nothing for a
 	// standalone one.
-	Access []string       `json:"access"`
-	Public DatabasePublic `json:"public"`
+	Access NullList[string] `json:"access"`
+	Public DatabasePublic   `json:"public"`
 }
 
 // DatabasePublic is the endpoint Traefik serves from outside the cluster.

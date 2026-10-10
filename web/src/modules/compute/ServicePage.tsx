@@ -48,6 +48,7 @@ import {
   DeployLockBanner,
   useEnvironments,
 } from "@/modules/projects/ProjectSettings";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 
 interface Revision {
   revision: number;
@@ -307,73 +308,75 @@ export function ServicePage() {
         value={tab}
         onChange={setTab}
       />
-      {tab === "metrics" && (
-        <MetricsPanel
-          path={path}
-          by="task"
-          shorten={shortTask}
-          memoryLimit={(svc.spec.resources.memoryLimit ?? 0) * 1024 * 1024}
-        />
-      )}
-      {tab === "traffic" && (
-        <div className={cn("flex flex-col", gap)}>
-          <TrafficPanel path={`${path}/traffic`} scope="service" />
-          <RequestsTail filter={{ project, environment: env, service: name }} />
-        </div>
-      )}
-      {tab === "networking" && <NetworkingTab path={path} spec={svc.spec} />}
-      {tab === "autoscaling" && (
-        <AutoscalingPanel
-          path={path}
-          desired={svc.desiredCount}
-          running={svc.running}
-        />
-      )}
-      {tab === "security" && (
-        <ServiceSecurityPanel path={path} project={project} env={env} name={name} />
-      )}
-      {tab === "tasks" && <ServiceTasks id={svc.id} path={path} />}
-      {tab === "logs" && (
-        <LogsView
-          filter={{ project, environment: env, service: name }}
-          showSource={false}
-        />
-      )}
-      {tab === "deployments" && (
-        <DeploymentsTable
-          path={`${path}/deployments`}
-          project={project}
-          env={env}
-          service={name}
-          currentRevision={svc.revision}
-        />
-      )}
-      {tab === "deploy" && (
-        <DeployTab project={project} env={env} name={name} path={path} spec={svc.spec} />
-      )}
-      {tab === "builds" && <BuildsPanel path={path} />}
-      {tab === "variables" && (
-        <ServiceVariables
-          key={svc.revision}
-          path={path}
-          project={project}
-          env={env}
-          spec={svc.spec}
-        />
-      )}
-      {tab === "s3" && <ServiceS3Panel path={path} />}
-      {tab === "revisions" && (
-        <Revisions path={path} project={project} window={projects?.find((x) => x.name === project)?.rollbackWindow} />
-      )}
-      {tab === "placement" && (
-        <ServicePlacementPanel
-          path={path}
-          service={svc}
-          projectNodes={projects?.find((x) => x.name === project)?.nodes ?? []}
-          projectTo={`/projects/${project}/${env}`}
-        />
-      )}
-      {tab === "spec" && <SpecEditor path={path} spec={svc.spec} />}
+      <ErrorBoundary resetKey={tab}>
+        {tab === "metrics" && (
+          <MetricsPanel
+            path={path}
+            by="task"
+            shorten={shortTask}
+            memoryLimit={(svc.spec.resources.memoryLimit ?? 0) * 1024 * 1024}
+          />
+        )}
+        {tab === "traffic" && (
+          <div className={cn("flex flex-col", gap)}>
+            <TrafficPanel path={`${path}/traffic`} scope="service" />
+            <RequestsTail filter={{ project, environment: env, service: name }} />
+          </div>
+        )}
+        {tab === "networking" && <NetworkingTab path={path} spec={svc.spec} />}
+        {tab === "autoscaling" && (
+          <AutoscalingPanel
+            path={path}
+            desired={svc.desiredCount}
+            running={svc.running}
+          />
+        )}
+        {tab === "security" && (
+          <ServiceSecurityPanel path={path} project={project} env={env} name={name} />
+        )}
+        {tab === "tasks" && <ServiceTasks id={svc.id} path={path} />}
+        {tab === "logs" && (
+          <LogsView
+            filter={{ project, environment: env, service: name }}
+            showSource={false}
+          />
+        )}
+        {tab === "deployments" && (
+          <DeploymentsTable
+            path={`${path}/deployments`}
+            project={project}
+            env={env}
+            service={name}
+            currentRevision={svc.revision}
+          />
+        )}
+        {tab === "deploy" && (
+          <DeployTab project={project} env={env} name={name} path={path} spec={svc.spec} />
+        )}
+        {tab === "builds" && <BuildsPanel path={path} />}
+        {tab === "variables" && (
+          <ServiceVariables
+            key={svc.revision}
+            path={path}
+            project={project}
+            env={env}
+            spec={svc.spec}
+          />
+        )}
+        {tab === "s3" && <ServiceS3Panel path={path} />}
+        {tab === "revisions" && (
+          <Revisions path={path} project={project} window={projects?.find((x) => x.name === project)?.rollbackWindow} />
+        )}
+        {tab === "placement" && (
+          <ServicePlacementPanel
+            path={path}
+            service={svc}
+            projectNodes={projects?.find((x) => x.name === project)?.nodes ?? []}
+            projectTo={`/projects/${project}/${env}`}
+          />
+        )}
+        {tab === "spec" && <SpecEditor path={path} spec={svc.spec} />}
+      </ErrorBoundary>
     </div>
   );
 }

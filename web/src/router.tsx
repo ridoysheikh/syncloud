@@ -6,6 +6,7 @@ import { AppShell } from "@/shell/AppShell";
 import { SetupPage } from "@/pages/SetupPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { EmptyState } from "@/ui/EmptyState";
+import { ErrorView } from "@/ui/ErrorBoundary";
 
 const rootRoute = createRootRoute({
   component: Outlet,
@@ -57,7 +58,12 @@ const moduleRoutes = modules.flatMap((m) =>
 
 const routeTree = rootRoute.addChildren([setupRoute, loginRoute, appRoute.addChildren(moduleRoutes)]);
 
-export const router = createRouter({ routeTree, defaultPreload: "intent" });
+export const router = createRouter({
+  routeTree,
+  defaultPreload: "intent",
+  // A page that fails to render shows the error in place, inside the shell.
+  defaultErrorComponent: ({ error, reset }) => <ErrorView error={error} onRetry={reset} />,
+});
 
 declare module "@tanstack/react-router" {
   interface Register {

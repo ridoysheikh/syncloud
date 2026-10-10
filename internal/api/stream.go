@@ -65,7 +65,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeEvent(ctx context.Context, c *websocket.Conn, e events.Event) error {
-	b, err := json.Marshal(e)
+	b, err := marshalClient(e)
 	if err != nil {
 		return err
 	}

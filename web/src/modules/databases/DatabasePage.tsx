@@ -37,6 +37,7 @@ import { PgExplorer } from "./pg/Explorer";
 import { PgRoles } from "./pg/Roles";
 import { AccessEditor, allowList, PublicFields } from "./Network";
 import { confirmAction, confirmDialog } from "@/ui/dialogs";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 
 type Tab =
   | "overview"
@@ -165,38 +166,40 @@ export function DatabasePage() {
         value={tab}
         onChange={setTab}
       />
-      {tab === "overview" && <Overview d={d} path={path} />}
-      {tab === "connectivity" && <Connectivity d={d} path={path} />}
-      {tab === "metrics" && !pg && <Metrics path={path} />}
-      {tab === "databases" && pg && (
-        <PgDatabases
-          path={path}
-          onExplore={(db) => {
-            setPgDb(db);
-            setTab("explorer");
-          }}
-        />
-      )}
-      {tab === "roles" && pg && <PgRoles path={path} name={d.name} />}
-      {tab === "explorer" &&
-        (pg ? (
-          <PgExplorer path={path} db={pgDb} setDb={setPgDb} />
-        ) : (
-          <Explorer path={path} />
-        ))}
-      {tab === "console" &&
-        (pg ? (
-          <PgConsole path={path} db={pgDb} setDb={setPgDb} />
-        ) : (
-          <Console path={path} />
-        ))}
-      {tab === "sessions" && pg && <PgSessions path={path} />}
-      {tab === "backups" && pg && <PgBackupsTab d={d} path={path} />}
-      {tab === "replication" && pg && <PgReplicationTab path={path} />}
-      {tab === "configuration" && pg && <PgConfigTab d={d} path={path} />}
-      {tab === "autoscaling" && !pg && <Autoscaling d={d} path={path} />}
-      {tab === "logs" && <LogsView filter={{ database: d.name }} />}
-      {tab === "settings" && <Settings d={d} path={path} />}
+      <ErrorBoundary resetKey={tab}>
+        {tab === "overview" && <Overview d={d} path={path} />}
+        {tab === "connectivity" && <Connectivity d={d} path={path} />}
+        {tab === "metrics" && !pg && <Metrics path={path} />}
+        {tab === "databases" && pg && (
+          <PgDatabases
+            path={path}
+            onExplore={(db) => {
+              setPgDb(db);
+              setTab("explorer");
+            }}
+          />
+        )}
+        {tab === "roles" && pg && <PgRoles path={path} name={d.name} />}
+        {tab === "explorer" &&
+          (pg ? (
+            <PgExplorer path={path} db={pgDb} setDb={setPgDb} />
+          ) : (
+            <Explorer path={path} />
+          ))}
+        {tab === "console" &&
+          (pg ? (
+            <PgConsole path={path} db={pgDb} setDb={setPgDb} />
+          ) : (
+            <Console path={path} />
+          ))}
+        {tab === "sessions" && pg && <PgSessions path={path} />}
+        {tab === "backups" && pg && <PgBackupsTab d={d} path={path} />}
+        {tab === "replication" && pg && <PgReplicationTab path={path} />}
+        {tab === "configuration" && pg && <PgConfigTab d={d} path={path} />}
+        {tab === "autoscaling" && !pg && <Autoscaling d={d} path={path} />}
+        {tab === "logs" && <LogsView filter={{ database: d.name }} />}
+        {tab === "settings" && <Settings d={d} path={path} />}
+      </ErrorBoundary>
     </div>
   );
 }
