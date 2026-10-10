@@ -75,10 +75,13 @@ func (r *Runner) emit(s *agentv1.TaskStatus) {
 }
 
 // SpecHash identifies a spec's content; a changed hash means "recreate".
+// Credentials rotate and resource weights are updated in place: neither
+// changes the container.
 func SpecHash(spec *agentv1.TaskSpec) string {
-	if spec.GetRegistryAuth() != "" || spec.GetRegistryCa() != "" { // credentials rotate; the container does not change
+	if spec.GetRegistryAuth() != "" || spec.GetRegistryCa() != "" || spec.GetCpuShares() != 0 || spec.GetMemoryReservationBytes() != 0 {
 		spec = proto.Clone(spec).(*agentv1.TaskSpec)
 		spec.RegistryAuth, spec.RegistryCa = "", ""
+		spec.CpuShares, spec.MemoryReservationBytes = 0, 0
 	}
 	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(spec)
 	if err != nil {
@@ -113,6 +116,7 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 					return
 				}
 			}
+			r.syncResources(ctx, c.ID, spec)
 			r.startProbe(spec, c.ID, hash)
 			r.emit(r.inspect(ctx, c.ID, spec.TaskId))
 			return
@@ -324,6 +328,22 @@ func (r *Runner) Watch(ctx context.Context) {
 	}
 }
 
+// syncResources gives a kept container the CPU weight and memory
+// reservation of its spec, in place (they are not part of the spec hash).
+func (r *Runner) syncResources(ctx context.Context, id string, spec *agentv1.TaskSpec) {
+	want := docker.Resources{CPUShares: spec.GetCpuShares(), MemoryReservation: spec.GetMemoryReservationBytes()}
+	if want == (docker.Resources{}) {
+		return
+	}
+	c, err := r.docker.Inspect(ctx, id)
+	if err != nil || (c.HostConfig.CPUShares == want.CPUShares && c.HostConfig.MemoryReservation == want.MemoryReservation) {
+		return
+	}
+	if err := r.docker.Update(ctx, id, want); err != nil {
+		r.log.Warn("update container resources", "task", spec.TaskId, "err", err)
+	}
+}
+
 func createRequest(spec *agentv1.TaskSpec, hash string) docker.CreateRequest {
 	labels := map[string]string{
 		LabelManaged:  "true",
@@ -349,14 +369,16 @@ func createRequest(spec *agentv1.TaskSpec, hash string) docker.CreateRequest {
 		Env:        env,
 		Labels:     labels,
 		HostConfig: docker.HostConfig{
-			NetworkMode:   spec.NetworkMode,
-			RestartPolicy: docker.RestartPolicy{Name: restartName(spec.Restart)},
-			Memory:        spec.MemoryLimitBytes,
-			NanoCPUs:      spec.NanoCpus,
-			ExtraHosts:    spec.ExtraHosts,
-			DNS:           spec.DnsServers,
-			Privileged:    spec.Privileged,
-			DNSSearch:     spec.DnsSearch,
+			NetworkMode:       spec.NetworkMode,
+			RestartPolicy:     docker.RestartPolicy{Name: restartName(spec.Restart)},
+			Memory:            spec.MemoryLimitBytes,
+			NanoCPUs:          spec.NanoCpus,
+			CPUShares:         spec.CpuShares,
+			MemoryReservation: spec.MemoryReservationBytes,
+			ExtraHosts:        spec.ExtraHosts,
+			DNS:               spec.DnsServers,
+			Privileged:        spec.Privileged,
+			DNSSearch:         spec.DnsSearch,
 			// Bounded local logs until centralized logging ships (§9.2).
 			LogConfig: docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 		},

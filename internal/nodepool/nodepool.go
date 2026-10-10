@@ -263,20 +263,27 @@ func (m *Manager) Run(ctx context.Context) {
 	}
 }
 
-// load is a node's reservation against its allocatable capacity.
+// load is how full a node is against its allocatable capacity, as the
+// scheduler sees it: reserved CPU and memory, and what is really used.
 type load struct {
-	cpu, allocCPU float64
-	mem, allocMem int
+	cpu, allocCPU float64 // reserved cores
+	cpuUsed       float64 // cores in use
+	mem, allocMem int     // reserved MiB
+	memUsed       int     // MiB in use
+	memExpected   int     // MiB its tasks are expected to use
 	tasks         int
 }
+
+// committedMem is the memory no new task can have.
+func (l load) committedMem() int { return max(l.mem, l.memUsed) }
 
 func (l load) pct() float64 {
 	p := 0.0
 	if l.allocCPU > 0 {
-		p = l.cpu / l.allocCPU
+		p = math.Max(l.cpu, l.cpuUsed) / l.allocCPU
 	}
 	if l.allocMem > 0 {
-		p = math.Max(p, float64(l.mem)/float64(l.allocMem))
+		p = math.Max(p, float64(l.committedMem())/float64(l.allocMem))
 	}
 	return p * 100
 }
@@ -285,7 +292,12 @@ func (m *Manager) loads(ctx context.Context, members []nodes.View) map[string]*l
 	out := map[string]*load{}
 	for _, v := range members {
 		cpu, mem := workload.Allocatable(v.Info.CPUCores, v.Info.MemoryBytes)
-		out[v.ID] = &load{allocCPU: cpu, allocMem: mem}
+		l := &load{allocCPU: cpu, allocMem: mem}
+		if mt := v.Metrics; mt != nil {
+			l.cpuUsed = mt.CPUPercent / 100 * float64(v.Info.CPUCores)
+			l.memUsed = int(mt.MemoryUsedBytes >> 20)
+		}
+		out[v.ID] = l
 	}
 	tasks, err := m.st.ActiveTasks(ctx)
 	if err != nil {
@@ -297,8 +309,9 @@ func (m *Manager) loads(ctx context.Context, members []nodes.View) map[string]*l
 			continue
 		}
 		if s, err := m.wl.SpecFor(ctx, t.ServiceID, t.Revision); err == nil {
-			l.cpu += s.Resources.CPU
-			l.mem += s.Resources.Memory
+			l.cpu += s.Resources.ReservedCPU()
+			l.mem += s.Resources.ReservedMemory()
+			l.memExpected += s.Resources.Memory
 		}
 		l.tasks++
 	}
@@ -492,7 +505,9 @@ func (m *Manager) maybeScaleIn(ctx context.Context, p store.NodePool, spec Spec,
 		if now.Sub(since) < time.Duration(spec.ScaleInAfter)*time.Second {
 			continue
 		}
-		// Its reservations must fit in the free room of the others.
+		// Its tasks must fit in the free room of the others: its reserved
+		// CPU in their unreserved cores, the memory its tasks use (or
+		// expect) in their free memory.
 		var freeCPU float64
 		var freeMem int
 		for _, o := range members {
@@ -501,10 +516,10 @@ func (m *Manager) maybeScaleIn(ctx context.Context, p store.NodePool, spec Spec,
 			}
 			if ol := loads[o.ID]; ol != nil {
 				freeCPU += ol.allocCPU - ol.cpu
-				freeMem += ol.allocMem - ol.mem
+				freeMem += ol.allocMem - ol.committedMem()
 			}
 		}
-		if l.cpu > freeCPU || l.mem > freeMem {
+		if l.cpu > freeCPU || max(l.mem, l.memExpected) > freeMem {
 			continue
 		}
 		if victim == nil || pct < victimPct {

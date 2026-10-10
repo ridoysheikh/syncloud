@@ -122,8 +122,8 @@ type poolView struct {
 	Max      int                `json:"max"`
 	Nodes    []poolNode         `json:"nodes"`
 	Servers  []store.PoolServer `json:"servers"`
-	CPU      [2]float64         `json:"cpu"`    // reserved, allocatable (cores)
-	Memory   [2]int             `json:"memory"` // reserved, allocatable (MiB)
+	CPU      [2]float64         `json:"cpu"`    // committed (reserved or in use), allocatable (cores)
+	Memory   [2]int             `json:"memory"` // committed (reserved or in use), allocatable (MiB)
 }
 
 func (s *Server) poolViews(r *http.Request) ([]poolView, error) {
@@ -154,8 +154,8 @@ func (s *Server) poolViews(r *http.Request) ([]poolView, error) {
 			used[t.NodeID] = u
 		}
 		if spec, err := s.workloads.SpecFor(ctx, t.ServiceID, t.Revision); err == nil {
-			u.cpu += spec.Resources.CPU
-			u.mem += spec.Resources.Memory
+			u.cpu += spec.Resources.ReservedCPU()
+			u.mem += spec.Resources.ReservedMemory()
 		}
 		u.tasks++
 	}
@@ -181,19 +181,27 @@ func (s *Server) poolViews(r *http.Request) ([]poolView, error) {
 			}
 			ac, am := workload.Allocatable(n.Info.CPUCores, n.Info.MemoryBytes)
 			pn := poolNode{ID: n.ID, Name: n.Name, Status: n.Status, Protected: n.ScaleInProtected, Draining: n.Draining, PublicIP: addr[n.ID], Schedulable: n.Schedulable}
-			if u := used[n.ID]; u != nil {
-				pn.Tasks = u.tasks
-				pct := 0.0
-				if ac > 0 {
-					pct = u.cpu / ac
-				}
-				if am > 0 && float64(u.mem)/float64(am) > pct {
-					pct = float64(u.mem) / float64(am)
-				}
-				pn.Reserved = float64(int(pct*1000)) / 10
-				v.CPU[0] += u.cpu
-				v.Memory[0] += u.mem
+			u := used[n.ID]
+			if u == nil {
+				u = &use{}
 			}
+			// How full the scheduler sees it: reserved or really used, whichever is more.
+			cpu, mem := u.cpu, u.mem
+			if mt := n.Metrics; mt != nil {
+				cpu = max(cpu, mt.CPUPercent/100*float64(n.Info.CPUCores))
+				mem = max(mem, int(mt.MemoryUsedBytes>>20))
+			}
+			pn.Tasks = u.tasks
+			pct := 0.0
+			if ac > 0 {
+				pct = cpu / ac
+			}
+			if am > 0 && float64(mem)/float64(am) > pct {
+				pct = float64(mem) / float64(am)
+			}
+			pn.Reserved = float64(int(min(pct, 1)*1000)) / 10
+			v.CPU[0] += cpu
+			v.Memory[0] += mem
 			v.CPU[1] += ac
 			v.Memory[1] += am
 			v.Nodes = append(v.Nodes, pn)

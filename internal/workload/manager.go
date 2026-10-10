@@ -543,7 +543,8 @@ func (m *Manager) trackUnplaced(serviceID string, spec Spec, count int, status s
 	if !ok {
 		u.Since = now
 	}
-	u.ServiceID, u.Count, u.CPU, u.MemoryMiB, u.Pools = serviceID, count, spec.Resources.CPU, spec.Resources.Memory, spec.Placement.Pools
+	// Only reserved CPU can keep a task waiting; memory always can.
+	u.ServiceID, u.Count, u.CPU, u.MemoryMiB, u.Pools = serviceID, count, spec.Resources.ReservedCPU(), spec.Resources.Memory, spec.Placement.Pools
 	m.unplaced[serviceID] = u
 }
 
@@ -606,45 +607,57 @@ func (m *Manager) backoff(serviceID string, now time.Time) time.Duration {
 	return max(recent[len(recent)-1].Add(delay).Sub(now), 0)
 }
 
-// place builds candidates from live node state and current reservations.
-// place picks a node for a new task of serviceID's revision rev. Spreading
-// counts only tasks of that revision: old ones about to be retired by a
-// rollout would otherwise push every new task onto the other nodes.
+// place picks a node for a new task of serviceID's revision rev, from live
+// node state, reservations and real usage. Old revisions of the service do
+// not count against it: a rollout retires them, and waiting for room they
+// are about to free would stall the deploy. Spreading likewise counts only
+// tasks of that revision.
 func (m *Manager) place(ctx context.Context, spec Spec, serviceID string, rev int, platform bool) (string, string) {
 	all, err := m.st.ActiveTasks(ctx)
 	if err != nil {
 		return "", err.Error()
 	}
 	type usage struct {
-		cpu      float64
-		mem      int
+		cpu      float64 // reserved
+		mem      int     // reserved
+		expected int     // memory every task is expected to use
+		starting int     // memory of tasks not running yet
 		svc, all int
 	}
 	used := map[string]*usage{}
-	for _, t := range all {
-		u := used[t.NodeID]
+	at := func(nodeID string) *usage {
+		u := used[nodeID]
 		if u == nil {
 			u = &usage{}
-			used[t.NodeID] = u
+			used[nodeID] = u
 		}
-		if s, err := m.SpecFor(ctx, t.ServiceID, t.Revision); err == nil {
-			u.cpu += s.Resources.CPU
-			u.mem += s.Resources.Memory
-		}
+		return u
+	}
+	for _, t := range all {
+		u := at(t.NodeID)
 		u.all++
 		if t.ServiceID == serviceID && t.Revision == rev {
 			u.svc++
 		}
+		s, err := m.SpecFor(ctx, t.ServiceID, t.Revision)
+		if err != nil {
+			continue
+		}
+		u.expected += s.Resources.Memory
+		if t.State != store.TaskRunning {
+			u.starting += s.Resources.Memory
+		}
+		if t.ServiceID == serviceID && t.Revision != rev {
+			continue // being replaced
+		}
+		u.cpu += s.Resources.ReservedCPU()
+		u.mem += s.Resources.ReservedMemory()
 	}
-	if m.ExtraUsage != nil { // database members (Phase 12)
+	if m.ExtraUsage != nil { // database members (Phase 12): their memory is reserved, their CPU shared
 		for nodeID, x := range m.ExtraUsage(ctx) {
-			u := used[nodeID]
-			if u == nil {
-				u = &usage{}
-				used[nodeID] = u
-			}
-			u.cpu += x.CPU
+			u := at(nodeID)
 			u.mem += x.MemoryMiB
+			u.expected += x.MemoryMiB
 			u.all += x.Count
 		}
 	}
@@ -652,8 +665,16 @@ func (m *Manager) place(ctx context.Context, spec Spec, serviceID string, rev in
 	for _, n := range m.nodes.List() {
 		cpu, mem := Allocatable(n.Info.CPUCores, n.Info.MemoryBytes)
 		c := Candidate{ID: n.ID, Name: n.Name, CPU: cpu, MemoryMiB: mem, Eligible: true}
-		if u := used[n.ID]; u != nil {
-			c.UsedCPU, c.UsedMemory, c.ServiceRuns, c.TotalRuns = u.cpu, u.mem, u.svc, u.all
+		u := used[n.ID]
+		if u == nil {
+			u = &usage{}
+		}
+		c.ReservedCPU, c.ReservedMemory, c.ServiceRuns, c.TotalRuns = u.cpu, u.mem, u.svc, u.all
+		if mt := n.Metrics; mt != nil && mt.MemoryTotalBytes > 0 {
+			c.UsedMemory = int(mt.MemoryUsedBytes>>20) + u.starting
+			c.CPULoad = mt.CPUPercent / 100 * float64(n.Info.CPUCores)
+		} else {
+			c.UsedMemory = u.expected // no report yet: assume tasks use what they expect
 		}
 		switch {
 		case n.Status != store.NodeReady || !n.Connected:
@@ -860,6 +881,22 @@ func (m *Manager) RunSpec(sv store.Service, spec Spec, t store.Task) *agentv1.Ta
 	return ts
 }
 
+// reservedWeight is how much more CPU weight a reserved core has than a
+// shared one. Under contention reserved tasks keep their cores while the
+// shared tasks' cpu adds up to less than reservedWeight × the unreserved
+// cores.
+const reservedWeight = 8
+
+// CPUShares is the Docker CPU weight of a task: its cpu in units of 1024 per
+// core, reservedWeight times that when reserved, within Docker's 2–262144.
+func CPUShares(r Resources) int64 {
+	w := r.CPU * 1024
+	if r.CPUMode == ResourceReserved {
+		w *= reservedWeight
+	}
+	return min(max(int64(w), 2), 262144)
+}
+
 // TaskSpec is what the agent runs for a task.
 func TaskSpec(sv store.Service, spec Spec, t store.Task) *agentv1.TaskSpec {
 	env := map[string]string{}
@@ -893,6 +930,8 @@ func TaskSpec(sv store.Service, spec Spec, t store.Task) *agentv1.TaskSpec {
 	if spec.Resources.CPULimit > 0 {
 		ts.NanoCpus = int64(spec.Resources.CPULimit * 1e9)
 	}
+	ts.CpuShares = CPUShares(spec.Resources)
+	ts.MemoryReservationBytes = int64(spec.Resources.ReservedMemory()) << 20
 	if h := spec.Health; h != nil {
 		port, _ := spec.PortNumber(h.Port)
 		ts.Health = &agentv1.HealthCheck{

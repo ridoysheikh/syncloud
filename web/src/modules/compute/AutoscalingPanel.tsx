@@ -263,7 +263,7 @@ export function AutoscalingPanel({
                 label="Target"
                 hint={
                   {
-                    cpu: "% of reserved CPU",
+                    cpu: "% of the task's CPU",
                     memory: "% of reserved memory",
                     rps: "req/s per task",
                     latency: "ms",

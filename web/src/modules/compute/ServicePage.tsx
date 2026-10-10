@@ -40,6 +40,7 @@ import { ServiceSecurityPanel } from "@/modules/network/SecurityGroups";
 import { AutoscalingPanel } from "./AutoscalingPanel";
 import { Tabs } from "@/ui/Tabs";
 import { ServicePlacementPanel } from "@/modules/projects/NodeLimits";
+import { ServiceResourcesPanel } from "@/modules/projects/Resources";
 import { confirmAction } from "@/ui/dialogs";
 import { lineDiff, withContext } from "@/lib/linediff";
 import { DeploymentsTable, useDeploymentActions } from "./Deployments";
@@ -234,9 +235,9 @@ export function ServicePage() {
           }
         />
         <StatTile
-          label="Reserved per task"
-          value={`${svc.spec.resources.cpu ?? 0.1} CPU`}
-          hint={`${svc.spec.resources.memory ?? 128} MiB memory`}
+          label="Per task"
+          value={`${svc.spec.resources.cpu ?? 0.1} CPU ${svc.spec.resources.cpuMode === "reserved" ? "reserved" : "shared"}`}
+          hint={`${svc.spec.resources.memory ?? 128} MiB memory ${svc.spec.resources.memoryMode === "reserved" ? "reserved" : "shared"}`}
         />
         <StatTile
           label="Placement"
@@ -368,12 +369,15 @@ export function ServicePage() {
           <Revisions path={path} project={project} window={projects?.find((x) => x.name === project)?.rollbackWindow} />
         )}
         {tab === "placement" && (
-          <ServicePlacementPanel
-            path={path}
-            service={svc}
-            projectNodes={projects?.find((x) => x.name === project)?.nodes ?? []}
-            projectTo={`/projects/${project}/${env}`}
-          />
+          <div className={cn("flex flex-col", gap)}>
+            <ServiceResourcesPanel path={path} service={svc} />
+            <ServicePlacementPanel
+              path={path}
+              service={svc}
+              projectNodes={projects?.find((x) => x.name === project)?.nodes ?? []}
+              projectTo={`/projects/${project}/${env}`}
+            />
+          </div>
         )}
         {tab === "spec" && <SpecEditor path={path} spec={svc.spec} />}
       </ErrorBoundary>

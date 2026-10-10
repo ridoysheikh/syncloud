@@ -13,7 +13,7 @@ synctl services scale web=4 -p shop
 Autoscaling keeps one metric near a target by adding and removing tasks between a minimum and a maximum. Set it on the **Autoscaling** tab, or:
 
 ```sh
-synctl autoscale set web -p shop --min 2 --max 10 --cpu 60       # average CPU, % of the reservation
+synctl autoscale set web -p shop --min 2 --max 10 --cpu 60       # average CPU, % of the task's cpu
 synctl autoscale set api -p shop --min 1 --max 20 --rps 50       # requests per second per task
 synctl autoscale set api -p shop --min 2 --max 8 --latency 250   # p95 latency in ms
 synctl autoscale history web -p shop                              # what changed and why
@@ -32,13 +32,19 @@ To add **servers** automatically when tasks don't fit, see [node pool autoscalin
 
 ## Size
 
-A service reserves CPU and memory per task. The scheduler uses reservations to decide what fits where:
+Each task has CPU and memory (`resources.cpu` and `resources.memory`, defaults 0.1 CPU and 128 MiB). Each one is **shared** (the default) or **reserved**. Set this under the service's **Placement › Resources**, with `"cpuMode": "reserved"` / `"memoryMode": "reserved"` in the spec, or with `synctl services run … --reserve-cpu --reserve-memory`.
 
-- `resources.cpu` and `resources.memory` are the reservations (defaults 0.1 CPU, 128 MiB);
-- `resources.memoryLimit` is the hard limit (default twice the reservation). A task above it is killed and replaced;
+| | Shared (default) | Reserved |
+| --- | --- | --- |
+| **CPU** | What the task is expected to use. It never stops a task from being placed: a busy node is slower, not full. When a node is busy, tasks get CPU in proportion to their `cpu`. | Set aside on the node. A task goes only where that many cores are not reserved by others, and keeps them when the node is busy. |
+| **Memory** | What the task is expected to use. A task goes to a node with that much memory really free. Memory it doesn't use stays free for others. | Set aside on the node whether used or not, and kept for the task when memory runs low. |
+
+A node's free memory is its memory minus whichever is larger: what's reserved on it, or what it really uses. Database members reserve their memory; their CPU is shared. During a rollout, the old revision's reservations don't count against the new one, so a deploy never waits for room it is about to free.
+
+- `resources.memoryLimit` is the hard limit (default twice `memory`). A task above it is killed and replaced.
 - `resources.cpuLimit` is an optional CPU cap.
 
-A task's actual use is on the **Metrics** tab. Size reservations near normal use and limits near peak.
+A task's real use is on the **Metrics** tab. Shared suits most services. Reserve for latency-sensitive work that must keep its CPU or memory when a node is busy.
 
 ## Placement
 

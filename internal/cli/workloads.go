@@ -545,6 +545,7 @@ func (a *app) servicesCmd() *cobra.Command {
 	var ports, envs []string
 	var cpu float64
 	var mem int
+	var reserveCPU, reserveMem bool
 	run := &cobra.Command{
 		Use: "run NAME --image IMAGE", Short: "Create or update a service from flags", Args: cobra.ExactArgs(1),
 		Example: "  synctl services run web -p shop --image nginx:1.27 --port 80 --replicas 2",
@@ -572,6 +573,12 @@ func (a *app) servicesCmd() *cobra.Command {
 				spec.Env[k] = v
 			}
 			spec.Resources.CPU, spec.Resources.Memory = cpu, mem
+			if reserveCPU {
+				spec.Resources.CPUMode = "reserved"
+			}
+			if reserveMem {
+				spec.Resources.MemoryMode = "reserved"
+			}
 			if cmd.Flags().Changed("replicas") {
 				spec.DesiredCount = &replicas
 			}
@@ -586,8 +593,10 @@ func (a *app) servicesCmd() *cobra.Command {
 	run.Flags().IntVar(&replicas, "replicas", 1, "desired task count")
 	run.Flags().StringArrayVar(&ports, "port", nil, "container port; 8080 (http) or 5432/tcp (repeatable)")
 	run.Flags().StringArrayVar(&envs, "env-var", nil, "environment variable KEY=value (repeatable)")
-	run.Flags().Float64Var(&cpu, "cpu", 0, "CPU cores reserved (default 0.1)")
-	run.Flags().IntVar(&mem, "memory", 0, "memory reserved in MiB (default 128)")
+	run.Flags().Float64Var(&cpu, "cpu", 0, "CPU cores per task, shared unless --reserve-cpu (default 0.1)")
+	run.Flags().IntVar(&mem, "memory", 0, "memory per task in MiB, shared unless --reserve-memory (default 128)")
+	run.Flags().BoolVar(&reserveCPU, "reserve-cpu", false, "set the CPU aside on the node instead of sharing it")
+	run.Flags().BoolVar(&reserveMem, "reserve-memory", false, "set the memory aside on the node instead of sharing it")
 
 	var file string
 	apply := &cobra.Command{

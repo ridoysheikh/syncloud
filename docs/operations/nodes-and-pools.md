@@ -97,7 +97,7 @@ With **autoscaling** on, the controller checks each pool every 15 seconds.
 **Scale out** happens when either:
 
 - tasks that may run in the pool have waited unplaced for `pendingAfter` seconds (default 60), or
-- reservations pass `headroom`% (default 80).
+- the pool's nodes pass `headroom`% (default 80) full, counting reserved or really used CPU and memory, whichever is more.
 
 Scale-out adds at most `maxStep` servers at a time (default 2) and never goes above `max`. A server that has not joined within `joinTimeout` (default 600 s) is deleted.
 

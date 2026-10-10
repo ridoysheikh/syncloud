@@ -81,12 +81,44 @@ type Port struct {
 	Protocol  string `json:"protocol"` // http (default), tcp, udp
 }
 
-// Resources are reservations used for placement, plus optional hard limits.
+// Resources are what a task needs, how placement treats it, and optional
+// hard limits.
+//
+// CPU and memory are shared by default: they say what the task is expected
+// to use. Placement goes by what nodes really use, CPU never stops a task
+// from being placed (a busy node is slower, not full), and under contention
+// tasks get CPU in proportion to their cpu. Reserved (CPUMode or
+// MemoryMode "reserved") sets the amount aside: placement only uses a node
+// with that much unreserved, whatever the node's load.
 type Resources struct {
-	CPU         float64 `json:"cpu"`                   // cores reserved (default 0.1)
-	Memory      int     `json:"memory"`                // MiB reserved (default 128)
+	CPU         float64 `json:"cpu"`                   // cores expected, or reserved (default 0.1)
+	Memory      int     `json:"memory"`                // MiB expected, or reserved (default 128)
+	CPUMode     string  `json:"cpuMode,omitempty"`     // "" (shared) | "reserved"
+	MemoryMode  string  `json:"memoryMode,omitempty"`  // "" (shared) | "reserved"
 	CPULimit    float64 `json:"cpuLimit,omitempty"`    // cores, hard limit (0 = none)
 	MemoryLimit int     `json:"memoryLimit,omitempty"` // MiB, hard limit (default = 2 × memory)
+}
+
+// Resource modes.
+const (
+	ResourceShared   = "" // the default; "shared" is accepted for it
+	ResourceReserved = "reserved"
+)
+
+// ReservedCPU is the CPU the task sets aside (0 when shared).
+func (r Resources) ReservedCPU() float64 {
+	if r.CPUMode == ResourceReserved {
+		return r.CPU
+	}
+	return 0
+}
+
+// ReservedMemory is the memory the task sets aside (0 when shared).
+func (r Resources) ReservedMemory() int {
+	if r.MemoryMode == ResourceReserved {
+		return r.Memory
+	}
+	return 0
 }
 
 type Placement struct {
@@ -219,6 +251,15 @@ func (s *Spec) Normalize() error {
 	}
 	if r.Memory < 4 || r.Memory > 4<<20 || r.MemoryLimit < r.Memory {
 		return errors.New("memory must be 4 MiB–4 TiB, and memoryLimit at least memory")
+	}
+	for _, m := range []*string{&r.CPUMode, &r.MemoryMode} {
+		switch *m {
+		case "shared":
+			*m = ResourceShared
+		case ResourceShared, ResourceReserved:
+		default:
+			return fmt.Errorf("cpuMode and memoryMode must be shared or reserved, not %q", *m)
+		}
 	}
 	if d := s.Deployment.DrainSeconds; d != nil && (*d < 0 || *d > 300) {
 		return errors.New("deployment.drainSeconds must be between 0 and 300")

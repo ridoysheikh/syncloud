@@ -2,16 +2,28 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
-## [Unreleased]
+## [0.1.5] - 2026-10-10
 
 ### Changed
 
+- **CPU and memory are shared by default; reserving is a choice.** Before, every task's CPU and memory were set aside on its node, used or not. A node whose apps used 6% CPU could still count as full and refuse new tasks (`cannot place task: no node fits (1 not enough CPU)`), leaving services degraded and deploys stuck. Now each task's CPU and memory are either:
+  - **Shared** (the default): what the task is expected to use. CPU never stops a task from being placed; when a node is busy, tasks get CPU in proportion to their `cpu`. Memory goes to a node with that much really free.
+  - **Reserved**: set aside on the node as before, and kept for the task when the node is busy or memory runs low.
+
+  Choose under the service's **Placement › Resources**, in the spec (`"cpuMode": "reserved"`, `"memoryMode": "reserved"`), or with `synctl services run … --reserve-cpu --reserve-memory`. Database members reserve their memory and share their CPU.
+- A rollout no longer waits for room its old tasks are about to free.
+- Node pool autoscaling and the pool view count a node's CPU and memory as reserved or really used, whichever is more.
 - Tab rows stay on one row. When the tabs don't fit, arrows appear at the clipped end, a mouse wheel scrolls the row sideways, and the selected tab stays in view without the page jumping. Arrow keys move between tabs.
 
 ### Fixed
 
 - Some tabs crashed with "Cannot read properties of null (reading 'map')" when a list was empty (for example a group with no members). The API now always sends empty lists as `[]`.
 - A tab or page that fails to load now shows the error with **Try again** in its place. Before, the whole page went blank; now the tabs and the rest of the dashboard keep working, and switching tabs clears the error.
+
+### Upgrading
+
+- Existing services become **shared** with the CPU and memory they had. Services waiting with "not enough CPU" are placed once the controller is upgraded. To keep a service's old guarantee, set it to **Reserved** (this rolls out a new revision).
+- Running containers are not restarted. Service tasks get their CPU weights in place when their agent reconnects after the upgrade; database members get theirs the next time they're updated.
 
 ## [0.1.4] - 2026-10-10
 

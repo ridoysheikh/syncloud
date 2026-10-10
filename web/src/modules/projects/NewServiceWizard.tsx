@@ -38,6 +38,7 @@ import {
   type GitConnection,
 } from "@/modules/integrations/RepoPicker";
 import { Select } from "@/ui/select";
+import { ResourceFields, resourceError, resourceForm, resourceSpec, type ResourceForm } from "./Resources";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 const steps = ["Source", "Service", "Variables", "Review"] as const;
@@ -64,8 +65,7 @@ interface Form {
   port: string;
   exposure: "public" | "internal" | "none";
   tasks: string;
-  cpu: string;
-  memory: string;
+  resources: ResourceForm;
   healthPath: string;
   /** A pre-deploy command such as database migrations (optional). */
   release: string;
@@ -102,8 +102,7 @@ export function NewServiceWizard() {
     port: "8080",
     exposure: "public",
     tasks: "1",
-    cpu: "0.1",
-    memory: "128",
+    resources: resourceForm(),
     healthPath: "",
     release: "",
   });
@@ -149,8 +148,8 @@ export function NewServiceWizard() {
             ? "Port must be 1–65535"
             : !(Number(f.tasks) >= 0 && Number(f.tasks) <= 100)
               ? "Tasks must be 0–100"
-              : !(Number(f.cpu) >= 0.01) || !(Number(f.memory) >= 4)
-                ? "CPU must be at least 0.01 and memory at least 4 MiB"
+              : resourceError(f.resources)
+                ? resourceError(f.resources)!
                 : f.healthPath && !f.healthPath.startsWith("/")
                   ? "The health check path must start with /"
                   : "",
@@ -175,7 +174,7 @@ export function NewServiceWizard() {
             },
           ],
     env: toVars(vars),
-    resources: { cpu: Number(f.cpu), memory: Number(f.memory) },
+    resources: resourceSpec(f.resources),
     health:
       f.healthPath && f.exposure !== "none"
         ? { type: "http", path: f.healthPath }
@@ -696,27 +695,11 @@ function ServiceStep({
             onChange={(e) => set("tasks", e.target.value)}
           />
         </Field>
-        <Field label="CPU per task (cores reserved)">
-          <Input
-            type="number"
-            step={0.05}
-            min={0.01}
-            value={f.cpu}
-            onChange={(e) => set("cpu", e.target.value)}
-          />
-        </Field>
-        <Field
-          label="Memory per task (MiB reserved)"
-          hint="The hard limit is twice this."
-        >
-          <Input
-            type="number"
-            min={4}
-            value={f.memory}
-            onChange={(e) => set("memory", e.target.value)}
-          />
-        </Field>
       </div>
+      <ResourceFields
+        value={f.resources}
+        onChange={(r) => set("resources", r)}
+      />
     </div>
   );
 }
@@ -794,7 +777,8 @@ function Review({
           : `${f.exposure === "public" ? "HTTP with a public URL" : "internal TCP"} on port ${f.port}${f.healthPath ? `, health check ${f.healthPath}` : ""}`}
       </Row>
       <Row k="Tasks">
-        {f.tasks} × {f.cpu} CPU, {f.memory} MiB
+        {f.tasks} × {f.resources.cpu} CPU ({f.resources.cpuMode}),{" "}
+        {f.resources.memory} MiB ({f.resources.memoryMode})
       </Row>
       <Row k="Release command">
         {f.release.trim() ? (

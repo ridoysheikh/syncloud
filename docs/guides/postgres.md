@@ -50,7 +50,7 @@ The older shared address `orders.db.<base-domain>:5432` still works for TLS clie
 | --- | --- |
 | **Memory** | sets `shared_buffers` (25%), `effective_cache_size` (75%) and `max_connections` (about one per 8 MiB, 50–500) |
 | **Read replicas** | 0–5. They stream from the primary on other nodes and serve `readUrl`. |
-| **CPU** | reserved per member |
+| **CPU** | per member, shared: it weights the member under contention but never blocks placement |
 
 Members run on different nodes when there are enough. On a single-server cluster they share the node, which protects against a failed container but not a lost server; the database page says so. A database without replicas is a single server: if its node goes down, the database is down until the node returns. Its data stays on the node.
 

@@ -20,7 +20,7 @@ Services only exist inside a project environment. Create them with **New service
 | **Command / entrypoint** | Override the image's. |
 | **Ports** | Each has a name, a container port and a protocol: `http` (gets an HTTPS address), `tcp` or `udp`. No ports makes a worker. |
 | **Health check** | `http` (a path), `tcp` (the port accepts connections) or `cmd` (exit 0). Only healthy tasks get traffic, and unhealthy ones are replaced. |
-| **Resources** | CPU and memory **reserved** (used for placement), with optional hard limits. The memory limit defaults to twice the reservation. |
+| **Resources** | CPU and memory per task, each **shared** (the default: placement goes by real usage) or **reserved** (set aside on the node). Optional hard limits; the memory limit defaults to twice the memory. See [Size](scaling.md#size). |
 | **Desired count** | How many tasks. Scale with the **±** buttons, `synctl services scale`, or [autoscaling](scaling.md). |
 | **Placement** | Spread across nodes (default) or pack, and optionally only some nodes ([Scaling and placement](scaling.md)). |
 

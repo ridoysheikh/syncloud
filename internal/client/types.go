@@ -435,6 +435,8 @@ type ServiceSpec struct {
 	Resources struct {
 		CPU         float64 `json:"cpu,omitempty"`
 		Memory      int     `json:"memory,omitempty"`
+		CPUMode     string  `json:"cpuMode,omitempty"`    // "" (shared) | "reserved"
+		MemoryMode  string  `json:"memoryMode,omitempty"` // "" (shared) | "reserved"
 		CPULimit    float64 `json:"cpuLimit,omitempty"`
 		MemoryLimit int     `json:"memoryLimit,omitempty"`
 	} `json:"resources"`

@@ -7,11 +7,17 @@ import (
 
 // Candidate is a node as the scheduler sees it.
 type Candidate struct {
-	ID, Name    string
-	CPU         float64 // allocatable cores
-	MemoryMiB   int     // allocatable MiB
-	UsedCPU     float64 // reserved by active tasks
+	ID, Name  string
+	CPU       float64 // allocatable cores
+	MemoryMiB int     // allocatable MiB
+	// ReservedCPU and ReservedMemory are set aside by reserved tasks and
+	// database members.
+	ReservedCPU    float64
+	ReservedMemory int
+	// UsedMemory is what the node really uses (its last report), plus what
+	// tasks still starting are expected to use. CPULoad is the cores in use.
 	UsedMemory  int
+	CPULoad     float64
 	ServiceRuns int // active tasks of the service being placed
 	TotalRuns   int // active tasks of all services
 	Eligible    bool
@@ -25,8 +31,16 @@ func Allocatable(cores int, memoryBytes uint64) (float64, int) {
 	return max(cpu, 0), max(mem, 0)
 }
 
+// FreeMemory is the memory a new task can have: what is neither reserved
+// nor in use, whichever is more.
+func (c Candidate) FreeMemory() int { return c.MemoryMiB - max(c.ReservedMemory, c.UsedMemory) }
+
 // Place picks a node for one task (§5.3): filter, then score. It returns ""
 // and a reason when no node fits.
+//
+// Shared CPU never rules a node out: CPU is shared out by weight, so a busy
+// node is slower, not full. Reserved CPU needs that many unreserved cores.
+// Memory, shared or reserved, needs that much free on the node (FreeMemory).
 func Place(cands []Candidate, r Resources, strategy string) (string, string) {
 	var fit []Candidate
 	reasons := map[string]int{}
@@ -34,9 +48,9 @@ func Place(cands []Candidate, r Resources, strategy string) (string, string) {
 		switch {
 		case !c.Eligible:
 			reasons[c.Why]++
-		case c.CPU-c.UsedCPU < r.CPU:
-			reasons["not enough CPU"]++
-		case c.MemoryMiB-c.UsedMemory < r.Memory:
+		case r.CPUMode == ResourceReserved && c.CPU-c.ReservedCPU < r.CPU:
+			reasons["not enough unreserved CPU"]++
+		case c.FreeMemory() < r.Memory:
 			reasons["not enough memory"]++
 		default:
 			fit = append(fit, c)
@@ -48,16 +62,28 @@ func Place(cands []Candidate, r Resources, strategy string) (string, string) {
 		}
 		return "", fmt.Sprintf("no node fits (%s)", summarize(reasons))
 	}
+	load := func(c Candidate) float64 {
+		if c.CPU <= 0 {
+			return 1
+		}
+		return c.CPULoad / c.CPU
+	}
 	sort.SliceStable(fit, func(i, j int) bool {
 		a, b := fit[i], fit[j]
 		if strategy == "binpack" {
 			// Least free memory first, so nodes fill up one by one.
-			fa, fb := a.MemoryMiB-a.UsedMemory, b.MemoryMiB-b.UsedMemory
-			if fa != fb {
+			if fa, fb := a.FreeMemory(), b.FreeMemory(); fa != fb {
 				return fa < fb
 			}
-		} else if a.ServiceRuns != b.ServiceRuns {
-			return a.ServiceRuns < b.ServiceRuns // spread the service across nodes
+		} else {
+			if a.ServiceRuns != b.ServiceRuns {
+				return a.ServiceRuns < b.ServiceRuns // spread the service across nodes
+			}
+			// Then the node with the most CPU to spare, in 10% steps so
+			// noise in the load does not reshuffle similar nodes.
+			if la, lb := int(load(a)*10), int(load(b)*10); la != lb {
+				return la < lb
+			}
 		}
 		if a.TotalRuns != b.TotalRuns {
 			return a.TotalRuns < b.TotalRuns

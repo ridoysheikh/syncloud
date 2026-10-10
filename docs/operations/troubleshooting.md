@@ -31,7 +31,7 @@ synctl system tasks                  # Traefik, registry, VictoriaMetrics, … a
 | **A node stays "Not ready"** | The agent can't reach the controller on 7443/tcp. Check `journalctl -u syncloud-agent` on the node and the firewall between them. |
 | **Tasks of one node unreachable from others** | WireGuard (51820/udp) is blocked between the nodes. **Network → Topology** shows each link. |
 | **Service stuck "starting"** | The health check fails. Open a task on the **Tasks** tab for its error, and the **Logs** tab. A wrong port or path is the usual cause. |
-| **"No node can take it"** | No node has the CPU or memory reserved, or placement excludes them. The message names the reason. Lower the reservation, add a node, or widen placement. |
+| **"No node can take it"** | No node has enough free memory, or enough unreserved CPU for a reserved-CPU service, or placement excludes them. The message names the reason. Lower the memory, switch a reservation to shared, add a node, or widen placement. |
 | **Deploy refused with 423** | The environment is [locked](../guides/deployments.md#locking-an-environment). |
 | **Build waits** | No node has room for a build (0.25 CPU, 512 MB), or BuildKit isn't running (`synctl system tasks`). |
 | **Webhook doesn't trigger builds** | The Git host can't reach your dashboard URL. Builds still start on the next poll (every minute). |

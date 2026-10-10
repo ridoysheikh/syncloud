@@ -157,6 +157,13 @@ message TaskSpec {
   RestartPolicy restart = 10;
   int64 memory_limit_bytes = 11; // 0 = unlimited
   int64 nano_cpus = 12;          // 0 = unlimited; 1e9 = one CPU
+  // Weight of the container's CPU under contention (Docker CPU shares,
+  // 1024 = one core's worth; 0 = Docker's default). Applied to a running
+  // container in place: not part of the spec hash.
+  int64 cpu_shares = 23;
+  // Memory the kernel keeps for the container under memory pressure
+  // (Docker's soft limit; 0 = none). Applied in place like cpu_shares.
+  int64 memory_reservation_bytes = 24;
   repeated string extra_hosts = 13; // "name:ip" or "name:host-gateway"
   bool system = 14;             // platform component (§5.0): never evicted by users
   repeated string dns_servers = 15; // the node's discovery DNS (§8.1)

@@ -9,6 +9,12 @@ export interface Port {
   protocol?: "http" | "tcp" | "udp";
 }
 
+/**
+ * Shared: what a task is expected to use; placement goes by the nodes' real
+ * usage and CPU never blocks it. Reserved: set aside on the node.
+ */
+export type ResourceMode = "shared" | "reserved";
+
 export interface Spec {
   image: string;
   entrypoint?: string[];
@@ -18,8 +24,13 @@ export interface Spec {
   sharedEnv?: Record<string, string>;
   ports?: Port[];
   resources: {
+    /** Cores expected (shared) or set aside (reserved). */
     cpu?: number;
+    /** MiB expected (shared) or set aside (reserved). */
     memory?: number;
+    /** Absent means shared. */
+    cpuMode?: ResourceMode;
+    memoryMode?: ResourceMode;
     cpuLimit?: number;
     memoryLimit?: number;
   };

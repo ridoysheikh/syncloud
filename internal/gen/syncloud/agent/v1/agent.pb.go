@@ -1417,14 +1417,21 @@ type TaskSpec struct {
 	Restart          RestartPolicy          `protobuf:"varint,10,opt,name=restart,proto3,enum=syncloud.agent.v1.RestartPolicy" json:"restart,omitempty"`
 	MemoryLimitBytes int64                  `protobuf:"varint,11,opt,name=memory_limit_bytes,json=memoryLimitBytes,proto3" json:"memory_limit_bytes,omitempty"` // 0 = unlimited
 	NanoCpus         int64                  `protobuf:"varint,12,opt,name=nano_cpus,json=nanoCpus,proto3" json:"nano_cpus,omitempty"`                           // 0 = unlimited; 1e9 = one CPU
-	ExtraHosts       []string               `protobuf:"bytes,13,rep,name=extra_hosts,json=extraHosts,proto3" json:"extra_hosts,omitempty"`                      // "name:ip" or "name:host-gateway"
-	System           bool                   `protobuf:"varint,14,opt,name=system,proto3" json:"system,omitempty"`                                               // platform component (§5.0): never evicted by users
-	DnsServers       []string               `protobuf:"bytes,15,rep,name=dns_servers,json=dnsServers,proto3" json:"dns_servers,omitempty"`                      // the node's discovery DNS (§8.1)
-	DnsSearch        []string               `protobuf:"bytes,16,rep,name=dns_search,json=dnsSearch,proto3" json:"dns_search,omitempty"`                         // e.g. production.shop.syncloud.internal
-	Health           *HealthCheck           `protobuf:"bytes,17,opt,name=health,proto3" json:"health,omitempty"`                                                // probed by the agent (§5.6); unset = no check
-	Privileged       bool                   `protobuf:"varint,19,opt,name=privileged,proto3" json:"privileged,omitempty"`                                       // only for platform builds (BuildKit, §5.8); never user-settable
-	RegistryAuth     string                 `protobuf:"bytes,18,opt,name=registry_auth,json=registryAuth,proto3" json:"registry_auth,omitempty"`                // X-Registry-Auth for the pull (short-lived; not part of the spec hash)
-	Entrypoint       []string               `protobuf:"bytes,20,rep,name=entrypoint,proto3" json:"entrypoint,omitempty"`                                        // overrides the image ENTRYPOINT when set
+	// Weight of the container's CPU under contention (Docker CPU shares,
+	// 1024 = one core's worth; 0 = Docker's default). Applied to a running
+	// container in place: not part of the spec hash.
+	CpuShares int64 `protobuf:"varint,23,opt,name=cpu_shares,json=cpuShares,proto3" json:"cpu_shares,omitempty"`
+	// Memory the kernel keeps for the container under memory pressure
+	// (Docker's soft limit; 0 = none). Applied in place like cpu_shares.
+	MemoryReservationBytes int64        `protobuf:"varint,24,opt,name=memory_reservation_bytes,json=memoryReservationBytes,proto3" json:"memory_reservation_bytes,omitempty"`
+	ExtraHosts             []string     `protobuf:"bytes,13,rep,name=extra_hosts,json=extraHosts,proto3" json:"extra_hosts,omitempty"`       // "name:ip" or "name:host-gateway"
+	System                 bool         `protobuf:"varint,14,opt,name=system,proto3" json:"system,omitempty"`                                // platform component (§5.0): never evicted by users
+	DnsServers             []string     `protobuf:"bytes,15,rep,name=dns_servers,json=dnsServers,proto3" json:"dns_servers,omitempty"`       // the node's discovery DNS (§8.1)
+	DnsSearch              []string     `protobuf:"bytes,16,rep,name=dns_search,json=dnsSearch,proto3" json:"dns_search,omitempty"`          // e.g. production.shop.syncloud.internal
+	Health                 *HealthCheck `protobuf:"bytes,17,opt,name=health,proto3" json:"health,omitempty"`                                 // probed by the agent (§5.6); unset = no check
+	Privileged             bool         `protobuf:"varint,19,opt,name=privileged,proto3" json:"privileged,omitempty"`                        // only for platform builds (BuildKit, §5.8); never user-settable
+	RegistryAuth           string       `protobuf:"bytes,18,opt,name=registry_auth,json=registryAuth,proto3" json:"registry_auth,omitempty"` // X-Registry-Auth for the pull (short-lived; not part of the spec hash)
+	Entrypoint             []string     `protobuf:"bytes,20,rep,name=entrypoint,proto3" json:"entrypoint,omitempty"`                         // overrides the image ENTRYPOINT when set
 	// registry_ca is a certificate to trust for the image's registry, when the
 	// platform registry only has a self-signed one (§5.9; not part of the spec hash).
 	RegistryCa string `protobuf:"bytes,21,opt,name=registry_ca,json=registryCa,proto3" json:"registry_ca,omitempty"`
@@ -1546,6 +1553,20 @@ func (x *TaskSpec) GetMemoryLimitBytes() int64 {
 func (x *TaskSpec) GetNanoCpus() int64 {
 	if x != nil {
 		return x.NanoCpus
+	}
+	return 0
+}
+
+func (x *TaskSpec) GetCpuShares() int64 {
+	if x != nil {
+		return x.CpuShares
+	}
+	return 0
+}
+
+func (x *TaskSpec) GetMemoryReservationBytes() int64 {
+	if x != nil {
+		return x.MemoryReservationBytes
 	}
 	return 0
 }
@@ -3954,7 +3975,7 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xc5\a\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\x9e\b\n" +
 	"\bTaskSpec\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -3968,7 +3989,10 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\arestart\x18\n" +
 	" \x01(\x0e2 .syncloud.agent.v1.RestartPolicyR\arestart\x12,\n" +
 	"\x12memory_limit_bytes\x18\v \x01(\x03R\x10memoryLimitBytes\x12\x1b\n" +
-	"\tnano_cpus\x18\f \x01(\x03R\bnanoCpus\x12\x1f\n" +
+	"\tnano_cpus\x18\f \x01(\x03R\bnanoCpus\x12\x1d\n" +
+	"\n" +
+	"cpu_shares\x18\x17 \x01(\x03R\tcpuShares\x128\n" +
+	"\x18memory_reservation_bytes\x18\x18 \x01(\x03R\x16memoryReservationBytes\x12\x1f\n" +
 	"\vextra_hosts\x18\r \x03(\tR\n" +
 	"extraHosts\x12\x16\n" +
 	"\x06system\x18\x0e \x01(\bR\x06system\x12\x1f\n" +

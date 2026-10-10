@@ -159,6 +159,7 @@ func taskSpec(d store.Database, spec Spec, st State, sec Secrets, m store.Databa
 		env["PERSISTENCE"], env["POLICY"], env["MAXMEMORY"] = spec.Persistence, spec.EvictionPolicy, fmt.Sprint(st.LimitMiB)
 		ts.Command = []string{"sh", "-c", memberScript}
 		ts.MemoryLimitBytes = int64(containerLimit(st.LimitMiB)) << 20
+		memberWeights(ts, spec, st)
 	} else {
 		short = fmt.Sprintf("s%d", m.Ordinal)
 		var peers []string
@@ -183,8 +184,20 @@ func taskSpec(d store.Database, spec Spec, st State, sec Secrets, m store.Databa
 	return ts
 }
 
-// specHash identifies a member's container spec.
+// memberWeights gives a data member the CPU weight of its cpu (shared) and
+// keeps its memory under pressure, as placement reserves it (Manager.Usage).
+func memberWeights(ts *agentv1.TaskSpec, spec Spec, st State) {
+	ts.CpuShares = workload.CPUShares(workload.Resources{CPU: spec.CPU})
+	ts.MemoryReservationBytes = int64(memberReservation(spec, st)) << 20
+}
+
+// specHash identifies a member's container spec. Resource weights are
+// applied in place by the agent and leave it unchanged.
 func specHash(ts *agentv1.TaskSpec) string {
+	if ts.GetCpuShares() != 0 || ts.GetMemoryReservationBytes() != 0 {
+		ts = proto.Clone(ts).(*agentv1.TaskSpec)
+		ts.CpuShares, ts.MemoryReservationBytes = 0, 0
+	}
 	b, _ := proto.MarshalOptions{Deterministic: true}.Marshal(ts)
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:8])

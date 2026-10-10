@@ -191,6 +191,7 @@ func pgTaskSpec(image string, d store.Database, spec Spec, st State, sec Secrets
 	for k, v := range walg {
 		ts.Env[k] = v
 	}
+	memberWeights(ts, spec, st)
 	ts.Name = fmt.Sprintf("%s-%s-db-%s-%s", d.Project, d.Environment, d.Name, short)
 	if d.Standalone() {
 		ts.Name = fmt.Sprintf("db-%s-%s", d.Name, short)

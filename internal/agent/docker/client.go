@@ -196,11 +196,15 @@ type HostConfig struct {
 	RestartPolicy RestartPolicy            `json:"RestartPolicy"`
 	Memory        int64                    `json:"Memory,omitempty"`
 	NanoCPUs      int64                    `json:"NanoCpus,omitempty"`
-	ExtraHosts    []string                 `json:"ExtraHosts,omitempty"`
-	DNS           []string                 `json:"Dns,omitempty"`
-	Privileged    bool                     `json:"Privileged,omitempty"`
-	DNSSearch     []string                 `json:"DnsSearch,omitempty"`
-	LogConfig     LogConfig                `json:"LogConfig"`
+	CPUShares     int64                    `json:"CpuShares,omitempty"`
+	// MemoryReservation is the soft limit kept for the container under
+	// memory pressure.
+	MemoryReservation int64     `json:"MemoryReservation,omitempty"`
+	ExtraHosts        []string  `json:"ExtraHosts,omitempty"`
+	DNS               []string  `json:"Dns,omitempty"`
+	Privileged        bool      `json:"Privileged,omitempty"`
+	DNSSearch         []string  `json:"DnsSearch,omitempty"`
+	LogConfig         LogConfig `json:"LogConfig"`
 }
 
 type PortBinding struct {
@@ -295,6 +299,21 @@ type ContainerJSON struct {
 			IPAddress string `json:"IPAddress"`
 		} `json:"Networks"`
 	} `json:"NetworkSettings"`
+	HostConfig struct {
+		CPUShares         int64 `json:"CpuShares"`
+		MemoryReservation int64 `json:"MemoryReservation"`
+	} `json:"HostConfig"`
+}
+
+// Resources are the limits Docker changes on a running container.
+type Resources struct {
+	CPUShares         int64 `json:"CpuShares"`
+	MemoryReservation int64 `json:"MemoryReservation"`
+}
+
+// Update changes a running container's resources in place, without a restart.
+func (c *Client) Update(ctx context.Context, id string, r Resources) error {
+	return c.json(ctx, "POST", "/containers/"+id+"/update", nil, r, nil)
 }
 
 func (c *Client) Inspect(ctx context.Context, id string) (ContainerJSON, error) {
