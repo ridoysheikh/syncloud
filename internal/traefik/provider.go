@@ -240,6 +240,25 @@ type Provider struct {
 	// off, §5.8); GitServerURL is where Traefik reaches it.
 	GitHost      func() string
 	GitServerURL string
+	// ProbeToken, when set, gives every service route a twin for the
+	// uptime monitor's probes (requests carrying ProbeHeader with this
+	// value), so its checks never count as the service's traffic.
+	ProbeToken string
+}
+
+// The uptime monitor marks its probes with ProbeHeader. They reach the app
+// through a router and Traefik service named after the route plus
+// ProbeSuffix, whose metrics and access lines are left out of traffic
+// (port names and domain IDs never contain "_", so no route can collide).
+const (
+	ProbeHeader = "X-Syncloud-Probe"
+	ProbeSuffix = "_probe"
+)
+
+// IsProbe reports whether a Traefik router or service name ("svc-…_probe@http")
+// is an uptime probe twin.
+func IsProbe(name string) bool {
+	return strings.HasSuffix(strings.SplitN(name, "@", 2)[0], ProbeSuffix)
 }
 
 const (
@@ -312,6 +331,25 @@ func (p *Provider) Config() Dynamic {
 			lb.HealthCheck = &HealthCheck{Path: r.HealthPath, Interval: "2s", Timeout: "1s"}
 		}
 		d.HTTP.Services[r.Name] = Service{LoadBalancer: lb}
+		if p.ProbeToken != "" && r.RedirectTo == "" {
+			// The probe twin: the same chain and tasks, its own metrics. Its
+			// longer rule outranks the route's. A slower health check is
+			// enough: it only keeps probes off tasks that just died.
+			plb := lb
+			if lb.HealthCheck != nil {
+				hc := *lb.HealthCheck
+				hc.Interval = "10s"
+				plb.HealthCheck = &hc
+			}
+			name := r.Name + ProbeSuffix
+			d.HTTP.Services[name] = Service{LoadBalancer: plb}
+			pr := Router{Rule: "(" + rule + ") && Header(`" + ProbeHeader + "`, `" + p.ProbeToken + "`)",
+				EntryPoints: web, Middlewares: chain, Service: name}
+			if base != "" {
+				pr.EntryPoints, pr.TLS = websecure, &RouterTLS{}
+			}
+			d.HTTP.Routers[name] = pr
+		}
 		if base == "" {
 			d.HTTP.Routers[r.Name] = Router{Rule: rule, EntryPoints: web, Middlewares: chain, Service: r.Name}
 			continue

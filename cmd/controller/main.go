@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
@@ -482,16 +483,24 @@ func serve(args []string) error {
 		metricStore.Add(node.Name, hb.GetTasks())
 		metricStore.AddNode(node.Name, hb)
 	}})
+	// Labels for Traefik's request metrics (§5.7): services by ID, custom
+	// domains by route name.
+	serviceNames := func(ctx context.Context) map[string]metrics.ServiceName {
+		out := map[string]metrics.ServiceName{}
+		svcs, _ := st.ListServices(ctx)
+		for _, sv := range svcs {
+			out[sv.ID] = metrics.ServiceName{ID: sv.ID, Project: sv.Project, Environment: sv.Environment, Name: sv.Name}
+		}
+		doms, _ := st.ListDomains(ctx, "")
+		for _, d := range doms {
+			if n, ok := out[d.ServiceID]; ok {
+				out[workload.DomainRouteName(d.ID)] = n
+			}
+		}
+		return out
+	}
 	if cfg.SystemTasks {
 		// Traefik's request metrics, labelled with SynCloud's names (§5.7).
-		serviceNames := func(ctx context.Context) map[string][3]string {
-			out := map[string][3]string{}
-			svcs, _ := st.ListServices(ctx)
-			for _, sv := range svcs {
-				out[sv.ID] = [3]string{sv.Project, sv.Environment, sv.Name}
-			}
-			return out
-		}
 		go metricStore.ScrapeTraefik(ctx, "http://"+cfg.TraefikAdmin+"/metrics", LocalNodeName, serviceNames, 10*time.Second)
 	}
 	pools := nodepool.New(st, box, registry, workloads, bus, log)
@@ -535,8 +544,12 @@ func serve(args []string) error {
 	go quotas.Run(ctx)
 	autoscaler := autoscale.New(st, workloads, metricStore, bus, log)
 	go autoscaler.Run(ctx)
+	// Marks the uptime monitor's probes, which Traefik routes apart so they
+	// never count as traffic (a new one each start is fine).
+	probeToken := rand.Text()
 	healthMon := health.New(st, workloads, bus, log, health.Config{
 		BaseDomain: domains.Base, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS, VictoriaMetricsURL: cfg.VictoriaMetricsURL,
+		ProbeToken: probeToken,
 	})
 	go healthMon.Run(ctx)
 	if cfg.CentralProbes {
@@ -619,14 +632,7 @@ func serve(args []string) error {
 		httpsPort = ""
 	}
 	meshControllerURL := func() string { return "http://" + net.JoinHostPort(mesh.MeshAddr(1).String(), portOf(cfg.Listen)) }
-	edges := edge.New(st, gw, metricStore, func(ctx context.Context) map[string][3]string {
-		out := map[string][3]string{}
-		svcs, _ := st.ListServices(ctx)
-		for _, sv := range svcs {
-			out[sv.ID] = [3]string{sv.Project, sv.Environment, sv.Name}
-		}
-		return out
-	}, edge.Config{Image: system.ImageTraefik, TraefikToken: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: meshControllerURL,
+	edges := edge.New(st, gw, metricStore, serviceNames, edge.Config{Image: system.ImageTraefik, TraefikToken: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: meshControllerURL,
 		Edges: pools.EdgeNodes, Settings: traefikExtras.Settings, DatabaseEntrypoints: map[string]string{"valkey": ":6379", "postgres": ":5432"},
 		ServiceEntrypoints: serviceEntrypoints}, log)
 	gw.AddHooks(edges.Hooks())
@@ -663,6 +669,7 @@ func serve(args []string) error {
 		Settings:          traefikExtras.Settings,
 		GitHost:           gitServer.Host,
 		GitServerURL:      "http://" + system.GitServerAddr,
+		ProbeToken:        probeToken,
 		MeshControllerURL: meshControllerURL,
 		Custom:            traefikExtras.Custom,
 		TCPRoutes: func() []traefik.TCPRoute {

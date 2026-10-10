@@ -22,6 +22,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/auth"
 	"github.com/ridoysheikh/syncloud/internal/events"
 	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/traefik"
 	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
@@ -95,6 +96,9 @@ type Config struct {
 	HTTPAddr, HTTPSAddr string
 	// VictoriaMetricsURL stores check samples for 7d/30d uptime ("" disables).
 	VictoriaMetricsURL string
+	// ProbeToken marks probes so Traefik keeps them out of the services'
+	// traffic (traefik.Provider.ProbeToken).
+	ProbeToken string
 }
 
 type Monitor struct {
@@ -205,6 +209,9 @@ func (m *Monitor) probe(ctx context.Context, r workload.Route, base string) Chec
 	c := Check{At: m.now().UTC(), URL: u}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	req.Header.Set("User-Agent", "syncloud-uptime/1")
+	if m.cfg.ProbeToken != "" {
+		req.Header.Set(traefik.ProbeHeader, m.cfg.ProbeToken)
+	}
 	start := time.Now()
 	resp, err := m.http.Do(req)
 	c.LatencyMs = float64(time.Since(start).Microseconds()) / 1000

@@ -18,9 +18,19 @@ func TestLogsQLQuotesUserInput(t *testing.T) {
 		t.Fatalf("\n got %s\nwant %s", got, want)
 	}
 	f = Filter{Service: "web", Stream: StreamAccess, Status: "5", Client: "1.2.3.4"}
-	want = `_time:3600s service:="web" stream:="access" status:~"^5" client:="1.2.3.4"`
+	want = `_time:3600s service:="web" -project:="syncloud" stream:="access" status:~"^5" client:="1.2.3.4"`
 	if got := f.LogsQL(time.Hour); got != want {
 		t.Fatalf("\n got %s\nwant %s", got, want)
+	}
+	// Asking for the platform shows its requests (the dashboard's own).
+	f = Filter{Project: "syncloud", Stream: StreamAccess}
+	want = `_time:3600s project:="syncloud" stream:="access"`
+	if got := f.LogsQL(time.Hour); got != want {
+		t.Fatalf("\n got %s\nwant %s", got, want)
+	}
+	dash := Line{Project: "syncloud", Stream: StreamAccess}
+	if (Filter{Stream: StreamAccess}).match(dash) || !(Filter{Project: "syncloud", Stream: StreamAccess}).match(dash) {
+		t.Error("the platform's requests are left out of tails unless asked for")
 	}
 }
 
@@ -29,7 +39,7 @@ func TestAccessLine(t *testing.T) {
 	s.cache["service:svc_ab12"] = labels{project: "shop", environment: "production", service: "web"}
 	raw := `{"ClientHost":"203.0.113.9","DownstreamContentSize":512,"DownstreamStatus":502,"Duration":12500000,"RequestHost":"web.example.com",` +
 		`"RequestMethod":"GET","RequestPath":"/api?x=1","RouterName":"svc-svc_ab12-http@http","ServiceURL":"http://10.92.0.5:8080","StartUTC":"2026-10-06T10:00:00.5Z"}`
-	l, ok := s.accessLine("ctl-0", raw)
+	l, ok, _ := s.accessLine("ctl-0", raw)
 	if !ok {
 		t.Fatal("not parsed")
 	}
@@ -44,10 +54,19 @@ func TestAccessLine(t *testing.T) {
 	if !l.Time.Equal(time.Date(2026, 10, 6, 10, 0, 0, 5e8, time.UTC)) {
 		t.Errorf("time %v", l.Time)
 	}
-	if l, _ := s.accessLine("ctl-0", `{"RequestMethod":"GET","DownstreamStatus":404,"RouterName":"syncloud-dashboard@http"}`); l.Service != "dashboard" || l.Project != "syncloud" {
+	if l, _, _ := s.accessLine("ctl-0", `{"RequestMethod":"GET","DownstreamStatus":404,"RouterName":"syncloud-dashboard@http"}`); l.Service != "dashboard" || l.Project != "syncloud" {
 		t.Errorf("system router: %+v", l)
 	}
-	if _, ok := s.accessLine("ctl-0", `time="..." level=info msg="Configuration loaded"`); ok {
+	// A custom domain's requests belong to its service.
+	s.cache["domain:dom_xy34"] = labels{service: "svc_ab12"}
+	if d, _, _ := s.accessLine("ctl-0", `{"RequestMethod":"GET","DownstreamStatus":200,"RouterName":"dom-xy34@http"}`); d.Service != "web" || d.Fields["service_id"] != "svc_ab12" {
+		t.Errorf("custom domain router: %+v", d)
+	}
+	// The uptime monitor's probes are not traffic.
+	if _, ok, skip := s.accessLine("ctl-0", `{"RequestMethod":"GET","DownstreamStatus":200,"RouterName":"svc-svc_ab12-http_probe@http"}`); !ok || !skip {
+		t.Error("an uptime probe was kept as a request")
+	}
+	if _, ok, _ := s.accessLine("ctl-0", `time="..." level=info msg="Configuration loaded"`); ok {
 		t.Error("a Traefik log line was taken for a request")
 	}
 	// Request lines stay out of application logs unless asked for.

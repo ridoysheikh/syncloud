@@ -69,7 +69,9 @@ type Filter struct {
 	// Text is a plain substring search (never interpreted as a query).
 	Text string
 	// Stream "access" selects request lines and "firewall" drop lines; ""
-	// means application logs (both are left out).
+	// means application logs (both are left out). Request lines of the
+	// platform itself (the dashboard and its API, the registry) are left out
+	// unless Project is PlatformProject.
 	Stream string
 	// Status is a status class of request lines: "2", "3", "4" or "5".
 	Status string
@@ -83,7 +85,18 @@ type Filter struct {
 	Before time.Time
 }
 
+// PlatformProject is the project of SynCloud's own components' lines.
+const PlatformProject = "syncloud"
+
+// platformRequests reports whether f leaves out the platform's request lines.
+func (f Filter) platformRequests() bool {
+	return f.Stream == StreamAccess && f.Project == "" && !f.NoProject
+}
+
 func (f Filter) match(l Line) bool {
+	if f.platformRequests() && l.Project == PlatformProject {
+		return false
+	}
 	if f.Stream == "" && (l.Stream == StreamAccess || l.Stream == StreamFirewall) || f.Stream != "" && l.Stream != f.Stream {
 		return false
 	}
@@ -133,7 +146,10 @@ func (s *Store) OnLogs(node store.Node, b *agentv1.LogBatch) {
 	}
 	for _, l := range b.GetLines() {
 		if l.GetTaskId() == TraefikTaskID || l.GetTaskId() == EdgeTraefikTaskID {
-			if line, ok := s.accessLine(node.Name, l.GetLine()); ok {
+			if line, ok, skip := s.accessLine(node.Name, l.GetLine()); ok {
+				if skip {
+					continue
+				}
 				s.fanout(line)
 				select {
 				case s.queue <- line:
@@ -163,7 +179,7 @@ func (s *Store) OnLogs(node store.Node, b *agentv1.LogBatch) {
 
 func (s *Store) labelsFor(taskID string) labels {
 	if c, ok := strings.CutPrefix(taskID, "sys-"); ok { // platform components (§5.0)
-		return labels{project: "syncloud", environment: "system", service: c}
+		return labels{project: PlatformProject, environment: "system", service: c}
 	}
 	s.mu.Lock()
 	lb, ok := s.cache[taskID]
@@ -395,6 +411,9 @@ func (f Filter) LogsQL(since time.Duration) string {
 	}
 	if f.NoProject {
 		parts = append(parts, `project:=""`)
+	}
+	if f.platformRequests() {
+		parts = append(parts, "-project:="+quote(PlatformProject))
 	}
 	if f.Text != "" {
 		parts = append(parts, "i("+quote(f.Text)+")")

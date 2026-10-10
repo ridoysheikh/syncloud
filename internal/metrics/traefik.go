@@ -11,15 +11,24 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/ridoysheikh/syncloud/internal/traefik"
 )
 
-// ServiceNames maps a SynCloud service ID to its project, environment and
-// name, for labelling Traefik's metrics.
-type ServiceNames func(ctx context.Context) map[string][3]string
+// ServiceName is the service a Traefik service's metrics are labelled with.
+type ServiceName struct{ ID, Project, Environment, Name string }
+
+// ServiceNames maps service IDs ("svc_ab12") and custom domains' route names
+// ("dom-xy34") to their service, for labelling Traefik's metrics.
+type ServiceNames func(ctx context.Context) map[string]ServiceName
 
 // traefikService matches Traefik's service label: "svc-<id>-<port>@http" for
-// user services, "syncloud-<component>@http" for the platform.
-var traefikService = regexp.MustCompile(`service="(?:svc-(svc_[a-z0-9]+)-[^"@]*|syncloud-([a-z-]+))@[a-z]+"`)
+// a service's generated address, "dom-<id>@http" for a custom domain,
+// "syncloud-<component>@http" for the platform.
+var traefikService = regexp.MustCompile(`service="(?:svc-(svc_[a-z0-9]+)-[^"@]*|(dom-[a-z0-9]+)|syncloud-([a-z-]+))@[a-z]+"`)
+
+// probeLabel matches a series of an uptime probe twin (traefik.ProbeSuffix).
+var probeLabel = regexp.MustCompile(`(?:service|router)="[^"@]*` + traefik.ProbeSuffix + `@`)
 
 // ScrapeTraefik copies Traefik's request metrics (§5.7, §9.1) into
 // VictoriaMetrics every interval until ctx ends. Each series gets the
@@ -95,8 +104,9 @@ func (s *Store) scrapeOnce(ctx context.Context, metricsURL, edge string, names S
 }
 
 // Relabel keeps Traefik's service, router and entrypoint series and adds
-// SynCloud labels to service series.
-func Relabel(r io.Reader, names map[string][3]string) ([]byte, error) {
+// SynCloud labels to service series. The uptime monitor's probes are left
+// out: they are not the service's traffic.
+func Relabel(r io.Reader, names map[string]ServiceName) ([]byte, error) {
 	var out bytes.Buffer
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
@@ -106,17 +116,20 @@ func Relabel(r io.Reader, names map[string][3]string) ([]byte, error) {
 			!strings.HasPrefix(line, "traefik_entrypoint_") && !strings.HasPrefix(line, "traefik_open_connections") {
 			continue
 		}
+		if probeLabel.MatchString(line) {
+			continue
+		}
 		brace := strings.IndexByte(line, '{')
 		if m := traefikService.FindStringSubmatch(line); m != nil && brace > 0 {
 			var extra string
-			if id := m[1]; id != "" {
-				n, ok := names[id]
+			if key := m[1] + m[2]; key != "" {
+				n, ok := names[key]
 				if !ok {
-					continue // a deleted service
+					continue // a deleted service or domain
 				}
-				extra = fmt.Sprintf(`service_id=%q,project=%q,environment=%q,app=%q,`, id, n[0], n[1], n[2])
+				extra = fmt.Sprintf(`service_id=%q,project=%q,environment=%q,app=%q,`, n.ID, n.Project, n.Environment, n.Name)
 			} else {
-				extra = fmt.Sprintf(`project="syncloud",environment="system",app=%q,`, m[2])
+				extra = fmt.Sprintf(`project="syncloud",environment="system",app=%q,`, m[3])
 			}
 			line = line[:brace+1] + extra + line[brace+1:]
 		}

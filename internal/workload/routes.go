@@ -142,7 +142,7 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 			}
 			for _, d := range byService[sv.ID] {
 				if d.PortName == p.Name {
-					out = append(out, Route{Name: "dom-" + strings.TrimPrefix(d.ID, "dom_"), Host: d.Host, Servers: r.Servers, ServiceID: sv.ID,
+					out = append(out, Route{Name: DomainRouteName(d.ID), Host: d.Host, Servers: r.Servers, ServiceID: sv.ID,
 						HealthPath: r.HealthPath, Path: d.Path, StripPrefix: d.StripPrefix, RedirectTo: d.RedirectTo})
 				}
 			}
@@ -151,6 +151,10 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 	c.routes, c.base, c.dirty = out, base, false
 	return out
 }
+
+// DomainRouteName is the Traefik router and service name of a custom domain
+// ("dom_xy34" → "dom-xy34").
+func DomainRouteName(id string) string { return "dom-" + strings.TrimPrefix(id, "dom_") }
 
 func portByName(s Spec, name string, def int) int {
 	for _, p := range s.Ports {

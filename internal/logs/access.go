@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ridoysheikh/syncloud/internal/traefik"
 )
 
 // TraefikTaskID is the edge proxy's system task; its JSON access log becomes
@@ -21,8 +23,12 @@ const EdgeTraefikTaskID = "sys-edge-traefik"
 var accessFields = []string{"method", "host", "path", "status", "duration_ms", "bytes", "client", "upstream", "service_id"}
 
 // Traefik names a service's routers and load balancers
-// "svc-<service ID>-<port>" (see workload.Routes).
-var routerRE = regexp.MustCompile(`^svc-(svc_[a-z0-9]+)-`)
+// "svc-<service ID>-<port>", and a custom domain's "dom-<domain ID>" (see
+// workload.Routes).
+var (
+	routerRE    = regexp.MustCompile(`^svc-(svc_[a-z0-9]+)-`)
+	domRouterRE = regexp.MustCompile(`^dom-([a-z0-9]+)@`)
+)
 
 // traefikAccess is the part of Traefik's JSON access log we keep.
 type traefikAccess struct {
@@ -48,30 +54,37 @@ func ServiceIDOfRouter(name string) string {
 }
 
 // accessLine turns one Traefik access log line into a request line labelled
-// with the service it reached. Other Traefik output returns ok=false.
-func (s *Store) accessLine(node, raw string) (Line, bool) {
+// with the service it reached. Other Traefik output returns ok=false; an
+// uptime probe's line returns skip (it is not the service's traffic).
+func (s *Store) accessLine(node, raw string) (l Line, ok, skip bool) {
 	if !strings.HasPrefix(raw, "{") || !strings.Contains(raw, `"DownstreamStatus"`) {
-		return Line{}, false
+		return Line{}, false, false
 	}
 	var a traefikAccess
 	if err := json.Unmarshal([]byte(raw), &a); err != nil || a.RequestMethod == "" {
-		return Line{}, false
+		return Line{}, false, false
+	}
+	if traefik.IsProbe(a.RouterName) {
+		return Line{}, true, true
 	}
 	t, err := time.Parse(time.RFC3339Nano, a.StartUTC)
 	if err != nil {
 		t = time.Now()
 	}
-	l := Line{Time: t.UTC(), TaskID: TraefikTaskID, Node: node, Stream: StreamAccess}
+	l = Line{Time: t.UTC(), TaskID: TraefikTaskID, Node: node, Stream: StreamAccess}
 	id := ServiceIDOfRouter(a.RouterName)
+	if m := domRouterRE.FindStringSubmatch(a.RouterName); m != nil {
+		id = s.serviceOfDomain("dom_" + m[1])
+	}
 	switch {
 	case id != "":
 		lb := s.labelsForService(id)
 		l.Project, l.Environment, l.Service = lb.project, lb.environment, lb.service
 	case a.RouterName != "":
 		name := strings.TrimPrefix(strings.SplitN(a.RouterName, "@", 2)[0], "syncloud-")
-		l.Project, l.Environment, l.Service = "syncloud", "system", name
+		l.Project, l.Environment, l.Service = PlatformProject, "system", name
 	default:
-		l.Project, l.Environment, l.Service = "syncloud", "system", "unrouted"
+		l.Project, l.Environment, l.Service = PlatformProject, "system", "unrouted"
 	}
 	ms := float64(a.Duration) / 1e6
 	upstream := strings.TrimPrefix(strings.TrimPrefix(a.ServiceURL, "http://"), "https://")
@@ -91,7 +104,36 @@ func (s *Store) accessLine(node, raw string) (Line, bool) {
 	} else if a.DownstreamStatus >= 400 {
 		l.Level = "warn"
 	}
-	return l, true
+	return l, true, false
+}
+
+// serviceOfDomain looks up (and caches) the service a custom domain routes
+// to, or "".
+func (s *Store) serviceOfDomain(domainID string) string {
+	key := "domain:" + domainID
+	s.mu.Lock()
+	lb, ok := s.cache[key]
+	s.mu.Unlock()
+	if ok {
+		return lb.service
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	doms, err := s.st.ListDomains(ctx, "")
+	if err != nil {
+		return ""
+	}
+	id := ""
+	s.mu.Lock()
+	s.cache[key] = labels{} // a deleted domain is not looked up again
+	for _, d := range doms {
+		s.cache["domain:"+d.ID] = labels{service: d.ServiceID}
+		if d.ID == domainID {
+			id = d.ServiceID
+		}
+	}
+	s.mu.Unlock()
+	return id
 }
 
 // labelsForService looks up (and caches) a service's names by ID.
@@ -107,7 +149,7 @@ func (s *Store) labelsForService(id string) labels {
 	defer cancel()
 	sv, err := s.st.ServiceByID(ctx, id)
 	if err != nil {
-		return labels{project: "syncloud", environment: "system", service: "unknown"}
+		return labels{project: PlatformProject, environment: "system", service: "unknown"}
 	}
 	lb = labels{project: sv.Project, environment: sv.Environment, service: sv.Name}
 	s.mu.Lock()

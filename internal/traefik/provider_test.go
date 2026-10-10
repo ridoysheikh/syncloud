@@ -189,3 +189,42 @@ func TestServiceRoutesPathsRedirectsAndPublicPorts(t *testing.T) {
 		t.Error("the database route lost TLS")
 	}
 }
+
+// The uptime monitor's probes take a twin router and service, so Traefik
+// counts them apart from the service's traffic.
+func TestProbeTwins(t *testing.T) {
+	domain := ""
+	p := &Provider{ControllerURL: "http://127.0.0.1:7070", BaseDomain: func() string { return domain }, ProbeToken: "TOK",
+		ServiceRoutes: func() []ServiceRoute {
+			return []ServiceRoute{
+				{Name: "svc-svc_ab12-http", Host: "web.example.com", HealthPath: "/healthz", Servers: []string{"http://10.91.1.2:8080"}},
+				{Name: "dom-c", Host: "www.shop.example.com", RedirectTo: "shop.example.com", Servers: []string{"http://10.91.1.3:80"}},
+			}
+		},
+	}
+	d := p.Config()
+	pr, ok := d.HTTP.Routers["svc-svc_ab12-http_probe"]
+	if !ok || pr.Rule != "(Host(`web.example.com`)) && Header(`X-Syncloud-Probe`, `TOK`)" || pr.Service != "svc-svc_ab12-http_probe" ||
+		pr.EntryPoints[0] != "web" || pr.TLS != nil {
+		t.Fatalf("dev probe router: %+v", pr)
+	}
+	ps := d.HTTP.Services["svc-svc_ab12-http_probe"].LoadBalancer
+	if len(ps.Servers) != 1 || ps.HealthCheck == nil || ps.HealthCheck.Interval != "10s" || d.HTTP.Services["svc-svc_ab12-http"].LoadBalancer.HealthCheck.Interval != "2s" {
+		t.Errorf("probe service: %+v", ps)
+	}
+	if _, ok := d.HTTP.Routers["dom-c_probe"]; ok {
+		t.Error("a redirect got a probe twin")
+	}
+	domain = "example.com"
+	if pr := p.Config().HTTP.Routers["svc-svc_ab12-http_probe"]; pr.EntryPoints[0] != "websecure" || pr.TLS == nil {
+		t.Errorf("probe router with a base domain: %+v", pr)
+	}
+	if !IsProbe("svc-svc_ab12-http_probe@http") || IsProbe("svc-svc_ab12-http@http") || IsProbe("") {
+		t.Error("IsProbe")
+	}
+	// Without a token nothing changes.
+	p.ProbeToken = ""
+	if _, ok := p.Config().HTTP.Routers["svc-svc_ab12-http_probe"]; ok {
+		t.Error("a probe twin without a token")
+	}
+}

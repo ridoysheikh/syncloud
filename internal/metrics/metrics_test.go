@@ -94,16 +94,21 @@ traefik_service_requests_total{code="200",method="GET",protocol="http",service="
 traefik_service_requests_total{code="200",method="GET",protocol="http",service="svc-svc_gone-http@http"} 3
 traefik_service_requests_total{code="200",method="GET",protocol="http",service="syncloud-controller@http"} 2
 traefik_router_requests_total{code="404",method="GET",protocol="http",router="svc-svc_ab12-http@http",service="svc-svc_ab12-http@http"} 1
+traefik_service_requests_total{code="200",method="GET",protocol="http",service="dom-xy34@http"} 5
+traefik_service_requests_total{code="200",method="GET",protocol="http",service="svc-svc_ab12-http_probe@http"} 240
+traefik_router_requests_total{code="200",method="GET",protocol="http",router="svc-svc_ab12-http_probe@http",service="svc-svc_ab12-http_probe@http"} 240
 traefik_config_reloads_total 4
 go_goroutines 40
 `
-	out, err := Relabel(strings.NewReader(in), map[string][3]string{"svc_ab12": {"shop", "production", "web"}})
+	web := ServiceName{ID: "svc_ab12", Project: "shop", Environment: "production", Name: "web"}
+	out, err := Relabel(strings.NewReader(in), map[string]ServiceName{"svc_ab12": web, "dom-xy34": web})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := `traefik_service_requests_total{service_id="svc_ab12",project="shop",environment="production",app="web",code="200",method="GET",protocol="http",service="svc-svc_ab12-http@http"} 7
 traefik_service_requests_total{project="syncloud",environment="system",app="controller",code="200",method="GET",protocol="http",service="syncloud-controller@http"} 2
 traefik_router_requests_total{service_id="svc_ab12",project="shop",environment="production",app="web",code="404",method="GET",protocol="http",router="svc-svc_ab12-http@http",service="svc-svc_ab12-http@http"} 1
+traefik_service_requests_total{service_id="svc_ab12",project="shop",environment="production",app="web",code="200",method="GET",protocol="http",service="dom-xy34@http"} 5
 `
 	if string(out) != want {
 		t.Errorf("got\n%s\nwant\n%s", out, want)

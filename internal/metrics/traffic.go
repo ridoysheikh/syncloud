@@ -13,7 +13,9 @@ import (
 )
 
 // TrafficScope selects the routes to chart: one service, a project
-// environment, or everything (all fields empty).
+// environment, or every service (all fields empty). The platform's own
+// routes (the dashboard and its API, the registry) are never included: the
+// dashboard's polling is not traffic.
 type TrafficScope struct {
 	ServiceID   string
 	Project     string
@@ -27,7 +29,7 @@ func (sc TrafficScope) selector() string {
 	case sc.Project != "":
 		return fmt.Sprintf(`project=%q,environment=%q`, sc.Project, sc.Environment)
 	}
-	return `project!=""`
+	return `service_id!=""`
 }
 
 // Traffic charts requests per second by status class, latency percentiles
