@@ -2,6 +2,25 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.1.4] - 2026-10-10
+
+### Changed
+
+- **Every dialog looks and works the same.** Each dialog has a title bar, a body that scrolls on long content, and its buttons in a footer that stays in place. An **Esc** button in the top-right corner closes it, as the Esc key does.
+- **Themed dropdowns instead of the browser's own.** Every select in the dashboard now matches the rest of the UI and works from the keyboard (arrows, Enter, Esc, type to jump). Lists longer than ten get a search box. Fields that suggest values (IAM actions, branches, registry hosts, security group peers, database access) show a themed suggestion list that filters as you type.
+- Traffic charts, the Overview, the traffic map and the request list show your services' traffic only. The platform's own requests, most of them the dashboard polling its API, are left out. To see them, choose **syncloud (platform)** in the request log, or use the Metrics Explorer.
+
+### Fixed
+
+- **Request counts were wrong.** The uptime monitor checks each service through Traefik every 15 seconds, and those checks were counted as the service's requests. An idle service showed about 0.07 req/s, its latency was the checks' latency, and an app without a `/` page showed nearly 100% 4xx. The checks now take a separate route to the app, so they're no longer counted in charts, alerts, autoscaling or the request log.
+- **Requests through custom domains were missing** from the traffic charts, alerts and request-rate autoscaling. In the request log they were filed under the platform (`syncloud/system/dom-…`). They now count for the service the domain points to.
+- Hover cards and dropdowns opened from a dialog appeared behind it.
+
+### Upgrading
+
+- Metrics already stored keep the old counts, so charts are accurate from the time the upgraded controller starts.
+- Traefik's generated configuration (**Network › Traefik**) lists a `…_probe` router and service next to each service route. These carry the uptime checks; leave them alone.
+
 ## [0.1.3] - 2026-10-09
 
 ### Fixed
