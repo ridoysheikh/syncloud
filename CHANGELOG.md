@@ -2,6 +2,12 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.1.6]
+
+### Added
+
+- **Override a service's command in the dashboard.** The service's **Deploy** tab and the New Service wizard have a **Command** setting: the image's own (default), a shell line (`node worker.js`), or exact arguments with an optional entrypoint. One image can now run several services — a web server, a worker, a scheduler — each with its own command. Saving rolls out a new revision.
+
 ## [0.1.5] - 2026-10-10
 
 ### Changed

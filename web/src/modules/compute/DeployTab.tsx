@@ -16,8 +16,9 @@ import {
   Toggle,
 } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { CommandPanel } from "./CommandOverride";
 
-/* Service › Deploy (Phase 15b): release commands, build settings, rollout. */
+/* Service › Deploy (Phase 15b): command, release commands, build settings, rollout. */
 
 interface HookJob {
   name: string;
@@ -685,6 +686,11 @@ export function DeployTab({
 }) {
   return (
     <div className={cn("flex flex-col", gap)}>
+      <CommandPanel
+        key={JSON.stringify([spec.entrypoint, spec.command])}
+        path={path}
+        spec={spec}
+      />
       <ReleaseCommands project={project} env={env} service={name} />
       <BuildSettingsPanel path={path} />
       <RolloutPanel

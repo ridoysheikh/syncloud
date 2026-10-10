@@ -74,13 +74,15 @@ export function ResourceFields({
               : "Shares the node's cores; it never stops a task from being placed. When the node is busy, tasks get CPU in proportion to this value."
           }
         >
-          <Segmented
-            label="CPU mode"
-            size="sm"
-            value={f.cpuMode}
-            onChange={(v) => set("cpuMode", v)}
-            options={modes}
-          />
+          <div>
+            <Segmented
+              label="CPU mode"
+              size="sm"
+              value={f.cpuMode}
+              onChange={(v) => set("cpuMode", v)}
+              options={modes}
+            />
+          </div>
         </ChoiceField>
       </div>
       <div className="flex flex-col gap-1.5">
@@ -103,13 +105,15 @@ export function ResourceFields({
               : "Tasks go to a node with this much memory really free. Unused memory stays free for others."
           }
         >
-          <Segmented
-            label="Memory mode"
-            size="sm"
-            value={f.memoryMode}
-            onChange={(v) => set("memoryMode", v)}
-            options={modes}
-          />
+          <div>
+            <Segmented
+              label="Memory mode"
+              size="sm"
+              value={f.memoryMode}
+              onChange={(v) => set("memoryMode", v)}
+              options={modes}
+            />
+          </div>
         </ChoiceField>
       </div>
     </div>

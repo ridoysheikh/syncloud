@@ -38,6 +38,7 @@ import {
   type GitConnection,
 } from "@/modules/integrations/RepoPicker";
 import { Select } from "@/ui/select";
+import { CommandFields, commandError, commandForm, commandSpec, type CommandForm } from "@/modules/compute/CommandOverride";
 import { ResourceFields, resourceError, resourceForm, resourceSpec, type ResourceForm } from "./Resources";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
@@ -69,6 +70,8 @@ interface Form {
   healthPath: string;
   /** A pre-deploy command such as database migrations (optional). */
   release: string;
+  /** What the containers run (the image's own by default). */
+  run: CommandForm;
 }
 
 /** Full-page wizard: source → service settings → variables → review (§4). */
@@ -105,6 +108,7 @@ export function NewServiceWizard() {
     resources: resourceForm(),
     healthPath: "",
     release: "",
+    run: commandForm(),
   });
   const set = <K extends keyof Form>(k: K, v: Form[K]) =>
     setF((x) => ({ ...x, [k]: v }));
@@ -153,7 +157,7 @@ export function NewServiceWizard() {
                 : f.healthPath && !f.healthPath.startsWith("/")
                   ? "The health check path must start with /"
                   : "",
-    Variables: varsError(vars),
+    Variables: varsError(vars) || commandError(f.run) || "",
     Review: "",
   };
   const idx = steps.indexOf(step);
@@ -174,6 +178,7 @@ export function NewServiceWizard() {
             },
           ],
     env: toVars(vars),
+    ...commandSpec(f.run),
     resources: resourceSpec(f.resources),
     health:
       f.healthPath && f.exposure !== "none"
@@ -293,6 +298,7 @@ export function NewServiceWizard() {
                   overrides them.
                 </p>
                 <VarsEditor rows={vars} onChange={setVars} inherited={shared} />
+                <CommandFields value={f.run} onChange={(v) => set("run", v)} />
                 <Field
                   label="Release command (optional)"
                   hint="Runs in the new image with these variables before every deployment takes traffic, for example database migrations. If it fails, the deployment stops and the running version stays. The first tasks start only after it passes. Change it later on the service's Deploy tab."
@@ -779,6 +785,17 @@ function Review({
       <Row k="Tasks">
         {f.tasks} × {f.resources.cpu} CPU ({f.resources.cpuMode}),{" "}
         {f.resources.memory} MiB ({f.resources.memoryMode})
+      </Row>
+      <Row k="Command">
+        {f.run.mode === "image" ? (
+          <span className="text-faint">the image's own</span>
+        ) : (
+          <span className="font-mono break-all">
+            {f.run.mode === "shell"
+              ? f.run.line.trim()
+              : [...commandSpec(f.run).entrypoint ?? [], ...commandSpec(f.run).command ?? []].join(" ")}
+          </span>
+        )}
       </Row>
       <Row k="Release command">
         {f.release.trim() ? (
