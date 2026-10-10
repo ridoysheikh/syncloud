@@ -16,6 +16,7 @@ import {
 import { confirmDialog } from "@/ui/dialogs";
 import { cn, gap } from "@/ui/cn";
 import { DomainsPanel } from "./DomainsPanel";
+import { Select } from "@/ui/select";
 
 /* Service › Networking (Phase 15c): ports, addresses and custom domains. */
 
@@ -35,8 +36,6 @@ export interface PortRoute {
 const errText = (e: unknown, fallback: string) =>
   e instanceof ApiError ? e.message : fallback;
 
-const select =
-  "bg-bg border-line-strong h-8 rounded-input border px-2 text-sm outline-none";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 
@@ -170,21 +169,20 @@ function PortsPanel({ path, spec }: { path: string; spec: Spec }) {
             </label>
             <label className="flex flex-col gap-0.5">
               <span className="text-faint text-xs">Protocol</span>
-              <select
+              <Select
                 value={p.protocol}
-                onChange={(e) =>
+                onChange={(v) =>
                   edit(() =>
                     update(i, {
-                      protocol: e.target.value as Port["protocol"],
+                      protocol: v as Port["protocol"],
                     }),
                   )
                 }
-                className={select}
               >
                 <option value="http">HTTP</option>
                 <option value="tcp">TCP</option>
                 <option value="udp">UDP</option>
-              </select>
+              </Select>
             </label>
             <IconButton
               label="Remove port"
@@ -224,23 +222,22 @@ function PortsPanel({ path, spec }: { path: string; spec: Spec }) {
           <div className="flex flex-wrap items-end gap-1.5">
             <label className="flex flex-col gap-0.5">
               <span className="text-faint text-xs">Type</span>
-              <select
+              <Select
                 value={health.type}
-                onChange={(e) =>
+                onChange={(v) =>
                   edit(() =>
                     setHealth({
                       ...health,
-                      type: e.target.value as typeof health.type,
+                      type: v as typeof health.type,
                     }),
                   )
                 }
-                className={select}
               >
                 <option value="none">None</option>
                 <option value="http">HTTP request</option>
                 <option value="tcp">TCP connect</option>
                 <option value="cmd">Command</option>
-              </select>
+              </Select>
             </label>
             {health.type === "http" && (
               <label className="flex flex-col gap-0.5">
@@ -258,12 +255,11 @@ function PortsPanel({ path, spec }: { path: string; spec: Spec }) {
             {(health.type === "http" || health.type === "tcp") && (
               <label className="flex flex-col gap-0.5">
                 <span className="text-faint text-xs">Port</span>
-                <select
+                <Select
                   value={health.port}
-                  onChange={(e) =>
-                    edit(() => setHealth({ ...health, port: e.target.value }))
+                  onChange={(v) =>
+                    edit(() => setHealth({ ...health, port: v }))
                   }
-                  className={select}
                 >
                   <option value="">first port</option>
                   {ports.map((p) => (
@@ -271,7 +267,7 @@ function PortsPanel({ path, spec }: { path: string; spec: Spec }) {
                       {p.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
             )}
             {health.type === "cmd" && (

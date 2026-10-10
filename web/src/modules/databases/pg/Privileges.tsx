@@ -12,7 +12,8 @@ import {
 import { Alert, Button, Toggle } from "@/ui/controls";
 import { ChipSelect, Segmented } from "@/ui/choice";
 import { cn } from "@/ui/cn";
-import { errText, SqlBlock, inlineSelect } from "./shared";
+import { errText, SqlBlock } from "./shared";
+import { Select } from "@/ui/select";
 
 const PLATFORM = ["syncloud_admin", "replicator"];
 
@@ -165,17 +166,18 @@ export function PrivilegesEditor({
         </table>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          className={cn(inlineSelect, "max-w-56")}
+        <Select
           value={pick}
-          onChange={(e) => setPick(e.target.value)}
+          onChange={setPick}
           aria-label="Role to add"
+          size="sm"
+          className="max-w-56"
         >
           <option value="">Add a grantee…</option>
           {choices.map((r) => (
             <option key={r}>{r}</option>
           ))}
-        </select>
+        </Select>
         <Button
           disabled={!pick}
           onClick={() => {
@@ -204,11 +206,12 @@ export function PrivilegesEditor({
       <div className="border-line flex flex-col gap-2 border-t pt-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-muted">Check what a role can do here:</span>
-          <select
-            className={cn(inlineSelect, "max-w-56")}
+          <Select
             value={check}
-            onChange={(e) => setCheck(e.target.value)}
+            onChange={setCheck}
             aria-label="Role to check"
+            size="sm"
+            className="max-w-56"
           >
             <option value="">choose a role</option>
             {(roles.data ?? [])
@@ -216,7 +219,7 @@ export function PrivilegesEditor({
               .map((r) => (
                 <option key={r.name}>{r.name}</option>
               ))}
-          </select>
+          </Select>
         </div>
         {p.effective && (
           <p>
@@ -333,33 +336,35 @@ function SchemaBulk({
           }))}
         />
         <span>on all</span>
-        <select
-          className={cn(inlineSelect, "w-28")}
+        <Select
           value={what}
-          onChange={(e) => {
-            const w = e.target.value as keyof typeof bulkPrivs;
+          onChange={(v) => {
+            const w = v as keyof typeof bulkPrivs;
             setWhat(w);
             setSelected((bulkPrivs[w] ?? []).slice(0, 1));
           }}
           aria-label="Object type"
+          size="sm"
+          className="w-28"
         >
           <option value="tables">tables</option>
           <option value="sequences">sequences</option>
           <option value="functions">functions</option>
-        </select>
+        </Select>
         <span>{revoke ? "from" : "to"}</span>
-        <select
-          className={cn(inlineSelect, "max-w-48")}
+        <Select
           value={grantee}
-          onChange={(e) => setGrantee(e.target.value)}
+          onChange={setGrantee}
           aria-label="Grantee"
+          size="sm"
+          className="max-w-48"
         >
           <option value="">role…</option>
           <option>PUBLIC</option>
           {names.map((n) => (
             <option key={n}>{n}</option>
           ))}
-        </select>
+        </Select>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
         <Toggle
@@ -367,17 +372,18 @@ function SchemaBulk({
           onChange={setFuture}
           label="and on ones created later by"
         />
-        <select
-          className={cn(inlineSelect, "max-w-40")}
+        <Select
           value={forRole}
-          onChange={(e) => setForRole(e.target.value)}
+          onChange={setForRole}
           disabled={!future}
           aria-label="Creator role"
+          size="sm"
+          className="max-w-40"
         >
           {names.map((n) => (
             <option key={n}>{n}</option>
           ))}
-        </select>
+        </Select>
         <span className="text-faint">(default privileges)</span>
       </div>
       <div>

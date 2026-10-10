@@ -63,3 +63,34 @@ func TestNoBareChoiceInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestNoNativeSelects keeps the browser's unthemed <select>, <datalist> and
+// <dialog> out of the pages: they use Select, SearchSelect and Combobox
+// (web/src/ui/select.tsx) and the one Dialog (web/src/ui/Dialog.tsx).
+func TestNoNativeSelects(t *testing.T) {
+	native := regexp.MustCompile(`<(select|datalist|dialog)[\s>]|\slist=["{]`)
+	root := filepath.Join("..", "..", "web", "src")
+	allowed := map[string]bool{"Dialog.tsx": true}
+	err := filepath.WalkDir(root, func(p string, e fs.DirEntry, err error) error {
+		if err != nil || e.IsDir() || !strings.HasSuffix(p, ".tsx") || allowed[filepath.Base(p)] {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			code := strings.TrimSpace(line)
+			if strings.HasPrefix(code, "//") || strings.HasPrefix(code, "*") || strings.HasPrefix(code, "/*") {
+				continue
+			}
+			if native.MatchString(line) {
+				t.Errorf("%s:%d uses a native select, datalist or dialog; use Select, SearchSelect, Combobox or Dialog from @/ui: %s", p, i+1, code)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

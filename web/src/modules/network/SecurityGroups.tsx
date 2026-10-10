@@ -13,6 +13,7 @@ import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/contr
 import { ChipSelect, ChoiceField, Segmented } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
+import { Combobox, Select } from "@/ui/select";
 
 export interface SGRule {
   protocol: "tcp" | "udp" | "icmp" | "any";
@@ -36,7 +37,6 @@ export interface SecurityGroup {
   updatedAt: string;
 }
 
-const sel = "bg-bg border-line-strong focus:border-line-accent h-7 rounded-input border px-1.5 text-xs outline-none";
 
 export function useSecurityGroups() {
   return useQuery({
@@ -200,6 +200,7 @@ interface Verdict {
 export function ReachabilityPanel({ to: fixedTo }: { to?: string }) {
   const { data: services = [] } = useServices();
   const paths = useMemo(() => services.map((s) => `${s.project}/${s.environment}/${s.name}`).sort(), [services]);
+  const pathSuggestions = useMemo(() => [...paths, "platform"], [paths]);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState(fixedTo ?? "");
   const [protocol, setProtocol] = useState("tcp");
@@ -216,19 +217,19 @@ export function ReachabilityPanel({ to: fixedTo }: { to?: string }) {
     <Panel title="Reachability check">
       <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
         <Field label="From (a service, an IP address or platform)">
-          <Input list="sg-paths" value={from} onChange={(e) => setFrom(e.target.value)} placeholder="shop/production/web" className="w-64 font-mono" />
+          <Combobox suggestions={pathSuggestions} value={from} onChange={setFrom} placeholder="shop/production/web" className="w-64 font-mono" />
         </Field>
         {!fixedTo && (
           <Field label="To">
-            <Input list="sg-paths" value={to} onChange={(e) => setTo(e.target.value)} placeholder="shop/production/db" className="w-64 font-mono" />
+            <Combobox suggestions={pathSuggestions} value={to} onChange={setTo} placeholder="shop/production/db" className="w-64 font-mono" />
           </Field>
         )}
         <Field label="Protocol">
-          <select value={protocol} onChange={(e) => setProtocol(e.target.value)} className={cn(sel, "h-8")}>
+          <Select value={protocol} onChange={setProtocol}>
             <option value="tcp">TCP</option>
             <option value="udp">UDP</option>
             <option value="icmp">ICMP</option>
-          </select>
+          </Select>
         </Field>
         <Field label="Port">
           <Input value={port} onChange={(e) => setPort(e.target.value)} disabled={protocol === "icmp"} placeholder="5432" className="w-24 font-mono" />
@@ -236,12 +237,6 @@ export function ReachabilityPanel({ to: fixedTo }: { to?: string }) {
         <Button type="submit" variant="primary" disabled={!from || !to || check.isPending}>
           <RouteIcon className="size-3.5" /> Check
         </Button>
-        <datalist id="sg-paths">
-          {paths.map((p) => (
-            <option key={p} value={p} />
-          ))}
-          <option value="platform" />
-        </datalist>
       </form>
       {check.error && (
         <div className="mt-2">
@@ -299,10 +294,11 @@ function PeerPicker({ value, onChange, suggestions }: { value: string[]; onChang
           </button>
         </span>
       ))}
-      <input
-        list="sg-peers"
+      <Combobox
+        bare
+        suggestions={suggestions}
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={setDraft}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === ",") {
             e.preventDefault();
@@ -313,11 +309,6 @@ function PeerPicker({ value, onChange, suggestions }: { value: string[]; onChang
         placeholder={value.length ? "" : "add a peer…"}
         className="min-w-32 flex-1 bg-transparent px-1 font-mono text-xs outline-none"
       />
-      <datalist id="sg-peers">
-        {suggestions.map((s) => (
-          <option key={s} value={s} />
-        ))}
-      </datalist>
     </div>
   );
 }
@@ -332,12 +323,12 @@ function RulesEditor({ title, dir, rules, onChange, suggestions }: { title: stri
         )}
         {rules.map((r, i) => (
           <div key={i} className="grid grid-cols-1 items-start gap-1.5 md:grid-cols-[5.5rem_7rem_minmax(0,2fr)_minmax(0,1fr)_auto]">
-            <select value={r.protocol} onChange={(e) => set(i, { protocol: e.target.value as SGRule["protocol"], ports: "" })} className={sel}>
+            <Select value={r.protocol} onChange={(v) => set(i, { protocol: v as SGRule["protocol"], ports: "" })} size="sm">
               <option value="tcp">TCP</option>
               <option value="udp">UDP</option>
               <option value="icmp">ICMP</option>
               <option value="any">All</option>
-            </select>
+            </Select>
             <Input
               value={r.ports}
               disabled={r.protocol === "icmp" || r.protocol === "any"}
@@ -477,11 +468,11 @@ export function SecurityGroupPage() {
       <Panel title="Group">
         <div className="grid max-w-4xl grid-cols-1 gap-2 sm:grid-cols-3">
           <Field label="Project">
-            <select value={project} onChange={(e) => setProject(e.target.value)} disabled={!isNew} className={cn(sel, "h-8 w-full")}>
+            <Select value={project} onChange={setProject} disabled={!isNew} className="w-full">
               {projects.map((p) => (
                 <option key={p.name}>{p.name}</option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label="Name">
             <Input value={name} onChange={(e) => setName(e.target.value)} disabled={existing?.default} placeholder="db" className="font-mono" autoFocus={isNew} />
@@ -646,20 +637,20 @@ export function DropLogPanel() {
               { value: "host", label: "host", icon: Server },
             ]}
           />
-          <select value={node} onChange={(e) => setNode(e.target.value)} className={sel}>
+          <Select value={node} onChange={setNode} size="sm">
             <option value="">every node</option>
             {(nodes.data ?? []).map((n) => (
               <option key={n.id} value={n.name}>
                 {n.name}
               </option>
             ))}
-          </select>
-          <select value={since} onChange={(e) => setSince(e.target.value)} className={sel}>
+          </Select>
+          <Select value={since} onChange={setSince} size="sm">
             <option value="15m">15 min</option>
             <option value="1h">1 hour</option>
             <option value="24h">24 hours</option>
             <option value="168h">7 days</option>
-          </select>
+          </Select>
         </>
       }
     >

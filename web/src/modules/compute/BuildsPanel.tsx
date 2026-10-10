@@ -25,6 +25,7 @@ import {
   useGitConnections,
 } from "@/modules/integrations/RepoPicker";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 export type Builder = "auto" | "dockerfile" | "nixpacks" | "static";
 
@@ -91,7 +92,6 @@ export const builderLabel: Record<Builder, string> = {
 
 const isPattern = (s: string) => /[*?[]/.test(s);
 const shortRef = (r: string) => r.replace(/^refs\/(heads|tags)\//, "");
-const sel = "bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs";
 
 const errText = (e: unknown, fallback: string) =>
   e instanceof ApiError ? e.message : fallback;
@@ -231,17 +231,18 @@ function ConnectForm({ path, initial }: { path: string; initial?: GitSource }) {
         <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
           <div className="md:col-span-2">
             <Field label="Builder">
-              <select
+              <Select
                 value={builder}
-                onChange={(e) => setBuilder(e.target.value as Builder)}
-                className={cn(sel, "w-full")}
+                onChange={(v) => setBuilder(v as Builder)}
+                size="sm"
+                className="w-full"
               >
                 {(Object.keys(builderLabel) as Builder[]).map((b) => (
                   <option key={b} value={b}>
                     {builderLabel[b]}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
           </div>
           {(builder === "auto" || builder === "dockerfile") && (
@@ -338,16 +339,17 @@ function SourcePanel({ path, src }: { path: string; src: GitSource }) {
       actions={
         <>
           {pattern && refs.length > 0 && (
-            <select
+            <Select
               value={ref || refs[0]}
-              onChange={(e) => setRef(e.target.value)}
-              className={cn(sel, "font-mono")}
+              onChange={setRef}
               aria-label="Branch or tag to build"
+              mono
+              size="sm"
             >
               {refs.map((r) => (
                 <option key={r}>{r}</option>
               ))}
-            </select>
+            </Select>
           )}
           <Button
             variant="primary"

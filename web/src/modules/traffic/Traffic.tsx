@@ -19,6 +19,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { RangePicker, refetchFor, type Range } from "@/ui/RangePicker";
+import { Select } from "@/ui/select";
 
 interface Series {
   key: string;
@@ -484,7 +485,6 @@ export function RequestsTail({
     const el = box.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [lines]);
-  const sel = "bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs";
   const showService = !filter.service;
 
   return (
@@ -498,18 +498,18 @@ export function RequestsTail({
       }
       actions={
         <>
-          <select
+          <Select
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            className={sel}
+            onChange={setStatus}
             aria-label="Status"
+            size="sm"
           >
             <option value="">all statuses</option>
             <option value="2xx">2xx</option>
             <option value="3xx">3xx</option>
             <option value="4xx">4xx</option>
             <option value="5xx">5xx</option>
-          </select>
+          </Select>
           <form
             onSubmit={(e) => {
               e.preventDefault();

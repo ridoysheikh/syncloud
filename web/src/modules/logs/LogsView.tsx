@@ -6,6 +6,7 @@ import { Panel } from "@/ui/Panel";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Input } from "@/ui/controls";
 import { cn } from "@/ui/cn";
+import { Select } from "@/ui/select";
 
 export interface LogLine {
   time: string;
@@ -159,13 +160,13 @@ export function LogsView({ filter, showSource = true }: { filter: LogFilter; sho
           >
             <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search text…" className="h-7 w-40 sm:w-56" />
           </form>
-          <select value={since} onChange={(e) => setSince(e.target.value)} className="bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs">
+          <Select value={since} onChange={setSince} size="sm">
             {["5m", "15m", "1h", "6h", "24h", "168h"].map((s) => (
               <option key={s} value={s}>
                 last {s === "168h" ? "7d" : s}
               </option>
             ))}
-          </select>
+          </Select>
           <Button variant={live ? "primary" : "default"} onClick={() => setLive(!live)} title="Live tail">
             {live ? <Pause className="size-3.5" /> : <Play className="size-3.5" />} {live ? "Live" : "Paused"}
           </Button>

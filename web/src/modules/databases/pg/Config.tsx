@@ -33,7 +33,8 @@ import {
 import { cn, gap } from "@/ui/cn";
 import { ChoiceCards, ChoiceField, Segmented } from "@/ui/choice";
 import { CountSelect, SizeSelect } from "../NewDatabaseWizard";
-import { errText, inlineSelect } from "./shared";
+import { errText } from "./shared";
+import { Select } from "@/ui/select";
 
 /** The PostgreSQL engine's add-ons and parameter catalog. */
 export function usePgCatalog() {
@@ -344,17 +345,18 @@ function ParamInput({
     p.type === "bool" ? ["on", "off"] : p.type === "enum" ? p.enum : null;
   if (options)
     return (
-      <select
-        className={cn(inlineSelect, "w-full")}
+      <Select
         aria-label={p.name}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(v) => onChange(v)}
+        size="sm"
+        className="w-full"
       >
         <option value="">default ({placeholder})</option>
         {options.map((o) => (
           <option key={o}>{o}</option>
         ))}
-      </select>
+      </Select>
     );
   const hint =
     p.type === "memory"

@@ -12,6 +12,7 @@ import { Alert, Button, Field, IconButton, Input, Toggle } from "@/ui/controls";
 import { ChipSelect, ChoiceCards } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 type PresetType =
   | "ip-allowlist"
@@ -33,7 +34,6 @@ interface MiddlewareView {
   services: string[];
 }
 
-const sel = "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
 
 function useMiddlewares() {
   return useQuery({
@@ -362,13 +362,13 @@ function PresetFields({ type, config, set }: { type: PresetType; config: Record<
           <Toggle checked={!!config.frameDeny} onChange={(v) => patch({ frameDeny: v })} label="Deny framing" hint="X-Frame-Options: DENY" />
           <Toggle checked={!!config.noSniff} onChange={(v) => patch({ noSniff: v })} label="No MIME sniffing" hint="X-Content-Type-Options: nosniff" />
           <Field label="Referrer policy">
-            <select value={config.referrerPolicy ?? ""} onChange={(e) => patch({ referrerPolicy: e.target.value })} className={sel}>
+            <Select value={config.referrerPolicy ?? ""} onChange={(v) => patch({ referrerPolicy: v })} className="w-full">
               {["", "no-referrer", "no-referrer-when-downgrade", "origin", "origin-when-cross-origin", "same-origin", "strict-origin", "strict-origin-when-cross-origin", "unsafe-url"].map((p) => (
                 <option key={p} value={p}>
                   {p || "not set"}
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
         </div>
       );
@@ -483,11 +483,11 @@ export function MiddlewarePage() {
         <div className="flex max-w-3xl flex-col gap-2">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <Field label="Project">
-              <select value={project} onChange={(e) => setProject(e.target.value)} disabled={!isNew} className={sel}>
+              <Select value={project} onChange={setProject} disabled={!isNew} className="w-full">
                 {projects.map((p) => (
                   <option key={p.name}>{p.name}</option>
                 ))}
-              </select>
+              </Select>
             </Field>
             <Field label="Name">
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="api-limit" className="font-mono" autoFocus={isNew} />

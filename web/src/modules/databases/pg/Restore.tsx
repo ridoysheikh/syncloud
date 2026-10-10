@@ -10,8 +10,8 @@ import { Panel } from "@/ui/Panel";
 import { Alert, Button, Field, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { ChoiceCards } from "@/ui/choice";
-import { selectClass } from "../NewDatabaseWizard";
 import { errText } from "./shared";
+import { Select } from "@/ui/select";
 
 const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleString() : "—");
 
@@ -195,10 +195,10 @@ export function PgRestorePage() {
               </Alert>
             )}
             <Field label="Start from base backup">
-              <select
-                className={cn(selectClass, "max-w-md")}
+              <Select
                 value={backup}
-                onChange={(e) => setBackup(e.target.value)}
+                onChange={setBackup}
+                className="w-full max-w-md"
               >
                 <option value="">The newest one before the moment</option>
                 {(s?.backups ?? []).map((b) => (
@@ -206,7 +206,7 @@ export function PgRestorePage() {
                     {b.name} — finished {fmt(b.finishTime)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
             {startFrom && (
               <p className="text-faint">
@@ -232,12 +232,12 @@ export function PgRestorePage() {
               />
             </Field>
             <Field label="Where">
-              <select
-                className={selectClass}
+              <Select
                 value={placement}
-                onChange={(e) =>
-                  setPlacement(e.target.value as typeof placement)
+                onChange={(v) =>
+                  setPlacement(v as typeof placement)
                 }
+                className="w-full"
               >
                 {src && !src.standalone && (
                   <option value="same">
@@ -245,23 +245,23 @@ export function PgRestorePage() {
                   </option>
                 )}
                 <option value="standalone">Standalone</option>
-              </select>
+              </Select>
             </Field>
             <Field
               label="Read replicas"
               hint="Size and settings are copied from the source."
             >
-              <select
-                className={selectClass}
+              <Select
                 value={replicas}
-                onChange={(e) => setReplicas(Number(e.target.value))}
+                onChange={(v) => setReplicas(Number(v))}
+                className="w-full"
               >
                 {[0, 1, 2, 3].map((n) => (
                   <option key={n} value={n}>
                     {n}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
           </div>
           <p className="text-faint mt-2 text-xs">

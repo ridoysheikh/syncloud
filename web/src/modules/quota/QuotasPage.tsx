@@ -12,6 +12,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Meter } from "@/ui/Meter";
 import { Alert, Button, Field, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { Select } from "@/ui/select";
 
 interface Limits {
   cpu?: number;
@@ -151,12 +152,12 @@ function UsagePanel() {
         title="Usage"
         actions={
           <>
-            <select value={project} onChange={(e) => setProject(e.target.value)} className="bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs">
+            <Select value={project} onChange={setProject} size="sm">
               <option value="">every project</option>
               {projects.map((p) => (
                 <option key={p.name}>{p.name}</option>
               ))}
-            </select>
+            </Select>
             <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="h-7 w-36" />
             <a href={`/api/v1/usage/export?${q}`} download>
               <Button variant="ghost">

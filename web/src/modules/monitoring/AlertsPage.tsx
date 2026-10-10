@@ -22,6 +22,7 @@ import {
 import { cn, gap } from "@/ui/cn";
 import { Tabs } from "@/ui/Tabs";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 export type Severity = "info" | "warning" | "critical";
 
@@ -426,8 +427,6 @@ function ChannelsTab() {
     e.preventDefault();
     create.mutate();
   };
-  const sel =
-    "bg-bg border-line-strong h-8 w-full rounded-input border px-2 text-sm";
   return (
     <div className={cn("grid grid-cols-1 lg:grid-cols-[1fr_22rem]", gap)}>
       <Panel title="Channels" flush>
@@ -506,20 +505,20 @@ function ChannelsTab() {
       <Panel title="Add a channel">
         <form onSubmit={submit} className="flex flex-col gap-2">
           <Field label="Type">
-            <select
+            <Select
               value={type}
-              onChange={(e) => {
-                setType(e.target.value as AlertChannel["type"]);
+              onChange={(v) => {
+                setType(v as AlertChannel["type"]);
                 setCfg({});
               }}
-              className={sel}
+              className="w-full"
             >
               <option value="slack">Slack</option>
               <option value="discord">Discord</option>
               <option value="telegram">Telegram</option>
               <option value="email">Email</option>
               <option value="webhook">Webhook</option>
-            </select>
+            </Select>
           </Field>
           <Field label="Name">
             <Input

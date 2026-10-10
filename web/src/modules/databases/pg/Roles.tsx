@@ -17,8 +17,8 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input, Toggle } from "@/ui/controls";
 import { ChoiceCard } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
-import { selectClass } from "../NewDatabaseWizard";
-import { errText, inlineSelect } from "./shared";
+import { errText } from "./shared";
+import { Select } from "@/ui/select";
 
 /** Predefined roles worth granting, with what they give. */
 const PREDEFINED: [string, string][] = [
@@ -381,12 +381,12 @@ export function PgRolePage() {
                 {f.login && !managed && (
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Field label="Password">
-                      <select
-                        className={selectClass}
+                      <Select
                         value={f.password}
-                        onChange={(e) =>
-                          set("password", e.target.value as PasswordMode)
+                        onChange={(v) =>
+                          set("password", v as PasswordMode)
                         }
+                        className="w-full"
                       >
                         {!creating && (
                           <option value="keep">
@@ -401,7 +401,7 @@ export function PgRolePage() {
                         <option value="none">
                           No password (cannot sign in)
                         </option>
-                      </select>
+                      </Select>
                     </Field>
                     {f.password === "set" && (
                       <Field
@@ -508,17 +508,18 @@ export function PgRolePage() {
                     label={`On ${name.replace(/-/g, "_")}`}
                     hint="Every schema, every table and sequence, now and later. Fine-grained grants are on each object's Privileges tab."
                   >
-                    <select
-                      className={cn(inlineSelect, "max-w-60")}
+                    <Select
                       value={f.access}
-                      onChange={(e) =>
-                        set("access", e.target.value as RoleForm["access"])
+                      onChange={(v) =>
+                        set("access", v as RoleForm["access"])
                       }
+                      size="sm"
+                      className="max-w-60"
                     >
                       <option value="">None yet</option>
                       <option value="read">Read only</option>
                       <option value="write">Read and write</option>
-                    </select>
+                    </Select>
                   </Field>
                 </div>
               </Panel>
@@ -682,17 +683,18 @@ function DropRole({
         </p>
         <div className="flex flex-wrap items-end gap-2">
           <Field label="Objects go to">
-            <select
-              className={cn(inlineSelect, "w-48")}
+            <Select
               value={to}
-              onChange={(e) => setTo(e.target.value)}
+              onChange={setTo}
+              size="sm"
+              className="w-48"
             >
               {roles
                 .filter((r) => !r.protected && r.name !== role.name)
                 .map((r) => (
                   <option key={r.name}>{r.name}</option>
                 ))}
-            </select>
+            </Select>
           </Field>
           <Field label={`Type ${role.name} to confirm`}>
             <Input

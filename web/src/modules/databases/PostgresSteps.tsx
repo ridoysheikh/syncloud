@@ -12,10 +12,10 @@ import {
   CountSelect,
   Section,
   SizeSelect,
-  selectClass,
   type Form,
   type SetFn,
 } from "./NewDatabaseWizard";
+import { Select } from "@/ui/select";
 
 /** Capacity of a PostgreSQL cluster: member size, replicas, durability. */
 export function PgCapacityStep({
@@ -155,13 +155,13 @@ export function PgDataStep({
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="S3 endpoint">
-              <select
-                className={selectClass}
+              <Select
                 value={f.backupEndpoint ?? ""}
-                onChange={(e) => {
-                  set("backupEndpoint", e.target.value);
+                onChange={(v) => {
+                  set("backupEndpoint", v);
                   set("backupBucket", "");
                 }}
+                className="w-full"
               >
                 <option value="">Off</option>
                 {(endpoints.data ?? []).map((e) => (
@@ -169,20 +169,20 @@ export function PgDataStep({
                     {e.name} — {e.url}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
             {f.backupEndpoint && (
               <Field label="Bucket">
-                <select
-                  className={selectClass}
+                <Select
                   value={f.backupBucket ?? ""}
-                  onChange={(e) => set("backupBucket", e.target.value)}
+                  onChange={(v) => set("backupBucket", v)}
+                  className="w-full"
                 >
                   <option value="">choose…</option>
                   {(buckets.data ?? []).map((b) => (
                     <option key={b.name}>{b.name}</option>
                   ))}
-                </select>
+                </Select>
               </Field>
             )}
           </div>

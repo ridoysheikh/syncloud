@@ -8,6 +8,7 @@ import { DataTable } from "@/ui/DataTable";
 import { Alert, Button, IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 export interface Rule {
   priority: number;
@@ -57,7 +58,6 @@ const toRule = (r: Row): Rule => ({
   [r.mode]: Number(r.count),
 });
 
-const select = "bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs";
 
 /** A repository's lifecycle policy with a dry-run preview (§5.10). */
 export function LifecyclePanel({ repo }: { repo: string }) {
@@ -201,16 +201,16 @@ export function LifecyclePanel({ repo }: { repo: string }) {
                 placeholder="(any tag)"
                 className="h-7 font-mono text-xs"
               />
-              <select
+              <Select
                 value={r.mode}
-                onChange={(e) =>
-                  set(i, { mode: e.target.value as Row["mode"] })
+                onChange={(v) =>
+                  set(i, { mode: v as Row["mode"] })
                 }
-                className={select}
+                size="sm"
               >
                 <option value="keepLast">keep the newest</option>
                 <option value="olderThanDays">expire after (days)</option>
-              </select>
+              </Select>
               <Input
                 value={r.count}
                 onChange={(e) => set(i, { count: e.target.value })}

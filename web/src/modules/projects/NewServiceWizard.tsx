@@ -37,13 +37,12 @@ import {
   useGitConnections,
   type GitConnection,
 } from "@/modules/integrations/RepoPicker";
+import { Select } from "@/ui/select";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 const steps = ["Source", "Service", "Variables", "Review"] as const;
 type Step = (typeof steps)[number];
 
-const select =
-  "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
 
 interface Form {
   source: "image" | "git";
@@ -591,26 +590,26 @@ function ServiceStep({
             ) : undefined
           }
         >
-          <select
+          <Select
             value={project}
-            onChange={(e) => (set("project", e.target.value), set("env", ""))}
-            className={select}
+            onChange={(v) => (set("project", v), set("env", ""))}
+            className="w-full"
           >
             {projects.map((p) => (
               <option key={p}>{p}</option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label="Environment">
-          <select
+          <Select
             value={env}
-            onChange={(e) => set("env", e.target.value)}
-            className={select}
+            onChange={(v) => set("env", v)}
+            className="w-full"
           >
             {envs.map((e) => (
               <option key={e}>{e}</option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field
           label="Service name"

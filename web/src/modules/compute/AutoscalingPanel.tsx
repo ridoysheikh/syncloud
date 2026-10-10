@@ -18,6 +18,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 type Metric = "cpu" | "memory" | "rps" | "latency";
 
@@ -75,7 +76,6 @@ const fmt = (m: Metric, v: number) =>
     : m === "rps"
       ? `${v.toFixed(v < 10 ? 2 : 0)}/s`
       : `${v.toFixed(0)}ms`;
-const sel = "bg-bg border-line-strong h-8 w-full rounded-input border px-2 text-sm";
 
 /** Target tracking autoscaling of one service (§5.5). */
 export function AutoscalingPanel({
@@ -244,20 +244,20 @@ export function AutoscalingPanel({
             )}
             <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
               <Field label="Metric">
-                <select
+                <Select
                   value={form.metric}
-                  onChange={(e) => {
-                    const m = e.target.value as Metric;
+                  onChange={(v) => {
+                    const m = v as Metric;
                     setForm((f) => ({ ...f, metric: m, target: defaults[m] }));
                   }}
-                  className={sel}
+                  className="w-full"
                 >
                   {(Object.keys(metricLabel) as Metric[]).map((m) => (
                     <option key={m} value={m}>
                       {metricLabel[m]}
                     </option>
                   ))}
-                </select>
+                </Select>
               </Field>
               <Field
                 label="Target"

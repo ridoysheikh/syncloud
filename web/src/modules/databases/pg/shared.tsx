@@ -16,10 +16,6 @@ import type { PgObjectKind } from "@/lib/pg";
 import { cn } from "@/ui/cn";
 import { Pagination, usePagination } from "@/ui/paging";
 
-/** A compact select for toolbars and inline forms (selectClass is full width). */
-export const inlineSelect =
-  "bg-bg border-line-strong focus:border-line-accent h-7 rounded-input border px-1.5 text-xs outline-none";
-
 export const errText = (e: unknown) =>
   e instanceof ApiError ? e.message : "Request failed";
 

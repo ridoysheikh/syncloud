@@ -17,6 +17,7 @@ import {
 } from "@/ui/controls";
 import { alertDialog, confirmChoice } from "@/ui/dialogs";
 import { cn, gap } from "@/ui/cn";
+import { Select } from "@/ui/select";
 
 /* Project › Settings (Phase 15d): environments with their deploy policy,
    cloning, and deleting with everything in them. */
@@ -275,8 +276,6 @@ export function EnvironmentsPanel({
     e.preventDefault();
     if (name) add.mutate();
   };
-  const select =
-    "bg-bg border-line-strong h-8 rounded-input border px-2 text-sm outline-none";
   return (
     <Panel title="Environments">
       <div className={cn("flex flex-col", gap)}>
@@ -304,10 +303,9 @@ export function EnvironmentsPanel({
             />
           </Field>
           <Field label="Copy from">
-            <select
+            <Select
               value={from}
-              onChange={(e) => setFrom(e.target.value)}
-              className={select}
+              onChange={setFrom}
             >
               <option value="">nothing (empty)</option>
               {envs
@@ -317,7 +315,7 @@ export function EnvironmentsPanel({
                     {e.name}
                   </option>
                 ))}
-            </select>
+            </Select>
           </Field>
           {from && (
             <span className="flex h-8 items-center">

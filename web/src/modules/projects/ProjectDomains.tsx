@@ -9,6 +9,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
+import { Select } from "@/ui/select";
 
 /* Project › Domains (Phase 15c): every way into the environment's services. */
 
@@ -85,8 +86,6 @@ export function ProjectDomains({
     e.preventDefault();
     if (target && host.trim()) add.mutate();
   };
-  const select =
-    "bg-bg border-line-strong h-8 rounded-input border px-2 text-sm outline-none";
   return (
     <div className={cn("flex flex-col", gap)}>
       {web.length > 0 && (
@@ -111,17 +110,17 @@ export function ProjectDomains({
               />
             </Field>
             <Field label="Service">
-              <select
+              <Select
                 value={target?.name ?? ""}
-                onChange={(e) => setSvc(e.target.value)}
-                className={cn(select, "max-w-56")}
+                onChange={setSvc}
+                className="max-w-56"
               >
                 {web.map((s) => (
                   <option key={s.name} value={s.name}>
                     {s.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
             <Button
               type="submit"

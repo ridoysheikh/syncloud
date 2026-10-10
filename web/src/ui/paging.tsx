@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { IconButton } from "./controls";
 import { LoadMore } from "./LoadMore";
+import { Select } from "@/ui/select";
 
 /** Rows per table page. */
 export const PAGE_SIZE = 15;
@@ -37,17 +38,17 @@ export function Pagination({
     <div className="border-line text-muted flex flex-wrap items-center justify-end gap-x-3 gap-y-1 border-t px-2 py-1 text-xs md:px-3">
       <label className="flex items-center gap-1.5">
         Rows
-        <select
+        <Select
           value={pageSize}
-          onChange={(e) => onPageSize(Number(e.target.value))}
-          className="bg-bg border-line-strong focus:border-line-accent text-fg h-6 rounded-input border px-1 text-xs outline-none"
+          onChange={(v) => onPageSize(Number(v))}
+          size="xs"
         >
           {PAGE_SIZES.map((n) => (
             <option key={n} value={n}>
               {n}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
       <span className="tabular-nums">
         {from}–{to} of {total}

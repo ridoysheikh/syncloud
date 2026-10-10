@@ -20,6 +20,7 @@ import { IconButton, StatusBadge } from "@/ui/controls";
 import { Meter } from "@/ui/Meter";
 import { ChoiceCard } from "@/ui/choice";
 import { cn, pad } from "@/ui/cn";
+import { Select } from "@/ui/select";
 
 /* Nodes, drawn the same way everywhere (Phase 16). */
 
@@ -393,16 +394,16 @@ export function NodesTable({
     columns.push({
       header: "Scheduling",
       cell: (n) => (
-        <select
+        <Select
           value={n.draining ? "drain" : n.schedulable ? "uncordon" : "cordon"}
-          onChange={(e) => onSchedule(n, e.target.value as ScheduleAction)}
-          className="bg-bg border-line-strong rounded-input h-7 border px-1 text-xs"
+          onChange={(v) => onSchedule(n, v as ScheduleAction)}
           title="Whether this node runs services"
+          size="sm"
         >
           <option value="uncordon">run tasks</option>
           <option value="cordon">no new tasks</option>
           <option value="drain">drain</option>
-        </select>
+        </Select>
       ),
     });
   }

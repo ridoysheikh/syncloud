@@ -13,6 +13,7 @@ import { Alert, Button, Field, IconButton, Input, StatusBadge, Toggle } from "@/
 import { ChipSelect, ChoiceCards, ChoiceField } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
+import { Combobox, Select } from "@/ui/select";
 
 // ── types and hooks ─────────────────────────────────────────────────────────
 
@@ -59,7 +60,6 @@ interface Attachment {
   policy: string;
 }
 
-const sel = "bg-bg border-line-strong focus:border-line-accent h-8 rounded-input border px-2 text-sm outline-none";
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "never");
 const errText = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 
@@ -113,7 +113,7 @@ function AttachedPolicies({ type, id }: { type: Attachment["principalType"]; id:
           </div>
         ))}
         <div className="flex flex-wrap items-center gap-1.5">
-          <select value={policy} onChange={(e) => setPolicy(e.target.value)} className={sel}>
+          <Select value={policy} onChange={setPolicy}>
             <option value="">attach a policy…</option>
             {policies.map((p) => (
               <option key={p.id} value={p.id}>
@@ -121,14 +121,14 @@ function AttachedPolicies({ type, id }: { type: Attachment["principalType"]; id:
                 {p.managed ? (p.perProject ? " (managed, per project)" : " (managed)") : ""}
               </option>
             ))}
-          </select>
+          </Select>
           {chosen?.perProject && (
-            <select value={project} onChange={(e) => setProject(e.target.value)} className={sel}>
+            <Select value={project} onChange={setProject}>
               <option value="">project…</option>
               {projects.map((p) => (
                 <option key={p.name}>{p.name}</option>
               ))}
-            </select>
+            </Select>
           )}
           <Button disabled={!policy || (chosen?.perProject && !project) || attach.isPending} onClick={() => attach.mutate()}>
             <Plus className="size-3.5" /> Attach
@@ -863,7 +863,7 @@ function SimulatorPanel() {
         className="flex flex-wrap items-end gap-2"
       >
         <Field label="Who">
-          <select value={principal} onChange={(e) => setPrincipal(e.target.value)} className={sel}>
+          <Select value={principal} onChange={setPrincipal}>
             <option value="">choose…</option>
             {users.map((u) => (
               <option key={u.id} value={u.id}>
@@ -875,10 +875,10 @@ function SimulatorPanel() {
                 role {r.name}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label="Action">
-          <Input list="iam-actions" value={action} onChange={(e) => setAction(e.target.value)} className="w-72 max-w-[calc(100vw-3rem)] font-mono" />
+          <Combobox suggestions={actionNames} value={action} onChange={setAction} className="w-72 max-w-[calc(100vw-3rem)] font-mono" />
         </Field>
         <Field label="Resource">
           <Input value={resource} onChange={(e) => setResource(e.target.value)} className="w-[32rem] max-w-[calc(100vw-3rem)] font-mono" />
@@ -889,11 +889,6 @@ function SimulatorPanel() {
         <Button type="submit" variant="primary" disabled={!principal || sim.isPending}>
           Simulate
         </Button>
-        <datalist id="iam-actions">
-          {actionNames.map((a) => (
-            <option key={a} value={a} />
-          ))}
-        </datalist>
       </form>
       {sim.data && (
         <div className={cn("mt-2 flex items-center gap-2 text-xs", sim.data.allowed ? "text-ok" : "text-bad")}>
@@ -967,13 +962,13 @@ export function AuditPage() {
             <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="resource, IP, detail" className="w-56" />
           </Field>
           <Field label="Since">
-            <select value={since} onChange={(e) => setSince(e.target.value)} className={sel}>
+            <Select value={since} onChange={setSince}>
               <option value="1h">1 hour</option>
               <option value="24h">24 hours</option>
               <option value="168h">7 days</option>
               <option value="720h">30 days</option>
               <option value="87600h">all</option>
-            </select>
+            </Select>
           </Field>
         </div>
       </Panel>

@@ -20,8 +20,8 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { Pagination, useLazyList, usePagination } from "@/ui/paging";
-import { selectClass } from "./NewDatabaseWizard";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 interface KeyInfo {
   key: string;
@@ -158,17 +158,18 @@ export function Explorer({ path }: { path: string }) {
               aria-label="Key pattern"
             />
           </div>
-          <select
-            className="bg-bg border-line-strong focus:border-line-accent h-7 w-28 shrink-0 rounded-input border px-1.5 text-xs outline-none"
+          <Select
             value={type}
-            onChange={(e) => setType(e.target.value)}
+            onChange={setType}
             aria-label="Key type"
+            size="sm"
+            className="w-28 shrink-0"
           >
             <option value="">all types</option>
             {TYPES.map((t) => (
               <option key={t}>{t}</option>
             ))}
-          </select>
+          </Select>
         </form>
         {keys.error && (
           <div className="p-1.5">
@@ -647,15 +648,15 @@ function NewKey({
             />
           </Field>
           <Field label="Type">
-            <select
-              className={selectClass}
+            <Select
               value={type}
-              onChange={(e) => setType(e.target.value as typeof type)}
+              onChange={(v) => setType(v as typeof type)}
+              className="w-full"
             >
               {TYPES.filter((t) => t !== "stream").map((t) => (
                 <option key={t}>{t}</option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label="TTL (seconds)">
             <Input

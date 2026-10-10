@@ -6,7 +6,8 @@ import { usePgDatabases, usePgRoles, type PgQueryResult } from "@/lib/pg";
 import { Panel } from "@/ui/Panel";
 import { Alert, Button, Toggle } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
-import { errText, ResultGrid, inlineSelect } from "./shared";
+import { errText, ResultGrid } from "./shared";
+import { Select } from "@/ui/select";
 
 const HISTORY_KEY = "syncloud.pg.history";
 
@@ -90,12 +91,13 @@ export function PgConsole({
         title="SQL"
         flush
         actions={
-          <select
-            className={cn(inlineSelect, "max-w-56")}
+          <Select
             value=""
-            onChange={(e) => e.target.value && setSql(e.target.value)}
+            onChange={(v) => v && setSql(v)}
             aria-label="History"
             title="Recent queries (this browser)"
+            size="sm"
+            className="max-w-56"
           >
             <option value="">History ({history.length})</option>
             {history.map((h, i) => (
@@ -103,33 +105,35 @@ export function PgConsole({
                 {h.replace(/\s+/g, " ").slice(0, 80)}
               </option>
             ))}
-          </select>
+          </Select>
         }
       >
         <div className="border-line flex flex-wrap items-center gap-2 border-b p-2 text-xs">
           <label className="flex items-center gap-1.5">
             <span className="text-muted whitespace-nowrap">Database</span>
-            <select
-              className={cn(inlineSelect, "w-40")}
+            <Select
               value={db}
-              onChange={(e) => setDb(e.target.value)}
+              onChange={setDb}
+              size="sm"
+              className="w-40"
             >
               {(dbs.data ?? []).map((d) => (
                 <option key={d.name}>{d.name}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="flex items-center gap-1.5">
             <span className="text-muted whitespace-nowrap">Run as</span>
-            <select
-              className={cn(inlineSelect, "w-40")}
+            <Select
               value={role}
-              onChange={(e) => setRole(e.target.value)}
+              onChange={setRole}
+              size="sm"
+              className="w-40"
             >
               {runAs.map((n) => (
                 <option key={n}>{n}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <Toggle
             checked={write}

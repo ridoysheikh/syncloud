@@ -31,9 +31,9 @@ import {
   Toggle,
 } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
-import { selectClass } from "../NewDatabaseWizard";
 import { duration, errText } from "./shared";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 /** The cluster's databases: list, create, rename, change owner, drop. */
 export function PgDatabases({
@@ -127,15 +127,15 @@ export function PgDatabases({
               />
             </Field>
             <Field label="Owner">
-              <select
-                className={selectClass}
+              <Select
                 value={form.owner}
-                onChange={(e) => setForm({ ...form, owner: e.target.value })}
+                onChange={(v) => setForm({ ...form, owner: v })}
+                className="w-full"
               >
                 {owners.map((o) => (
                   <option key={o}>{o}</option>
                 ))}
-              </select>
+              </Select>
             </Field>
             <Field label="Connection limit" hint="Empty or -1: no limit">
               <Input

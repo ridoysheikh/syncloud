@@ -3,8 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
 import { statusQuery } from "@/lib/auth";
 import { useProjects } from "@/lib/workloads";
-import { Button, Field, Input, Toggle } from "@/ui/controls";
+import { Button, Field, Toggle } from "@/ui/controls";
 import { cn } from "@/ui/cn";
+import { Combobox } from "@/ui/select";
 
 /** The platform's base domain ("" in development without one). */
 export function useBaseDomain() {
@@ -78,10 +79,10 @@ export function AccessEditor({
         </ul>
       )}
       <div className="flex gap-2">
-        <Input
-          list="db-access-suggestions"
+        <Combobox
+          suggestions={suggestions}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={setDraft}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -91,11 +92,6 @@ export function AccessEditor({
           placeholder="project:shop or environment:shop/production"
           className="min-w-0 flex-1 font-mono"
         />
-        <datalist id="db-access-suggestions">
-          {suggestions.map((s) => (
-            <option key={s} value={s} />
-          ))}
-        </datalist>
         <Button onClick={add} disabled={!draft.trim()}>
           <Plus className="size-3.5" /> Add
         </Button>

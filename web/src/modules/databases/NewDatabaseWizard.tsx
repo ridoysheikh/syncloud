@@ -36,6 +36,7 @@ import {
   useBaseDomain,
 } from "./Network";
 import { PgCapacityStep, PgDataStep } from "./PostgresSteps";
+import { Select } from "@/ui/select";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,27}[a-z0-9])?$/;
 const steps = [
@@ -47,9 +48,6 @@ const steps = [
   "Review",
 ] as const;
 type Step = (typeof steps)[number];
-
-export const selectClass =
-  "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
 
 /** Sizes offered in the wizard (MiB). */
 const SIZES = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
@@ -335,10 +333,10 @@ export function NewDatabaseWizard() {
                         : undefined
                     }
                   >
-                    <select
-                      className={cn(selectClass, "max-w-60")}
+                    <Select
                       value={f.version}
-                      onChange={(e) => set("version", e.target.value)}
+                      onChange={(v) => set("version", v)}
+                      className="w-full max-w-60"
                     >
                       {engine.versions.map((v) => (
                         <option key={v} value={v}>
@@ -346,7 +344,7 @@ export function NewDatabaseWizard() {
                           {v === engine.defaultVersion ? " (recommended)" : ""}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </Field>
                 )}
               </div>
@@ -388,26 +386,26 @@ export function NewDatabaseWizard() {
                 {!f.standalone && (
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Field label="Project">
-                      <select
-                        className={selectClass}
+                      <Select
                         value={project}
-                        onChange={(e) => set("project", e.target.value)}
+                        onChange={(v) => set("project", v)}
+                        className="w-full"
                       >
                         {projects.map((p) => (
                           <option key={p.name}>{p.name}</option>
                         ))}
-                      </select>
+                      </Select>
                     </Field>
                     <Field label="Environment">
-                      <select
-                        className={selectClass}
+                      <Select
                         value={env}
-                        onChange={(e) => set("env", e.target.value)}
+                        onChange={(v) => set("env", v)}
+                        className="w-full"
                       >
                         {envs.map((e) => (
                           <option key={e}>{e}</option>
                         ))}
-                      </select>
+                      </Select>
                     </Field>
                   </div>
                 )}
@@ -524,17 +522,17 @@ export function SizeSelect({
   onChange: (v: number) => void;
 }) {
   return (
-    <select
-      className={selectClass}
+    <Select
       value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
+      onChange={(v) => onChange(Number(v))}
+      className="w-full"
     >
       {SIZES.map((s) => (
         <option key={s} value={s}>
           {mib(s)}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }
 
@@ -681,10 +679,10 @@ export function DataStep({
         />
       </Section>
       <Section title="When memory is full">
-        <select
-          className={cn(selectClass, "max-w-80")}
+        <Select
           value={f.eviction}
-          onChange={(e) => set("eviction", e.target.value)}
+          onChange={(v) => set("eviction", v)}
+          className="w-full max-w-80"
         >
           {EVICTION_POLICIES.map((p) => (
             <option key={p} value={p}>
@@ -695,7 +693,7 @@ export function DataStep({
                   : p}
             </option>
           ))}
-        </select>
+        </Select>
       </Section>
       <Section title="Nodes">
         <p className="text-muted">

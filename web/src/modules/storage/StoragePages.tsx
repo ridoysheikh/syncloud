@@ -11,6 +11,7 @@ import { Alert, Button, Field, IconButton, Input } from "@/ui/controls";
 import { ChoiceField, Segmented } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 interface Endpoint {
   id: string;
@@ -514,7 +515,6 @@ export function ServiceS3Panel({ path }: { path: string }) {
   const list = rows ?? [];
   const patch = (i: number, p: Partial<(typeof list)[number]>) => setRows(list.map((r, j) => (j === i ? { ...r, ...p } : r)));
   const dirty = rows !== null && JSON.stringify(rows) !== JSON.stringify(cur.data?.map((b) => ({ endpoint: b.endpoint, bucket: b.bucket, prefix: b.prefix, envPrefix: b.envPrefix })));
-  const sel = "bg-bg border-line-strong focus:border-line-accent h-7 rounded-input border px-2 text-xs outline-none";
   return (
     <Panel
       title="S3 buckets"
@@ -537,13 +537,13 @@ export function ServiceS3Panel({ path }: { path: string }) {
         {list.map((r, i) => (
           <div key={i} className="flex flex-wrap items-end gap-1.5">
             <Field label="Endpoint">
-              <select value={r.endpoint} onChange={(e) => patch(i, { endpoint: e.target.value })} className={cn(sel, "w-36")}>
+              <Select value={r.endpoint} onChange={(v) => patch(i, { endpoint: v })} size="sm" className="w-36">
                 {endpoints.map((e) => (
                   <option key={e.id} value={e.name}>
                     {e.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
             <Field label="Bucket">
               <Input value={r.bucket} onChange={(e) => patch(i, { bucket: e.target.value })} className="h-7 w-44 font-mono" />

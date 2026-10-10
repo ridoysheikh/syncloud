@@ -3,6 +3,7 @@ import { useProjects, useServices } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { cn, gap } from "@/ui/cn";
 import { LogsView } from "./LogsView";
+import { Select } from "@/ui/select";
 
 /** Logs of every service, or one project/environment/service (§9.2). */
 export function LogsPage() {
@@ -13,43 +14,42 @@ export function LogsPage() {
   const [service, setService] = useState("");
   const envs = projects.find((p) => p.name === project)?.environments ?? [];
   const svcs = services.filter((s) => s.project === project && (!env || s.environment === env));
-  const sel = "bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs";
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader
         title="Logs"
         actions={
           <>
-            <select
+            <Select
               value={project}
-              onChange={(e) => {
-                setProject(e.target.value);
+              onChange={(v) => {
+                setProject(v);
                 setEnv("");
                 setService("");
               }}
-              className={sel}
+              size="sm"
             >
               <option value="">All projects</option>
               <option value="syncloud">syncloud (platform)</option>
               {projects.map((p) => (
                 <option key={p.id}>{p.name}</option>
               ))}
-            </select>
+            </Select>
             {project && project !== "syncloud" && (
-              <select value={env} onChange={(e) => setEnv(e.target.value)} className={sel}>
+              <Select value={env} onChange={setEnv} size="sm">
                 <option value="">All environments</option>
                 {envs.map((e) => (
                   <option key={e}>{e}</option>
                 ))}
-              </select>
+              </Select>
             )}
             {project && project !== "syncloud" && (
-              <select value={service} onChange={(e) => setService(e.target.value)} className={sel}>
+              <Select value={service} onChange={setService} size="sm">
                 <option value="">All services</option>
                 {[...new Set(svcs.map((s) => s.name))].map((s) => (
                   <option key={s}>{s}</option>
                 ))}
-              </select>
+              </Select>
             )}
           </>
         }

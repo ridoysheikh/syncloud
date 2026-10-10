@@ -276,7 +276,7 @@ export function TasksTable({
           open
           onClose={() => setShell(null)}
           title={`Shell: ${shell.service} · ${shortId(shell.id)} on ${shell.node}`}
-          wide
+          size="xl"
         >
           <Suspense
             fallback={

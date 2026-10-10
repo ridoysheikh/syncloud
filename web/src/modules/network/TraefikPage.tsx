@@ -8,6 +8,7 @@ import { Panel } from "@/ui/Panel";
 import { Alert, Button, Field, Input, StatusBadge, Toggle } from "@/ui/controls";
 import { NodeLink } from "@/entities/nodes";
 import { cn, gap } from "@/ui/cn";
+import { Select } from "@/ui/select";
 
 export interface TraefikSettings {
   logLevel: "DEBUG" | "INFO" | "WARN" | "ERROR";
@@ -78,7 +79,6 @@ const CLOUDFLARE = [
   "2c0f:f248::/32",
 ];
 
-const sel = "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
 const stateTone = (s: string) => (s === "running" || s === "healthy" ? "ok" : s === "starting" || s === "pulling" ? "info" : "bad");
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -183,10 +183,10 @@ export function TraefikPage() {
             />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Minimum TLS version">
-                <select className={sel} value={form.minTls} onChange={(e) => set("minTls", e.target.value as TraefikSettings["minTls"])}>
+                <Select value={form.minTls} onChange={(v) => set("minTls", v as TraefikSettings["minTls"])} className="w-full">
                   <option value="1.2">TLS 1.2 (compatible)</option>
                   <option value="1.3">TLS 1.3 (modern clients only)</option>
-                </select>
+                </Select>
               </Field>
               <Field label="HSTS max-age (seconds)" hint="0 = no Strict-Transport-Security header. One year is 31536000.">
                 <Input type="number" min={0} value={form.hstsSeconds} onChange={(e) => num("hstsSeconds", e.target.value)} />
@@ -266,11 +266,11 @@ export function TraefikPage() {
             </div>
             <Toggle checked={form.http3} onChange={(v) => set("http3", v)} label="HTTP/3 (QUIC)" hint="Also serve HTTP/3 on the HTTPS port over UDP." />
             <Field label="Log level">
-              <select className={sel} value={form.logLevel} onChange={(e) => set("logLevel", e.target.value as TraefikSettings["logLevel"])}>
+              <Select value={form.logLevel} onChange={(v) => set("logLevel", v as TraefikSettings["logLevel"])} className="w-full">
                 {["ERROR", "WARN", "INFO", "DEBUG"].map((l) => (
                   <option key={l}>{l}</option>
                 ))}
-              </select>
+              </Select>
             </Field>
           </div>
         </Panel>

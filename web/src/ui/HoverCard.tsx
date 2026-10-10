@@ -7,6 +7,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "./cn";
+import { portalRoot } from "./popover";
 
 const OPEN_DELAY = 300;
 const CLOSE_DELAY = 120;
@@ -111,7 +112,7 @@ export function HoverCard({
           >
             {children()}
           </div>,
-          document.body,
+          portalRoot(anchor.current),
         )}
     </>
   );

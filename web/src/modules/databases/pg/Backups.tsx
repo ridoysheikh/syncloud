@@ -17,9 +17,9 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
-import { selectClass } from "../NewDatabaseWizard";
 import { ago, errText } from "./shared";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 const restoreTo = (name: string, backup?: string) =>
   `/databases/${encodeURIComponent(name)}/restore${backup ? `?backup=${encodeURIComponent(backup)}` : ""}`;
@@ -335,13 +335,12 @@ function BackupSettings({
         )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Field label="S3 endpoint">
-            <select
-              className={selectClass}
+            <Select
               value={f.endpoint}
-              onChange={(e) =>
-                setF({ ...f, endpoint: e.target.value, bucket: "" })
+              onChange={(v) =>
+                setF({ ...f, endpoint: v, bucket: "" })
               }
-              required
+              className="w-full"
             >
               <option value="">choose…</option>
               {(endpoints.data ?? []).map((e) => (
@@ -349,7 +348,7 @@ function BackupSettings({
                   {e.name} — {e.url}
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field
             label="Bucket"
@@ -359,18 +358,17 @@ function BackupSettings({
                 : "Create buckets under Storage."
             }
           >
-            <select
-              className={selectClass}
+            <Select
               value={f.bucket}
-              onChange={(e) => set("bucket", e.target.value)}
-              required
+              onChange={(v) => set("bucket", v)}
               disabled={!f.endpoint}
+              className="w-full"
             >
               <option value="">choose…</option>
               {(buckets.data ?? []).map((b) => (
                 <option key={b.name}>{b.name}</option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label="Prefix" hint={`Default syncloud-pg/${d.id}`}>
             <Input

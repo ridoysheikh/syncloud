@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, KeyRound, Plus, Ticket, Trash2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
@@ -223,6 +223,7 @@ function CreateDialog<T>({
   const [values, setValues] = useState<Record<string, string>>(initial);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const formId = useId();
 
   const close = () => {
     setValues(initial());
@@ -245,8 +246,22 @@ function CreateDialog<T>({
   };
 
   return (
-    <Dialog open={open} onClose={close} title={title}>
-      <form onSubmit={onSubmit} className="flex flex-col gap-2.5">
+    <Dialog
+      open={open}
+      onClose={close}
+      title={title}
+      footer={
+        <>
+          <Button type="button" variant="ghost" onClick={close}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} variant="primary" disabled={busy}>
+            Create
+          </Button>
+        </>
+      }
+    >
+      <form id={formId} onSubmit={onSubmit} className="flex flex-col gap-2.5">
         {fields.map((f) => (
           <Field key={f.name} label={f.label}>
             <Input
@@ -259,14 +274,6 @@ function CreateDialog<T>({
           </Field>
         ))}
         {error && <Alert>{error}</Alert>}
-        <div className="flex justify-end gap-1.5">
-          <Button type="button" variant="ghost" onClick={close}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="primary" disabled={busy}>
-            Create
-          </Button>
-        </div>
       </form>
     </Dialog>
   );

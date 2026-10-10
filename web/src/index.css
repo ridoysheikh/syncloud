@@ -47,6 +47,15 @@
   --radius-input: 0.25rem;
   --radius-md: 0.25rem;
   --radius-btn: 0.3125rem;
+
+  /* Popups (select lists, suggestions) grow in under their field. */
+  --animate-pop-in: pop-in 120ms ease-out;
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(-2px);
+    }
+  }
 }
 
 @layer base {
@@ -92,4 +101,34 @@ input[type="radio"] {
 ::placeholder {
   color: var(--color-faint);
   opacity: 1;
+}
+
+/*
+ * Dialogs (ui/Dialog.tsx) fade and grow in place. No fill mode: a transform
+ * left on the dialog would make it the containing block of the fixed popups
+ * rendered inside it.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  dialog[open] {
+    animation: dialog-in 140ms ease-out;
+  }
+  dialog[open]::backdrop {
+    animation: backdrop-in 140ms ease-out;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-pop-in {
+    animation: none;
+  }
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
 }

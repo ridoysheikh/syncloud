@@ -36,9 +36,8 @@ import {
   useAlertRules,
   type AlertRule,
 } from "./AlertsPage";
+import { Select } from "@/ui/select";
 
-const sel =
-  "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
 
 const typeIcons: Record<string, typeof Activity> = {
   metric: Activity,
@@ -232,64 +231,64 @@ export function AlertRulePage() {
           {scoped && (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <Field label="Project" hint="Empty: every project">
-                <select
+                <Select
                   value={r.project ?? ""}
-                  onChange={(e) =>
+                  onChange={(v) =>
                     setR((x) => ({
                       ...x,
-                      project: e.target.value,
+                      project: v,
                       environment: "",
                       service: "",
                     }))
                   }
-                  className={sel}
+                  className="w-full"
                 >
                   <option value="">any project</option>
                   {projects.map((p) => (
                     <option key={p.name}>{p.name}</option>
                   ))}
-                </select>
+                </Select>
               </Field>
               <Field label="Environment">
-                <select
+                <Select
                   value={r.environment ?? ""}
-                  onChange={(e) => set("environment", e.target.value)}
-                  className={sel}
+                  onChange={(v) => set("environment", v)}
                   disabled={!r.project}
+                  className="w-full"
                 >
                   <option value="">any environment</option>
                   {envs.map((e) => (
                     <option key={e}>{e}</option>
                   ))}
-                </select>
+                </Select>
               </Field>
               <Field label="Service">
-                <select
+                <Select
                   value={r.service ?? ""}
-                  onChange={(e) => set("service", e.target.value)}
-                  className={sel}
+                  onChange={(v) => set("service", v)}
+                  className="w-full"
                 >
                   <option value="">any service</option>
                   {svcNames.map((s) => (
                     <option key={s}>{s}</option>
                   ))}
-                </select>
+                </Select>
               </Field>
             </div>
           )}
           {r.type === "metric" && (
             <Field label="Metric" hint={metricUnits[r.metric ?? ""]}>
-              <select
+              <Select
                 value={r.metric}
-                onChange={(e) => set("metric", e.target.value)}
-                className={sel}
+                onChange={(v) => set("metric", v)}
+                className="w-full"
               >
                 <option value="error_rate">5xx error rate</option>
                 <option value="latency">p95 latency</option>
                 <option value="rps">Request rate</option>
                 <option value="cpu">CPU</option>
                 <option value="memory">Memory</option>
-              </select>
+              </Select>
             </Field>
           )}
           {r.type === "promql" && (
@@ -316,16 +315,16 @@ export function AlertRulePage() {
                 />
               </Field>
               <Field label="Level">
-                <select
+                <Select
                   value={r.level ?? ""}
-                  onChange={(e) => set("level", e.target.value)}
-                  className={sel}
+                  onChange={(v) => set("level", v)}
+                  className="w-full"
                 >
                   <option value="">any level</option>
                   <option value="error">error</option>
                   <option value="warn">warn</option>
                   <option value="fatal">fatal</option>
-                </select>
+                </Select>
               </Field>
             </div>
           )}

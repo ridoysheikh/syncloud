@@ -14,6 +14,7 @@ import { DropLogPanel } from "./SecurityGroups";
 import { NodePicker } from "@/entities/nodes";
 import { ChoiceCards, ChoiceField } from "@/ui/choice";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 interface Rule {
   id?: string;
@@ -157,13 +158,13 @@ function EffectiveRules({ nodes }: { nodes: { id: string; name: string }[] }) {
       flush
       actions={
         <>
-          <select value={id} onChange={(e) => setNode(e.target.value)} className="bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs">
+          <Select value={id} onChange={setNode} size="sm">
             {nodes.map((n) => (
               <option key={n.id} value={n.id}>
                 {n.name}
               </option>
             ))}
-          </select>
+          </Select>
           <Button variant="ghost" onClick={() => setRaw(!raw)}>
             {raw ? "Rules" : "nftables"}
           </Button>
@@ -303,16 +304,16 @@ export function FirewallPolicyPage() {
         <div className="flex flex-col gap-1.5">
           {rules.map((r, i) => (
             <div key={i} className="grid grid-cols-1 items-center gap-1.5 md:grid-cols-[5.5rem_7rem_1fr_1fr_auto]">
-              <select
+              <Select
                 value={r.protocol}
-                onChange={(e) => setRule(i, { protocol: e.target.value as Rule["protocol"], ports: "" })}
-                className="bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs"
+                onChange={(v) => setRule(i, { protocol: v as Rule["protocol"], ports: "" })}
+                size="sm"
               >
                 <option value="tcp">TCP</option>
                 <option value="udp">UDP</option>
                 <option value="icmp">ICMP</option>
                 <option value="any">Any</option>
-              </select>
+              </Select>
               <Input
                 value={r.ports}
                 disabled={r.protocol === "icmp" || r.protocol === "any"}

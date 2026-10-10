@@ -16,6 +16,7 @@ import { NodeLink } from "@/entities/nodes";
 import { cn, gap } from "@/ui/cn";
 import { useLazyList } from "@/ui/paging";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 interface PoolSpec {
   region?: string;
@@ -52,7 +53,6 @@ interface Provider {
   summary: string;
 }
 
-const sel = "bg-bg border-line-strong focus:border-line-accent h-8 w-full rounded-input border px-2 text-sm outline-none";
 const errText = (e: unknown, f: string) => (e instanceof ApiError ? e.message : f);
 const usePools = () =>
   useQuery({ queryKey: ["node-pools"], queryFn: async () => (await api<{ items: Pool[] }>("GET", "/node-pools")).items, refetchInterval: 5000 });
@@ -251,11 +251,11 @@ function ProvidersPanel() {
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="hcloud" className="h-7 w-36" />
           </Field>
           <Field label="Type">
-            <select value={type} onChange={(e) => setType(e.target.value)} className={cn(sel, "h-7 w-36")}>
+            <Select value={type} onChange={setType} size="sm" className="w-full w-36">
               <option value="hetzner">Hetzner Cloud</option>
               <option value="digitalocean">DigitalOcean</option>
               <option value="webhook">Webhook</option>
-            </select>
+            </Select>
           </Field>
           {type === "webhook" ? (
             <Field label="URL">
@@ -356,14 +356,14 @@ export function NodePoolPage() {
             />
           </ChoiceField>
           <Field label="Servers" hint={provider ? "created through the provider" : "nodes join with a command"}>
-            <select value={provider} onChange={(e) => setProvider(e.target.value)} className={sel}>
+            <Select value={provider} onChange={setProvider} className="w-full">
               <option value="">manual (join by hand)</option>
               {providers.map((p) => (
                 <option key={p.id} value={p.name}>
                   {p.name} ({p.type})
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
         </div>
       </Panel>

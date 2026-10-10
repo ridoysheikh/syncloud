@@ -8,6 +8,7 @@ import { cn } from "@/ui/cn";
 import { useLazyList } from "@/ui/paging";
 import { ChoiceCards } from "@/ui/choice";
 import { GiteaIcon, GitHubIcon, GitLabIcon } from "@/ui/brands";
+import { Combobox } from "@/ui/select";
 
 export type GitKind = "github-app" | "github" | "gitlab" | "gitea";
 
@@ -185,15 +186,13 @@ export function BranchInput({
   onChange: (v: string) => void;
 }) {
   const branches = useBranches(connection, repo);
-  const id = `branches-${connection}-${repo}`.replace(/[^a-zA-Z0-9-]/g, "-");
   return (
-    <>
-      <Input value={value} onChange={(e) => onChange(e.target.value)} list={id} className="font-mono" placeholder="default branch" />
-      <datalist id={id}>
-        {branches.data?.map((b) => (
-          <option key={b} value={b} />
-        ))}
-      </datalist>
-    </>
+    <Combobox
+      value={value}
+      onChange={onChange}
+      suggestions={branches.data ?? []}
+      className="font-mono"
+      placeholder="default branch"
+    />
   );
 }

@@ -49,6 +49,7 @@ import { alertDialog, confirmAction, confirmChoice } from "@/ui/dialogs";
 import { cn, gap } from "@/ui/cn";
 import { LogsView } from "@/modules/logs/LogsView";
 import { TasksTable } from "@/entities/tasks";
+import { Select } from "@/ui/select";
 
 /* Deployment history, the deployment page and their actions (Phase 15a). */
 
@@ -731,16 +732,15 @@ export function ProjectDeployments({
   const params = new URLSearchParams({ environment: env });
   if (service) params.set("service", service);
   if (status) params.set("status", status);
-  const sel =
-    "bg-bg border-line-strong h-7 rounded-input border px-1.5 text-xs";
   return (
     <div className={cn("flex flex-col", gap)}>
       <div className="flex flex-wrap items-center gap-2">
-        <select
+        <Select
           value={service}
-          onChange={(e) => setService(e.target.value)}
-          className={cn(sel, "max-w-56")}
+          onChange={setService}
           aria-label="Service"
+          size="sm"
+          className="max-w-56"
         >
           <option value="">All services</option>
           {services.map((s) => (
@@ -748,12 +748,12 @@ export function ProjectDeployments({
               {s}
             </option>
           ))}
-        </select>
-        <select
+        </Select>
+        <Select
           value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className={sel}
+          onChange={setStatus}
           aria-label="Status"
+          size="sm"
         >
           <option value="">Any status</option>
           {Object.entries(deploymentStatusLabel).map(([k, label]) => (
@@ -761,7 +761,7 @@ export function ProjectDeployments({
               {label}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
       <DeploymentsTable
         path={`/projects/${project}/deployments?${params}`}

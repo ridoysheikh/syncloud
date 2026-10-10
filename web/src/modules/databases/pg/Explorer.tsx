@@ -31,7 +31,6 @@ import { Tabs } from "@/ui/Tabs";
 import { Alert, Button, IconButton, Input, Toggle } from "@/ui/controls";
 import { DataTable } from "@/ui/DataTable";
 import { cn, gap } from "@/ui/cn";
-import { selectClass } from "../NewDatabaseWizard";
 import { PrivilegesEditor } from "./Privileges";
 import {
   ago,
@@ -43,9 +42,9 @@ import {
   kindOrder,
   ResultGrid,
   SqlBlock,
-  inlineSelect,
 } from "./shared";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 type Selection =
   | { kind: "database" }
@@ -99,11 +98,11 @@ export function PgExplorer({
         }
       >
         <div className="border-line flex flex-col gap-1.5 border-b p-2">
-          <select
-            className={selectClass}
+          <Select
             value={db}
-            onChange={(e) => setDb(e.target.value)}
+            onChange={setDb}
             aria-label="Database"
+            className="w-full"
           >
             {(dbs.data ?? []).map((d) => (
               <option key={d.name} value={d.name}>
@@ -111,7 +110,7 @@ export function PgExplorer({
                 {d.primary ? " (cluster database)" : ""}
               </option>
             ))}
-          </select>
+          </Select>
           <div className="relative">
             <Search className="text-faint absolute top-1/2 left-2 size-3.5 -translate-y-1/2" />
             <Input
@@ -962,28 +961,30 @@ function DataView({
             </button>
           </span>
         ))}
-        <select
-          className={cn(inlineSelect, "w-36")}
+        <Select
           value={draft.column}
-          onChange={(e) => setDraft({ ...draft, column: e.target.value })}
+          onChange={(v) => setDraft({ ...draft, column: v })}
           aria-label="Filter column"
+          size="sm"
+          className="w-36"
         >
           {cols.map((c) => (
             <option key={c.name}>{c.name}</option>
           ))}
-        </select>
-        <select
-          className={cn(inlineSelect, "w-24")}
+        </Select>
+        <Select
           value={draft.op}
-          onChange={(e) => setDraft({ ...draft, op: e.target.value })}
+          onChange={(v) => setDraft({ ...draft, op: v })}
           aria-label="Filter operator"
+          size="sm"
+          className="w-24"
         >
           {OPS.map(([v, l]) => (
             <option key={v} value={v}>
               {l}
             </option>
           ))}
-        </select>
+        </Select>
         {draft.op !== "null" && draft.op !== "notnull" && (
           <Input
             value={draft.value}

@@ -169,7 +169,17 @@ function JobDialog({ job, onClose }: { job: Job; onClose: () => void }) {
   const sel = selected ?? runs.find((r) => r.status !== "skipped")?.id;
 
   return (
-    <Dialog open onClose={onClose} title={`Job ${job.name}`} wide>
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Job ${job.name}`}
+      size="xl"
+      footer={
+        <Button variant="ghost" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
       <div className="flex flex-col gap-2">
         <div className="text-muted text-xs">
           <span className="font-mono">
@@ -250,11 +260,6 @@ function JobDialog({ job, onClose }: { job: Job; onClose: () => void }) {
         {sel && (
           <LogsView key={sel} filter={{ task: sel }} showSource={false} />
         )}
-        <div className="flex justify-end">
-          <Button variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
       </div>
     </Dialog>
   );

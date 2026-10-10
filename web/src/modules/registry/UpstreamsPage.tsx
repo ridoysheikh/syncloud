@@ -10,6 +10,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
+import { Combobox } from "@/ui/select";
 
 interface Credential {
   id: string;
@@ -117,17 +118,12 @@ export function UpstreamsPage() {
               label="Registry host"
               hint="One credential per host; saving again replaces it."
             >
-              <Input
+              <Combobox
                 value={host}
-                onChange={(e) => setHost(e.target.value)}
-                list="upstream-hosts"
+                onChange={setHost}
+                suggestions={presets}
                 className="font-mono"
               />
-              <datalist id="upstream-hosts">
-                {presets.map((p) => (
-                  <option key={p} value={p} />
-                ))}
-              </datalist>
             </Field>
             <Field label="Username">
               <Input

@@ -16,6 +16,7 @@ import {
 } from "@/ui/controls";
 import { ChoiceField, Segmented } from "@/ui/choice";
 import { confirmAction } from "@/ui/dialogs";
+import { Select } from "@/ui/select";
 
 interface DomainCheck {
   host: string;
@@ -97,8 +98,6 @@ export function DomainsPanel({
     if (ready) add.mutate();
   };
   if (httpPorts.length === 0) return null;
-  const select =
-    "bg-bg border-line-strong h-8 rounded-input border px-2 text-sm outline-none";
 
   return (
     <Panel title="Custom domains" flush>
@@ -139,17 +138,16 @@ export function DomainsPanel({
             </Field>
             {httpPorts.length > 1 && (
               <Field label="Port">
-                <select
+                <Select
                   value={port}
-                  onChange={(e) => setPort(e.target.value)}
-                  className={select}
+                  onChange={setPort}
                 >
                   {httpPorts.map((p) => (
                     <option key={p} value={p}>
                       {p}
                     </option>
                   ))}
-                </select>
+                </Select>
               </Field>
             )}
             {prefix && (
