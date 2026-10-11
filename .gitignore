@@ -16,6 +16,8 @@
 *.swp
 /.tools/
 /dist/
+/plan/
+plan/
 
 # dependencies and logs anywhere
 node_modules/
