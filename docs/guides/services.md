@@ -16,7 +16,7 @@ Services only exist inside a project environment. Create them with **New service
 
 | Setting | Notes |
 | --- | --- |
-| **Image** | Any registry image (`nginx:1.27`, `ghcr.io/acme/api:v2`), or `@registry/<project>/<name>:<tag>` from the built-in registry. Private registries: **Registry → Upstreams**. |
+| **Image** | Any registry image (`nginx:1.27`, `ghcr.io/acme/api:v2`), or `@registry/<project>/<name>:<tag>` from the built-in registry. Each revision runs the exact image its tag pointed to; new pushes are deployed by a redeploy or [image updates](deployments.md#image-updates). Private registries: **Registry → Upstreams**. |
 | **Command / entrypoint** | Override the image's. |
 | **Ports** | Each has a name, a container port and a protocol: `http` (gets an HTTPS address), `tcp` or `udp`. No ports makes a worker. |
 | **Health check** | `http` (a path), `tcp` (the port accepts connections) or `cmd` (exit 0). Only healthy tasks get traffic, and unhealthy ones are replaced. |

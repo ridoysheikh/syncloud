@@ -15146,6 +15146,353 @@
           }
         }
       }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/auto-deploy": {
+      "get": {
+        "operationId": "getAutoDeploy",
+        "tags": [
+          "services"
+        ],
+        "summary": "A service's auto-deploy of new pushes of its image",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoDeploy"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "setAutoDeploy",
+        "tags": [
+          "services"
+        ],
+        "summary": "Watch the image's registry and deploy new pushes of its tag (the built-in registry at once, others every pollSeconds)",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "autoDeploy": {
+                    "type": "boolean"
+                  },
+                  "pollSeconds": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 86400,
+                    "default": 300
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoDeploy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/auto-deploy/webhook": {
+      "post": {
+        "operationId": "createDeployWebhook",
+        "tags": [
+          "services"
+        ],
+        "summary": "Make a new deploy webhook URL for CI to call after pushing the image (shown once; replaces the previous one)",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDeployWebhook",
+        "tags": [
+          "services"
+        ],
+        "summary": "Remove the deploy webhook",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/environments/{env}/services/{service}/auto-deploy/check": {
+      "post": {
+        "operationId": "checkImage",
+        "tags": [
+          "services"
+        ],
+        "summary": "Check the registry now and deploy a newer push of the image's tag",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checked (200) or deploying (202)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageUpdate"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Checked (200) or deploying (202)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageUpdate"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "423": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/hooks/image/{token}": {
+      "post": {
+        "operationId": "imageWebhook",
+        "tags": [
+          "services"
+        ],
+        "security": [],
+        "summary": "Deploy webhook: deploys the newest push of the service's image tag; the token in the path is the secret",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checked (200) or deploying (202)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageUpdate"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Checked (200) or deploying (202)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageUpdate"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "423": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -20216,6 +20563,65 @@
                 "type": "string"
               }
             }
+          }
+        }
+      },
+      "AutoDeploy": {
+        "type": "object",
+        "properties": {
+          "watchable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "builtIn": {
+            "type": "boolean"
+          },
+          "autoDeploy": {
+            "type": "boolean"
+          },
+          "pollSeconds": {
+            "type": "integer"
+          },
+          "webhook": {
+            "type": "boolean"
+          },
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lastDigest": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "lastDeployAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "git": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ImageUpdate": {
+        "type": "object",
+        "properties": {
+          "deployed": {
+            "type": "boolean"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
           }
         }
       }

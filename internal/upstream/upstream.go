@@ -103,6 +103,17 @@ func (m *Manager) list(ctx context.Context) []cred {
 	return out
 }
 
+// Credential returns the username and password stored for a registry host.
+func (m *Manager) Credential(ctx context.Context, host string) (string, string, bool) {
+	host = NormalizeHost(host)
+	for _, c := range m.list(ctx) {
+		if c.Host == host {
+			return c.Username, c.password, true
+		}
+	}
+	return "", "", false
+}
+
 // RegistryAuth is the X-Registry-Auth header value for pulling image, or ""
 // when no credential matches its registry.
 func (m *Manager) RegistryAuth(ctx context.Context, image string) string {

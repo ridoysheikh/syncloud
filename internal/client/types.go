@@ -1565,3 +1565,53 @@ func (c *Client) PutUpstreamCredential(ctx context.Context, host, username, pass
 func (c *Client) DeleteUpstreamCredential(ctx context.Context, id string) error {
 	return c.Do(ctx, "DELETE", "/api/v1/registry/upstreams/"+url.PathEscape(id), nil, nil)
 }
+
+// AutoDeploy is a service's auto-deploy of new pushes of its image.
+type AutoDeploy struct {
+	Watchable    bool       `json:"watchable"`
+	Reason       string     `json:"reason,omitempty"`
+	Git          bool       `json:"git"`
+	BuiltIn      bool       `json:"builtIn"`
+	AutoDeploy   bool       `json:"autoDeploy"`
+	PollSeconds  int        `json:"pollSeconds"`
+	Webhook      bool       `json:"webhook"`
+	CheckedAt    *time.Time `json:"checkedAt"`
+	LastDigest   string     `json:"lastDigest"`
+	LastError    string     `json:"lastError"`
+	LastDeployAt *time.Time `json:"lastDeployAt"`
+}
+
+// ImageUpdate is the outcome of a check for a newer push of an image.
+type ImageUpdate struct {
+	Deployed bool   `json:"deployed"`
+	Digest   string `json:"digest"`
+	Revision int    `json:"revision"`
+	Message  string `json:"message"`
+}
+
+func (c *Client) GetAutoDeploy(ctx context.Context, project, env, service string) (AutoDeploy, error) {
+	var out AutoDeploy
+	return out, c.Do(ctx, "GET", svcPath(project, env, service)+"/auto-deploy", nil, &out)
+}
+
+func (c *Client) SetAutoDeploy(ctx context.Context, project, env, service string, on bool, pollSeconds int) (AutoDeploy, error) {
+	var out AutoDeploy
+	return out, c.Do(ctx, "PUT", svcPath(project, env, service)+"/auto-deploy", map[string]any{"autoDeploy": on, "pollSeconds": pollSeconds}, &out)
+}
+
+// CreateDeployWebhook returns the new deploy webhook's path (it holds the secret).
+func (c *Client) CreateDeployWebhook(ctx context.Context, project, env, service string) (string, error) {
+	var out struct {
+		Path string `json:"path"`
+	}
+	return out.Path, c.Do(ctx, "POST", svcPath(project, env, service)+"/auto-deploy/webhook", nil, &out)
+}
+
+func (c *Client) DeleteDeployWebhook(ctx context.Context, project, env, service string) error {
+	return c.Do(ctx, "DELETE", svcPath(project, env, service)+"/auto-deploy/webhook", nil, nil)
+}
+
+func (c *Client) CheckImage(ctx context.Context, project, env, service string) (ImageUpdate, error) {
+	var out ImageUpdate
+	return out, c.Do(ctx, "POST", svcPath(project, env, service)+"/auto-deploy/check", nil, &out)
+}

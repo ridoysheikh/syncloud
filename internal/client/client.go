@@ -255,3 +255,6 @@ func (c *Client) Send(ctx context.Context, method, path string, body []byte, con
 	}
 	return resp, nil
 }
+
+// Endpoint is the controller's address, e.g. "https://203-0-113-10.sslip.io".
+func (c *Client) Endpoint() string { return strings.TrimSuffix(c.endpoint.String(), "/") }

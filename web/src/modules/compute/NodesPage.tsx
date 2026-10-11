@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, LayoutGrid, Plus, Rows3 } from "lucide-react";
+import { LayoutGrid, Plus, Rows3 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useNodes, type Node } from "@/lib/nodes";
 import { PageHeader } from "@/ui/PageHeader";
@@ -11,6 +11,7 @@ import { Alert, Button, Field, IconButton } from "@/ui/controls";
 import { cn, gap, pad } from "@/ui/cn";
 import { NodeGrid, NodesTable } from "@/entities/nodes";
 import { confirmAction } from "@/ui/dialogs";
+import { CopyBox } from "@/ui/CopyBox";
 
 type View = "table" | "cards";
 const VIEW_KEY = "syncloud.nodes.view";
@@ -211,7 +212,7 @@ function AddNodeDialog({
       ) : (
         <div className="flex flex-col gap-2.5">
           <Field label="Run on the new server">
-            <CommandBox
+            <CopyBox wrap
               value={token.command ?? `curl -fsSL ${origin}/join.sh | sudo bash -s -- --token ${token.token}`}
             />
           </Field>
@@ -228,7 +229,7 @@ function AddNodeDialog({
               Agent already installed?
             </summary>
             <div className="mt-1.5">
-              <CommandBox
+              <CopyBox wrap
                 value={`syncloud-agent join --controller ${origin} --token ${token.token} && syncloud-agent run`}
               />
             </div>
@@ -236,31 +237,5 @@ function AddNodeDialog({
         </div>
       )}
     </Dialog>
-  );
-}
-
-function CommandBox({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="bg-bg border-line-strong flex items-start gap-1 rounded-input border p-1.5 pl-2">
-      <code className="flex-1 font-mono text-xs break-all select-all">
-        {value}
-      </code>
-      <IconButton
-        label="Copy"
-        onClick={() =>
-          navigator.clipboard?.writeText(value).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          })
-        }
-      >
-        {copied ? (
-          <Check className="text-ok size-3.5" />
-        ) : (
-          <Copy className="size-3.5" />
-        )}
-      </IconButton>
-    </div>
   );
 }

@@ -858,6 +858,9 @@ const (
 	TriggerVariables    = "variables"
 	TriggerRedeploy     = "redeploy"
 	TriggerConfig       = "config"
+	// TriggerImage: a new push of the service's image tag (auto-deploy or
+	// the deploy webhook).
+	TriggerImage = "image"
 )
 
 // DeployCancelled marks a deployment stopped by a user.

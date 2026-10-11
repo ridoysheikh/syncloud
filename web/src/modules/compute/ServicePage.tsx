@@ -231,7 +231,9 @@ export function ServicePage() {
           hint={
             svc.spec.image === AWAITING_BUILD
               ? "waiting for the first build"
-              : svc.spec.image
+              : svc.spec.imageDigest
+                ? `${svc.spec.image} · ${svc.spec.imageDigest.slice(0, 19)}`
+                : svc.spec.image
           }
         />
         <StatTile

@@ -34,6 +34,7 @@ var noCommand = map[string]string{
 	"getRegistryToken":   "used by `docker login` / the Docker registry token protocol",
 	"getScalingCharts":   "charts for the dashboard; `synctl autoscale history` lists the changes",
 	"gitWebhook":         "called by Git hosts on push",
+	"imageWebhook":       "called by CI after pushing an image (`synctl services auto-deploy webhook` makes the URL)",
 	"gitHubAppWebhook":   "called by GitHub for a GitHub App",
 	"completeGitHubApp":  "browser-only: GitHub redirects the person here after creating the app",
 	"approveDevice":      "browser-only: the person confirms synctl login in the dashboard",

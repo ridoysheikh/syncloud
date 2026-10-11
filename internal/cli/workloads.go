@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -871,8 +872,126 @@ func (a *app) servicesCmd() *cobra.Command {
 		},
 		redeployCmd,
 		rollbackCmd,
+		a.autoDeployCmd(withClient, &s),
 	)
 	return svc
+}
+
+// autoDeployCmd is `synctl services auto-deploy`: deploying new pushes of
+// a service's image tag.
+func (a *app) autoDeployCmd(withClient func(func(*cobra.Command, *client.Client, []string) error) func(*cobra.Command, []string) error, s *scope) *cobra.Command {
+	printAD := func(v client.AutoDeploy) error {
+		if a.output == "json" {
+			return a.printer().json(v)
+		}
+		if !v.Watchable {
+			fmt.Fprintf(a.out, "Not available: %s\n", v.Reason)
+			return nil
+		}
+		switch {
+		case v.AutoDeploy && v.BuiltIn:
+			fmt.Fprintln(a.out, "Auto-deploy: on (built-in registry: pushes deploy within seconds)")
+		case v.AutoDeploy:
+			fmt.Fprintf(a.out, "Auto-deploy: on (checks every %ds)\n", v.PollSeconds)
+		default:
+			fmt.Fprintln(a.out, "Auto-deploy: off")
+		}
+		fmt.Fprintf(a.out, "Deploy webhook: %s\n", map[bool]string{true: "active", false: "none"}[v.Webhook])
+		if v.CheckedAt != nil {
+			fmt.Fprintf(a.out, "Last checked: %s", v.CheckedAt.Local().Format(time.DateTime))
+			if v.LastDigest != "" {
+				fmt.Fprintf(a.out, " (tag points to %s)", v.LastDigest)
+			}
+			fmt.Fprintln(a.out)
+		}
+		if v.LastError != "" {
+			fmt.Fprintf(a.out, "Last error: %s\n", v.LastError)
+		}
+		return nil
+	}
+	var interval time.Duration
+	ad := &cobra.Command{
+		Use: "auto-deploy", Short: "Deploy new pushes of a service's image tag (watch the registry, or a deploy webhook for CI)",
+	}
+	set := func(on bool) *cobra.Command {
+		use, short := "off NAME", "Stop watching the image's registry"
+		if on {
+			use, short = "on NAME", "Watch the image's registry and deploy new pushes of its tag"
+		}
+		return &cobra.Command{
+			Use: use, Short: short, Args: cobra.ExactArgs(1),
+			Annotations: op("setAutoDeploy"),
+			RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+				v, err := c.SetAutoDeploy(ctx(cmd), s.project, s.env, args[0], on, int(interval.Seconds()))
+				if err != nil {
+					return err
+				}
+				return printAD(v)
+			}),
+		}
+	}
+	on, off := set(true), set(false)
+	on.Flags().DurationVar(&interval, "interval", 5*time.Minute, "how often other registries than the built-in one are checked (1m–24h)")
+	off.Flags().DurationVar(&interval, "interval", 5*time.Minute, "")
+	_ = off.Flags().MarkHidden("interval")
+	ad.AddCommand(
+		&cobra.Command{
+			Use: "get NAME", Aliases: []string{"status"}, Short: "Show auto-deploy, the deploy webhook and the last check", Args: cobra.ExactArgs(1),
+			Annotations: op("getAutoDeploy"),
+			RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+				v, err := c.GetAutoDeploy(ctx(cmd), s.project, s.env, args[0])
+				if err != nil {
+					return err
+				}
+				return printAD(v)
+			}),
+		},
+		on, off,
+		&cobra.Command{
+			Use: "check NAME", Short: "Check the registry now and deploy a newer push of the image's tag", Args: cobra.ExactArgs(1),
+			Annotations: op("checkImage"),
+			RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+				up, err := c.CheckImage(ctx(cmd), s.project, s.env, args[0])
+				if err != nil {
+					return err
+				}
+				if a.output == "json" {
+					return a.printer().json(up)
+				}
+				fmt.Fprintln(a.out, up.Message)
+				return nil
+			}),
+		},
+		&cobra.Command{
+			Use: "webhook NAME", Short: "Make a new deploy webhook URL for CI (shown once; replaces the previous one)", Args: cobra.ExactArgs(1),
+			Annotations: op("createDeployWebhook"),
+			// The URL is called by CI after it pushes: POST /api/v1/hooks/image/{token}.
+			RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+				path, err := c.CreateDeployWebhook(ctx(cmd), s.project, s.env, args[0])
+				if err != nil {
+					return err
+				}
+				u := c.Endpoint() + path
+				if a.output == "json" {
+					return a.printer().json(map[string]string{"url": u})
+				}
+				fmt.Fprintf(a.out, "%s\n\nCall it from CI after pushing the image:\n  curl -fsS -X POST %s\nIt is not shown again: store it as a CI secret.\n", u, u)
+				return nil
+			}),
+		},
+		&cobra.Command{
+			Use: "remove-webhook NAME", Short: "Remove the deploy webhook", Args: cobra.ExactArgs(1),
+			Annotations: op("deleteDeployWebhook"),
+			RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
+				if err := c.DeleteDeployWebhook(ctx(cmd), s.project, s.env, args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(a.out, "Removed the deploy webhook of %s\n", args[0])
+				return nil
+			}),
+		},
+	)
+	return ad
 }
 
 func (a *app) printDeployments(ds []client.Deployment, withService bool) error {

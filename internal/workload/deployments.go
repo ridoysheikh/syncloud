@@ -176,9 +176,19 @@ func (m *Manager) Redeploy(ctx context.Context, serviceID, actor string, runHook
 	if err := m.checkLock(ctx, sv.EnvironmentID); err != nil {
 		return ServiceView{}, err
 	}
+	// A redeploy gets the image its tag points to now: a newer push of the
+	// same tag is deployed (and pulled by every node).
+	cur := spec
+	if err := m.pinImage(ctx, &spec, &cur, true); err != nil {
+		return ServiceView{}, err
+	}
+	msg := "redeploy"
+	if spec.ImageDigest != "" && spec.ImageDigest != cur.ImageDigest {
+		msg = "redeploy with a newer image"
+	}
 	spec.RedeployedAt = m.now().UTC().Format(time.RFC3339Nano)
 	ctx = WithCause(ctx, Cause{Trigger: store.TriggerRedeploy})
-	if err := m.rollout(ctx, sv, spec.Canonical(), sv.DesiredCount, actor, runHooks, "redeploy"); err != nil {
+	if err := m.rollout(ctx, sv, spec.Canonical(), sv.DesiredCount, actor, runHooks, msg); err != nil {
 		return ServiceView{}, err
 	}
 	m.Enqueue(sv.ID)

@@ -11,6 +11,7 @@ import {
   CircleX,
   GitCommitHorizontal,
   History,
+  Package,
   Play,
   RefreshCw,
   RotateCcw,
@@ -61,6 +62,7 @@ const triggers: Record<string, { label: string; icon: LucideIcon }> = {
   variables: { label: "Shared variables", icon: Variable },
   redeploy: { label: "Redeploy", icon: RefreshCw },
   config: { label: "Configuration", icon: Settings2 },
+  image: { label: "New image push", icon: Package },
 };
 
 export function TriggerLabel({ d }: { d: Deployment }) {

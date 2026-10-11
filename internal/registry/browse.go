@@ -189,6 +189,20 @@ func (b *Browser) HasImage(ctx context.Context, repo, ref string) (bool, error) 
 	return true, nil
 }
 
+// Digest is the manifest digest repo's ref (a tag) points to now.
+func (b *Browser) Digest(ctx context.Context, repo, ref string) (string, error) {
+	resp, err := b.do(ctx, http.MethodHead, "/v2/"+repo+"/manifests/"+ref, manifestAccept, repoAccess(repo, "pull"))
+	if err != nil {
+		return "", err
+	}
+	resp.Body.Close()
+	d := resp.Header.Get("Docker-Content-Digest")
+	if d == "" {
+		return "", fmt.Errorf("registry: no digest for %s:%s", repo, ref)
+	}
+	return d, nil
+}
+
 // Images lists a repository's tags, newest first.
 func (b *Browser) Images(ctx context.Context, repo string) ([]Image, error) {
 	tags, err := b.tags(ctx, repo)

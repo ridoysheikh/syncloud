@@ -1,6 +1,6 @@
 import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, Plus, Ticket, Trash2 } from "lucide-react";
+import { KeyRound, Plus, Ticket, Trash2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
@@ -10,6 +10,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
+import { CopyBox } from "@/ui/CopyBox";
 
 interface AccessKey {
   id: string;
@@ -299,31 +300,11 @@ function SecretDialog({
         <Alert tone="warn">This is the only time the secret is shown. Store it somewhere safe now.</Alert>
         {values.map(([label, value]) => (
           <Field key={label} label={label}>
-            <CopyValue value={value} />
+            <CopyBox value={value} />
           </Field>
         ))}
         {hint && <p className="text-muted text-xs">{hint}</p>}
       </div>
     </Dialog>
-  );
-}
-
-function CopyValue({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="bg-bg border-line-strong flex h-8 items-center rounded-input border pl-2">
-      <code className="flex-1 truncate font-mono text-xs select-all">{value}</code>
-      <IconButton
-        label="Copy"
-        onClick={() =>
-          navigator.clipboard?.writeText(value).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          })
-        }
-      >
-        {copied ? <Check className="text-ok size-3.5" /> : <Copy className="size-3.5" />}
-      </IconButton>
-    </div>
   );
 }

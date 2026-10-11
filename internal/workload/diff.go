@@ -25,6 +25,7 @@ func Diff(a, b Spec) []Change {
 		}
 	}
 	add("image", a.Image, b.Image)
+	add("image digest", shortDigest(a.ImageDigest), shortDigest(b.ImageDigest))
 	add("entrypoint", strings.Join(a.Entrypoint, " "), strings.Join(b.Entrypoint, " "))
 	add("command", strings.Join(a.Command, " "), strings.Join(b.Command, " "))
 	out = append(out, envDiff("variable", a.Env, b.Env)...)
@@ -161,4 +162,12 @@ func jsonString(v any) string {
 		return s
 	}
 	return ""
+}
+
+// shortDigest is a digest as Docker shows it: "sha256:" and 12 hex digits.
+func shortDigest(d string) string {
+	if len(d) > len("sha256:")+12 {
+		return d[:len("sha256:")+12]
+	}
+	return d
 }

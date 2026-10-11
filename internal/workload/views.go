@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/imageref"
 	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
@@ -247,6 +248,19 @@ func (m *Manager) Apply(ctx context.Context, env store.Environment, name string,
 	if desired > maxDesired {
 		return ServiceView{}, false, ErrInvalid{fmt.Errorf("desiredCount must be at most %d", maxDesired)}
 	}
+	// The image's digest is the platform's: kept while the image stays the
+	// same (a config change never upgrades the app), resolved anew when it
+	// changes or when asked to (a redeploy, an image auto-deploy).
+	var cur *Spec
+	if sv, err := m.st.ServiceByName(ctx, env.ID, name); err == nil {
+		if s, err := m.SpecFor(ctx, sv.ID, sv.Revision); err == nil {
+			cur = &s
+		}
+	}
+	refresh, _ := ctx.Value(refreshImageKey{}).(bool)
+	if err := m.pinImage(ctx, &spec, cur, refresh); err != nil {
+		return ServiceView{}, false, err
+	}
 	if err := m.checkLock(ctx, env.ID); err != nil {
 		return ServiceView{}, false, err
 	}
@@ -377,7 +391,7 @@ func (m *Manager) startDeployment(ctx context.Context, serviceID string, fromRev
 func (m *Manager) prePull(ctx context.Context, serviceID string, fromRev, toRev int) {
 	from, err1 := m.SpecFor(ctx, serviceID, fromRev)
 	to, err2 := m.SpecFor(ctx, serviceID, toRev)
-	if err1 != nil || err2 != nil || from.Image == to.Image || to.Image == AwaitingBuild || m.gw == nil {
+	if err1 != nil || err2 != nil || from.ImageRef() == to.ImageRef() || to.Image == AwaitingBuild || m.gw == nil {
 		return
 	}
 	sv, err := m.st.ServiceByID(ctx, serviceID)
@@ -400,7 +414,7 @@ func (m *Manager) prePull(ctx context.Context, serviceID string, fromRev, toRev 
 			targets[n.ID] = true
 		}
 	}
-	image, auth := to.Image, ""
+	image, auth := to.ImageRef(), ""
 	if m.ResolveImage != nil {
 		image, auth = m.ResolveImage(image)
 	}
@@ -655,4 +669,44 @@ func (m *Manager) PreDeployDone(ctx context.Context, depID string, ok bool, msg 
 	if v, err := m.ServiceView(ctx, dep.ServiceID); err == nil {
 		m.bus.Publish(TopicService, v)
 	}
+}
+
+type refreshImageKey struct{}
+
+// WithImageRefresh makes Apply resolve the image's tag again even when the
+// image is unchanged, picking up a newer push (image auto-deploys).
+func WithImageRefresh(ctx context.Context) context.Context {
+	return context.WithValue(ctx, refreshImageKey{}, true)
+}
+
+// pinImage sets spec's ImageDigest (see Apply). A tag that does not exist
+// is refused; a registry that cannot be reached leaves the current pin, or
+// none, so deploys never depend on a registry being up.
+func (m *Manager) pinImage(ctx context.Context, spec *Spec, cur *Spec, refresh bool) error {
+	spec.ImageDigest = ""
+	if spec.Image == AwaitingBuild || HasDigest(spec.Image) {
+		return nil
+	}
+	if cur != nil && cur.Image == spec.Image && !refresh {
+		spec.ImageDigest = cur.ImageDigest
+		return nil
+	}
+	if m.ResolveDigest == nil {
+		return nil
+	}
+	rctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	d, err := m.ResolveDigest(rctx, spec.Image)
+	switch {
+	case err == nil:
+		spec.ImageDigest = d
+	case errors.Is(err, imageref.ErrNotFound):
+		return ErrInvalid{fmt.Errorf("image %s was not found in its registry", spec.Image)}
+	default:
+		m.log.Warn("could not check the image's digest; deploying the tag as it is on the nodes", "image", spec.Image, "err", err)
+		if cur != nil && cur.Image == spec.Image {
+			spec.ImageDigest = cur.ImageDigest
+		}
+	}
+	return nil
 }

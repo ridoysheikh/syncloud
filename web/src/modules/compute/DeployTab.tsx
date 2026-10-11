@@ -17,8 +17,9 @@ import {
 } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { CommandPanel } from "./CommandOverride";
+import { ImageUpdatesPanel } from "./ImageUpdates";
 
-/* Service › Deploy (Phase 15b): command, release commands, build settings, rollout. */
+/* Service › Deploy (Phase 15b): image updates, command, release commands, build settings, rollout. */
 
 interface HookJob {
   name: string;
@@ -686,6 +687,7 @@ export function DeployTab({
 }) {
   return (
     <div className={cn("flex flex-col", gap)}>
+      <ImageUpdatesPanel path={path} image={spec.image} />
       <CommandPanel
         key={JSON.stringify([spec.entrypoint, spec.command])}
         path={path}

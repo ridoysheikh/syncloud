@@ -17,6 +17,8 @@ export type ResourceMode = "shared" | "reserved";
 
 export interface Spec {
   image: string;
+  /** The digest the image's tag pointed to for this revision (set by the platform). */
+  imageDigest?: string;
   entrypoint?: string[];
   command?: string[];
   env?: Record<string, string>;

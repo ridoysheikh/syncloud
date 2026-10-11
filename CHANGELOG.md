@@ -2,6 +2,26 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.1.7]
+
+### Added
+
+- **Image updates for services that run a ready-made image** (**Deploy › Image updates**):
+  - **Deploy new pushes automatically** watches the image's registry and deploys a new push of its tag: within seconds for the built-in registry, every 5 minutes (or 1 minute to 1 hour) for others. **Check now** checks at once.
+  - **Deploy webhook:** a secret URL for CI to call after `docker push`, with any registry. It answers `202` when a deployment starts and `200` when the tag hasn't changed.
+  - Deployments started this way show **New image push** as their trigger. A locked environment, or one that deploys by hand, isn't deployed to.
+  - From the CLI: `synctl services auto-deploy on|off|check|webhook|get`.
+
+### Fixed
+
+- **Redeploy now deploys the newest push of the image's tag.** Before, nodes pulled an image only when they didn't have it yet, so after the first deploy a moved tag (`:latest`, `:main`, `:v2`) was never pulled again: a redeploy restarted the old image, and nodes could run different builds under the same tag. Each revision now records the exact image its tag pointed to (its digest), and every node runs exactly that. Changing a variable or setting keeps the image; a new image, a redeploy or an image update moves to the newest push. A rollback returns to the exact old image. The service page shows the digest next to the image.
+- A new image that doesn't exist in its registry is refused when it's set, instead of failing on the nodes.
+
+### Upgrading
+
+- Running services keep their image until their next redeploy, image change or image update; from then on they're pinned to a digest. If a registry can't be reached, deploys go ahead with the image as it is on the nodes.
+- Private registries need their credentials under **Registry › Upstreams** for checking tags, as for pulling.
+
 ## [0.1.6]
 
 ### Added

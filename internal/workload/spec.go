@@ -15,10 +15,16 @@ import (
 
 // Spec is one immutable task definition revision (one container per task).
 type Spec struct {
-	Image      string            `json:"image"`
-	Entrypoint []string          `json:"entrypoint,omitempty"` // replaces the image ENTRYPOINT
-	Command    []string          `json:"command,omitempty"`
-	Env        map[string]string `json:"env,omitempty"`
+	Image string `json:"image"`
+	// ImageDigest pins Image to the exact version its tag pointed to when
+	// the revision was made ("sha256:…"), set by the platform: every node
+	// pulls exactly that, a redeploy picks up a newer push of the same
+	// tag, and a rollback returns to the exact old image. Empty when the
+	// image names its own digest or could not be resolved.
+	ImageDigest string            `json:"imageDigest,omitempty"`
+	Entrypoint  []string          `json:"entrypoint,omitempty"` // replaces the image ENTRYPOINT
+	Command     []string          `json:"command,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
 	// SharedEnv is a snapshot of the environment's shared variables, taken
 	// by the platform for every revision (never user-set). Env wins over it.
 	SharedEnv map[string]string `json:"sharedEnv,omitempty"`
@@ -183,6 +189,19 @@ func ValidName(s string) error {
 	}
 	return nil
 }
+
+// ImageRef is what nodes pull and run: the image pinned to its digest
+// ("nginx:1.27@sha256:…"; Docker ignores the tag), or the image as given.
+func (s Spec) ImageRef() string {
+	if s.ImageDigest == "" || HasDigest(s.Image) {
+		return s.Image
+	}
+	return s.Image + "@" + s.ImageDigest
+}
+
+// HasDigest reports whether an image reference names its own digest
+// ("repo@sha256:…"): nothing to resolve.
+func HasDigest(image string) bool { return strings.Contains(image, "@sha256:") }
 
 // AwaitingBuild is the image of a service built from Git before its first
 // build: it runs no tasks until a build is deployed (§5.8).

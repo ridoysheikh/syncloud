@@ -21,9 +21,9 @@ If new tasks keep failing, the **circuit breaker** stops the rollout and returns
 Each service's **Deployments** tab, and the project's **Deployments** tab for all of its services, lists every rollout with:
 
 - **status:** running pre-deploy, in progress, succeeded, failed, rolled back, superseded or cancelled;
-- **trigger:** manual, Git push (with the commit), rollback, automatic rollback, variables, redeploy;
+- **trigger:** manual, Git push (with the commit), new image push, rollback, automatic rollback, variables, redeploy;
 - **who** started it, when, and how long it took;
-- **what changed:** the image, ports, resources, and variables by name (never their values).
+- **what changed:** the image and its digest, ports, resources, and variables by name (never their values).
 
 Open one for its step-by-step timeline, the logs of its release commands, and its tasks.
 
@@ -49,8 +49,43 @@ The old revision's settings roll out as a new deployment, with the same health c
 
 ## Redeploy and cancel
 
-- **Redeploy** restarts every task, one at a time, with unchanged settings. Use it to pick up a new `:latest` image or recover from a bad state: `synctl services redeploy api`.
+- **Redeploy** restarts every task, one at a time. It also picks up the newest push of the image's tag, so a new `:latest` (or `:main`, `:v2`, …) is deployed. Use it to update the image or recover from a bad state: `synctl services redeploy api`.
 - **Cancel** stops a deployment in progress. A rollout that has started rolls back; one waiting on its pre-deploy commands stops them: `synctl services cancel-deployment api 42`.
+
+## Image updates
+
+A service that runs a ready-made image (not built from Git) refers to it by a tag, such as `ghcr.io/acme/api:main`. A tag can point to a new image after every push, so each revision records the exact image the tag pointed to when the revision was made (its **digest**, `sha256:…`):
+
+- every node runs that exact image, even one that pulled the tag earlier;
+- a rollback returns to the exact old image, not to whatever the tag points to now;
+- changing a variable or a setting keeps the image as it is; only a new image, a **Redeploy** or an image update moves to a newer push.
+
+The service page shows the digest next to the image. To pin an image yourself, give it with its digest (`nginx@sha256:…`); it is then never updated.
+
+New pushes are deployed from the service's **Deploy › Image updates**:
+
+- **Deploy new pushes automatically** watches the registry. Images in the built-in registry are deployed within seconds of a push. Images in other registries are checked every 5 minutes, or at an interval you choose (1 minute to 1 hour). **Check now** checks at once.
+- **Deploy webhook** gives a secret URL for CI to call after it pushes. The newest push of the tag is deployed at once, with any registry, whether automatic deploys are on or not:
+
+  ```sh
+  docker push ghcr.io/acme/api:main
+  curl -fsS -X POST "$SYNCLOUD_DEPLOY_HOOK"
+  ```
+
+  The URL is shown once, when it is made. **Make a new URL** replaces it; **Remove** turns it off. The call answers `202` with the deployment started, `200` when the tag has not changed, `423` when the environment is locked, and `409` when the environment deploys by hand.
+
+From the CLI:
+
+```sh
+synctl services auto-deploy on api -p shop --interval 5m    # watch the registry
+synctl services auto-deploy check api -p shop               # check now
+synctl services auto-deploy webhook api -p shop             # make a deploy webhook URL
+synctl services auto-deploy get api -p shop
+```
+
+Deployments started this way show **New image push** as their trigger. The environment's policy applies, as for Git builds: nothing is deployed to a locked environment, or to one that deploys by hand.
+
+Private registries need their credentials under **Registry › Upstreams**, for checking tags as for pulling. If a registry can't be reached, deploys go ahead with the image as it is on the nodes, and the image update tries again later.
 
 ## Locking an environment
 

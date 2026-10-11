@@ -50,6 +50,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/gitremote"
 	"github.com/ridoysheikh/syncloud/internal/gitserver"
 	"github.com/ridoysheikh/syncloud/internal/health"
+	"github.com/ridoysheikh/syncloud/internal/imageref"
 	"github.com/ridoysheikh/syncloud/internal/jobs"
 	"github.com/ridoysheikh/syncloud/internal/logs"
 	"github.com/ridoysheikh/syncloud/internal/mesh"
@@ -552,6 +553,7 @@ func serve(args []string) error {
 		ProbeToken: probeToken,
 	})
 	go healthMon.Run(ctx)
+	go workloads.RunImageWatch(ctx) // auto-deploy new pushes of image services' tags
 	if cfg.CentralProbes {
 		workloads.Reachable = healthMon.TaskReachable
 		workload.CentralCheck = func(id string) (string, string) {
@@ -571,10 +573,31 @@ func serve(args []string) error {
 	go gitServer.Run(ctx)
 	gw.AddHooks(execs.Hooks())
 	regBrowser := &dockerregistry.Browser{URL: "http://" + system.RegistryAddr, Issuer: regIssuer}
+	// What an image's tag points to now, for pinning revisions to a digest:
+	// the built-in registry directly, others with stored upstream credentials.
+	digests := &imageref.Resolver{Creds: upstreams.Credential}
+	workloads.ResolveDigest = func(ctx context.Context, image string) (string, error) {
+		path, ok := strings.CutPrefix(image, sysimage.RegistryPrefix)
+		if !ok {
+			return digests.Digest(ctx, image)
+		}
+		repo, tag := path, "latest"
+		if i := strings.LastIndexByte(path, ':'); i > strings.LastIndexByte(path, '/') {
+			repo, tag = path[:i], path[i+1:]
+		}
+		d, err := regBrowser.Digest(ctx, repo, tag)
+		if errors.Is(err, dockerregistry.ErrManifestNotFound) {
+			return "", fmt.Errorf("%w: %s", imageref.ErrNotFound, image)
+		}
+		return d, err
+	}
 	// Push, pull and delete notifications from the registry (§5.9).
 	regEvents := &dockerregistry.Events{
 		Store: st, Token: traefikToken, TokenHeader: system.TraefikTokenHeader, Log: log,
-		OnEvent: func(repos []string) { bus.Publish("registry.event", repos) },
+		OnEvent: func(repos []string) {
+			bus.Publish("registry.event", repos)
+			workloads.KickImageWatch() // a push may be a new version of a watched image
+		},
 	}
 	go regEvents.Prune(ctx)
 	// Lifecycle policies and garbage collection need the registry system task.

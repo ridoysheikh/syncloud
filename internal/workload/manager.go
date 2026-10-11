@@ -57,6 +57,8 @@ type Manager struct {
 	AdmitCount func(ctx context.Context, envID, what string) error
 	unplacedMu sync.Mutex
 	unplaced   map[string]Unplaced
+	// imageKick wakes the image watcher (a push to the built-in registry).
+	imageKick chan struct{}
 	// NodePool names a node's pool and its role ("" and "worker" for nodes
 	// outside any pool); edge nodes only run tasks that ask for their pool.
 	NodePool func(nodeID string) (pool, role string)
@@ -73,6 +75,9 @@ type Manager struct {
 	// ResolveImage turns "@registry/…" into the private registry's reference
 	// and returns pull credentials for the node (§5.9); may be nil.
 	ResolveImage func(image string) (ref, registryAuth string)
+	// ResolveDigest returns the digest an image's tag points to now (an
+	// image of the built-in registry or of any other); may be nil.
+	ResolveDigest func(ctx context.Context, image string) (string, error)
 	// RegistryCA returns a certificate nodes must trust to pull a resolved
 	// image ("" = none): the platform registry's, while self-signed.
 	RegistryCA func(ref string) string
@@ -108,6 +113,7 @@ func NewManager(st *store.Store, gw *agentgw.Gateway, reg *nodes.Registry, netRe
 	return &Manager{
 		st: st, gw: gw, nodes: reg, netReady: netReady, bus: bus, log: log, now: time.Now,
 		queue: make(chan string, 1024), queued: map[string]bool{}, specs: map[string]Spec{}, failures: map[string][]time.Time{},
+		imageKick: make(chan struct{}, 1),
 	}
 }
 
@@ -915,7 +921,7 @@ func TaskSpec(sv store.Service, spec Spec, t store.Task) *agentv1.TaskSpec {
 	ts := &agentv1.TaskSpec{
 		TaskId:     t.ID,
 		Name:       fmt.Sprintf("%s-%s-%s-%s", sv.Project, sv.Environment, sv.Name, short[:min(8, len(short))]),
-		Image:      spec.Image,
+		Image:      spec.ImageRef(),
 		Entrypoint: spec.Entrypoint,
 		Command:    spec.Command,
 		Env:        env,
