@@ -39,6 +39,34 @@ The new database:
 - keeps the source's database name, roles and passwords, so apps switch by changing only the host;
 - archives to the same bucket under its own prefix.
 
+## Restore from another server
+
+A WAL-G archive written by a PostgreSQL server **outside SynCloud** (a VM, another platform, a self-managed Patroni cluster) restores into a new managed database. SynCloud only reads the archive.
+
+1. Register the S3 endpoint the archive is on under **Storage**.
+2. Look at what the archive holds: its PostgreSQL version, whether it's encrypted, its base backups and the restore window.
+3. Restore, to a moment or to the archive's end:
+
+```sh
+synctl db archive --endpoint aws --bucket old-backups --prefix walg/main
+synctl db restore-archive shop -p shop --endpoint aws --bucket old-backups --prefix walg/main --database shop
+synctl db restore-archive shop --standalone --endpoint aws --bucket old-backups --prefix walg/main \
+  --key-file walg.key --key-transform hex --time 2026-10-12T19:00:00Z    # an encrypted archive, to a moment
+```
+
+In the dashboard: **Databases → Restore from another server**.
+
+- **Prefix** is the server's `WALG_S3_PREFIX` without `s3://bucket/` (the folder that holds `basebackups_005/` and `wal_005/`).
+- **Key:** an encrypted archive needs the server's `WALG_LIBSODIUM_KEY`, written as it is set there (`WALG_LIBSODIUM_KEY_TRANSFORM`: `none`, the WAL-G default, `hex` or `base64`). It's stored sealed with the new database's secrets. Archives encrypted with OpenPGP aren't supported.
+- **Version:** the new database runs the archive's PostgreSQL major version (17 or 18).
+
+The new database is an ordinary SynCloud database from then on:
+
+- It gets **SynCloud's own passwords** for the superuser, the replication user and the app user (`app`). Get them with `synctl db credentials NAME`. The old server's roles stay as they were, with their old passwords.
+- `app` becomes the owner of the **app database** (`--database`, by default the new database's name) and of the schemas, tables, views, sequences, functions and types in it. Objects of extensions keep their owner. If the archive has no database by that name, an empty one is created.
+- The old server's `postgresql.conf`, `postgresql.auto.conf`, `pg_hba.conf` and `pg_ident.conf` are not used. They're kept in the data directory as `*.source` for reference. Set what you need on the **Config** tab, and turn on the add-ons the data uses (TimescaleDB, pg_cron, …) on the **Extensions** tab.
+- It archives under its **own** prefix (by default the archive's bucket, `syncloud-pg/<id>`), encrypted with its own key, and never writes to the source archive.
+
 ## Good to know
 
 - **Members must reach the S3 endpoint.** For an S3 service inside the cluster (MinIO, Garage…), its [security group](network-security.md) must let the database in.

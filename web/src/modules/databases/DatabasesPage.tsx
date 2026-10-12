@@ -1,5 +1,10 @@
 import { Link } from "@tanstack/react-router";
-import { Database as DatabaseIcon, Globe, Plus } from "lucide-react";
+import {
+  ArchiveRestore,
+  Database as DatabaseIcon,
+  Globe,
+  Plus,
+} from "lucide-react";
 import { bytes } from "@/lib/nodes";
 import {
   dbUrl,
@@ -141,11 +146,19 @@ export function DatabasesPage() {
         crumbs={["Databases"]}
         title="Databases"
         actions={
-          <Link to={newTo}>
-            <Button variant="primary">
-              <Plus className="size-3.5" /> New database
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link to={"/databases/restore-archive" as string}>
+              <Button>
+                <ArchiveRestore className="size-3.5" /> Restore from another
+                server
+              </Button>
+            </Link>
+            <Link to={newTo}>
+              <Button variant="primary">
+                <Plus className="size-3.5" /> New database
+              </Button>
+            </Link>
+          </div>
         }
       />
       {error && (

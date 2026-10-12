@@ -139,7 +139,7 @@ func (s *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	cr := dbs.CreateRequest{Name: req.Name, Engine: req.Engine, Version: req.Version, Spec: req.Spec, Network: req.Network, Exists: s.dbPeerExists(r), Restore: req.Restore}
-	if req.Restore != nil {
+	if req.Restore != nil && req.Restore.Archive == nil {
 		// A restore copies the source's data and passwords: it takes the
 		// right to read the source's credentials.
 		src, err := s.store.DatabaseByName(r.Context(), req.Restore.From)
@@ -181,8 +181,33 @@ func (s *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 		s.databaseErr(w, "create database", err)
 		return
 	}
-	s.audit(r, u.ID, "database:Create", res, map[string]any{"engine": v.Engine, "memory": v.Spec.Memory, "replicas": v.Spec.Replicas, "public": v.Network.Public.Enabled, "restore": req.Restore})
+	restore := req.Restore
+	if restore != nil && restore.Archive != nil {
+		cp, a := *restore, *restore.Archive
+		a.Key = map[bool]string{true: "(set)"}[a.Key != ""] // never in the audit log
+		cp.Archive = &a
+		restore = &cp
+	}
+	s.audit(r, u.ID, "database:Create", res, map[string]any{"engine": v.Engine, "memory": v.Spec.Memory, "replicas": v.Spec.Replicas, "public": v.Network.Public.Enabled, "restore": restore})
 	writeJSON(w, http.StatusCreated, v)
+}
+
+// handleInspectPgArchive reads a WAL-G archive written outside SynCloud:
+// its base backups, restore window, version and encryption.
+func (s *Server) handleInspectPgArchive(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDatabases(w) {
+		return
+	}
+	var req dbs.PgArchive
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	out, err := s.databases.InspectArchive(r.Context(), req)
+	if err != nil {
+		s.databaseErr(w, "inspect archive", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleSetDatabaseNetwork(w http.ResponseWriter, r *http.Request) {

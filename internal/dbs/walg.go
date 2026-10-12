@@ -3,6 +3,7 @@ package dbs
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -102,7 +103,10 @@ func backupPrefix(d store.Database, b *PgBackupSpec) string {
 // PgRestore asks for a new cluster restored from another one's archive.
 type PgRestore struct {
 	// From is the source database (name). It is never changed.
-	From string `json:"from"`
+	From string `json:"from,omitempty"`
+	// Archive restores from a WAL-G archive written outside SynCloud
+	// instead (From is then empty).
+	Archive *PgArchive `json:"archive,omitempty"`
 	// Backup is a base backup name; default the newest one that finished
 	// before TargetTime (or the newest).
 	Backup string `json:"backup,omitempty"`
@@ -120,6 +124,10 @@ type RestoreState struct {
 	Prefix     string     `json:"prefix"`
 	Backup     string     `json:"backup"`
 	TargetTime *time.Time `json:"targetTime,omitempty"`
+	// External: the archive was written outside SynCloud (Source is then
+	// empty and SourceName its location); KeyTransform reads its key.
+	External     bool   `json:"external,omitempty"`
+	KeyTransform string `json:"keyTransform,omitempty"`
 }
 
 // S3Access is an S3 endpoint's address and credentials.
@@ -172,18 +180,27 @@ func (m *Manager) walgEnv(ctx context.Context, d store.Database, spec Spec, st S
 		env["WALG_LIBSODIUM_KEY"] = sec.WalgKey
 	}
 	if r := st.Restore; r != nil {
+		// The restore scripts switch WAL-G to the source's archive (its own
+		// endpoint, prefix and key); the cluster's own stay for archiving.
 		a, err := m.S3(ctx, r.Endpoint)
 		if err != nil {
 			return nil, fmt.Errorf("restore endpoint %s: %w", r.Endpoint, err)
 		}
-		if b == nil || b.Endpoint != r.Endpoint {
-			for k, v := range s3Env(a) {
-				env[k] = v
-			}
+		for k, v := range s3Env(a) {
+			env["WALG_RESTORE_"+k] = v
 		}
 		env["WALG_RESTORE_S3_PREFIX"] = "s3://" + r.Bucket + "/" + r.Prefix
 		env["WALG_RESTORE_LIBSODIUM_KEY"] = sec.RestoreWalgKey
+		env["WALG_RESTORE_LIBSODIUM_KEY_TRANSFORM"] = "hex"
 		env["WALG_RESTORE_BACKUP"] = r.Backup
+		if r.External {
+			env["WALG_RESTORE_LIBSODIUM_KEY_TRANSFORM"] = r.KeyTransform
+			env["WALG_RESTORE_EXTERNAL"] = "1"
+			env["SYNCLOUD_ADOPT_SQL_B64"] = base64.StdEncoding.EncodeToString([]byte(adoptSQL(sec)))
+			if r.TargetTime != nil {
+				env["WALG_RESTORE_TARGET_TIME"] = r.TargetTime.UTC().Format(pgTimeFormat)
+			}
+		}
 	}
 	return env, nil
 }
@@ -207,20 +224,29 @@ func archiveConfig(cfg map[string]any, spec Spec, st State) {
 	} else {
 		params["archive_command"] = "/bin/true"
 	}
-	if r := st.Restore; r != nil {
+	if r := st.Restore; r != nil && r.External {
+		// walg-bootstrap recovers and promotes the data itself: Patroni
+		// starts a primary.
+		bs := cfg["bootstrap"].(map[string]any)
+		bs["method"] = "walg"
+		bs["walg"] = map[string]any{"command": "/usr/local/bin/walg-bootstrap", "keep_existing_recovery_conf": false}
+	} else if r != nil {
 		rc := map[string]string{
 			"restore_command":          "/usr/local/bin/walg-restore-wal %f %p",
 			"recovery_target_action":   "promote",
 			"recovery_target_timeline": "latest",
 		}
 		if r.TargetTime != nil {
-			rc["recovery_target_time"] = r.TargetTime.UTC().Format("2006-01-02 15:04:05.000000+00")
+			rc["recovery_target_time"] = r.TargetTime.UTC().Format(pgTimeFormat)
 		}
 		bs := cfg["bootstrap"].(map[string]any)
 		bs["method"] = "walg"
 		bs["walg"] = map[string]any{"command": "/usr/local/bin/walg-bootstrap", "keep_existing_recovery_conf": false, "recovery_conf": rc}
 	}
 }
+
+// pgTimeFormat writes a recovery target time.
+const pgTimeFormat = "2006-01-02 15:04:05.000000+00"
 
 // ── base backups ────────────────────────────────────────────────────────────
 
@@ -438,6 +464,7 @@ type PgBaseBackup struct {
 	CompressedSize   int64     `json:"compressedSize"`
 	UncompressedSize int64     `json:"uncompressedSize"`
 	Permanent        bool      `json:"permanent"`
+	PgVersion        int       `json:"pgVersion,omitempty"` // server_version_num
 }
 
 // PgArchiver is the primary's pg_stat_archiver.
@@ -505,6 +532,7 @@ type sentinel struct {
 	CompressedSize   int64     `json:"CompressedSize"`
 	UncompressedSize int64     `json:"UncompressedSize"`
 	IsPermanent      bool      `json:"IsPermanent"`
+	PgVersion        int       `json:"PgVersion"`
 }
 
 func lsn(v uint64) string { return fmt.Sprintf("%X/%X", v>>32, v&0xffffffff) }
@@ -548,7 +576,7 @@ func (m *Manager) listBackups(ctx context.Context, endpoint, bucket, prefix stri
 			continue
 		}
 		out = append(out, PgBaseBackup{Name: name, StartTime: s.StartTime.UTC(), FinishTime: s.FinishTime.UTC(), StartLSN: lsn(s.LSN), FinishLSN: lsn(s.FinishLSN),
-			CompressedSize: s.CompressedSize, UncompressedSize: s.UncompressedSize, Permanent: s.IsPermanent})
+			CompressedSize: s.CompressedSize, UncompressedSize: s.UncompressedSize, Permanent: s.IsPermanent, PgVersion: s.PgVersion})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].FinishTime.After(out[j].FinishTime) })
 	// The newest WAL segment: names sort by timeline and position, so the
@@ -625,14 +653,7 @@ func (m *Manager) Backups(ctx context.Context, d store.Database) (PgBackups, err
 			lastWAL = a.LastAt
 		}
 	}
-	if len(out.Backups) > 0 {
-		oldest := out.Backups[len(out.Backups)-1].FinishTime
-		to := out.Backups[0].FinishTime
-		if lastWAL != nil && lastWAL.After(to) {
-			to = *lastWAL
-		}
-		out.Window = &RestoreWindow{From: oldest, To: to}
-	}
+	out.Window = restoreWindow(out.Backups, lastWAL)
 	return out, nil
 }
 
@@ -662,34 +683,7 @@ func (m *Manager) planRestore(ctx context.Context, r PgRestore) (store.Database,
 	}
 	b := spec.Postgres.Backup
 	rs := RestoreState{Source: src.ID, SourceName: src.Name, Endpoint: b.Endpoint, Bucket: b.Bucket, Prefix: backupPrefix(src, b)}
-	if r.TargetTime != nil {
-		t := r.TargetTime.UTC()
-		if w := status.Window; w != nil && (t.Before(w.From) || t.After(w.To)) {
-			return src, rs, ErrInvalid{fmt.Errorf("the target time must be within the restore window, %s to %s",
-				w.From.Format(time.RFC3339), w.To.Format(time.RFC3339))}
-		}
-		rs.TargetTime = &t
-	}
-	for _, bb := range status.Backups { // newest first
-		if r.Backup != "" && bb.Name != r.Backup {
-			continue
-		}
-		if rs.TargetTime != nil && bb.FinishTime.After(*rs.TargetTime) {
-			if r.Backup != "" {
-				return src, rs, ErrInvalid{fmt.Errorf("backup %s finished after the target time", bb.Name)}
-			}
-			continue
-		}
-		rs.Backup = bb.Name
-		break
-	}
-	if rs.Backup == "" {
-		if r.Backup != "" {
-			return src, rs, ErrInvalid{fmt.Errorf("no backup %q in the archive of %s", r.Backup, src.Name)}
-		}
-		return src, rs, ErrInvalid{errors.New("no base backup finished before the target time")}
-	}
-	return src, rs, nil
+	return src, rs, pickBackup(&rs, r, status.Backups, status.Window, src.Name)
 }
 
 // checkBackupEndpoint makes sure the backup endpoint exists.

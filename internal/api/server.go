@@ -419,6 +419,7 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/databases", h: s.handleListAllDatabases},
 		{Method: "POST", Path: "/api/v1/databases", h: s.handleCreateDatabase},
 		{Method: "GET", Path: "/api/v1/databases/engines", h: s.handleListDatabaseEngines},
+		{Method: "POST", Path: "/api/v1/databases/pg-archive", h: s.handleInspectPgArchive},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/databases", h: s.handleListDatabases},
 		{Method: "GET", Path: "/api/v1/databases/{database}", h: s.handleGetDatabase},
 		{Method: "PUT", Path: "/api/v1/databases/{database}", h: s.handleUpdateDatabase},

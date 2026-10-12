@@ -1,0 +1,14 @@
+# Sourced by walg-bootstrap and walg-restore-wal: point WAL-G at the archive
+# a cluster is restored from. Its endpoint, prefix and key come in as
+# WALG_RESTORE_*; the cluster's own (for archiving) are replaced only in
+# the restore's processes. An archive without a key is not encrypted.
+export WALG_S3_PREFIX="$WALG_RESTORE_S3_PREFIX"
+for v in AWS_ENDPOINT AWS_REGION AWS_S3_FORCE_PATH_STYLE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+  eval "x=\${WALG_RESTORE_$v:-}"
+  if [ -n "$x" ]; then export "$v=$x"; fi
+done
+if [ -n "${WALG_RESTORE_LIBSODIUM_KEY:-}" ]; then
+  export WALG_LIBSODIUM_KEY="$WALG_RESTORE_LIBSODIUM_KEY" WALG_LIBSODIUM_KEY_TRANSFORM="${WALG_RESTORE_LIBSODIUM_KEY_TRANSFORM:-hex}"
+else
+  unset WALG_LIBSODIUM_KEY WALG_LIBSODIUM_KEY_TRANSFORM
+fi

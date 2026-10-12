@@ -336,6 +336,8 @@ export interface PgBaseBackup {
   compressedSize: number;
   uncompressedSize: number;
   permanent: boolean;
+  /** server_version_num of the server that took it. */
+  pgVersion?: number;
 }
 
 export interface PgBackupRun {
@@ -366,6 +368,8 @@ export interface PgBackups {
   error?: string;
   restoredFrom?: {
     sourceName: string;
+    /** An archive another server wrote (sourceName is its location). */
+    external?: boolean;
     backup: string;
     targetTime?: string;
   };

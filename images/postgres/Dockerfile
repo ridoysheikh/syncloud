@@ -49,8 +49,8 @@ RUN set -eux; \
     mkdir -p /data /etc/syncloud; chown -R postgres:postgres /data /etc/syncloud
 
 COPY entrypoint.sh /usr/local/bin/syncloud-pg
-COPY walg-bootstrap walg-restore-wal walg-replica /usr/local/bin/
-RUN chmod 0755 /usr/local/bin/syncloud-pg /usr/local/bin/walg-bootstrap /usr/local/bin/walg-restore-wal /usr/local/bin/walg-replica
+COPY walg-bootstrap walg-adopt walg-restore-env walg-restore-wal walg-replica /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/syncloud-pg /usr/local/bin/walg-bootstrap /usr/local/bin/walg-adopt /usr/local/bin/walg-restore-wal /usr/local/bin/walg-replica
 
 USER postgres
 ENV PATH=/usr/lib/postgresql/${PG_MAJOR}/bin:$PATH

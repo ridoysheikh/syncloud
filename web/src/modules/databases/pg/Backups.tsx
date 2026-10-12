@@ -219,7 +219,8 @@ function RestoredFrom({
   if (!s) return null;
   return (
     <Alert tone="info">
-      Restored from <span className="font-mono">{s.sourceName}</span>, base
+      Restored from {s.external && "another server's archive "}
+      <span className="font-mono">{s.sourceName}</span>, base
       backup <span className="font-mono">{s.backup}</span>, to{" "}
       {s.targetTime ? fmt(s.targetTime) : "the end of its archive"}.
     </Alert>

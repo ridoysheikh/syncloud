@@ -1527,10 +1527,48 @@
                   },
                   "restore": {
                     "type": "object",
-                    "description": "PostgreSQL: create the database from another one's backups (needs database:GetDatabaseCredentials on the source)",
+                    "description": "PostgreSQL: create the database from another one's backups (needs database:GetDatabaseCredentials on the source), or from an archive another server wrote",
                     "properties": {
                       "from": {
                         "type": "string"
+                      },
+                      "archive": {
+                        "type": "object",
+                        "description": "a WAL-G archive another PostgreSQL server wrote (instead of from); the new database gets SynCloud's own passwords",
+                        "required": [
+                          "endpoint",
+                          "bucket"
+                        ],
+                        "properties": {
+                          "endpoint": {
+                            "type": "string",
+                            "description": "a registered S3 endpoint"
+                          },
+                          "bucket": {
+                            "type": "string"
+                          },
+                          "prefix": {
+                            "type": "string",
+                            "description": "the source server's WALG_S3_PREFIX path in the bucket"
+                          },
+                          "key": {
+                            "type": "string",
+                            "description": "the source server's WALG_LIBSODIUM_KEY; empty for an archive that is not encrypted"
+                          },
+                          "keyTransform": {
+                            "type": "string",
+                            "enum": [
+                              "none",
+                              "hex",
+                              "base64"
+                            ],
+                            "description": "as WALG_LIBSODIUM_KEY_TRANSFORM (default none)"
+                          },
+                          "database": {
+                            "type": "string",
+                            "description": "the app database in the archive; the app user becomes its owner (default: the new database's name)"
+                          }
+                        }
                       },
                       "backup": {
                         "type": "string",
@@ -1567,6 +1605,97 @@
           }
         },
         "description": "Creates a managed database. Without project and environment it is standalone. Database names are unique in the cluster. The action is checked on the database resource: srn:syncloud:database/NAME for standalone, or under the project environment."
+      }
+    },
+    "/api/v1/databases/pg-archive": {
+      "post": {
+        "tags": [
+          "databases"
+        ],
+        "operationId": "inspectPgArchive",
+        "summary": "PostgreSQL: read a WAL-G archive another server wrote",
+        "description": "Its base backups, restore window, PostgreSQL version and whether it is encrypted, before restoring from it (restore.archive on createDatabase). The key is not needed.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "a WAL-G archive another PostgreSQL server wrote (instead of from); the new database gets SynCloud's own passwords",
+                "required": [
+                  "endpoint",
+                  "bucket"
+                ],
+                "properties": {
+                  "endpoint": {
+                    "type": "string",
+                    "description": "a registered S3 endpoint"
+                  },
+                  "bucket": {
+                    "type": "string"
+                  },
+                  "prefix": {
+                    "type": "string",
+                    "description": "the source server's WALG_S3_PREFIX path in the bucket"
+                  },
+                  "key": {
+                    "type": "string",
+                    "description": "the source server's WALG_LIBSODIUM_KEY; empty for an archive that is not encrypted"
+                  },
+                  "keyTransform": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "hex",
+                      "base64"
+                    ],
+                    "description": "as WALG_LIBSODIUM_KEY_TRANSFORM (default none)"
+                  },
+                  "database": {
+                    "type": "string",
+                    "description": "the app database in the archive; the app user becomes its owner (default: the new database's name)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "location": {
+                      "type": "string"
+                    },
+                    "backups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "window": {
+                      "type": "object"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "encrypted": {
+                      "type": "boolean",
+                      "description": "absent when it cannot be told (brotli or uncompressed backups)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/databases/engines": {

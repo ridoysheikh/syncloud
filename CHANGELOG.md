@@ -2,6 +2,20 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.1.8]
+
+### Added
+
+- **Restore PostgreSQL from another server's WAL-G archive.** A new managed database can be built from an archive a server outside SynCloud wrote to S3: point it at the endpoint, bucket and prefix (plus the server's `WALG_LIBSODIUM_KEY` if the archive is encrypted) and restore to the archive's end or to a moment. The new database runs the archive's PostgreSQL version, gets SynCloud's own superuser, replication and app passwords, makes the app user the owner of its app database, and archives under its own prefix. The source archive is only read. The old server's configuration files are set aside, so libraries and paths only it had don't stop the restore. In the dashboard: **Databases › Restore from another server**. From the CLI: `synctl db archive` and `synctl db restore-archive`.
+
+### Fixed
+
+- Restoring a SynCloud database whose backups use a different S3 endpoint than the restored database's own no longer mixes up the two endpoints' credentials.
+
+### Upgrading
+
+- The managed PostgreSQL images are now `17-r3` and `18-r2` (new restore scripts). PostgreSQL members move to them one at a time, replicas first, with a switchover before the primary, as for any setting that needs a restart.
+
 ## [0.1.7]
 
 ### Added

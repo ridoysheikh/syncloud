@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -434,6 +436,123 @@ func (a *app) databasesCmd() *cobra.Command {
 	restore.Flags().StringVar(&rBackup, "backup", "", "start from this base backup (default: the newest before --time)")
 	restore.Flags().BoolVar(&rStandalone, "standalone", false, "create it outside any project (default: the source's project, or -p)")
 
+	var ar struct {
+		endpoint, bucket, prefix, keyFile, keyTransform, database, time, backup string
+		standalone                                                              bool
+		spec                                                                    dbSpecFlags
+	}
+	archiveBody := func() map[string]any {
+		return map[string]any{"endpoint": ar.endpoint, "bucket": ar.bucket, "prefix": ar.prefix}
+	}
+	archive := &cobra.Command{
+		Use: "archive", Short: "Read a WAL-G archive another PostgreSQL server wrote: its version, encryption, base backups and restore window",
+		Example: `  synctl db archive --endpoint aws --bucket old-backups --prefix walg/main`,
+		Args:    cobra.NoArgs, Annotations: op("inspectPgArchive"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var out struct {
+				Location  string `json:"location"`
+				Version   string `json:"version"`
+				Encrypted *bool  `json:"encrypted"`
+				Window    *struct {
+					From time.Time `json:"from"`
+					To   time.Time `json:"to"`
+				} `json:"window"`
+				Backups []struct {
+					Name             string    `json:"name"`
+					FinishTime       time.Time `json:"finishTime"`
+					UncompressedSize int64     `json:"uncompressedSize"`
+					PgVersion        int       `json:"pgVersion"`
+				} `json:"backups"`
+			}
+			if err := a.do(cmd, "POST", "/api/v1/databases/pg-archive", archiveBody(), &out); err != nil {
+				return err
+			}
+			if a.output == "json" {
+				return a.printer().json(out)
+			}
+			enc := "unknown (brotli or uncompressed)"
+			if out.Encrypted != nil {
+				enc = map[bool]string{true: "yes: restoring needs the server's WALG_LIBSODIUM_KEY", false: "no"}[*out.Encrypted]
+			}
+			fmt.Fprintf(a.out, "Archive:    %s\nPostgreSQL: %s\nEncrypted:  %s\n", out.Location, orDash(out.Version), enc)
+			if out.Window != nil {
+				fmt.Fprintf(a.out, "Restore:    any moment from %s to %s\n", out.Window.From.Format(time.RFC3339), out.Window.To.Format(time.RFC3339))
+			}
+			fmt.Fprintln(a.out)
+			rows := [][]string{}
+			for _, b := range out.Backups {
+				rows = append(rows, []string{b.Name, b.FinishTime.Format(time.RFC3339), bytesIEC(uint64(b.UncompressedSize))})
+			}
+			return a.printer().table(out.Backups, []string{"BACKUP", "FINISHED", "SIZE"}, rows)
+		},
+	}
+	restoreArchive := &cobra.Command{
+		Use: "restore-archive NAME", Short: "Create a PostgreSQL database from a WAL-G archive another server wrote, as of a moment",
+		Long: "Fetches a base backup from the archive, replays its WAL to --time (or its end) and promotes it. The new database gets SynCloud's own " +
+			"superuser, replication and app passwords (synctl db credentials NAME), the app user becomes the owner of --database, and it archives " +
+			"under its own prefix: the source archive is only read. See what an archive holds with: synctl db archive",
+		Example: `  synctl db restore-archive shop --endpoint aws --bucket old-backups --prefix walg/main --database shop
+  synctl db restore-archive shop -p prod --endpoint aws --bucket old-backups --key-file walg.key --key-transform hex --time 2026-10-12T19:00:00Z`,
+		Args: cobra.ExactArgs(1), Annotations: op("createDatabase"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			arc := archiveBody()
+			arc["keyTransform"], arc["database"] = ar.keyTransform, ar.database
+			if ar.keyFile != "" {
+				var raw []byte
+				var err error
+				if ar.keyFile == "-" {
+					raw, err = io.ReadAll(os.Stdin)
+				} else {
+					raw, err = os.ReadFile(ar.keyFile)
+				}
+				if err != nil {
+					return err
+				}
+				arc["key"] = strings.TrimSpace(string(raw))
+			} else if k := os.Getenv("WALG_LIBSODIUM_KEY"); k != "" {
+				arc["key"] = k
+			}
+			r := map[string]any{"archive": arc, "backup": ar.backup}
+			if ar.time != "" {
+				t, err := time.Parse(time.RFC3339, ar.time)
+				if err != nil {
+					return errors.New("--time takes RFC 3339, e.g. 2026-10-07T14:05:00Z")
+				}
+				r["targetTime"] = t
+			}
+			spec := map[string]any{}
+			ar.spec.apply(cmd, spec)
+			body := map[string]any{"name": args[0], "engine": "postgres", "spec": spec, "restore": r}
+			if s.project != "" && !ar.standalone {
+				body["project"], body["environment"] = s.project, s.env
+			}
+			var v dbView
+			if err := a.do(cmd, "POST", "/api/v1/databases", body, &v); err != nil {
+				return err
+			}
+			if a.output == "json" {
+				return a.printer().json(v)
+			}
+			fmt.Fprintf(a.out, "Restoring the archive into %s (%s, PostgreSQL %s); it is ready when its health is healthy: synctl db get %s\n", v.Name, v.owner(), v.Version, v.Name)
+			fmt.Fprintf(a.out, "Its passwords are SynCloud's own: synctl db credentials %s\n", v.Name)
+			return nil
+		},
+	}
+	for _, c := range []*cobra.Command{archive, restoreArchive} {
+		c.Flags().StringVar(&ar.endpoint, "endpoint", "", "the registered S3 endpoint the archive is on (synctl s3 endpoints)")
+		c.Flags().StringVar(&ar.bucket, "bucket", "", "its bucket")
+		c.Flags().StringVar(&ar.prefix, "prefix", "", "its path in the bucket (the server's WALG_S3_PREFIX without s3://bucket/)")
+		_ = c.MarkFlagRequired("endpoint")
+		_ = c.MarkFlagRequired("bucket")
+	}
+	restoreArchive.Flags().StringVar(&ar.keyFile, "key-file", "", "file holding the server's WALG_LIBSODIUM_KEY (- for stdin; default $WALG_LIBSODIUM_KEY; none: not encrypted)")
+	restoreArchive.Flags().StringVar(&ar.keyTransform, "key-transform", "none", "how the key is written: none, hex or base64 (the server's WALG_LIBSODIUM_KEY_TRANSFORM)")
+	restoreArchive.Flags().StringVar(&ar.database, "database", "", "the app database in the archive; the app user becomes its owner (default: NAME)")
+	restoreArchive.Flags().StringVar(&ar.time, "time", "", "recover to this moment (RFC 3339); default: the end of the archive")
+	restoreArchive.Flags().StringVar(&ar.backup, "backup", "", "start from this base backup (default: the newest before --time)")
+	restoreArchive.Flags().BoolVar(&ar.standalone, "standalone", false, "create outside any project even when $SYNCLOUD_PROJECT is set")
+	ar.spec.add(restoreArchive)
+
 	var uf dbSpecFlags
 	update := &cobra.Command{
 		Use: "update NAME", Aliases: []string{"set"}, Short: "Change memory, replicas, persistence, eviction or nodes", Args: cobra.ExactArgs(1),
@@ -733,7 +852,7 @@ func (a *app) databasesCmd() *cobra.Command {
 		creds,
 		simple("failover", "Promote a replica to primary", "POST", "/failover", "failoverDatabase", "Failover of %s requested"),
 		metricsCmd, events, keys, keyCmd, run, info, slow)
-	db.AddCommand(restore)
+	db.AddCommand(restore, archive, restoreArchive)
 	db.AddCommand(pgCommands(a)...)
 	return db
 }

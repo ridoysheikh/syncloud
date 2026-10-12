@@ -48,7 +48,7 @@ For PostgreSQL in development, build the images, then point the controller at th
 
 ```sh
 make postgres-image
-go run ./cmd/controller --dev --data-dir .data --postgres-image 18=syncloud-postgres:18-r1,17=syncloud-postgres:17-r2
+go run ./cmd/controller --dev --data-dir .data --postgres-image 18=syncloud-postgres:18-r2,17=syncloud-postgres:17-r3
 ```
 
 ## Checks before a pull request

@@ -364,6 +364,9 @@ func pgBootstrap(ctx context.Context, d store.Database, sec Secrets, leaderIP st
 		if _, err := c.Exec(ctx, `CREATE DATABASE `+pgx.Identifier{db}.Sanitize()+` OWNER `+pgx.Identifier{pgAppUser}.Sanitize()); err != nil {
 			return err
 		}
+	} else if r := parseState(d.State).Restore; r != nil && r.External {
+		// Data from another server: its app database becomes the app user's.
+		return adoptDatabase(ctx, leaderIP, sec, db)
 	}
 	return nil
 }

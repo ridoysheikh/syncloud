@@ -201,10 +201,36 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
 	spec.ForEngine(eng.Name)
 	var restore *RestoreState
 	var source store.Database
-	if req.Restore != nil {
-		if eng.Name != EnginePostgres {
-			return View{}, ErrInvalid{errors.New("restoring from a backup is for PostgreSQL databases")}
+	var archive *PgArchive
+	if req.Restore != nil && eng.Name != EnginePostgres {
+		return View{}, ErrInvalid{errors.New("restoring from a backup is for PostgreSQL databases")}
+	}
+	if req.Restore != nil && req.Restore.Archive != nil {
+		if req.Restore.From != "" {
+			return View{}, ErrInvalid{errors.New("restore from a database or from an archive, not both")}
 		}
+		archive = req.Restore.Archive
+		rs, major, err := m.planArchiveRestore(ctx, *req.Restore)
+		if err != nil {
+			return View{}, err
+		}
+		restore = &rs
+		if !slices.Contains(eng.Versions, major) {
+			return View{}, ErrInvalid{fmt.Errorf("the archive holds PostgreSQL %s; SynCloud runs %s", major, strings.Join(eng.Versions, ", "))}
+		}
+		if req.Version != "" && req.Version != major {
+			return View{}, ErrInvalid{fmt.Errorf("data files only open with the version that wrote them: the archive holds PostgreSQL %s", major)}
+		}
+		version = major
+		// The new cluster archives under its own prefix (by default to the
+		// same endpoint and bucket), never into the source's archive.
+		if spec.Postgres.Backup == nil {
+			spec.Postgres.Backup = &PgBackupSpec{Endpoint: archive.Endpoint, Bucket: archive.Bucket}
+		}
+		if b := spec.Postgres.Backup; b.Endpoint == archive.Endpoint && b.Bucket == archive.Bucket && strings.Trim(b.Prefix, "/") == archive.Prefix && b.Prefix != "" {
+			return View{}, ErrInvalid{errors.New("postgres.backup.prefix: the new database cannot archive into the archive it restores from")}
+		}
+	} else if req.Restore != nil {
 		src, rs, err := m.planRestore(ctx, *req.Restore)
 		if err != nil {
 			return View{}, err
@@ -265,7 +291,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
 		secrets.WalgKey = newWalgKey()
 		st.LimitMiB = spec.Memory.Min // the container's size (vertical scaling restarts members)
 	}
-	if restore != nil {
+	if restore != nil && archive == nil {
 		// The restored data holds the source's roles: keep their passwords,
 		// so Patroni, replicas and apps sign in as before.
 		ss, err := m.secrets(source)
@@ -275,6 +301,12 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (View, error) {
 		secrets.Password, secrets.AdminPassword, secrets.ReplicationPassword = ss.Password, ss.AdminPassword, ss.ReplicationPassword
 		secrets.RestoreWalgKey = ss.WalgKey
 		st.Restore, st.Database = restore, PgDatabase(source)
+	}
+	if archive != nil {
+		// Data from outside: SynCloud's own passwords are signed in, and the
+		// app user takes over the database the archive's app uses.
+		secrets.RestoreWalgKey = archive.Key
+		st.Restore, st.Database = restore, archive.Database
 	}
 	sec, _ := json.Marshal(secrets)
 	d.Secrets = m.box.Seal(sec, aad(d.ID))

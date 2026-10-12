@@ -22,8 +22,8 @@ const (
 	ImageForgejo         = "codeberg.org/forgejo/forgejo:13.0.5-rootless"
 	// PostgresTag17 and PostgresTag18 tag the managed PostgreSQL image,
 	// built from images/postgres per major version (make postgres-image).
-	PostgresTag17 = "17-r2"
-	PostgresTag18 = "18-r1"
+	PostgresTag17 = "17-r3"
+	PostgresTag18 = "18-r2"
 )
 
 // The managed PostgreSQL images ship inside each release, not on a public

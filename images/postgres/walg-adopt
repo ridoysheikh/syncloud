@@ -1,0 +1,60 @@
+#!/bin/sh
+# Second half of restoring an archive written outside SynCloud (run by
+# walg-bootstrap on a fetched base backup):
+#  1. set the source server's own settings aside (*.source): they may name
+#     libraries, files and paths this image does not have;
+#  2. recover from the archive (WALG_RESTORE_TARGET_TIME, or to its end) and
+#     promote, on a local socket only;
+#  3. sign SynCloud's superuser, replication and app users in with this
+#     cluster's passwords (SYNCLOUD_ADOPT_SQL_B64, one statement per line)
+#     in single-user mode, which needs no role; and make sure a "postgres"
+#     database exists for the controller to connect to.
+# Patroni then writes its own configuration and starts the primary.
+set -eu
+pgdata=$1
+cd "$pgdata"
+for f in postgresql.conf postgresql.auto.conf pg_hba.conf pg_ident.conf; do
+  if [ -f "$f" ]; then mv "$f" "$f.source"; fi
+done
+rm -f standby.signal recovery.signal recovery.conf
+: > postgresql.auto.conf
+: > pg_ident.conf
+echo "local all all trust" > pg_hba.conf
+{
+  echo "listen_addresses = ''"
+  echo "unix_socket_directories = '/tmp'"
+  echo "archive_mode = off"
+  echo "hot_standby = off"
+  echo "restore_command = '/usr/local/bin/walg-restore-wal %f %p'"
+  echo "recovery_target_timeline = 'latest'"
+  echo "recovery_target_action = 'promote'"
+  if [ -n "${WALG_RESTORE_TARGET_TIME:-}" ]; then echo "recovery_target_time = '$WALG_RESTORE_TARGET_TIME'"; fi
+} > postgresql.conf
+touch recovery.signal
+
+echo "walg-adopt: recovering the archive to ${WALG_RESTORE_TARGET_TIME:-its end}"
+pg_ctl -D "$pgdata" -w -t 2147483 start
+# pg_ctl returns once the data is consistent, still replaying; the control
+# file says when recovery has ended and the server is promoted. A server
+# that stops first did not recover (e.g. the archive ends before the target).
+until pg_controldata -D "$pgdata" | grep -q '^Database cluster state: *in production'; do
+  pg_ctl -D "$pgdata" status >/dev/null || { echo "walg-adopt: recovery failed (see the log above)" >&2; exit 1; }
+  sleep 2
+done
+pg_ctl -D "$pgdata" -w -t 3600 -m fast stop
+echo "walg-adopt: promoted; signing in SynCloud's roles"
+
+single() {
+  # Statements are not logged: they carry passwords.
+  out=$(postgres --single -D "$pgdata" -c log_min_error_statement=panic -c log_min_messages=warning "$1" 2>&1) || {
+    echo "$out" >&2
+    return 1
+  }
+  if echo "$out" | grep -E '(ERROR|FATAL|PANIC):' | grep -v 'already exists' >&2; then return 1; fi
+}
+echo "CREATE DATABASE postgres" | single template1
+echo "$SYNCLOUD_ADOPT_SQL_B64" | base64 -d | single postgres
+
+rm -f postgresql.conf pg_hba.conf
+echo "# SynCloud: Patroni writes the settings; the source server's own files are kept as *.source." > postgresql.conf
+echo "walg-adopt: done"
