@@ -186,7 +186,7 @@ func (x Mount_Type) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Mount_Type.Descriptor instead.
 func (Mount_Type) EnumDescriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{14, 0}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{15, 0}
 }
 
 type ConnectRequest struct {
@@ -967,8 +967,11 @@ type Welcome struct {
 	NodeId string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	// How often the agent should send heartbeats.
 	HeartbeatIntervalSeconds int32 `protobuf:"varint,2,opt,name=heartbeat_interval_seconds,json=heartbeatIntervalSeconds,proto3" json:"heartbeat_interval_seconds,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// gateways are the addresses to reach the gateway at, tried in order
+	// (Traefik on 443 first, the direct port last). Empty: keep the current.
+	Gateways      []*GatewayEndpoint `protobuf:"bytes,3,rep,name=gateways,proto3" json:"gateways,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Welcome) Reset() {
@@ -1015,6 +1018,69 @@ func (x *Welcome) GetHeartbeatIntervalSeconds() int32 {
 	return 0
 }
 
+func (x *Welcome) GetGateways() []*GatewayEndpoint {
+	if x != nil {
+		return x.Gateways
+	}
+	return nil
+}
+
+// GatewayEndpoint is one way to reach the agent gateway.
+type GatewayEndpoint struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Address string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"` // host:port
+	// server_name is the TLS name sent (SNI) for Traefik to route by; the
+	// certificate is then checked for pki.GatewayName. Empty: the address's
+	// host is sent and checked.
+	ServerName    string `protobuf:"bytes,2,opt,name=server_name,json=serverName,proto3" json:"server_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GatewayEndpoint) Reset() {
+	*x = GatewayEndpoint{}
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GatewayEndpoint) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GatewayEndpoint) ProtoMessage() {}
+
+func (x *GatewayEndpoint) ProtoReflect() protoreflect.Message {
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GatewayEndpoint.ProtoReflect.Descriptor instead.
+func (*GatewayEndpoint) Descriptor() ([]byte, []int) {
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GatewayEndpoint) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *GatewayEndpoint) GetServerName() string {
+	if x != nil {
+		return x.ServerName
+	}
+	return ""
+}
+
 type Heartbeat struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Metrics       *NodeMetrics           `protobuf:"bytes,1,opt,name=metrics,proto3" json:"metrics,omitempty"`
@@ -1026,7 +1092,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[8]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1038,7 +1104,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[8]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1051,7 +1117,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{8}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Heartbeat) GetMetrics() *NodeMetrics {
@@ -1098,7 +1164,7 @@ type TaskMetrics struct {
 
 func (x *TaskMetrics) Reset() {
 	*x = TaskMetrics{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[9]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1110,7 +1176,7 @@ func (x *TaskMetrics) String() string {
 func (*TaskMetrics) ProtoMessage() {}
 
 func (x *TaskMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[9]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1123,7 +1189,7 @@ func (x *TaskMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskMetrics.ProtoReflect.Descriptor instead.
 func (*TaskMetrics) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{9}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *TaskMetrics) GetTaskId() string {
@@ -1236,7 +1302,7 @@ type NodeMetrics struct {
 
 func (x *NodeMetrics) Reset() {
 	*x = NodeMetrics{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[10]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1248,7 +1314,7 @@ func (x *NodeMetrics) String() string {
 func (*NodeMetrics) ProtoMessage() {}
 
 func (x *NodeMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[10]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1261,7 +1327,7 @@ func (x *NodeMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeMetrics.ProtoReflect.Descriptor instead.
 func (*NodeMetrics) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{10}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *NodeMetrics) GetCpuPercent() float64 {
@@ -1352,7 +1418,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[11]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1364,7 +1430,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[11]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1377,7 +1443,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{11}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *CommandResult) GetCommandId() string {
@@ -1445,7 +1511,7 @@ type TaskSpec struct {
 
 func (x *TaskSpec) Reset() {
 	*x = TaskSpec{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[12]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1457,7 +1523,7 @@ func (x *TaskSpec) String() string {
 func (*TaskSpec) ProtoMessage() {}
 
 func (x *TaskSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[12]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1470,7 +1536,7 @@ func (x *TaskSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskSpec.ProtoReflect.Descriptor instead.
 func (*TaskSpec) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{12}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TaskSpec) GetTaskId() string {
@@ -1653,7 +1719,7 @@ type PortBinding struct {
 
 func (x *PortBinding) Reset() {
 	*x = PortBinding{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[13]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1665,7 +1731,7 @@ func (x *PortBinding) String() string {
 func (*PortBinding) ProtoMessage() {}
 
 func (x *PortBinding) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[13]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1678,7 +1744,7 @@ func (x *PortBinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PortBinding.ProtoReflect.Descriptor instead.
 func (*PortBinding) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{13}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PortBinding) GetHostIp() string {
@@ -1721,7 +1787,7 @@ type Mount struct {
 
 func (x *Mount) Reset() {
 	*x = Mount{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[14]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1733,7 +1799,7 @@ func (x *Mount) String() string {
 func (*Mount) ProtoMessage() {}
 
 func (x *Mount) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[14]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1746,7 +1812,7 @@ func (x *Mount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Mount.ProtoReflect.Descriptor instead.
 func (*Mount) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{14}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Mount) GetType() Mount_Type {
@@ -1787,7 +1853,7 @@ type RunTask struct {
 
 func (x *RunTask) Reset() {
 	*x = RunTask{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[15]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1799,7 +1865,7 @@ func (x *RunTask) String() string {
 func (*RunTask) ProtoMessage() {}
 
 func (x *RunTask) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[15]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1812,7 +1878,7 @@ func (x *RunTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunTask.ProtoReflect.Descriptor instead.
 func (*RunTask) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{15}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RunTask) GetCommandId() string {
@@ -1844,7 +1910,7 @@ type StopTask struct {
 
 func (x *StopTask) Reset() {
 	*x = StopTask{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[16]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1856,7 +1922,7 @@ func (x *StopTask) String() string {
 func (*StopTask) ProtoMessage() {}
 
 func (x *StopTask) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[16]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1869,7 +1935,7 @@ func (x *StopTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopTask.ProtoReflect.Descriptor instead.
 func (*StopTask) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{16}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *StopTask) GetCommandId() string {
@@ -1925,7 +1991,7 @@ type TaskStatus struct {
 
 func (x *TaskStatus) Reset() {
 	*x = TaskStatus{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[17]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1937,7 +2003,7 @@ func (x *TaskStatus) String() string {
 func (*TaskStatus) ProtoMessage() {}
 
 func (x *TaskStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[17]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1950,7 +2016,7 @@ func (x *TaskStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskStatus.ProtoReflect.Descriptor instead.
 func (*TaskStatus) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{17}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *TaskStatus) GetTaskId() string {
@@ -2042,7 +2108,7 @@ type NetworkConfig struct {
 
 func (x *NetworkConfig) Reset() {
 	*x = NetworkConfig{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[18]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2054,7 +2120,7 @@ func (x *NetworkConfig) String() string {
 func (*NetworkConfig) ProtoMessage() {}
 
 func (x *NetworkConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[18]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2067,7 +2133,7 @@ func (x *NetworkConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkConfig.ProtoReflect.Descriptor instead.
 func (*NetworkConfig) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{18}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *NetworkConfig) GetGeneration() uint64 {
@@ -2150,7 +2216,7 @@ type Firewall struct {
 
 func (x *Firewall) Reset() {
 	*x = Firewall{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[19]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2162,7 +2228,7 @@ func (x *Firewall) String() string {
 func (*Firewall) ProtoMessage() {}
 
 func (x *Firewall) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[19]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2175,7 +2241,7 @@ func (x *Firewall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Firewall.ProtoReflect.Descriptor instead.
 func (*Firewall) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{19}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *Firewall) GetRules() []*FirewallRule {
@@ -2212,7 +2278,7 @@ type FirewallRule struct {
 
 func (x *FirewallRule) Reset() {
 	*x = FirewallRule{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[20]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2224,7 +2290,7 @@ func (x *FirewallRule) String() string {
 func (*FirewallRule) ProtoMessage() {}
 
 func (x *FirewallRule) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[20]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2237,7 +2303,7 @@ func (x *FirewallRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FirewallRule.ProtoReflect.Descriptor instead.
 func (*FirewallRule) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{20}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *FirewallRule) GetId() string {
@@ -2286,7 +2352,7 @@ type ConfirmNetwork struct {
 
 func (x *ConfirmNetwork) Reset() {
 	*x = ConfirmNetwork{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[21]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2298,7 +2364,7 @@ func (x *ConfirmNetwork) String() string {
 func (*ConfirmNetwork) ProtoMessage() {}
 
 func (x *ConfirmNetwork) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[21]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2311,7 +2377,7 @@ func (x *ConfirmNetwork) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfirmNetwork.ProtoReflect.Descriptor instead.
 func (*ConfirmNetwork) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{21}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ConfirmNetwork) GetGeneration() uint64 {
@@ -2334,7 +2400,7 @@ type Peer struct {
 
 func (x *Peer) Reset() {
 	*x = Peer{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[22]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2346,7 +2412,7 @@ func (x *Peer) String() string {
 func (*Peer) ProtoMessage() {}
 
 func (x *Peer) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[22]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2359,7 +2425,7 @@ func (x *Peer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Peer.ProtoReflect.Descriptor instead.
 func (*Peer) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{22}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *Peer) GetNodeId() string {
@@ -2414,7 +2480,7 @@ type NetworkStatus struct {
 
 func (x *NetworkStatus) Reset() {
 	*x = NetworkStatus{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[23]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2426,7 +2492,7 @@ func (x *NetworkStatus) String() string {
 func (*NetworkStatus) ProtoMessage() {}
 
 func (x *NetworkStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[23]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2439,7 +2505,7 @@ func (x *NetworkStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkStatus.ProtoReflect.Descriptor instead.
 func (*NetworkStatus) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{23}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *NetworkStatus) GetGeneration() uint64 {
@@ -2516,7 +2582,7 @@ type RuleCounter struct {
 
 func (x *RuleCounter) Reset() {
 	*x = RuleCounter{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[24]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2528,7 +2594,7 @@ func (x *RuleCounter) String() string {
 func (*RuleCounter) ProtoMessage() {}
 
 func (x *RuleCounter) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[24]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2541,7 +2607,7 @@ func (x *RuleCounter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RuleCounter.ProtoReflect.Descriptor instead.
 func (*RuleCounter) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{24}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *RuleCounter) GetId() string {
@@ -2581,7 +2647,7 @@ type DropFlow struct {
 
 func (x *DropFlow) Reset() {
 	*x = DropFlow{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[25]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2593,7 +2659,7 @@ func (x *DropFlow) String() string {
 func (*DropFlow) ProtoMessage() {}
 
 func (x *DropFlow) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[25]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2606,7 +2672,7 @@ func (x *DropFlow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DropFlow.ProtoReflect.Descriptor instead.
 func (*DropFlow) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{25}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *DropFlow) GetDirection() string {
@@ -2665,7 +2731,7 @@ type PeerStatus struct {
 
 func (x *PeerStatus) Reset() {
 	*x = PeerStatus{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[26]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2677,7 +2743,7 @@ func (x *PeerStatus) String() string {
 func (*PeerStatus) ProtoMessage() {}
 
 func (x *PeerStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[26]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2690,7 +2756,7 @@ func (x *PeerStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerStatus.ProtoReflect.Descriptor instead.
 func (*PeerStatus) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{26}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *PeerStatus) GetPublicKey() string {
@@ -2746,7 +2812,7 @@ type RenewCertificate struct {
 
 func (x *RenewCertificate) Reset() {
 	*x = RenewCertificate{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[27]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2758,7 +2824,7 @@ func (x *RenewCertificate) String() string {
 func (*RenewCertificate) ProtoMessage() {}
 
 func (x *RenewCertificate) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[27]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2771,7 +2837,7 @@ func (x *RenewCertificate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenewCertificate.ProtoReflect.Descriptor instead.
 func (*RenewCertificate) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{27}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *RenewCertificate) GetCsr() string {
@@ -2790,7 +2856,7 @@ type CertificateIssued struct {
 
 func (x *CertificateIssued) Reset() {
 	*x = CertificateIssued{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[28]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2802,7 +2868,7 @@ func (x *CertificateIssued) String() string {
 func (*CertificateIssued) ProtoMessage() {}
 
 func (x *CertificateIssued) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[28]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2815,7 +2881,7 @@ func (x *CertificateIssued) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CertificateIssued.ProtoReflect.Descriptor instead.
 func (*CertificateIssued) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{28}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *CertificateIssued) GetCertificate() string {
@@ -2837,7 +2903,7 @@ type LogBatch struct {
 
 func (x *LogBatch) Reset() {
 	*x = LogBatch{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[29]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2849,7 +2915,7 @@ func (x *LogBatch) String() string {
 func (*LogBatch) ProtoMessage() {}
 
 func (x *LogBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[29]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2862,7 +2928,7 @@ func (x *LogBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogBatch.ProtoReflect.Descriptor instead.
 func (*LogBatch) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{29}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *LogBatch) GetLines() []*LogLine {
@@ -2891,7 +2957,7 @@ type LogLine struct {
 
 func (x *LogLine) Reset() {
 	*x = LogLine{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[30]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2903,7 +2969,7 @@ func (x *LogLine) String() string {
 func (*LogLine) ProtoMessage() {}
 
 func (x *LogLine) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[30]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2916,7 +2982,7 @@ func (x *LogLine) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogLine.ProtoReflect.Descriptor instead.
 func (*LogLine) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{30}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *LogLine) GetTaskId() string {
@@ -2961,7 +3027,7 @@ type Discovery struct {
 
 func (x *Discovery) Reset() {
 	*x = Discovery{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[31]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2973,7 +3039,7 @@ func (x *Discovery) String() string {
 func (*Discovery) ProtoMessage() {}
 
 func (x *Discovery) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[31]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2986,7 +3052,7 @@ func (x *Discovery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Discovery.ProtoReflect.Descriptor instead.
 func (*Discovery) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{31}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *Discovery) GetGeneration() uint64 {
@@ -3031,7 +3097,7 @@ type SecurityPolicy struct {
 
 func (x *SecurityPolicy) Reset() {
 	*x = SecurityPolicy{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[32]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3043,7 +3109,7 @@ func (x *SecurityPolicy) String() string {
 func (*SecurityPolicy) ProtoMessage() {}
 
 func (x *SecurityPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[32]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3056,7 +3122,7 @@ func (x *SecurityPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecurityPolicy.ProtoReflect.Descriptor instead.
 func (*SecurityPolicy) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{32}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *SecurityPolicy) GetSets() []*SecuritySet {
@@ -3095,7 +3161,7 @@ type SecuritySet struct {
 
 func (x *SecuritySet) Reset() {
 	*x = SecuritySet{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[33]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3107,7 +3173,7 @@ func (x *SecuritySet) String() string {
 func (*SecuritySet) ProtoMessage() {}
 
 func (x *SecuritySet) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[33]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3120,7 +3186,7 @@ func (x *SecuritySet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecuritySet.ProtoReflect.Descriptor instead.
 func (*SecuritySet) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{33}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *SecuritySet) GetName() string {
@@ -3159,7 +3225,7 @@ type SecurityRule struct {
 
 func (x *SecurityRule) Reset() {
 	*x = SecurityRule{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[34]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3171,7 +3237,7 @@ func (x *SecurityRule) String() string {
 func (*SecurityRule) ProtoMessage() {}
 
 func (x *SecurityRule) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[34]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3184,7 +3250,7 @@ func (x *SecurityRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecurityRule.ProtoReflect.Descriptor instead.
 func (*SecurityRule) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{34}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SecurityRule) GetId() string {
@@ -3246,7 +3312,7 @@ type DNSRecord struct {
 
 func (x *DNSRecord) Reset() {
 	*x = DNSRecord{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[35]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3258,7 +3324,7 @@ func (x *DNSRecord) String() string {
 func (*DNSRecord) ProtoMessage() {}
 
 func (x *DNSRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[35]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3271,7 +3337,7 @@ func (x *DNSRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DNSRecord.ProtoReflect.Descriptor instead.
 func (*DNSRecord) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{35}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *DNSRecord) GetName() string {
@@ -3299,7 +3365,7 @@ type VirtualService struct {
 
 func (x *VirtualService) Reset() {
 	*x = VirtualService{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[36]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3311,7 +3377,7 @@ func (x *VirtualService) String() string {
 func (*VirtualService) ProtoMessage() {}
 
 func (x *VirtualService) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[36]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3324,7 +3390,7 @@ func (x *VirtualService) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VirtualService.ProtoReflect.Descriptor instead.
 func (*VirtualService) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{36}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *VirtualService) GetId() string {
@@ -3359,7 +3425,7 @@ type VirtualPort struct {
 
 func (x *VirtualPort) Reset() {
 	*x = VirtualPort{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[37]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3371,7 +3437,7 @@ func (x *VirtualPort) String() string {
 func (*VirtualPort) ProtoMessage() {}
 
 func (x *VirtualPort) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[37]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3384,7 +3450,7 @@ func (x *VirtualPort) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VirtualPort.ProtoReflect.Descriptor instead.
 func (*VirtualPort) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{37}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *VirtualPort) GetProtocol() string {
@@ -3427,7 +3493,7 @@ type ExecInput struct {
 
 func (x *ExecInput) Reset() {
 	*x = ExecInput{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[38]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3439,7 +3505,7 @@ func (x *ExecInput) String() string {
 func (*ExecInput) ProtoMessage() {}
 
 func (x *ExecInput) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[38]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3452,7 +3518,7 @@ func (x *ExecInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecInput.ProtoReflect.Descriptor instead.
 func (*ExecInput) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{38}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ExecInput) GetSessionId() string {
@@ -3562,7 +3628,7 @@ type ExecStart struct {
 
 func (x *ExecStart) Reset() {
 	*x = ExecStart{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[39]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3574,7 +3640,7 @@ func (x *ExecStart) String() string {
 func (*ExecStart) ProtoMessage() {}
 
 func (x *ExecStart) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[39]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3587,7 +3653,7 @@ func (x *ExecStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecStart.ProtoReflect.Descriptor instead.
 func (*ExecStart) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{39}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ExecStart) GetTaskId() string {
@@ -3642,7 +3708,7 @@ type ExecResize struct {
 
 func (x *ExecResize) Reset() {
 	*x = ExecResize{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[40]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3654,7 +3720,7 @@ func (x *ExecResize) String() string {
 func (*ExecResize) ProtoMessage() {}
 
 func (x *ExecResize) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[40]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3667,7 +3733,7 @@ func (x *ExecResize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecResize.ProtoReflect.Descriptor instead.
 func (*ExecResize) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{40}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ExecResize) GetCols() uint32 {
@@ -3697,7 +3763,7 @@ type ExecOutput struct {
 
 func (x *ExecOutput) Reset() {
 	*x = ExecOutput{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[41]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3709,7 +3775,7 @@ func (x *ExecOutput) String() string {
 func (*ExecOutput) ProtoMessage() {}
 
 func (x *ExecOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[41]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3722,7 +3788,7 @@ func (x *ExecOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecOutput.ProtoReflect.Descriptor instead.
 func (*ExecOutput) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{41}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ExecOutput) GetSessionId() string {
@@ -3780,7 +3846,7 @@ type HealthCheck struct {
 
 func (x *HealthCheck) Reset() {
 	*x = HealthCheck{}
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[42]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3792,7 +3858,7 @@ func (x *HealthCheck) String() string {
 func (*HealthCheck) ProtoMessage() {}
 
 func (x *HealthCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[42]
+	mi := &file_syncloud_agent_v1_agent_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3805,7 +3871,7 @@ func (x *HealthCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheck.ProtoReflect.Descriptor instead.
 func (*HealthCheck) Descriptor() ([]byte, []int) {
-	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{42}
+	return file_syncloud_agent_v1_agent_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *HealthCheck) GetType() string {
@@ -3927,10 +3993,15 @@ const file_syncloud_agent_v1_agent_proto_rawDesc = "" +
 	"\x0edocker_version\x18\b \x01(\tR\rdockerVersion\x120\n" +
 	"\x14wireguard_public_key\x18\t \x01(\tR\x12wireguardPublicKey\x12+\n" +
 	"\x11advertise_address\x18\n" +
-	" \x01(\tR\x10advertiseAddress\"`\n" +
+	" \x01(\tR\x10advertiseAddress\"\xa0\x01\n" +
 	"\aWelcome\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12<\n" +
-	"\x1aheartbeat_interval_seconds\x18\x02 \x01(\x05R\x18heartbeatIntervalSeconds\"\xb7\x01\n" +
+	"\x1aheartbeat_interval_seconds\x18\x02 \x01(\x05R\x18heartbeatIntervalSeconds\x12>\n" +
+	"\bgateways\x18\x03 \x03(\v2\".syncloud.agent.v1.GatewayEndpointR\bgateways\"L\n" +
+	"\x0fGatewayEndpoint\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x1f\n" +
+	"\vserver_name\x18\x02 \x01(\tR\n" +
+	"serverName\"\xb7\x01\n" +
 	"\tHeartbeat\x128\n" +
 	"\ametrics\x18\x01 \x01(\v2\x1e.syncloud.agent.v1.NodeMetricsR\ametrics\x12:\n" +
 	"\anetwork\x18\x02 \x01(\v2 .syncloud.agent.v1.NetworkStatusR\anetwork\x124\n" +
@@ -4236,7 +4307,7 @@ func file_syncloud_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_syncloud_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_syncloud_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
+var file_syncloud_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
 var file_syncloud_agent_v1_agent_proto_goTypes = []any{
 	(RestartPolicy)(0),        // 0: syncloud.agent.v1.RestartPolicy
 	(TaskState)(0),            // 1: syncloud.agent.v1.TaskState
@@ -4249,99 +4320,101 @@ var file_syncloud_agent_v1_agent_proto_goTypes = []any{
 	(*Hello)(nil),             // 8: syncloud.agent.v1.Hello
 	(*NodeInfo)(nil),          // 9: syncloud.agent.v1.NodeInfo
 	(*Welcome)(nil),           // 10: syncloud.agent.v1.Welcome
-	(*Heartbeat)(nil),         // 11: syncloud.agent.v1.Heartbeat
-	(*TaskMetrics)(nil),       // 12: syncloud.agent.v1.TaskMetrics
-	(*NodeMetrics)(nil),       // 13: syncloud.agent.v1.NodeMetrics
-	(*CommandResult)(nil),     // 14: syncloud.agent.v1.CommandResult
-	(*TaskSpec)(nil),          // 15: syncloud.agent.v1.TaskSpec
-	(*PortBinding)(nil),       // 16: syncloud.agent.v1.PortBinding
-	(*Mount)(nil),             // 17: syncloud.agent.v1.Mount
-	(*RunTask)(nil),           // 18: syncloud.agent.v1.RunTask
-	(*StopTask)(nil),          // 19: syncloud.agent.v1.StopTask
-	(*TaskStatus)(nil),        // 20: syncloud.agent.v1.TaskStatus
-	(*NetworkConfig)(nil),     // 21: syncloud.agent.v1.NetworkConfig
-	(*Firewall)(nil),          // 22: syncloud.agent.v1.Firewall
-	(*FirewallRule)(nil),      // 23: syncloud.agent.v1.FirewallRule
-	(*ConfirmNetwork)(nil),    // 24: syncloud.agent.v1.ConfirmNetwork
-	(*Peer)(nil),              // 25: syncloud.agent.v1.Peer
-	(*NetworkStatus)(nil),     // 26: syncloud.agent.v1.NetworkStatus
-	(*RuleCounter)(nil),       // 27: syncloud.agent.v1.RuleCounter
-	(*DropFlow)(nil),          // 28: syncloud.agent.v1.DropFlow
-	(*PeerStatus)(nil),        // 29: syncloud.agent.v1.PeerStatus
-	(*RenewCertificate)(nil),  // 30: syncloud.agent.v1.RenewCertificate
-	(*CertificateIssued)(nil), // 31: syncloud.agent.v1.CertificateIssued
-	(*LogBatch)(nil),          // 32: syncloud.agent.v1.LogBatch
-	(*LogLine)(nil),           // 33: syncloud.agent.v1.LogLine
-	(*Discovery)(nil),         // 34: syncloud.agent.v1.Discovery
-	(*SecurityPolicy)(nil),    // 35: syncloud.agent.v1.SecurityPolicy
-	(*SecuritySet)(nil),       // 36: syncloud.agent.v1.SecuritySet
-	(*SecurityRule)(nil),      // 37: syncloud.agent.v1.SecurityRule
-	(*DNSRecord)(nil),         // 38: syncloud.agent.v1.DNSRecord
-	(*VirtualService)(nil),    // 39: syncloud.agent.v1.VirtualService
-	(*VirtualPort)(nil),       // 40: syncloud.agent.v1.VirtualPort
-	(*ExecInput)(nil),         // 41: syncloud.agent.v1.ExecInput
-	(*ExecStart)(nil),         // 42: syncloud.agent.v1.ExecStart
-	(*ExecResize)(nil),        // 43: syncloud.agent.v1.ExecResize
-	(*ExecOutput)(nil),        // 44: syncloud.agent.v1.ExecOutput
-	(*HealthCheck)(nil),       // 45: syncloud.agent.v1.HealthCheck
-	nil,                       // 46: syncloud.agent.v1.TaskSpec.EnvEntry
-	nil,                       // 47: syncloud.agent.v1.TaskSpec.LabelsEntry
+	(*GatewayEndpoint)(nil),   // 11: syncloud.agent.v1.GatewayEndpoint
+	(*Heartbeat)(nil),         // 12: syncloud.agent.v1.Heartbeat
+	(*TaskMetrics)(nil),       // 13: syncloud.agent.v1.TaskMetrics
+	(*NodeMetrics)(nil),       // 14: syncloud.agent.v1.NodeMetrics
+	(*CommandResult)(nil),     // 15: syncloud.agent.v1.CommandResult
+	(*TaskSpec)(nil),          // 16: syncloud.agent.v1.TaskSpec
+	(*PortBinding)(nil),       // 17: syncloud.agent.v1.PortBinding
+	(*Mount)(nil),             // 18: syncloud.agent.v1.Mount
+	(*RunTask)(nil),           // 19: syncloud.agent.v1.RunTask
+	(*StopTask)(nil),          // 20: syncloud.agent.v1.StopTask
+	(*TaskStatus)(nil),        // 21: syncloud.agent.v1.TaskStatus
+	(*NetworkConfig)(nil),     // 22: syncloud.agent.v1.NetworkConfig
+	(*Firewall)(nil),          // 23: syncloud.agent.v1.Firewall
+	(*FirewallRule)(nil),      // 24: syncloud.agent.v1.FirewallRule
+	(*ConfirmNetwork)(nil),    // 25: syncloud.agent.v1.ConfirmNetwork
+	(*Peer)(nil),              // 26: syncloud.agent.v1.Peer
+	(*NetworkStatus)(nil),     // 27: syncloud.agent.v1.NetworkStatus
+	(*RuleCounter)(nil),       // 28: syncloud.agent.v1.RuleCounter
+	(*DropFlow)(nil),          // 29: syncloud.agent.v1.DropFlow
+	(*PeerStatus)(nil),        // 30: syncloud.agent.v1.PeerStatus
+	(*RenewCertificate)(nil),  // 31: syncloud.agent.v1.RenewCertificate
+	(*CertificateIssued)(nil), // 32: syncloud.agent.v1.CertificateIssued
+	(*LogBatch)(nil),          // 33: syncloud.agent.v1.LogBatch
+	(*LogLine)(nil),           // 34: syncloud.agent.v1.LogLine
+	(*Discovery)(nil),         // 35: syncloud.agent.v1.Discovery
+	(*SecurityPolicy)(nil),    // 36: syncloud.agent.v1.SecurityPolicy
+	(*SecuritySet)(nil),       // 37: syncloud.agent.v1.SecuritySet
+	(*SecurityRule)(nil),      // 38: syncloud.agent.v1.SecurityRule
+	(*DNSRecord)(nil),         // 39: syncloud.agent.v1.DNSRecord
+	(*VirtualService)(nil),    // 40: syncloud.agent.v1.VirtualService
+	(*VirtualPort)(nil),       // 41: syncloud.agent.v1.VirtualPort
+	(*ExecInput)(nil),         // 42: syncloud.agent.v1.ExecInput
+	(*ExecStart)(nil),         // 43: syncloud.agent.v1.ExecStart
+	(*ExecResize)(nil),        // 44: syncloud.agent.v1.ExecResize
+	(*ExecOutput)(nil),        // 45: syncloud.agent.v1.ExecOutput
+	(*HealthCheck)(nil),       // 46: syncloud.agent.v1.HealthCheck
+	nil,                       // 47: syncloud.agent.v1.TaskSpec.EnvEntry
+	nil,                       // 48: syncloud.agent.v1.TaskSpec.LabelsEntry
 }
 var file_syncloud_agent_v1_agent_proto_depIdxs = []int32{
 	8,  // 0: syncloud.agent.v1.ConnectRequest.hello:type_name -> syncloud.agent.v1.Hello
-	11, // 1: syncloud.agent.v1.ConnectRequest.heartbeat:type_name -> syncloud.agent.v1.Heartbeat
-	14, // 2: syncloud.agent.v1.ConnectRequest.result:type_name -> syncloud.agent.v1.CommandResult
-	20, // 3: syncloud.agent.v1.ConnectRequest.task_status:type_name -> syncloud.agent.v1.TaskStatus
-	30, // 4: syncloud.agent.v1.ConnectRequest.renew_certificate:type_name -> syncloud.agent.v1.RenewCertificate
-	32, // 5: syncloud.agent.v1.ConnectRequest.logs:type_name -> syncloud.agent.v1.LogBatch
-	44, // 6: syncloud.agent.v1.ConnectRequest.exec_output:type_name -> syncloud.agent.v1.ExecOutput
+	12, // 1: syncloud.agent.v1.ConnectRequest.heartbeat:type_name -> syncloud.agent.v1.Heartbeat
+	15, // 2: syncloud.agent.v1.ConnectRequest.result:type_name -> syncloud.agent.v1.CommandResult
+	21, // 3: syncloud.agent.v1.ConnectRequest.task_status:type_name -> syncloud.agent.v1.TaskStatus
+	31, // 4: syncloud.agent.v1.ConnectRequest.renew_certificate:type_name -> syncloud.agent.v1.RenewCertificate
+	33, // 5: syncloud.agent.v1.ConnectRequest.logs:type_name -> syncloud.agent.v1.LogBatch
+	45, // 6: syncloud.agent.v1.ConnectRequest.exec_output:type_name -> syncloud.agent.v1.ExecOutput
 	6,  // 7: syncloud.agent.v1.ConnectRequest.upgrade_result:type_name -> syncloud.agent.v1.UpgradeResult
 	10, // 8: syncloud.agent.v1.ConnectResponse.welcome:type_name -> syncloud.agent.v1.Welcome
-	18, // 9: syncloud.agent.v1.ConnectResponse.run_task:type_name -> syncloud.agent.v1.RunTask
-	19, // 10: syncloud.agent.v1.ConnectResponse.stop_task:type_name -> syncloud.agent.v1.StopTask
-	21, // 11: syncloud.agent.v1.ConnectResponse.network:type_name -> syncloud.agent.v1.NetworkConfig
-	31, // 12: syncloud.agent.v1.ConnectResponse.certificate:type_name -> syncloud.agent.v1.CertificateIssued
-	24, // 13: syncloud.agent.v1.ConnectResponse.confirm_network:type_name -> syncloud.agent.v1.ConfirmNetwork
-	34, // 14: syncloud.agent.v1.ConnectResponse.discovery:type_name -> syncloud.agent.v1.Discovery
-	41, // 15: syncloud.agent.v1.ConnectResponse.exec_input:type_name -> syncloud.agent.v1.ExecInput
+	19, // 9: syncloud.agent.v1.ConnectResponse.run_task:type_name -> syncloud.agent.v1.RunTask
+	20, // 10: syncloud.agent.v1.ConnectResponse.stop_task:type_name -> syncloud.agent.v1.StopTask
+	22, // 11: syncloud.agent.v1.ConnectResponse.network:type_name -> syncloud.agent.v1.NetworkConfig
+	32, // 12: syncloud.agent.v1.ConnectResponse.certificate:type_name -> syncloud.agent.v1.CertificateIssued
+	25, // 13: syncloud.agent.v1.ConnectResponse.confirm_network:type_name -> syncloud.agent.v1.ConfirmNetwork
+	35, // 14: syncloud.agent.v1.ConnectResponse.discovery:type_name -> syncloud.agent.v1.Discovery
+	42, // 15: syncloud.agent.v1.ConnectResponse.exec_input:type_name -> syncloud.agent.v1.ExecInput
 	7,  // 16: syncloud.agent.v1.ConnectResponse.pull_image:type_name -> syncloud.agent.v1.PullImage
 	5,  // 17: syncloud.agent.v1.ConnectResponse.upgrade_agent:type_name -> syncloud.agent.v1.UpgradeAgent
 	9,  // 18: syncloud.agent.v1.Hello.info:type_name -> syncloud.agent.v1.NodeInfo
-	20, // 19: syncloud.agent.v1.Hello.tasks:type_name -> syncloud.agent.v1.TaskStatus
-	13, // 20: syncloud.agent.v1.Heartbeat.metrics:type_name -> syncloud.agent.v1.NodeMetrics
-	26, // 21: syncloud.agent.v1.Heartbeat.network:type_name -> syncloud.agent.v1.NetworkStatus
-	12, // 22: syncloud.agent.v1.Heartbeat.tasks:type_name -> syncloud.agent.v1.TaskMetrics
-	46, // 23: syncloud.agent.v1.TaskSpec.env:type_name -> syncloud.agent.v1.TaskSpec.EnvEntry
-	47, // 24: syncloud.agent.v1.TaskSpec.labels:type_name -> syncloud.agent.v1.TaskSpec.LabelsEntry
-	16, // 25: syncloud.agent.v1.TaskSpec.ports:type_name -> syncloud.agent.v1.PortBinding
-	17, // 26: syncloud.agent.v1.TaskSpec.mounts:type_name -> syncloud.agent.v1.Mount
-	0,  // 27: syncloud.agent.v1.TaskSpec.restart:type_name -> syncloud.agent.v1.RestartPolicy
-	45, // 28: syncloud.agent.v1.TaskSpec.health:type_name -> syncloud.agent.v1.HealthCheck
-	2,  // 29: syncloud.agent.v1.Mount.type:type_name -> syncloud.agent.v1.Mount.Type
-	15, // 30: syncloud.agent.v1.RunTask.spec:type_name -> syncloud.agent.v1.TaskSpec
-	1,  // 31: syncloud.agent.v1.TaskStatus.state:type_name -> syncloud.agent.v1.TaskState
-	25, // 32: syncloud.agent.v1.NetworkConfig.peers:type_name -> syncloud.agent.v1.Peer
-	22, // 33: syncloud.agent.v1.NetworkConfig.firewall:type_name -> syncloud.agent.v1.Firewall
-	23, // 34: syncloud.agent.v1.Firewall.rules:type_name -> syncloud.agent.v1.FirewallRule
-	29, // 35: syncloud.agent.v1.NetworkStatus.peers:type_name -> syncloud.agent.v1.PeerStatus
-	27, // 36: syncloud.agent.v1.NetworkStatus.counters:type_name -> syncloud.agent.v1.RuleCounter
-	28, // 37: syncloud.agent.v1.NetworkStatus.drops:type_name -> syncloud.agent.v1.DropFlow
-	33, // 38: syncloud.agent.v1.LogBatch.lines:type_name -> syncloud.agent.v1.LogLine
-	38, // 39: syncloud.agent.v1.Discovery.records:type_name -> syncloud.agent.v1.DNSRecord
-	39, // 40: syncloud.agent.v1.Discovery.services:type_name -> syncloud.agent.v1.VirtualService
-	35, // 41: syncloud.agent.v1.Discovery.security:type_name -> syncloud.agent.v1.SecurityPolicy
-	36, // 42: syncloud.agent.v1.SecurityPolicy.sets:type_name -> syncloud.agent.v1.SecuritySet
-	37, // 43: syncloud.agent.v1.SecurityPolicy.rules:type_name -> syncloud.agent.v1.SecurityRule
-	40, // 44: syncloud.agent.v1.VirtualService.ports:type_name -> syncloud.agent.v1.VirtualPort
-	42, // 45: syncloud.agent.v1.ExecInput.start:type_name -> syncloud.agent.v1.ExecStart
-	43, // 46: syncloud.agent.v1.ExecInput.resize:type_name -> syncloud.agent.v1.ExecResize
-	3,  // 47: syncloud.agent.v1.AgentGatewayService.Connect:input_type -> syncloud.agent.v1.ConnectRequest
-	4,  // 48: syncloud.agent.v1.AgentGatewayService.Connect:output_type -> syncloud.agent.v1.ConnectResponse
-	48, // [48:49] is the sub-list for method output_type
-	47, // [47:48] is the sub-list for method input_type
-	47, // [47:47] is the sub-list for extension type_name
-	47, // [47:47] is the sub-list for extension extendee
-	0,  // [0:47] is the sub-list for field type_name
+	21, // 19: syncloud.agent.v1.Hello.tasks:type_name -> syncloud.agent.v1.TaskStatus
+	11, // 20: syncloud.agent.v1.Welcome.gateways:type_name -> syncloud.agent.v1.GatewayEndpoint
+	14, // 21: syncloud.agent.v1.Heartbeat.metrics:type_name -> syncloud.agent.v1.NodeMetrics
+	27, // 22: syncloud.agent.v1.Heartbeat.network:type_name -> syncloud.agent.v1.NetworkStatus
+	13, // 23: syncloud.agent.v1.Heartbeat.tasks:type_name -> syncloud.agent.v1.TaskMetrics
+	47, // 24: syncloud.agent.v1.TaskSpec.env:type_name -> syncloud.agent.v1.TaskSpec.EnvEntry
+	48, // 25: syncloud.agent.v1.TaskSpec.labels:type_name -> syncloud.agent.v1.TaskSpec.LabelsEntry
+	17, // 26: syncloud.agent.v1.TaskSpec.ports:type_name -> syncloud.agent.v1.PortBinding
+	18, // 27: syncloud.agent.v1.TaskSpec.mounts:type_name -> syncloud.agent.v1.Mount
+	0,  // 28: syncloud.agent.v1.TaskSpec.restart:type_name -> syncloud.agent.v1.RestartPolicy
+	46, // 29: syncloud.agent.v1.TaskSpec.health:type_name -> syncloud.agent.v1.HealthCheck
+	2,  // 30: syncloud.agent.v1.Mount.type:type_name -> syncloud.agent.v1.Mount.Type
+	16, // 31: syncloud.agent.v1.RunTask.spec:type_name -> syncloud.agent.v1.TaskSpec
+	1,  // 32: syncloud.agent.v1.TaskStatus.state:type_name -> syncloud.agent.v1.TaskState
+	26, // 33: syncloud.agent.v1.NetworkConfig.peers:type_name -> syncloud.agent.v1.Peer
+	23, // 34: syncloud.agent.v1.NetworkConfig.firewall:type_name -> syncloud.agent.v1.Firewall
+	24, // 35: syncloud.agent.v1.Firewall.rules:type_name -> syncloud.agent.v1.FirewallRule
+	30, // 36: syncloud.agent.v1.NetworkStatus.peers:type_name -> syncloud.agent.v1.PeerStatus
+	28, // 37: syncloud.agent.v1.NetworkStatus.counters:type_name -> syncloud.agent.v1.RuleCounter
+	29, // 38: syncloud.agent.v1.NetworkStatus.drops:type_name -> syncloud.agent.v1.DropFlow
+	34, // 39: syncloud.agent.v1.LogBatch.lines:type_name -> syncloud.agent.v1.LogLine
+	39, // 40: syncloud.agent.v1.Discovery.records:type_name -> syncloud.agent.v1.DNSRecord
+	40, // 41: syncloud.agent.v1.Discovery.services:type_name -> syncloud.agent.v1.VirtualService
+	36, // 42: syncloud.agent.v1.Discovery.security:type_name -> syncloud.agent.v1.SecurityPolicy
+	37, // 43: syncloud.agent.v1.SecurityPolicy.sets:type_name -> syncloud.agent.v1.SecuritySet
+	38, // 44: syncloud.agent.v1.SecurityPolicy.rules:type_name -> syncloud.agent.v1.SecurityRule
+	41, // 45: syncloud.agent.v1.VirtualService.ports:type_name -> syncloud.agent.v1.VirtualPort
+	43, // 46: syncloud.agent.v1.ExecInput.start:type_name -> syncloud.agent.v1.ExecStart
+	44, // 47: syncloud.agent.v1.ExecInput.resize:type_name -> syncloud.agent.v1.ExecResize
+	3,  // 48: syncloud.agent.v1.AgentGatewayService.Connect:input_type -> syncloud.agent.v1.ConnectRequest
+	4,  // 49: syncloud.agent.v1.AgentGatewayService.Connect:output_type -> syncloud.agent.v1.ConnectResponse
+	49, // [49:50] is the sub-list for method output_type
+	48, // [48:49] is the sub-list for method input_type
+	48, // [48:48] is the sub-list for extension type_name
+	48, // [48:48] is the sub-list for extension extendee
+	0,  // [0:48] is the sub-list for field type_name
 }
 
 func init() { file_syncloud_agent_v1_agent_proto_init() }
@@ -4371,7 +4444,7 @@ func file_syncloud_agent_v1_agent_proto_init() {
 		(*ConnectResponse_PullImage)(nil),
 		(*ConnectResponse_UpgradeAgent)(nil),
 	}
-	file_syncloud_agent_v1_agent_proto_msgTypes[38].OneofWrappers = []any{
+	file_syncloud_agent_v1_agent_proto_msgTypes[39].OneofWrappers = []any{
 		(*ExecInput_Start)(nil),
 		(*ExecInput_Stdin)(nil),
 		(*ExecInput_Resize)(nil),
@@ -4384,7 +4457,7 @@ func file_syncloud_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_syncloud_agent_v1_agent_proto_rawDesc), len(file_syncloud_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   45,
+			NumMessages:   46,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

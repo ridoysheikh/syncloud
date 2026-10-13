@@ -112,6 +112,30 @@ func TestTCPRoutesForPublicDatabases(t *testing.T) {
 	}
 }
 
+// agent.<domain> passes TLS through to the gateway with a PROXY header, on
+// the controller only: edges leave the route out.
+func TestAgentRoutePassthrough(t *testing.T) {
+	p := &Provider{ControllerURL: "http://127.0.0.1:7070", BaseDomain: func() string { return "example.com" },
+		MeshControllerURL: func() string { return "http://10.90.0.1:7070" },
+		TCPRoutes: func() []TCPRoute {
+			return []TCPRoute{{Name: AgentRouteName, Entrypoint: "websecure", Host: "agent.example.com",
+				Servers: []string{"127.0.0.1:7444"}, Passthrough: true, ProxyProtocol: true}}
+		}}
+	b, _ := json.Marshal(p.Config().TCP)
+	for _, want := range []string{
+		`"rule":"HostSNI(` + "`agent.example.com`" + `)"`, `"entryPoints":["websecure"]`, `"tls":{"passthrough":true}`,
+		`"serversTransport":"syncloud-agent"`, `"serversTransports":{"syncloud-agent":{"proxyProtocol":{"version":1}}}`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("missing %s in %s", want, b)
+		}
+	}
+	edge, _ := json.Marshal(p.EdgeConfig()["tcp"])
+	if strings.Contains(string(edge), AgentRouteName) {
+		t.Errorf("edge config has the agent route: %s", edge)
+	}
+}
+
 func TestDedicatedDatabasePortsAndDefaultCertificate(t *testing.T) {
 	routes := []TCPRoute{
 		{Name: "db-1-port", Entrypoint: "db-21000", Servers: []string{"10.91.1.2:6379"}, Allow: []string{"203.0.113.0/24"}},

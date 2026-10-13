@@ -54,6 +54,8 @@ type Gateway struct {
 	log      *slog.Logger
 	hooks    []Hooks
 	ca       *pki.CA
+	// endpoints lists the gateway addresses sent to a node on connect (nil: none).
+	endpoints func(store.Node) []*agentv1.GatewayEndpoint
 
 	mu       sync.Mutex
 	sessions map[string]*session // by node ID
@@ -68,6 +70,9 @@ var ErrNotConnected = errors.New("node is not connected")
 func New(st *store.Store, registry *nodes.Registry, log *slog.Logger) *Gateway {
 	return &Gateway{st: st, registry: registry, log: log, sessions: map[string]*session{}}
 }
+
+// SetEndpoints sets the gateway addresses agents are told to use, in order.
+func (g *Gateway) SetEndpoints(f func(store.Node) []*agentv1.GatewayEndpoint) { g.endpoints = f }
 
 // Conn describes a newly connected agent.
 type Conn struct {
@@ -96,19 +101,30 @@ func (g *Gateway) Send(nodeID string, msg *agentv1.ConnectResponse) error {
 }
 
 // Serve listens on addr with mTLS until ctx ends. hosts are the names and IPs
-// agents use to reach the gateway (put in the server certificate).
-func (g *Gateway) Serve(ctx context.Context, ca *pki.CA, addr string, hosts []string) error {
+// agents use to reach the gateway (put in the server certificate). With
+// proxyAddr set, it also listens there for connections Traefik passes on
+// with a PROXY protocol header (agent.<domain>:443).
+func (g *Gateway) Serve(ctx context.Context, ca *pki.CA, addr, proxyAddr string, hosts []string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
-	return g.ServeListener(ctx, ca, ln, hosts)
+	lns := []net.Listener{ln}
+	if proxyAddr != "" {
+		pln, err := net.Listen("tcp", proxyAddr)
+		if err != nil {
+			ln.Close()
+			return err
+		}
+		lns = append(lns, ProxyListener(pln))
+	}
+	return g.ServeListener(ctx, ca, hosts, lns...)
 }
 
-// ServeListener is Serve on an existing listener.
-func (g *Gateway) ServeListener(ctx context.Context, ca *pki.CA, ln net.Listener, hosts []string) error {
+// ServeListener is Serve on existing listeners.
+func (g *Gateway) ServeListener(ctx context.Context, ca *pki.CA, hosts []string, lns ...net.Listener) error {
 	g.ca = ca
-	cert, err := ca.ServerCert(hosts, 365*24*time.Hour)
+	cert, err := ca.ServerCert(append(hosts, pki.GatewayName), 365*24*time.Hour)
 	if err != nil {
 		return fmt.Errorf("gateway certificate: %w", err)
 	}
@@ -128,8 +144,12 @@ func (g *Gateway) ServeListener(ctx context.Context, ca *pki.CA, ln net.Listener
 		<-ctx.Done()
 		srv.GracefulStop()
 	}()
-	g.log.Info("agent gateway listening", "addr", ln.Addr().String())
-	return srv.Serve(ln)
+	errc := make(chan error, len(lns))
+	for _, ln := range lns {
+		g.log.Info("agent gateway listening", "addr", ln.Addr().String())
+		go func() { errc <- srv.Serve(ln) }()
+	}
+	return <-errc
 }
 
 func (g *Gateway) Connect(stream grpc.BidiStreamingServer[agentv1.ConnectRequest, agentv1.ConnectResponse]) error {
@@ -152,7 +172,7 @@ func (g *Gateway) Connect(stream grpc.BidiStreamingServer[agentv1.ConnectRequest
 	g.log.Info("agent connected", "node", node.Name, "version", hello.GetAgentVersion())
 
 	if err := stream.Send(&agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_Welcome{Welcome: &agentv1.Welcome{
-		NodeId: node.ID, HeartbeatIntervalSeconds: int32(nodes.HeartbeatInterval / time.Second),
+		NodeId: node.ID, HeartbeatIntervalSeconds: int32(nodes.HeartbeatInterval / time.Second), Gateways: g.endpointsFor(node),
 	}}}); err != nil {
 		return err
 	}
@@ -270,6 +290,13 @@ func (g *Gateway) Connect(stream grpc.BidiStreamingServer[agentv1.ConnectRequest
 			}
 		}
 	}
+}
+
+func (g *Gateway) endpointsFor(n store.Node) []*agentv1.GatewayEndpoint {
+	if g.endpoints == nil {
+		return nil
+	}
+	return g.endpoints(n)
 }
 
 // authenticate maps the verified client certificate to a node.

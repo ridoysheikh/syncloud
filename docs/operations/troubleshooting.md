@@ -28,7 +28,7 @@ synctl system tasks                  # Traefik, registry, VictoriaMetrics, … a
 | --- | --- |
 | **Installer: "port 80/443 is used"** | Another web server owns the port. Stop it; Traefik must own 80 and 443. |
 | **No certificate, browser warning** | DNS doesn't point at the cluster yet, or ports 80/443 are blocked. `synctl certificates list` shows the error; `synctl certificates renew HOST` retries now. |
-| **A node stays "Not ready"** | The agent can't reach the controller on 7443/tcp. Check `journalctl -u syncloud-agent` on the node and the firewall between them. |
+| **A node stays "Not ready"** | The agent can't reach the controller on 443/tcp (`agent.<domain>`) or 7443/tcp. Run `syncloud-agent check-gateways` on the node, check `journalctl -u syncloud-agent`, and check the firewall between them. |
 | **Tasks of one node unreachable from others** | WireGuard (51820/udp) is blocked between the nodes. **Network → Topology** shows each link. |
 | **Service stuck "starting"** | The health check fails. Open a task on the **Tasks** tab for its error, and the **Logs** tab. A wrong port or path is the usual cause. |
 | **"No node can take it"** | No node has enough free memory, or enough unreserved CPU for a reserved-CPU service, or placement excludes them. The message names the reason. Lower the memory, switch a reservation to shared, add a node, or widen placement. |

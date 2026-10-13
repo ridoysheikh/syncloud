@@ -18,6 +18,9 @@ type Controller struct {
 	Listen string
 	// AgentListen is where the agent gateway (gRPC, mTLS) listens.
 	AgentListen string
+	// AgentProxyListen is the gateway's loopback port for connections
+	// Traefik passes on from agent.<domain>:443 (PROXY protocol; "" = off).
+	AgentProxyListen string
 	// AgentAdvertise is the gateway address given to joining nodes. In production
 	// this is the controller's WireGuard IP (10.90.0.1:7443, §8).
 	AgentAdvertise string
@@ -99,6 +102,7 @@ func LoadController(args []string) (Controller, error) {
 	fs.StringVar(&c.DataDir, "data-dir", env("SYNCLOUD_DATA_DIR", "/var/lib/syncloud"), "directory for controller state")
 	fs.StringVar(&c.Listen, "listen", env("SYNCLOUD_LISTEN", "127.0.0.1:7070"), "API and dashboard listen address")
 	fs.StringVar(&c.AgentListen, "agent-listen", env("SYNCLOUD_AGENT_LISTEN", "127.0.0.1:7443"), "agent gateway listen address")
+	fs.StringVar(&c.AgentProxyListen, "agent-proxy-listen", env("SYNCLOUD_AGENT_PROXY_LISTEN", "127.0.0.1:7444"), "agent gateway port for agent.<domain>:443 through Traefik (loopback; empty = off)")
 	fs.StringVar(&c.AgentAdvertise, "agent-advertise", env("SYNCLOUD_AGENT_ADVERTISE", ""), "agent gateway address for nodes (default: --agent-listen)")
 	fs.BoolVar(&c.Dev, "dev", env("SYNCLOUD_DEV", "") == "1", "development mode")
 	fs.StringVar(&c.PublicHTTP, "public-http", env("SYNCLOUD_PUBLIC_HTTP", ""), "Traefik HTTP entrypoint (default :80, dev 127.0.0.1:8080)")

@@ -62,6 +62,7 @@ type Server struct {
 	ca                    *pki.CA
 	nodes                 *nodes.Registry
 	gatewayAddr           string
+	gatewayEndpointsFn    func(string) []GatewayEndpoint
 	system                *system.Manager
 	registry              *registry.Issuer
 	internal              map[string]http.Handler
@@ -127,6 +128,8 @@ type Options struct {
 	Nodes   *nodes.Registry
 	// GatewayAddr is the agent gateway address returned to joining nodes.
 	GatewayAddr string
+	// GatewayEndpoints lists the gateway addresses for a node, in order (nil: GatewayAddr only).
+	GatewayEndpoints func(node string) []GatewayEndpoint
 	// System reports platform components (system tasks); may be nil in tests.
 	System *system.Manager
 	// Registry issues Docker registry tokens; nil disables the token endpoint.
@@ -218,6 +221,7 @@ func New(o Options) *Server {
 		ca:                    o.CA,
 		nodes:                 o.Nodes,
 		gatewayAddr:           o.GatewayAddr,
+		gatewayEndpointsFn:    o.GatewayEndpoints,
 		system:                o.System,
 		registry:              o.Registry,
 		internal:              o.Internal,

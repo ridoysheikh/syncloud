@@ -16371,6 +16371,26 @@
           "gatewayAddress": {
             "type": "string",
             "description": "host:port of the agent gateway (gRPC, mTLS)"
+          },
+          "gateways": {
+            "type": "array",
+            "description": "addresses to reach the gateway at, tried in order: Traefik (agent.<domain>:443) first, gatewayAddress last",
+            "items": {
+              "type": "object",
+              "required": [
+                "address"
+              ],
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "description": "host:port"
+                },
+                "serverName": {
+                  "type": "string",
+                  "description": "TLS name sent for Traefik to route by; the certificate is checked for syncloud-gateway"
+                }
+              }
+            }
           }
         }
       },

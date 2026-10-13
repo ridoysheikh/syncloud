@@ -54,7 +54,7 @@ func startCluster(t *testing.T) *cluster {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go agentgw.New(st, reg, log).ServeListener(ctx, ca, ln, []string{"127.0.0.1"})
+	go agentgw.New(st, reg, log).ServeListener(ctx, ca, []string{"127.0.0.1"}, ln)
 
 	box, _ := secrets.New(make([]byte, 32))
 	srv := httptest.NewServer(api.New(api.Options{

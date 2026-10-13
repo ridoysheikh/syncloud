@@ -132,14 +132,14 @@ if [ ! -f /var/lib/syncloud-agent/agent.json ]; then
 else
   ok "already joined; restarting the agent"
 fi
-# The agent dials the controller's gateway (mutual TLS); check it is reachable.
+# The agent dials the controller's gateway (mutual TLS): Traefik on 443
+# first, the direct port last. Check which addresses answer.
 GATEWAY=$(sed -n 's/.*"gateway": *"\([^"]*\)".*/\1/p' /var/lib/syncloud-agent/agent.json)
-if [ -n "$GATEWAY" ]; then
-  if timeout 5 bash -c "exec 3<>/dev/tcp/${GATEWAY%:*}/${GATEWAY##*:}" 2>/dev/null; then
-    info "gateway $GATEWAY reachable"
-  else
-    warn "can't open TCP $GATEWAY: the agent won't connect until it is reachable (firewall or security group on the controller?)"
-  fi
+if checks=$(/usr/local/bin/syncloud-agent check-gateways 2>&1); then
+  printf '%s\n' "$checks" | sed "s/^/      /"
+else
+  printf '%s\n' "$checks" | sed "s/^/      /"
+  warn "no gateway address answers: the agent won't connect until one does (firewall or security group on the controller?)"
 fi
 
 # ── 6. start and wait for the connection ────────────────────────────────────
@@ -154,7 +154,7 @@ for _ in $(seq 1 45); do
   lines=$(journalctl -u syncloud-agent --since "$since" -o cat --no-pager 2>/dev/null || true)
   total=$(printf '%s\n' "$lines" | grep -c . || true)
   if [ "$total" -gt "$shown" ]; then
-    printf '%s\n' "$lines" | tail -n +"$((shown + 1))" | cut -c1-160 | sed "s/^/      ${D}│ /;s/\$/${N}/"
+    printf '%s\n' "$lines" | tail -n +"$((shown + 1))" | fold -s -w 150 | sed "s/^/      ${D}│ /;s/\$/${N}/"
     shown=$total
   fi
   if printf '%s' "$lines" | grep -q "connected to controller"; then connected=1; break; fi
@@ -162,8 +162,18 @@ for _ in $(seq 1 45); do
 done
 if [ "$connected" -ne 1 ]; then
   printf '\n%sThe agent did not connect within 90 seconds.%s\n' "$Y" "$N" >&2
+  # Name the likely cause from the agent's own error.
+  if printf '%s' "$lines" | grep -q "connection refused"; then
+    printf '  • %s refused the connection: nothing listens there. On the controller check\n    ss -ltnp | grep 7443   (SYNCLOUD_AGENT_LISTEN in /etc/syncloud/controller.env must be 0.0.0.0:7443)\n' "$GATEWAY" >&2
+  elif printf '%s' "$lines" | grep -qE "i/o timeout|deadline exceeded|no route to host|while dialing"; then
+    printf '  • packets to %s are dropped: a firewall between this server and the controller blocks TCP %s.\n' "$GATEWAY" "${GATEWAY##*:}" >&2
+    printf '    On the controller: ufw allow %s/tcp  (or firewall-cmd --add-port=%s/tcp --permanent; firewall-cmd --reload),\n' "${GATEWAY##*:}" "${GATEWAY##*:}" >&2
+    printf '    and open it in your cloud provider'"'"'s firewall / security group if it has one.\n' >&2
+  elif printf '%s' "$lines" | grep -qE "certificate|x509|handshake"; then
+    printf '  • the TLS handshake failed: the controller'"'"'s address may have changed since this server joined.\n' >&2
+  fi
   printf '  • follow it:   journalctl -u syncloud-agent -f\n' >&2
-  [ -n "$GATEWAY" ] && printf '  • open TCP %s on the controller to this server\n' "$GATEWAY" >&2
+  printf '  • open TCP 443 (or %s) on the controller to this server\n' "${GATEWAY:-7443}" >&2
   printf '  • open UDP 51820 between nodes (WireGuard)\n' >&2
   printf '  • it keeps retrying; the node turns Ready once it connects\n' >&2
   exit 1

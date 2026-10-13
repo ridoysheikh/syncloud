@@ -23,11 +23,19 @@ type joinRequest struct {
 }
 
 type joinResponse struct {
-	NodeID         string `json:"nodeId"`
-	Name           string `json:"name"`
-	Certificate    string `json:"certificate"`
-	CACertificate  string `json:"caCertificate"`
-	GatewayAddress string `json:"gatewayAddress"`
+	NodeID         string            `json:"nodeId"`
+	Name           string            `json:"name"`
+	Certificate    string            `json:"certificate"`
+	CACertificate  string            `json:"caCertificate"`
+	GatewayAddress string            `json:"gatewayAddress"`
+	Gateways       []GatewayEndpoint `json:"gateways,omitempty"`
+}
+
+// GatewayEndpoint is one way to reach the agent gateway; with ServerName set
+// it goes through Traefik (agent.<domain>:443).
+type GatewayEndpoint struct {
+	Address    string `json:"address"`
+	ServerName string `json:"serverName,omitempty"`
 }
 
 // handleJoin registers a node (§6.1). It is authenticated by the join token in
@@ -87,7 +95,15 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	s.log.Info("node joined", "node", req.Name, "id", nodeID)
 	writeJSON(w, http.StatusCreated, joinResponse{
 		NodeID: nodeID, Name: req.Name, Certificate: string(certPEM), CACertificate: string(s.ca.CertPEM), GatewayAddress: s.gatewayAddr,
+		Gateways: s.gatewayEndpoints(req.Name),
 	})
+}
+
+func (s *Server) gatewayEndpoints(node string) []GatewayEndpoint {
+	if s.gatewayEndpointsFn == nil {
+		return nil
+	}
+	return s.gatewayEndpointsFn(node)
 }
 
 func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {

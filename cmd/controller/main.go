@@ -791,6 +791,11 @@ func serve(args []string) error {
 					out = append(out, traefik.TCPRoute{Name: r.Name, Entrypoint: r.Entrypoint(), Servers: r.Servers, Allow: r.Allow, Plain: true})
 				}
 			}
+			if host := agentHost(domains.Base()); host != "" && cfg.AgentProxyListen != "" {
+				// Agents reach the gateway on 443 too, so a blocked 7443 can't stop a join.
+				out = append(out, traefik.TCPRoute{Name: traefik.AgentRouteName, Entrypoint: "websecure", Host: host,
+					Servers: []string{cfg.AgentProxyListen}, Passthrough: true, ProxyProtocol: true})
+			}
 			return out
 		},
 		UDPRoutes: func() []traefik.UDPRoute {
@@ -854,13 +859,42 @@ func serve(args []string) error {
 		DataDir: cfg.DataDir, DBPath: cfg.DBPath(), Downloads: cfg.DownloadsDir, Source: upgrade.Source{Base: cfg.ReleaseURL},
 		Channel: cfg.ReleaseChannel, Current: version.Version, Settle: cfg.UpgradeSettle, Snapshot: snapshotDB(cfg.DBPath()),
 	}
+	// Workers try Traefik on 443 first (agent.<domain>, then the controller's
+	// address with that name), the direct port last. The controller's own
+	// agent stays off Traefik, which it runs: it uses loopback.
+	gatewayEndpoints := func(node string) []api.GatewayEndpoint {
+		var out []api.GatewayEndpoint
+		add := func(e api.GatewayEndpoint) {
+			if !slices.Contains(out, e) {
+				out = append(out, e)
+			}
+		}
+		if node == LocalNodeName {
+			add(api.GatewayEndpoint{Address: loopbackURLHost(cfg.AgentListen)})
+		} else if host := agentHost(domains.Base()); host != "" && cfg.AgentProxyListen != "" && cfg.SystemTasks {
+			port := portOf(cfg.PublicHTTPS)
+			add(api.GatewayEndpoint{Address: net.JoinHostPort(host, port), ServerName: host})
+			if !isLoopback(gwHost) && net.ParseIP(gwHost) != nil && !net.ParseIP(gwHost).IsUnspecified() {
+				add(api.GatewayEndpoint{Address: net.JoinHostPort(gwHost, port), ServerName: host})
+			}
+		}
+		add(api.GatewayEndpoint{Address: cfg.AgentAdvertise})
+		return out
+	}
+	gw.SetEndpoints(func(n store.Node) []*agentv1.GatewayEndpoint {
+		var out []*agentv1.GatewayEndpoint
+		for _, e := range gatewayEndpoints(n.Name) {
+			out = append(out, &agentv1.GatewayEndpoint{Address: e.Address, ServerName: e.ServerName})
+		}
+		return out
+	})
 	agentRollout := rollout.New(gw, registry, cfg.DownloadsDir, version.Version, log)
 	go gc.Run(ctx, st, cfg.DataDir, store.DefaultRetention, log)
 	gw.AddHooks(agentRollout.Hooks())
 
 	api.CLICommands = cli.OperationCommands
 	srv := api.New(api.Options{
-		Store: st, Secrets: box, CA: ca, Nodes: registry, GatewayAddr: cfg.AgentAdvertise,
+		Store: st, Secrets: box, CA: ca, Nodes: registry, GatewayAddr: cfg.AgentAdvertise, GatewayEndpoints: gatewayEndpoints,
 		System: sysMgr, Registry: regIssuer,
 		Internal: map[string]http.Handler{
 			"GET /internal/traefik/config":      traefikProvider,
@@ -908,7 +942,7 @@ func serve(args []string) error {
 		Bus: bus, Log: log, Web: web.FS(),
 	})
 	go func() {
-		if err := gw.Serve(ctx, ca, cfg.AgentListen, []string{gwHost, "localhost", "127.0.0.1"}); err != nil {
+		if err := gw.Serve(ctx, ca, cfg.AgentListen, cfg.AgentProxyListen, []string{gwHost, "localhost", "127.0.0.1"}); err != nil {
 			log.Error("agent gateway stopped", "err", err)
 			stop()
 		}
@@ -1174,6 +1208,15 @@ func acmeHTTPClient(caFile string) (*http.Client, error) {
 	t.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 	c.Transport = t
 	return c, nil
+}
+
+// agentHost is the name agents reach the gateway at through Traefik
+// ("" without a base domain).
+func agentHost(base string) string {
+	if base == "" {
+		return ""
+	}
+	return "agent." + base
 }
 
 func portOf(addr string) string {

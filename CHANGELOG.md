@@ -2,6 +2,19 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.2.2]
+
+### Changed
+
+- **Nodes connect through port 443.** Agents now reach the controller through Traefik at `agent.<your domain>:443`, then the controller's IP on 443, and only then on port 7443. A firewall or provider that blocks 7443 no longer stops a node from joining: the port that serves the dashboard is enough. Traefik passes the connection through without decrypting it, so agents still prove who they are with their own certificates. Nodes that already joined get the new addresses the next time they connect, without re-joining. The controller's own agent keeps connecting directly, so a Traefik problem can't cut it off. Without a base domain, agents use 7443 as before.
+- The join script's step 5 tries every address and shows which answer. `syncloud-agent check-gateways` does the same on a node at any time.
+- The join script shows the agent's full error lines, and when the agent doesn't connect, it names the likely cause: a blocked port, nothing listening, or a certificate problem.
+
+### Upgrading
+
+- `agent` under your base domain is now reserved for the platform. A service already using `agent.<your domain>` stops receiving HTTPS traffic on it; move it to another name.
+- Upgrade the controller first. Nodes pick up the new addresses once their agent is upgraded and reconnects.
+
 ## [0.2.1]
 
 ### Changed

@@ -157,6 +157,15 @@ type JoinResponse struct {
 	Certificate    string `json:"certificate"`
 	CACertificate  string `json:"caCertificate"`
 	GatewayAddress string `json:"gatewayAddress"`
+	// Gateways lists the addresses to reach the gateway at, in order.
+	Gateways []GatewayEndpoint `json:"gateways,omitempty"`
+}
+
+// GatewayEndpoint is one way to reach the agent gateway; with ServerName
+// set it goes through Traefik (agent.<domain>:443).
+type GatewayEndpoint struct {
+	Address    string `json:"address"`
+	ServerName string `json:"serverName,omitempty"`
 }
 
 // JoinNode needs no credentials: the join token authorizes it.

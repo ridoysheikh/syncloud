@@ -41,9 +41,20 @@ type UDPLoadBalancer struct {
 // TCPConfig carries the public database endpoints (Phase 12e): TLS is
 // terminated by Traefik and routed by SNI.
 type TCPConfig struct {
-	Routers     map[string]TCPRouter     `json:"routers"`
-	Services    map[string]TCPService    `json:"services"`
-	Middlewares map[string]TCPMiddleware `json:"middlewares,omitempty"`
+	Routers           map[string]TCPRouter           `json:"routers"`
+	Services          map[string]TCPService          `json:"services"`
+	Middlewares       map[string]TCPMiddleware       `json:"middlewares,omitempty"`
+	ServersTransports map[string]TCPServersTransport `json:"serversTransports,omitempty"`
+}
+
+// TCPServersTransport sets how Traefik connects to a TCP service's servers.
+type TCPServersTransport struct {
+	ProxyProtocol *ProxyProtocol `json:"proxyProtocol,omitempty"`
+}
+
+// ProxyProtocol makes Traefik send the client's address first (PROXY protocol).
+type ProxyProtocol struct {
+	Version int `json:"version"`
 }
 
 type TCPRouter struct {
@@ -59,7 +70,8 @@ type TCPService struct {
 }
 
 type TCPLoadBalancer struct {
-	Servers []TCPServer `json:"servers"`
+	Servers          []TCPServer `json:"servers"`
+	ServersTransport string      `json:"serversTransport,omitempty"`
 }
 
 type TCPServer struct {
@@ -83,6 +95,9 @@ type TCPRoute struct {
 	Servers                []string // host:port
 	Allow                  []string // client CIDRs (empty: anyone)
 	Plain                  bool     // no TLS: any plain connection on the entrypoint
+	// Passthrough forwards the TLS connection undecrypted (the server
+	// terminates it); ProxyProtocol sends the client's address first.
+	Passthrough, ProxyProtocol bool
 }
 
 // UDPRoute is a public UDP port of a service.
@@ -106,7 +121,9 @@ type Router struct {
 	TLS         *RouterTLS `json:"tls,omitempty"`
 }
 
-type RouterTLS struct{}
+type RouterTLS struct {
+	Passthrough bool `json:"passthrough,omitempty"`
+}
 
 type Service struct {
 	LoadBalancer LoadBalancer `json:"loadBalancer"`
@@ -260,6 +277,10 @@ const (
 func IsProbe(name string) bool {
 	return strings.HasSuffix(strings.SplitN(name, "@", 2)[0], ProbeSuffix)
 }
+
+// AgentRouteName is the TCP route that passes agent.<domain>:443 to the
+// agent gateway.
+const AgentRouteName = "syncloud-agent"
 
 const (
 	svcController = "syncloud-controller"
@@ -456,7 +477,7 @@ func tcpConfig(routes []TCPRoute) *TCPConfig {
 	if len(routes) == 0 {
 		return nil
 	}
-	c := &TCPConfig{Routers: map[string]TCPRouter{}, Services: map[string]TCPService{}, Middlewares: map[string]TCPMiddleware{}}
+	c := &TCPConfig{Routers: map[string]TCPRouter{}, Services: map[string]TCPService{}, Middlewares: map[string]TCPMiddleware{}, ServersTransports: map[string]TCPServersTransport{}}
 	for _, r := range routes {
 		if len(r.Servers) == 0 {
 			continue // nothing to serve yet (no running primary)
@@ -465,8 +486,12 @@ func tcpConfig(routes []TCPRoute) *TCPConfig {
 		for _, a := range r.Servers {
 			lb.Servers = append(lb.Servers, TCPServer{Address: a})
 		}
+		if r.ProxyProtocol {
+			c.ServersTransports[r.Name] = TCPServersTransport{ProxyProtocol: &ProxyProtocol{Version: 1}}
+			lb.ServersTransport = r.Name
+		}
 		c.Services[r.Name] = TCPService{LoadBalancer: lb}
-		rt := TCPRouter{Rule: hostSNI(r.Host), EntryPoints: []string{r.Entrypoint}, Service: r.Name, TLS: &RouterTLS{}}
+		rt := TCPRouter{Rule: hostSNI(r.Host), EntryPoints: []string{r.Entrypoint}, Service: r.Name, TLS: &RouterTLS{Passthrough: r.Passthrough}}
 		if r.Host == "" {
 			rt.Rule = "HostSNI(`*`)" // TLS with any name, or none
 		}
@@ -543,6 +568,15 @@ func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // private network; the registry stays on the controller's own Traefik.
 func (p *Provider) EdgeConfig() map[string]any {
 	out := p.Merged()
+	// Agents reach the controller's own Traefik: the gateway's PROXY port
+	// is loopback only (edges could only pass on their own address).
+	if t, ok := out["tcp"].(map[string]any); ok {
+		for _, k := range []string{"routers", "services", "serversTransports"} {
+			if m, ok := t[k].(map[string]any); ok {
+				delete(m, AgentRouteName)
+			}
+		}
+	}
 	h, _ := out["http"].(map[string]any)
 	if h == nil {
 		return out

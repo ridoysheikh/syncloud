@@ -15,10 +15,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc"
+	backoffpkg "google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -47,7 +49,10 @@ type State struct {
 	NodeID     string `json:"nodeId"`
 	Name       string `json:"name"`
 	Controller string `json:"controller"`
-	Gateway    string `json:"gateway"`
+	Gateway    string `json:"gateway"` // the address joined with, tried last
+	// Gateways are the controller's addresses for the gateway, in order
+	// (Traefik first); sent on join and on every connect.
+	Gateways []Endpoint `json:"gateways,omitempty"`
 }
 
 // Join registers this machine with the controller using a join token. The
@@ -74,6 +79,9 @@ func Join(ctx context.Context, dataDir, controllerURL, token, name, pin string) 
 		return State{}, fmt.Errorf("join: %w", err)
 	}
 	st := State{NodeID: resp.NodeID, Name: resp.Name, Controller: controllerURL, Gateway: resp.GatewayAddress}
+	for _, g := range resp.Gateways {
+		st.Gateways = append(st.Gateways, Endpoint{Address: g.Address, ServerName: g.ServerName})
+	}
 	stateJSON, _ := json.MarshalIndent(st, "", "  ")
 
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
@@ -121,15 +129,14 @@ func loadState(dataDir string) (State, *tls.Config, *certHolder, error) {
 	if !pool.AppendCertsFromPEM(caPEM) {
 		return st, nil, nil, errors.New("invalid CA certificate")
 	}
-	host, _, err := net.SplitHostPort(st.Gateway)
-	if err != nil {
-		return st, nil, nil, fmt.Errorf("gateway address %q: %w", st.Gateway, err)
+	if len(st.endpoints()) == 0 {
+		return st, nil, nil, errors.New("no gateway address: run `syncloud-agent set-controller`")
 	}
+	// ServerName is set per gateway address (endpointTLS).
 	return st, &tls.Config{
 		// Read on every handshake, so a renewed certificate is used on the next reconnect.
 		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return holder.get(), nil },
 		RootCAs:              pool, // only the cluster CA is trusted for the gateway
-		ServerName:           host,
 		MinVersion:           tls.VersionTLS13,
 	}, holder, nil
 }
@@ -159,15 +166,33 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 	if err != nil {
 		return err
 	}
-	conn, err := grpc.NewClient(st.Gateway,
-		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 30 * time.Second, Timeout: 10 * time.Second, PermitWithoutStream: true}),
-	)
-	if err != nil {
-		return err
+	// One connection per gateway address, made on first use.
+	conns := map[Endpoint]*grpc.ClientConn{}
+	defer func() {
+		for _, c := range conns {
+			c.Close()
+		}
+	}()
+	clientFor := func(e Endpoint) (agentv1.AgentGatewayServiceClient, error) {
+		if c := conns[e]; c != nil {
+			return agentv1.NewAgentGatewayServiceClient(c), nil
+		}
+		cfg, err := endpointTLS(tlsCfg, e)
+		if err != nil {
+			return nil, err
+		}
+		c, err := grpc.NewClient(e.Address,
+			grpc.WithTransportCredentials(credentials.NewTLS(cfg)),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 30 * time.Second, Timeout: 10 * time.Second, PermitWithoutStream: true}),
+			// A blocked address fails sooner, so the next one is tried.
+			grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffConfig(), MinConnectTimeout: 10 * time.Second}),
+		)
+		if err != nil {
+			return nil, err
+		}
+		conns[e] = c
+		return agentv1.NewAgentGatewayServiceClient(c), nil
 	}
-	defer conn.Close()
-	gw := agentv1.NewAgentGatewayServiceClient(conn)
 	info := sysinfo.StaticInfo(ctx, "/")
 
 	runner := NewRunner(d, log)
@@ -191,15 +216,22 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 		renewBefore = 30 * 24 * time.Hour
 	}
 	a := &agentLink{info: info, runner: runner, net: net, logs: logs, stats: stats, execs: execs, advertise: opts.AdvertiseAddress, log: log,
-		dataDir: dataDir, certs: certs, renewBefore: renewBefore, extra: make(chan *agentv1.ConnectRequest, 8)}
+		dataDir: dataDir, certs: certs, renewBefore: renewBefore, extra: make(chan *agentv1.ConnectRequest, 8), state: st}
 	a.upgrade = &selfUpgrade{dataDir: dataDir, log: log, report: a.report}
 	if p, ok := upgrade.ReadAgentPending(dataDir); ok && p.Version == version.Version {
 		log.Info("upgraded agent starting; confirming once connected", "from", p.From)
 	}
 
-	log.Info("agent starting", "node", st.Name, "gateway", st.Gateway, "version", version.Version)
-	for attempt := 0; ; attempt++ {
-		connected, err := a.session(ctx, gw)
+	eps := st.endpoints()
+	log.Info("agent starting", "node", st.Name, "gateway", eps[0].Address, "version", version.Version)
+	idx, round := 0, 0
+	for {
+		e := eps[idx]
+		gw, err := clientFor(e)
+		connected := false
+		if err == nil {
+			connected, err = a.session(ctx, gw, e)
+		}
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -207,11 +239,20 @@ func RunWith(ctx context.Context, dataDir string, d *docker.Client, log *slog.Lo
 			// The node was removed or its certificate replaced: retrying cannot help.
 			return fmt.Errorf("controller rejected this node: %w", err)
 		}
+		// A dropped session retries the same address; a failed one moves
+		// on to the next, waiting longer after each full round.
+		delay := 500 * time.Millisecond
 		if connected {
-			attempt = 0
+			round = 0
+			delay = backoff(0)
+		} else if idx = (idx + 1) % len(eps); idx == 0 {
+			delay = backoff(round)
+			round++
 		}
-		delay := backoff(attempt)
-		log.Warn("disconnected from controller", "err", err, "retry_in", delay.Round(100*time.Millisecond))
+		if now := a.endpoints(); !slices.Equal(now, eps) {
+			eps, idx = now, 0 // the controller sent a new list
+		}
+		log.Warn("disconnected from controller", "gateway", e.Address, "err", err, "next", eps[idx].Address, "retry_in", delay.Round(100*time.Millisecond))
 		select {
 		case <-ctx.Done():
 			return nil
@@ -236,13 +277,14 @@ type agentLink struct {
 
 	mu         sync.Mutex
 	pendingKey []byte // key for an in-flight renewal
+	state      State  // Gateways is updated from Welcome
 
 	extra   chan *agentv1.ConnectRequest // renewals and upgrade results, sent by the writer
 	upgrade *selfUpgrade
 }
 
 // session runs one stream. connected reports whether the controller accepted it.
-func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceClient) (connected bool, err error) {
+func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceClient, via Endpoint) (connected bool, err error) {
 	info, runner, log := a.info, a.runner, a.log
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -275,7 +317,8 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 	if welcome == nil {
 		return false, errors.New("expected Welcome from controller")
 	}
-	log.Info("connected to controller", "node_id", welcome.GetNodeId())
+	log.Info("connected to controller", "node_id", welcome.GetNodeId(), "gateway", via.Address, "traefik", via.ViaTraefik())
+	a.setGateways(welcome.GetGateways())
 
 	interval := time.Duration(welcome.GetHeartbeatIntervalSeconds()) * time.Second
 	if interval <= 0 {
@@ -373,6 +416,39 @@ func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.Connect
 }
 
 // backoff: 1s, 2s, 4s … capped at 30s, with ±25% jitter so nodes don't reconnect in lockstep.
+// endpoints are the gateway addresses to try, newest list first.
+func (a *agentLink) endpoints() []Endpoint {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.state.endpoints()
+}
+
+// setGateways stores a new list from the controller (empty: keep the current).
+func (a *agentLink) setGateways(list []*agentv1.GatewayEndpoint) {
+	eps := endpointsFrom(list)
+	if len(eps) == 0 {
+		return
+	}
+	a.mu.Lock()
+	same := slices.Equal(a.state.Gateways, eps)
+	a.state.Gateways = eps
+	a.mu.Unlock()
+	if same {
+		return
+	}
+	if err := saveGateways(a.dataDir, eps); err != nil {
+		a.log.Warn("save gateway addresses", "err", err)
+		return
+	}
+	a.log.Info("gateway addresses updated", "first", eps[0].Address)
+}
+
+func backoffConfig() backoffpkg.Config {
+	c := backoffpkg.DefaultConfig
+	c.MaxDelay = 30 * time.Second
+	return c
+}
+
 func backoff(attempt int) time.Duration {
 	d := time.Second << min(attempt, 5)
 	d = min(d, 30*time.Second)
@@ -396,6 +472,7 @@ func SetController(dataDir, gateway, controllerURL string) (State, error) {
 		return st, fmt.Errorf("--gateway must be HOST:PORT: %w", err)
 	}
 	st.Gateway = gateway
+	st.Gateways = nil // the controller sends its new list once connected
 	if controllerURL != "" {
 		st.Controller = controllerURL
 	}

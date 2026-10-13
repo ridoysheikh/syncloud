@@ -26,6 +26,7 @@ const usage = `usage:
   syncloud-agent join --controller URL --token TOKEN [--name NAME] [--data-dir DIR]
   syncloud-agent run [--data-dir DIR]
   syncloud-agent set-controller --gateway HOST:PORT [--controller URL] [--data-dir DIR]
+  syncloud-agent check-gateways [--data-dir DIR]
   syncloud-agent uninstall [--purge] [--data-dir DIR]
   syncloud-agent version
 `
@@ -109,6 +110,20 @@ func run(args []string) error {
 			return err
 		}
 		fmt.Printf("Node %s now connects to %s. Restart the agent (systemctl restart syncloud-agent).\n", st.Name, st.Gateway)
+		return nil
+
+	case "check-gateways":
+		// Tries every gateway address (TLS with this node's certificate).
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		ok, err := agent.CheckGateways(ctx, *dataDir, os.Stdout)
+		if err != nil {
+			return err
+		}
+		if ok == 0 {
+			return errors.New("no gateway address is reachable")
+		}
 		return nil
 
 	case "upgrade-guard":

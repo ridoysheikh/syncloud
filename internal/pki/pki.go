@@ -29,6 +29,11 @@ const (
 	caValidity = 10 * 365 * 24 * time.Hour
 	// NodeCertValidity bounds how long a stolen node key is useful; agents renew before expiry.
 	NodeCertValidity = 90 * 24 * time.Hour
+	// GatewayName is in every gateway certificate. Agents that reach the
+	// gateway through Traefik send another name (agent.<domain>, for
+	// routing) and check the certificate for this one, so the domain can
+	// change without new certificates.
+	GatewayName = "syncloud-gateway"
 )
 
 type CA struct {

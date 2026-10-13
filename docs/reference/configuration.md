@@ -9,7 +9,8 @@ The installer writes `/etc/syncloud/controller.env`. Every flag of `syncloud-con
 | `--data-dir` | `/var/lib/syncloud` | controller state (SQLite, keys) |
 | `--listen` | `127.0.0.1:7070` | API and dashboard (Traefik proxies to it) |
 | `--agent-listen` | `127.0.0.1:7443` (installer: `0.0.0.0:7443`) | where agents connect (mutual TLS) |
-| `--agent-advertise` | `--agent-listen` | the address nodes use to reach it |
+| `--agent-advertise` | `--agent-listen` | the address nodes use to reach it (their last fallback) |
+| `--agent-proxy-listen` | `127.0.0.1:7444` | loopback port Traefik passes `agent.<domain>:443` to, with the agent's address in a PROXY header. Empty turns the route off. |
 | `--public-ip` | detected | public IPv4 address |
 | `--base-domain` | `<public-ip>.sslip.io` | the platform's domain. `off` means none. |
 | `--acme`, `--acme-email`, `--acme-directory`, `--acme-ca-file` | Let's Encrypt | certificate issuing |
@@ -41,13 +42,14 @@ The agent is configured when it joins (`syncloud-agent join`). Its state lives i
 | `--no-host-shell` / `SYNCLOUD_AGENT_NO_HOST_SHELL=1` | refuse node shells on this machine |
 | `SYNCLOUD_WIREGUARD_MODE=userspace` | use userspace WireGuard even when the kernel module exists |
 | `syncloud-agent set-controller --gateway HOST:7443 --controller URL` | point it at a moved controller |
+| `syncloud-agent check-gateways` | try every gateway address this node knows and say which answer |
 
 ## Ports
 
 | Port | Who listens | Reached by |
 | --- | --- | --- |
 | 80, 443/tcp | Traefik (controller and edge nodes) | the internet |
-| 7443/tcp | controller (agent gateway) | nodes |
+| 7443/tcp | controller (agent gateway) | nodes, when 443 doesn't work for them |
 | 51820/udp | every node (WireGuard) | other nodes |
 | 20000–20999 tcp/udp | Traefik | the internet, for ports you make public |
 | 21000–21999/tcp | Traefik | the internet, for public databases (TLS or plain) |

@@ -45,7 +45,7 @@ type RoutingInput struct {
 var DefaultPublicPorts = [2]int{20000, 20999}
 
 // reservedLabels name platform hosts under the base domain.
-var reservedLabels = map[string]bool{"registry": true, "git": true, "db": true, "www": true}
+var reservedLabels = map[string]bool{"registry": true, "git": true, "db": true, "www": true, "agent": true}
 
 var labelRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 

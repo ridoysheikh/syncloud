@@ -96,6 +96,18 @@ message Welcome {
   string node_id = 1;
   // How often the agent should send heartbeats.
   int32 heartbeat_interval_seconds = 2;
+  // gateways are the addresses to reach the gateway at, tried in order
+  // (Traefik on 443 first, the direct port last). Empty: keep the current.
+  repeated GatewayEndpoint gateways = 3;
+}
+
+// GatewayEndpoint is one way to reach the agent gateway.
+message GatewayEndpoint {
+  string address = 1; // host:port
+  // server_name is the TLS name sent (SNI) for Traefik to route by; the
+  // certificate is then checked for pki.GatewayName. Empty: the address's
+  // host is sent and checked.
+  string server_name = 2;
 }
 
 message Heartbeat {
