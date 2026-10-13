@@ -95,6 +95,8 @@ type Manager struct {
 	live      map[string]*Live // member ID -> last probe
 	auto      map[string]*autoState
 	etcdUsers map[string]bool          // PostgreSQL clusters whose etcd user exists
+	etcdUp    bool                     // etcd answered the last reconcile
+	etcdWhy   string                   // why etcd cannot grow (logged once)
 	pgSlots   map[string]chan struct{} // explorer connection slots per PostgreSQL cluster
 	// pgRestarting: PostgreSQL clusters with a member restarting for
 	// pending settings (one at a time).
@@ -563,7 +565,8 @@ func (m *Manager) reconcile(ctx context.Context, id string) {
 	changed := false
 
 	if d.Deleting {
-		if d.Engine == EnginePostgres {
+		if d.Engine == EnginePostgres && m.etcdHealthy() {
+			// Skipped while etcd does not answer; what is left is unused.
 			m.dropEtcdUser(ctx, d)
 		}
 		for _, mb := range members {
@@ -602,8 +605,14 @@ func (m *Manager) reconcile(ctx context.Context, id string) {
 		}
 	}
 	if d.Engine == EnginePostgres && !m.etcdUserReady(id) {
-		// Patroni needs its etcd user before any member starts.
-		if err := m.ensureEtcdUser(ctx, d, sec); err != nil {
+		// Patroni needs its etcd user before any member starts. While etcd
+		// does not answer, wait without calling it: its timeouts would hold
+		// up every other database's reconcile.
+		err := errors.New(m.etcdWaiting(ctx))
+		if m.etcdHealthy() {
+			err = m.ensureEtcdUser(ctx, d, sec)
+		}
+		if err != nil {
 			if why := "waiting for the platform etcd: " + err.Error(); why != d.Status {
 				_ = m.st.SetDatabaseStatus(ctx, id, why)
 				m.publish(ctx, id)
@@ -811,7 +820,7 @@ func (m *Manager) taskSpec(d store.Database, spec Spec, st State, sec Secrets, m
 		if err != nil {
 			m.log.Warn("WAL-G settings", "database", d.Name, "err", err)
 		}
-		return pgTaskSpec(m.pgImage(d.Version), d, spec, st, sec, mb, m.EtcdHosts(context.Background()), dns, search, walg)
+		return pgTaskSpec(m.pgImage(d.Version), d, spec, st, sec, mb, EtcdHosts(), dns, search, walg)
 	}
 	return taskSpec(d, spec, st, sec, mb, dns, search)
 }
@@ -1006,7 +1015,7 @@ func (m *Manager) onConnect(c agentgw.Conn) {
 	}
 	if orphans, err := m.st.NodeDatabaseOrphans(ctx, c.Node.ID); err == nil {
 		for _, o := range orphans {
-			if seen[o.TaskID] {
+			if seen[o.TaskID] || etcdSeen[o.TaskID] {
 				continue // stopped with its volume above
 			}
 			// The container is already gone; remove the volume left behind.

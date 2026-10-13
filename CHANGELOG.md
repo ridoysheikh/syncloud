@@ -2,6 +2,32 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.2.3]
+
+### Fixed
+
+- **The platform etcd no longer hangs when nodes join.** When a cluster grew to three nodes, etcd added its second member with a vote before the member had a node or was running. A one-member etcd that adds a voter loses its quorum until the new member starts. If the member couldn't be placed (a node that takes no tasks, or whose network wasn't ready yet), etcd stayed stuck for good, and every PostgreSQL leader lost its lock. etcd now starts with one member. Each new member gets its node first, joins as a learner without a vote, and is promoted once it has caught up. A learner that doesn't catch up within 15 minutes is removed with its data and tried again, and members left over from an interrupted change are cleaned up.
+- **New PostgreSQL databases no longer wait forever for the platform etcd.** They stayed on "waiting for the platform etcd: the platform etcd is starting" while etcd was running, because etcd authentication was only turned on once etcd had all its members. It's now turned on as soon as etcd answers. The waiting message says what etcd is doing, for example which member is still pulling its image.
+- While etcd doesn't answer, the database operator no longer calls it for every PostgreSQL database. Its timeouts were holding up every other database too, Valkey included, so their members weren't created.
+- The controller now signs in to each etcd member separately. A sign-in token is only valid on the member that issued it, so calls that moved on to another member failed.
+- etcd's logs show under the platform's system logs as `etcd`, and base backup logs show in their database's logs. Both were filed as `unknown` before.
+- **The database wizard's capacity step accepts real sizes.** PostgreSQL sizes above 1 GiB were refused with "The memory maximum is below the minimum", from a hidden Valkey setting. The step now shows what each node can give one member and whether all members fit on separate nodes. It refuses a size no node can fit. Sizes of 1.5, 3, 6, 12, 24 and 32 GiB are offered, and Valkey's maximum follows its minimum up.
+
+### Upgrading
+
+- PostgreSQL members now start from a fixed list of etcd addresses, so they're no longer restarted when etcd grows or a member moves. Each existing member restarts once after the upgrade, one at a time: replicas first, then the primary after a switchover.
+- An etcd that lost its quorum under an earlier version can't recover by itself, because removing the stuck member needs a quorum too. On the node running `syncloud-etcd-e0`, after upgrading the controller:
+
+  ```sh
+  docker stop syncloud-etcd-e0
+  timeout 20 docker run --rm --user postgres -v syncloud-etcd-e0:/data --entrypoint etcd \
+    "$(docker inspect -f '{{.Config.Image}}' syncloud-etcd-e0)" --name=e0 --data-dir=/data/etcd \
+    --force-new-cluster --listen-client-urls=http://127.0.0.1:2379 --advertise-client-urls=http://127.0.0.1:2379
+  docker start syncloud-etcd-e0
+  ```
+
+  The controller then removes the stale members and adds them back as learners.
+
 ## [0.2.2]
 
 ### Changed

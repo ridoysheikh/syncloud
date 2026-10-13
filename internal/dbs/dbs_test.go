@@ -205,3 +205,17 @@ func TestPgHealth(t *testing.T) {
 		t.Error(h)
 	}
 }
+
+func TestEtcdIDsAndHosts(t *testing.T) {
+	// etcd's JSON gateway prints member IDs in decimal; SynCloud keeps hex.
+	if got := hexID("295791031814970942"); got != "41adc605313de3e" {
+		t.Errorf("hexID: %s", got)
+	}
+	if hexID("") != "" || hexID("x") != "" {
+		t.Error("hexID of a missing ID")
+	}
+	// Patroni's hosts never change as etcd grows (members would restart).
+	if h := EtcdHosts(); len(h) != etcdSize || h[0] != "e0.etcd.syncloud.internal:2379" || h[2] != "e2.etcd.syncloud.internal:2379" {
+		t.Errorf("EtcdHosts: %v", h)
+	}
+}

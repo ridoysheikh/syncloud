@@ -42,8 +42,9 @@ data=[m for m in d["members"] if m["kind"]=="data"]
 assert len(data)==2 and len({m["node"] for m in data})==2, data
 assert sorted(m["role"] for m in data)==["primary","replica"], data
 print("  ✓ m0/m1 on", ", ".join(m["node"] for m in data))'
-n=0; for c in sc-e2e-ctl sc-e2e-w1 sc-e2e-w2; do n=$((n + $(x $c docker ps -q --filter label=syncloud.service_id=etcd | wc -l))); done
-[ "$n" = 3 ] || fail "expected 3 etcd members, found $n"
+etcd_count() { local n=0; for c in sc-e2e-ctl sc-e2e-w1 sc-e2e-w2; do n=$((n + $(x $c docker ps -q --filter label=syncloud.service_id=etcd | wc -l))); done; echo $n; }
+# One member bootstraps; the others join as learners and get their vote.
+wait_for "3 etcd members" '[ "$(etcd_count)" = 3 ]'
 echo "  ✓ platform etcd: 3 members on distinct nodes"
 
 eval "$(api "$DB/credentials" | py '

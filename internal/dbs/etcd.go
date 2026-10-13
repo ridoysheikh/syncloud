@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,8 +25,9 @@ import (
 // The platform etcd (Phase 13) is Patroni's coordination store for every
 // PostgreSQL cluster. It runs on the nodes, so leader elections and
 // failovers keep working while the controller is down. Three members on
-// distinct nodes (one while the cluster has fewer nodes); a member whose
-// node is lost for good is removed and replaced, one change at a time.
+// distinct nodes (one while the cluster has fewer nodes); members join as
+// learners and get their vote once caught up, and a member whose node is
+// lost for good is removed and replaced, one change at a time.
 
 const (
 	EtcdPrefix = "dbe_"
@@ -36,8 +38,11 @@ const (
 	etcdPeerPort   = 2380
 	etcdSize       = 3
 	etcdLostAfter  = 10 * time.Minute
-	etcdRootKey    = "etcd.root_password" // sealed, in settings
-	etcdAuthKey    = "etcd.auth_enabled"
+	// etcdLearnerTimeout is how long a new member may take to start and
+	// catch up (its node pulls the PostgreSQL image first).
+	etcdLearnerTimeout = 15 * time.Minute
+	etcdRootKey        = "etcd.root_password" // sealed, in settings
+	etcdAuthKey        = "etcd.auth_enabled"
 )
 
 func etcdName(ord int) string { return fmt.Sprintf("e%d", ord) }
@@ -46,6 +51,8 @@ func etcdName(ord int) string { return fmt.Sprintf("e%d", ord) }
 func EtcdHost(ord int) string { return etcdName(ord) + "." + etcdZone }
 
 func etcdPeerURL(ord int) string { return fmt.Sprintf("http://%s:%d", EtcdHost(ord), etcdPeerPort) }
+
+func etcdVolume(ord int) string { return "syncloud-etcd-" + etcdName(ord) }
 
 // etcdTaskSpec runs one etcd member from the PostgreSQL image.
 func etcdTaskSpec(image string, mb store.EtcdMember, dns, search []string) *agentv1.TaskSpec {
@@ -57,7 +64,7 @@ func etcdTaskSpec(image string, mb store.EtcdMember, dns, search []string) *agen
 	return &agentv1.TaskSpec{
 		TaskId: mb.ID, Name: "syncloud-etcd-" + name, Image: image, NetworkMode: workload.Network,
 		Restart: agentv1.RestartPolicy_RESTART_POLICY_UNLESS_STOPPED,
-		Mounts:  []*agentv1.Mount{{Type: agentv1.Mount_TYPE_VOLUME, Source: "syncloud-etcd-" + name, Target: "/data"}},
+		Mounts:  []*agentv1.Mount{{Type: agentv1.Mount_TYPE_VOLUME, Source: etcdVolume(mb.Ordinal), Target: "/data"}},
 		Command: []string{"etcd",
 			"--name=" + name, "--data-dir=/data/etcd",
 			fmt.Sprintf("--listen-client-urls=http://0.0.0.0:%d", etcdClientPort),
@@ -77,12 +84,14 @@ func etcdTaskSpec(image string, mb store.EtcdMember, dns, search []string) *agen
 	}
 }
 
-// EtcdHosts are the client addresses Patroni uses.
-func (m *Manager) EtcdHosts(ctx context.Context) []string {
-	ms, _ := m.st.EtcdMembers(ctx)
+// EtcdHosts are the client addresses Patroni starts from: every name a
+// member can have, so members are not restarted as etcd grows or a member
+// moves. Patroni skips the names that do not answer and learns the
+// cluster's members from the first that does.
+func EtcdHosts() []string {
 	var out []string
-	for _, mb := range ms {
-		out = append(out, fmt.Sprintf("%s:%d", EtcdHost(mb.Ordinal), etcdClientPort))
+	for i := range etcdSize {
+		out = append(out, fmt.Sprintf("%s:%d", EtcdHost(i), etcdClientPort))
 	}
 	return out
 }
@@ -97,7 +106,10 @@ func (m *Manager) needsEtcd(ctx context.Context) bool {
 	return false
 }
 
-// reconcileEtcd keeps the platform etcd at its size.
+// reconcileEtcd keeps the platform etcd at its size. It starts with one
+// member and grows one learner at a time: a learner has no vote, so a member
+// that is slow to pull its image, or never starts, cannot cost the cluster
+// its quorum. It gets its vote once it has caught up with the leader.
 func (m *Manager) reconcileEtcd(ctx context.Context) {
 	members, err := m.st.EtcdMembers(ctx)
 	if err != nil {
@@ -111,7 +123,23 @@ func (m *Manager) reconcileEtcd(ctx context.Context) {
 		return
 	}
 	now := m.now().UTC()
-	m.etcdLearnIDs(ctx, members)
+	// What etcd lists (it needs a quorum to answer): nil while it does not.
+	list, lerr := m.etcdList(ctx)
+	m.mu.Lock()
+	m.etcdUp = lerr == nil
+	m.mu.Unlock()
+	if list != nil {
+		// Authentication only needs etcd to answer: PostgreSQL clusters
+		// wait for it, so it never waits for etcd to grow.
+		if err := m.etcdEnableAuth(ctx); err != nil {
+			m.log.Warn("etcd auth", "err", err)
+		}
+		m.etcdLearnIDs(ctx, members, list)
+		if m.etcdTidy(ctx, members, list, now) {
+			return // one change at a time
+		}
+		m.etcdPromote(ctx, members, list)
+	}
 
 	// Replace a member whose node is gone for good, if the rest keep quorum.
 	for _, mb := range members {
@@ -128,7 +156,7 @@ func (m *Manager) reconcileEtcd(ctx context.Context) {
 			}
 		}
 		m.log.Warn("replacing an etcd member on a lost node", "member", etcdName(mb.Ordinal))
-		_ = m.st.DeleteEtcdMember(ctx, mb.ID)
+		m.etcdDrop(ctx, mb)
 		return // one change at a time
 	}
 
@@ -137,74 +165,72 @@ func (m *Manager) reconcileEtcd(ctx context.Context) {
 		want = etcdSize
 	}
 	want = max(want, len(members)) // never shrink
-	placeOne := func(ord int, used []string, cluster string, isNew bool) (store.EtcdMember, bool) {
+	var used []string
+	for _, x := range members {
+		used = append(used, m.nodeName(x.NodeID))
+	}
+	placeNode := func() string {
 		ws := workload.Spec{Resources: workload.Resources{CPU: 0.05, Memory: 128}, Placement: workload.Placement{Strategy: "spread"}}.Avoiding(used)
 		nodeID, why := m.wl.PlaceSpec(ctx, ws)
 		if nodeID == "" {
-			m.log.Warn("cannot place an etcd member", "why", why)
-			return store.EtcdMember{}, false
+			m.etcdNote("cannot place an etcd member: " + why)
 		}
+		return nodeID
+	}
+	create := func(ord int, nodeID, cluster string, isNew bool, memberID string) bool {
 		mb := store.EtcdMember{ID: auth.NewID(EtcdPrefix), Ordinal: ord, NodeID: nodeID, State: store.TaskPending,
-			Cluster: cluster, NewCluster: isNew, CreatedAt: now.Truncate(time.Second)}
+			Cluster: cluster, NewCluster: isNew, MemberID: memberID, CreatedAt: now.Truncate(time.Second)}
 		if err := m.st.CreateEtcdMember(ctx, mb); err != nil {
 			m.log.Error("create etcd member", "err", err)
-			return store.EtcdMember{}, false
+			return false
 		}
-		return mb, true
+		m.etcdNote("")
+		m.etcdSend(ctx, &mb)
+		m.changed()
+		return true
 	}
 
 	switch {
 	case len(members) == 0:
-		// Bootstrap: every member at once, with the full initial cluster.
-		var parts []string
-		for i := 0; i < want; i++ {
-			parts = append(parts, etcdName(i)+"="+etcdPeerURL(i))
+		// Bootstrap a one-member cluster; the others join as learners.
+		if nodeID := placeNode(); nodeID != "" {
+			create(0, nodeID, etcdName(0)+"="+etcdPeerURL(0), true, "")
 		}
-		var used []string
-		for i := 0; i < want; i++ {
-			mb, ok := placeOne(i, used, strings.Join(parts, ","), true)
-			if !ok {
-				break
-			}
-			used = append(used, m.nodeName(mb.NodeID))
-			m.etcdSend(ctx, &mb)
-		}
-		m.changed()
 		return
-	case len(members) < want && m.etcdAllRunning(members):
-		// Grow by one: announce the member, then start it with the
-		// cluster as etcd now sees it.
+	case len(members) < want && list != nil && m.etcdAllRunning(members) && !hasLearner(list):
 		ord := 0
 		for slicesContainsOrd(members, ord) {
 			ord++
 		}
-		var resp struct {
-			Members []struct {
-				Name     string   `json:"name"`
-				PeerURLs []string `json:"peerURLs"`
-			} `json:"members"`
+		// The node first: etcd only hears of the member once it has one.
+		nodeID := placeNode()
+		if nodeID == "" {
+			return
 		}
-		if err := m.etcdCall(ctx, "cluster/member/add", map[string]any{"peerURLs": []string{etcdPeerURL(ord)}}, &resp); err != nil {
-			m.log.Warn("add an etcd member", "err", err)
+		var resp struct {
+			Member  etcdListed   `json:"member"`
+			Members []etcdListed `json:"members"`
+		}
+		if err := m.etcdCall(ctx, "cluster/member/add", map[string]any{"peerURLs": []string{etcdPeerURL(ord)}, "isLearner": true}, &resp); err != nil {
+			m.log.Warn("add an etcd member", "member", etcdName(ord), "err", err)
 			return
 		}
 		var parts []string
 		for _, x := range resp.Members {
 			name := x.Name
+			if name == "" && slices.Contains(x.PeerURLs, etcdPeerURL(ord)) {
+				name = etcdName(ord) // not started yet: etcd knows no name
+			}
 			if name == "" {
-				name = etcdName(ord)
+				continue
 			}
 			for _, u := range x.PeerURLs {
 				parts = append(parts, name+"="+u)
 			}
 		}
-		var used []string
-		for _, x := range members {
-			used = append(used, m.nodeName(x.NodeID))
-		}
-		if mb, ok := placeOne(ord, used, strings.Join(parts, ","), false); ok {
-			m.etcdSend(ctx, &mb)
-			m.changed()
+		m.log.Info("adding an etcd member as a learner", "member", etcdName(ord), "node", m.nodeName(nodeID))
+		if !create(ord, nodeID, strings.Join(parts, ","), false, hexID(resp.Member.ID)) {
+			_ = m.etcdRemove(ctx, resp.Member.ID)
 		}
 		return
 	}
@@ -234,11 +260,188 @@ func (m *Manager) reconcileEtcd(ctx context.Context) {
 		}
 		break
 	}
-	if m.etcdAllRunning(members) {
-		if err := m.etcdEnableAuth(ctx); err != nil {
-			m.log.Warn("etcd auth", "err", err)
+}
+
+// etcdListed is a member as etcd lists it.
+type etcdListed struct {
+	ID        string   `json:"ID"` // decimal
+	Name      string   `json:"name"`
+	PeerURLs  []string `json:"peerURLs"`
+	IsLearner bool     `json:"isLearner"`
+}
+
+func hexID(dec string) string {
+	id, err := strconv.ParseUint(dec, 10, 64)
+	if err != nil || id == 0 {
+		return ""
+	}
+	return strconv.FormatUint(id, 16)
+}
+
+func hasLearner(list []etcdListed) bool {
+	return slices.ContainsFunc(list, func(x etcdListed) bool { return x.IsLearner })
+}
+
+// etcdList is etcd's member list, or nil while no member answers with a
+// quorum behind it.
+func (m *Manager) etcdList(ctx context.Context) ([]etcdListed, error) {
+	ctx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	var resp struct {
+		Members []etcdListed `json:"members"`
+	}
+	// Linearizable: a member that lost its quorum does not answer.
+	if err := m.etcdCall(ctx, "cluster/member/list", map[string]any{"linearizable": true}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Members, nil
+}
+
+func (m *Manager) etcdRemove(ctx context.Context, decID string) error {
+	return m.etcdCall(ctx, "cluster/member/remove", map[string]string{"ID": decID}, nil)
+}
+
+// etcdTidy removes what cannot become a working member: members etcd lists
+// that SynCloud does not run (left over from an interrupted change), members
+// SynCloud runs that etcd no longer lists, and learners that never caught
+// up. It reports whether it changed anything.
+func (m *Manager) etcdTidy(ctx context.Context, members []store.EtcdMember, list []etcdListed, now time.Time) bool {
+	ours := func(x etcdListed) (store.EtcdMember, bool) {
+		for _, mb := range members {
+			if x.Name == etcdName(mb.Ordinal) || slices.Contains(x.PeerURLs, etcdPeerURL(mb.Ordinal)) {
+				return mb, true
+			}
+		}
+		return store.EtcdMember{}, false
+	}
+	for _, x := range list {
+		mb, ok := ours(x)
+		switch {
+		case !ok:
+			m.log.Warn("removing an etcd member SynCloud does not run", "name", x.Name, "peers", strings.Join(x.PeerURLs, ","))
+			if err := m.etcdRemove(ctx, x.ID); err != nil {
+				m.log.Warn("remove an etcd member", "err", err)
+			}
+			return true
+		case x.IsLearner && now.Sub(mb.CreatedAt) > etcdLearnerTimeout:
+			m.log.Warn("an etcd learner did not catch up; trying again", "member", etcdName(mb.Ordinal), "node", m.nodeName(mb.NodeID), "state", mb.State, "error", mb.Error)
+			if err := m.etcdRemove(ctx, x.ID); err != nil {
+				m.log.Warn("remove an etcd learner", "err", err)
+				return true
+			}
+			m.etcdDrop(ctx, mb)
+			return true
 		}
 	}
+	for _, mb := range members {
+		listed := slices.ContainsFunc(list, func(x etcdListed) bool {
+			return x.Name == etcdName(mb.Ordinal) || slices.Contains(x.PeerURLs, etcdPeerURL(mb.Ordinal))
+		})
+		if !listed {
+			// Removed from the cluster: it can never rejoin with its data.
+			m.log.Warn("an etcd member is no longer in the cluster; replacing it", "member", etcdName(mb.Ordinal))
+			m.etcdDrop(ctx, mb)
+			return true
+		}
+	}
+	return false
+}
+
+// etcdPromote gives running learners their vote; etcd refuses until a
+// learner has caught up with the leader, and the next tick tries again.
+func (m *Manager) etcdPromote(ctx context.Context, members []store.EtcdMember, list []etcdListed) {
+	for _, x := range list {
+		if !x.IsLearner {
+			continue
+		}
+		for _, mb := range members {
+			if x.Name != etcdName(mb.Ordinal) || mb.State != store.TaskRunning {
+				continue
+			}
+			if err := m.etcdCall(ctx, "cluster/member/promote", map[string]string{"ID": x.ID}, nil); err != nil {
+				m.log.Debug("promote an etcd learner", "member", x.Name, "err", err)
+				continue
+			}
+			m.log.Info("etcd member promoted to a voter", "member", x.Name)
+			m.changed()
+		}
+	}
+}
+
+// etcdDrop forgets a member and removes its container and data, which are
+// of no use once etcd no longer lists it: a member started on them again
+// would be refused as removed. A node that cannot be told now removes them
+// when it reports in (the orphan record).
+func (m *Manager) etcdDrop(ctx context.Context, mb store.EtcdMember) {
+	vol := etcdVolume(mb.Ordinal)
+	if err := m.st.AddDatabaseOrphan(ctx, store.DatabaseOrphan{TaskID: mb.ID, NodeID: mb.NodeID, Volume: vol, CreatedAt: m.now().UTC()}); err != nil {
+		m.log.Warn("record etcd member volume", "member", mb.ID, "err", err)
+	}
+	_ = m.st.DeleteEtcdMember(ctx, mb.ID)
+	var volumes []string
+	if m.etcdVolumeFree(ctx, mb.NodeID, vol) {
+		volumes = []string{vol}
+	}
+	err := m.gw.Send(mb.NodeID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_StopTask{StopTask: &agentv1.StopTask{
+		TaskId: mb.ID, TimeoutSeconds: 10, Remove: true, RemoveVolumes: volumes}}})
+	if err != nil && !errors.Is(err, agentgw.ErrNotConnected) {
+		m.log.Warn("stop etcd member", "member", mb.ID, "err", err)
+	}
+	m.changed()
+}
+
+// etcdVolumeFree reports whether no current member uses a volume on a node
+// (volumes are named after the member's name, which a replacement reuses).
+func (m *Manager) etcdVolumeFree(ctx context.Context, nodeID, vol string) bool {
+	ms, err := m.st.EtcdMembers(ctx)
+	if err != nil {
+		return false
+	}
+	return !slices.ContainsFunc(ms, func(x store.EtcdMember) bool { return x.NodeID == nodeID && etcdVolume(x.Ordinal) == vol })
+}
+
+// etcdNote logs why etcd cannot grow, once per reason.
+func (m *Manager) etcdNote(why string) {
+	m.mu.Lock()
+	same := m.etcdWhy == why
+	m.etcdWhy = why
+	m.mu.Unlock()
+	if !same && why != "" {
+		m.log.Warn(why)
+	}
+}
+
+// etcdWaiting says why PostgreSQL clusters wait for etcd: its members'
+// states while none answers.
+func (m *Manager) etcdWaiting(ctx context.Context) string {
+	ms, _ := m.st.EtcdMembers(ctx)
+	if len(ms) == 0 {
+		m.mu.Lock()
+		why := m.etcdWhy
+		m.mu.Unlock()
+		if why != "" {
+			return why
+		}
+		return "no member is placed yet"
+	}
+	var parts []string
+	for _, mb := range ms {
+		p := fmt.Sprintf("%s on %s %s", etcdName(mb.Ordinal), m.nodeName(mb.NodeID), mb.State)
+		if mb.Error != "" {
+			p += " (" + mb.Error + ")"
+		} else if mb.State == store.TaskRunning && mb.IP == "" {
+			p += " without an address"
+		}
+		parts = append(parts, p)
+	}
+	return "no member answers yet: " + strings.Join(parts, ", ") + " (see the platform's etcd logs)"
+}
+
+// etcdHealthy reports whether etcd answered the last reconcile.
+func (m *Manager) etcdHealthy() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.etcdUp
 }
 
 func slicesContainsOrd(ms []store.EtcdMember, ord int) bool {
@@ -302,9 +505,16 @@ func (m *Manager) onEtcdStatus(node store.Node, s *agentv1.TaskStatus) {
 	mb, err := m.st.EtcdMemberByID(ctx, s.GetTaskId())
 	if errors.Is(err, store.ErrNotFound) {
 		if s.GetState() != agentv1.TaskState_TASK_STATE_REMOVED {
-			// Left over from a replaced member: remove it (its volume stays).
+			// Left over from a replaced member: remove it, with its data when
+			// its removal recorded the volume (etcd no longer lists it).
+			var volumes []string
+			if o, err := m.st.DatabaseOrphanByTask(ctx, s.GetTaskId()); err == nil && m.etcdVolumeFree(ctx, node.ID, o.Volume) {
+				volumes = []string{o.Volume}
+			}
 			_ = m.gw.Send(node.ID, &agentv1.ConnectResponse{Msg: &agentv1.ConnectResponse_StopTask{StopTask: &agentv1.StopTask{
-				TaskId: s.GetTaskId(), TimeoutSeconds: 10, Remove: true}}})
+				TaskId: s.GetTaskId(), TimeoutSeconds: 10, Remove: true, RemoveVolumes: volumes}}})
+		} else if _, err := m.st.DatabaseOrphanByTask(ctx, s.GetTaskId()); err == nil {
+			_ = m.st.DeleteDatabaseOrphan(ctx, s.GetTaskId())
 		}
 		return
 	} else if err != nil {
@@ -327,21 +537,26 @@ func (m *Manager) onEtcdStatus(node store.Node, s *agentv1.TaskStatus) {
 var etcdHTTP = &http.Client{Timeout: 5 * time.Second}
 
 // etcdCall posts to /v3/<path> on the first running member that answers,
-// authenticating as root once auth is on.
+// authenticating as root once auth is on. A member that lost its quorum
+// does not answer writes or linearizable reads, and the next is tried.
 func (m *Manager) etcdCall(ctx context.Context, path string, body, out any) error {
 	members, err := m.st.EtcdMembers(ctx)
 	if err != nil {
 		return err
 	}
-	token := ""
 	authOn, _, _ := m.st.GetSetting(ctx, etcdAuthKey)
 	last := errors.New("no etcd member is running")
 	for _, mb := range members {
 		if mb.IP == "" || mb.State != store.TaskRunning {
 			continue
 		}
+		if ctx.Err() != nil {
+			return last
+		}
 		base := fmt.Sprintf("http://%s/v3/", addr(mb.IP, etcdClientPort))
-		if authOn == "1" && token == "" {
+		// A simple token is only valid on the member that issued it.
+		token := ""
+		if authOn == "1" {
 			pw, err := m.etcdRootPassword(ctx)
 			if err != nil {
 				return err
@@ -436,7 +651,7 @@ func (m *Manager) etcdEnableAuth(ctx context.Context) error {
 // under its Patroni prefix.
 func (m *Manager) ensureEtcdUser(ctx context.Context, d store.Database, sec Secrets) error {
 	if v, _, _ := m.st.GetSetting(ctx, etcdAuthKey); v != "1" {
-		return errors.New("the platform etcd is starting")
+		return errors.New("turning on authentication")
 	}
 	user := etcdUser(d)
 	prefix := pgNamespace + d.ID + "/"
@@ -471,30 +686,14 @@ func (m *Manager) dropEtcdUser(ctx context.Context, d store.Database) {
 }
 
 // etcdLearnIDs records etcd's member IDs (needed to remove members).
-func (m *Manager) etcdLearnIDs(ctx context.Context, members []store.EtcdMember) {
-	missing := false
+func (m *Manager) etcdLearnIDs(ctx context.Context, members []store.EtcdMember, list []etcdListed) {
 	for _, mb := range members {
-		if mb.MemberID == "" && mb.State == store.TaskRunning {
-			missing = true
+		if mb.MemberID != "" {
+			continue
 		}
-	}
-	if !missing {
-		return
-	}
-	var resp struct {
-		Members []struct {
-			ID   string `json:"ID"`
-			Name string `json:"name"`
-		} `json:"members"`
-	}
-	if err := m.etcdCall(ctx, "cluster/member/list", map[string]any{}, &resp); err != nil {
-		return
-	}
-	for _, mb := range members {
-		for _, x := range resp.Members {
-			if x.Name == etcdName(mb.Ordinal) && mb.MemberID == "" {
-				id, _ := strconv.ParseUint(x.ID, 10, 64)
-				mb.MemberID = strconv.FormatUint(id, 16)
+		for _, x := range list {
+			if x.Name == etcdName(mb.Ordinal) {
+				mb.MemberID = hexID(x.ID)
 				_ = m.st.UpdateEtcdMember(ctx, mb, m.now().UTC())
 			}
 		}

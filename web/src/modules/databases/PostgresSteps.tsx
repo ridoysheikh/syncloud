@@ -9,6 +9,7 @@ import {
   usePgCatalog,
 } from "./pg/Config";
 import {
+  CapacityFit,
   CountSelect,
   Section,
   SizeSelect,
@@ -46,6 +47,11 @@ export function PgCapacityStep({
             />
           </Field>
         </div>
+        <CapacityFit
+          mem={f.memMin}
+          cpu={Number(f.cpu) || 0}
+          members={1 + f.repMin}
+        />
       </Section>
       <Section title="Replicas and failover">
         <ChoiceField label="Read replicas">

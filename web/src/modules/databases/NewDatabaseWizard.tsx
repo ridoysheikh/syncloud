@@ -15,6 +15,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useProjects } from "@/lib/workloads";
 import { NodePicker } from "@/entities/nodes";
+import { useNodes } from "@/lib/nodes";
 import {
   dbUrl,
   defaultPgReplication,
@@ -50,7 +51,71 @@ const steps = [
 type Step = (typeof steps)[number];
 
 /** Sizes offered in the wizard (MiB). */
-const SIZES = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
+const SIZES = [
+  64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 12288, 16384,
+  24576, 32768,
+];
+
+/** What one member can have on each node that takes databases: the
+ * scheduler's allocatable share (90% of memory, cores less 0.1). */
+export function useNodeFit() {
+  const { data: nodes = [] } = useNodes();
+  const fit = nodes
+    .filter((n) => n.status === "ready" && n.schedulable && !n.draining)
+    .map((n) => ({
+      name: n.name,
+      mem: Math.floor(((n.info.memoryBytes / 2 ** 20) * 9) / 10),
+      cpu: Math.max(0, n.info.cpuCores - 0.1),
+    }));
+  return {
+    nodes: fit,
+    /** Nodes one member of this size fits on (when empty). */
+    fitting: (mem: number, cpu: number) =>
+      fit.filter((n) => n.mem >= mem && n.cpu >= cpu),
+  };
+}
+
+/** A capacity problem against the nodes, or "" (none known: no check). */
+export function capacityProblem(
+  fit: ReturnType<typeof useNodeFit>,
+  mem: number,
+  cpu: number,
+): string {
+  if (fit.nodes.length === 0) return "";
+  if (fit.fitting(mem, cpu).length > 0) return "";
+  const big = Math.max(...fit.nodes.map((n) => n.mem));
+  const cores = Math.max(...fit.nodes.map((n) => n.cpu));
+  return `No node fits a member of ${mib(mem)} and ${cpu} cores: the largest has ${mib(big)} and ${cores.toFixed(1)} cores to give.`;
+}
+
+/** A line on how members of this size spread over the nodes. */
+export function CapacityFit({
+  mem,
+  cpu,
+  members,
+}: {
+  mem: number;
+  cpu: number;
+  members: number;
+}) {
+  const fit = useNodeFit();
+  if (fit.nodes.length === 0) return null;
+  const ok = fit.fitting(mem, cpu);
+  return (
+    <p className="text-faint">
+      Each node can give a member:{" "}
+      {fit.nodes
+        .map((n) => `${n.name} ${mib(n.mem)} / ${n.cpu.toFixed(1)} cores`)
+        .join(", ")}
+      .{" "}
+      {ok.length > 0 && ok.length < members
+        ? `Only ${ok.length} of ${members} members fit on separate nodes; the rest share a node, which does not survive that node's loss.`
+        : ok.length >= members
+          ? `${members === 1 ? "The member fits" : `All ${members} members fit on separate nodes`}.`
+          : ""}
+    </p>
+  );
+}
 
 export interface Form {
   engine: string;
@@ -144,7 +209,8 @@ export function specOf(f: {
   };
 }
 
-const mib = (v: number) => (v >= 1024 ? `${v / 1024} GiB` : `${v} MiB`);
+const mib = (v: number) =>
+  v >= 1024 ? `${+(v / 1024).toFixed(1)} GiB` : `${v} MiB`;
 
 /** Full-page wizard for a managed database (Phase 12): standalone, or in a project environment. */
 export function NewDatabaseWizard() {
@@ -200,6 +266,7 @@ export function NewDatabaseWizard() {
     ? `${f.name || "NAME"}.${env}.${project}.syncloud.internal`
     : `${f.name || "NAME"}.db.syncloud.internal`;
 
+  const fit = useNodeFit();
   const problems: Record<Step, string> = {
     Engine: engine && !engine.available ? `${engine.title} is planned.` : "",
     Database: !nameRE.test(f.name)
@@ -209,12 +276,19 @@ export function NewDatabaseWizard() {
         : !f.standalone && !project
           ? "Create a project first, or make the database standalone."
           : "",
+    // PostgreSQL members have one size (min = max); Valkey grows to a maximum.
     Capacity:
-      f.memMin > f.memMax
+      f.engine !== "postgres" && f.memMin > f.memMax
         ? "The memory maximum is below the minimum."
-        : f.repMin > f.repMax
+        : f.engine !== "postgres" && f.repMin > f.repMax
           ? "The replica maximum is below the minimum."
-          : "",
+          : !(Number(f.cpu) > 0)
+            ? "CPU must be a number of cores above 0."
+            : capacityProblem(
+                fit,
+                f.engine === "postgres" ? f.memMin : f.memMax,
+                Number(f.cpu),
+              ),
     Data: "",
     Network: "",
     Review: "",
@@ -586,7 +660,13 @@ export function CapacityStep({
       <Section title="Memory (maxmemory)">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Start at / never below">
-            <SizeSelect value={f.memMin} onChange={(v) => set("memMin", v)} />
+            <SizeSelect
+              value={f.memMin}
+              onChange={(v) => {
+                set("memMin", v);
+                if (v > f.memMax) set("memMax", v);
+              }}
+            />
           </Field>
           <Field label="Grow up to">
             <SizeSelect value={f.memMax} onChange={(v) => set("memMax", v)} />
@@ -597,6 +677,11 @@ export function CapacityStep({
             ? `Autoscaled online, without restarts: +50% when more than 85% is used, −25% after 30 minutes under 40%.`
             : "Fixed size. Set a higher maximum to let it grow."}
         </p>
+        <CapacityFit
+          mem={f.memMax}
+          cpu={Number(f.cpu) || 0}
+          members={1 + f.repMax}
+        />
       </Section>
       <Section title="Read replicas and failover">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

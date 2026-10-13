@@ -210,6 +210,25 @@ func (s *Store) labelsFor(taskID string) labels {
 		s.mu.Unlock()
 		return lb
 	}
+	if strings.HasPrefix(taskID, "dbe_") { // the platform etcd (Phase 13): a platform component
+		return labels{project: PlatformProject, environment: "system", service: "etcd"}
+	}
+	if rest, ok := strings.CutPrefix(taskID, "dbk_"); ok { // base backups (Phase 13c): the database's, revision "backup"
+		if i := strings.LastIndexByte(rest, '_'); i > 0 {
+			var project, env, name string
+			err := s.st.R.QueryRowContext(ctx, `SELECT coalesce(p.name, ''), coalesce(e.name, ''), d.name FROM databases d
+				LEFT JOIN environments e ON e.id = d.environment_id LEFT JOIN projects p ON p.id = e.project_id
+				WHERE d.id = ?`, "db_"+rest[:i]).Scan(&project, &env, &name)
+			if err == nil {
+				lb = labels{project: project, environment: env, service: "db-" + name, revision: "backup"}
+				s.mu.Lock()
+				s.cache[taskID] = lb
+				s.mu.Unlock()
+				return lb
+			}
+		}
+		return labels{service: "unknown"}
+	}
 	if strings.HasPrefix(taskID, "run_") { // job runs (§5.11): service "job-<name>" or "run-<service>"
 		var project, env, job, svc string
 		err := s.st.R.QueryRowContext(ctx, `SELECT p.name, e.name, coalesce(j.name, ''), coalesce(sv.name, '') FROM job_runs r
