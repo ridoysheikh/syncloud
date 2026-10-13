@@ -14,6 +14,7 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, IconButton, StatusBadge } from "@/ui/controls";
 import { LifecyclePanel } from "./LifecyclePanel";
+import { StoragePanel } from "./StoragePanel";
 import { cn, gap } from "@/ui/cn";
 import { useLazyList } from "@/ui/paging";
 import { Tabs } from "@/ui/Tabs";
@@ -251,6 +252,7 @@ export function RegistryDashboard() {
         <PushCommands />
         <ActivityPanel />
       </div>
+      <StoragePanel />
       <Cleanup />
     </div>
   );

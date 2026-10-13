@@ -61,6 +61,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/quota"
 	dockerregistry "github.com/ridoysheikh/syncloud/internal/registry"
 	"github.com/ridoysheikh/syncloud/internal/regmaint"
+	"github.com/ridoysheikh/syncloud/internal/regstorage"
 	"github.com/ridoysheikh/syncloud/internal/s3"
 	"github.com/ridoysheikh/syncloud/internal/secrets"
 	"github.com/ridoysheikh/syncloud/internal/shell"
@@ -277,8 +278,18 @@ func serve(args []string) error {
 		}
 		return out
 	}
+	// Where the registry keeps images (Phase 19), read before the system
+	// tasks start so the registry never starts on the wrong storage.
+	s3Mgr := s3.New(st, box)
+	regStorage := regstorage.New(st, s3Mgr, log)
+	if err := regStorage.Load(ctx); err != nil {
+		return err
+	}
+	s3Mgr.InUse = regStorage.EndpointInUse
+	s3Mgr.OnChange = regStorage.EndpointChanged
 	sysCfg := func(ep domain.Endpoints) system.Config {
 		return system.Config{
+			RegistryS3: regStorage.S3(), RegistryCopy: regStorage.CopyTarget(),
 			GitServer:       gitServer.Config(),
 			TraefikSettings: traefikExtras.Settings(),
 			ControllerURL:   controllerURL, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS,
@@ -511,7 +522,6 @@ func serve(args []string) error {
 	pools.ControllerURL = func() string { return domains.Endpoints().DashboardURL }
 	pools.Pin = func() string { return certMgr.Pin(domains.Endpoints().BaseDomain) }
 	workloads.NodePool = pools.PoolOf
-	s3Mgr := s3.New(st, box)
 	dbMgr.S3 = func(ctx context.Context, ref string) (dbs.S3Access, error) {
 		c, err := s3Mgr.Credentials(ctx, ref)
 		return dbs.S3Access{URL: c.URL, Region: c.Region, AccessKeyID: c.AccessKeyID, SecretAccessKey: c.SecretAccessKey, PathStyle: c.PathStyle}, err
@@ -606,7 +616,17 @@ func serve(args []string) error {
 		regMaint = regmaint.New(st, regBrowser, sysMgr, execs, workloads, bus, log)
 		regMaint.RegistryHosts = func() []string { return []string{registryHost(), domains.Endpoints().RegistryHost} }
 		workloads.ImageAvailable = regMaint.ImageAvailable
+		regMaint.StorageSize = func(ctx context.Context) (int64, error) {
+			if n, ok, err := regStorage.S3Size(ctx); ok {
+				return n, err
+			}
+			return regMaint.DiskSize(ctx)
+		}
 		go regMaint.Run(ctx)
+		regStorage.Sys, regStorage.Maint, regStorage.Bus = sysMgr, regMaint, bus
+		regStorage.Main = regBrowser
+		regStorage.Copy = &dockerregistry.Browser{URL: "http://" + system.RegistryCopyAddr, Issuer: regIssuer}
+		regStorage.OnChange = func() { sysMgr.SetConfig(sysCfg(domains.Endpoints())) }
 	}
 	logStore := logs.New(st, cfg.VictoriaLogsURL, log)
 	logStore.OnIngest = quotas.AddLogBytes
@@ -780,6 +800,7 @@ func serve(args []string) error {
 		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Databases: dbMgr, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon,
 		RegistryBrowser:  regBrowser,
 		RegistryMaint:    regMaint,
+		RegistryStorage:  regStorageIfMaint(regMaint, regStorage),
 		Upstreams:        upstreams,
 		RegistryHosts:    func() []string { return []string{registryHost(), domains.Endpoints().RegistryHost} },
 		Builds:           buildMgr,
@@ -977,6 +998,15 @@ func loadOrCreateToken(path string) (string, error) {
 
 // loopbackURLHost turns a listen address into something reachable from the
 // host network namespace (":7070" or "0.0.0.0:7070" become "127.0.0.1:7070").
+// regStorageIfMaint offers storage switching only with the registry system
+// task (and so its maintenance), which switching relies on.
+func regStorageIfMaint(m *regmaint.Manager, s *regstorage.Manager) *regstorage.Manager {
+	if m == nil {
+		return nil
+	}
+	return s
+}
+
 func loopbackURLHost(listen string) string {
 	host, port, err := net.SplitHostPort(listen)
 	if err != nil {

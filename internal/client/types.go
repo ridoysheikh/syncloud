@@ -1544,6 +1544,54 @@ func (c *Client) StartRegistryCleanup(ctx context.Context) (GCRun, error) {
 	return out, c.Do(ctx, "POST", "/api/v1/registry/gc", nil, &out)
 }
 
+// RegistryStorageTarget is where the registry keeps images (Phase 19).
+type RegistryStorageTarget struct {
+	Driver   string `json:"driver"` // disk | s3
+	Endpoint string `json:"endpoint,omitempty"`
+	Bucket   string `json:"bucket,omitempty"`
+	Prefix   string `json:"prefix,omitempty"`
+}
+
+type RegistryStorageSwitch struct {
+	From     RegistryStorageTarget `json:"from"`
+	To       RegistryStorageTarget `json:"to"`
+	State    string                `json:"state"`
+	Step     string                `json:"step"`
+	Progress struct {
+		Repositories     int    `json:"repositories"`
+		RepositoriesDone int    `json:"repositoriesDone"`
+		Images           int    `json:"images"`
+		ImagesDone       int    `json:"imagesDone"`
+		Blobs            int    `json:"blobs"`
+		Skipped          int    `json:"skipped"`
+		Bytes            int64  `json:"bytes"`
+		Current          string `json:"current"`
+	} `json:"progress"`
+	Message   string     `json:"message"`
+	Kept      string     `json:"kept"`
+	Freed     int64      `json:"freedBytes"`
+	StartedAt time.Time  `json:"startedAt"`
+	EndedAt   *time.Time `json:"endedAt"`
+}
+
+type RegistryStorage struct {
+	RegistryStorageTarget
+	EndpointName string                 `json:"endpointName"`
+	EndpointURL  string                 `json:"endpointUrl"`
+	Switch       *RegistryStorageSwitch `json:"switch"`
+}
+
+func (c *Client) RegistryStorage(ctx context.Context) (RegistryStorage, error) {
+	var out RegistryStorage
+	return out, c.Do(ctx, "GET", "/api/v1/registry/storage", nil, &out)
+}
+
+// SetRegistryStorage starts switching the registry's storage.
+func (c *Client) SetRegistryStorage(ctx context.Context, t RegistryStorageTarget) (RegistryStorage, error) {
+	var out RegistryStorage
+	return out, c.Do(ctx, "PUT", "/api/v1/registry/storage", t, &out)
+}
+
 type UpstreamCredential struct {
 	ID        string    `json:"id"`
 	Host      string    `json:"host"`

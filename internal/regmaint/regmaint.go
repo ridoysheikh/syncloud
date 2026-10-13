@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +39,8 @@ var (
 	ErrBusy = errors.New("a registry cleanup is already running")
 	// ErrNoRegistry means the registry system task is not running.
 	ErrNoRegistry = errors.New("the registry is not running on the controller node")
+	// ErrSwitching means the registry is switching storage.
+	ErrSwitching = errors.New("the registry is switching storage")
 )
 
 // ErrInvalid wraps validation errors.
@@ -58,10 +61,13 @@ type Manager struct {
 	RegistryHosts func() []string
 	// Every is the time between scheduled runs.
 	Every time.Duration
-	now   func() time.Time
+	// StorageSize measures the registry's storage (nil = the local volume).
+	StorageSize func(ctx context.Context) (int64, error)
+	now         func() time.Time
 
-	mu      sync.Mutex
-	running bool
+	mu        sync.Mutex
+	running   bool
+	switching bool // the lock is held by a storage switch
 }
 
 func New(st *store.Store, b *registry.Browser, sys *system.Manager, ex *execrelay.Relay, wl *workload.Manager, bus *events.Bus, log *slog.Logger) *Manager {
@@ -211,7 +217,30 @@ func (m *Manager) ImageAvailable(ctx context.Context, image string) (bool, error
 func (m *Manager) Running() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.running
+	return m.running && !m.switching
+}
+
+// Acquire takes the registry maintenance lock for a storage switch (Phase
+// 19): cleanups and switches never overlap. Release frees it.
+func (m *Manager) Acquire() error { return m.acquire(true) }
+
+func (m *Manager) acquire(switching bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	switch {
+	case m.running && m.switching:
+		return ErrSwitching
+	case m.running:
+		return ErrBusy
+	}
+	m.running, m.switching = true, switching
+	return nil
+}
+
+func (m *Manager) Release() {
+	m.mu.Lock()
+	m.running, m.switching = false, false
+	m.mu.Unlock()
 }
 
 // Start begins a run in the background.
@@ -219,18 +248,12 @@ func (m *Manager) Start(trigger string) (store.GCRun, error) {
 	if t, ok := m.sys.Task(registryTask); !ok || t.State != "running" || m.sys.NodeID() == "" {
 		return store.GCRun{}, ErrNoRegistry
 	}
-	m.mu.Lock()
-	if m.running {
-		m.mu.Unlock()
-		return store.GCRun{}, ErrBusy
+	if err := m.acquire(false); err != nil {
+		return store.GCRun{}, err
 	}
-	m.running = true
-	m.mu.Unlock()
 	run := store.GCRun{ID: auth.NewID("gc_"), Trigger: trigger, Status: "running", StartedAt: m.now().UTC().Truncate(time.Second)}
 	if err := m.st.CreateGCRun(context.Background(), run); err != nil {
-		m.mu.Lock()
-		m.running = false
-		m.mu.Unlock()
+		m.Release()
 		return store.GCRun{}, err
 	}
 	m.bus.Publish(TopicRun, run)
@@ -253,7 +276,7 @@ func (m *Manager) Run(ctx context.Context) {
 		if err != nil || (len(runs) == 1 && m.now().Sub(runs[0].StartedAt) < m.Every) {
 			continue
 		}
-		if _, err := m.Start("schedule"); err != nil && !errors.Is(err, ErrNoRegistry) && !errors.Is(err, ErrBusy) {
+		if _, err := m.Start("schedule"); err != nil && !errors.Is(err, ErrNoRegistry) && !errors.Is(err, ErrBusy) && !errors.Is(err, ErrSwitching) {
 			m.log.Warn("scheduled registry cleanup", "err", err)
 		}
 	}
@@ -270,11 +293,7 @@ type Expired struct {
 func (m *Manager) run(run store.GCRun) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	defer func() {
-		m.mu.Lock()
-		m.running = false
-		m.mu.Unlock()
-	}()
+	defer m.Release()
 	expired, perr := m.applyPolicies(ctx)
 	reclaimed, gerr := m.collect(ctx)
 	now := m.now().UTC().Truncate(time.Second)
@@ -339,21 +358,18 @@ func (m *Manager) applyPolicies(ctx context.Context) ([]Expired, error) {
 // collect runs registry garbage collection with the registry read-only
 // (pulls keep working) and returns the bytes freed.
 func (m *Manager) collect(ctx context.Context) (int64, error) {
-	before, _ := m.sys.Task(registryTask)
-	m.sys.SetRegistryReadOnly(true)
-	defer func() {
-		ro, _ := m.sys.Task(registryTask)
-		m.sys.SetRegistryReadOnly(false)
-		_ = m.waitRestarted(context.Background(), ro.ContainerID)
-	}()
-	if err := m.waitRestarted(ctx, before.ContainerID); err != nil {
+	if err := m.SetReadOnly(ctx, true); err != nil {
 		return 0, err
 	}
+	defer func() { _ = m.SetReadOnly(context.Background(), false) }()
 	sizeBefore, err := m.storageSize(ctx)
 	if err != nil {
 		return 0, err
 	}
-	out, code, err := m.execute(ctx, []string{"registry", "garbage-collect", "--delete-untagged", configFile})
+	if err := m.checkMarks(ctx); err != nil {
+		return 0, err
+	}
+	out, code, err := m.Execute(ctx, []string{"registry", "garbage-collect", "--delete-untagged", configFile})
 	if err != nil {
 		return 0, err
 	}
@@ -367,8 +383,46 @@ func (m *Manager) collect(ctx context.Context) (int64, error) {
 	return max(sizeBefore-sizeAfter, 0), nil
 }
 
-// waitRestarted waits until the registry runs in a container other than old.
-func (m *Manager) waitRestarted(ctx context.Context, old string) error {
+var marksRE = regexp.MustCompile(`(\d+) blobs marked, (\d+) blobs and (\d+) manifests eligible for deletion`)
+
+// checkMarks runs garbage collection as a dry run first and refuses to
+// collect when it would keep nothing although images exist: an S3 provider
+// that lists objects wrongly makes every blob look unused (Phase 19).
+func (m *Manager) checkMarks(ctx context.Context) error {
+	out, code, err := m.Execute(ctx, []string{"registry", "garbage-collect", "--dry-run", "--delete-untagged", configFile})
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("garbage collection dry run exited with %d: %s", code, lastLine(out))
+	}
+	mm := marksRE.FindSubmatch(out)
+	if mm == nil {
+		return fmt.Errorf("garbage collection dry run: unexpected output: %s", lastLine(out))
+	}
+	if string(mm[1]) != "0" {
+		return nil
+	}
+	repos, err := m.browser.Repositories(ctx)
+	if err != nil {
+		return err
+	}
+	if len(repos) > 0 {
+		return fmt.Errorf("garbage collection would delete every image although %d repositories have tags; nothing was deleted (the storage may not list objects correctly)", len(repos))
+	}
+	return nil
+}
+
+// SetReadOnly switches the registry in or out of read-only maintenance
+// mode and waits until it runs again.
+func (m *Manager) SetReadOnly(ctx context.Context, ro bool) error {
+	before, _ := m.sys.Task(registryTask)
+	m.sys.SetRegistryReadOnly(ro)
+	return m.WaitRestarted(ctx, before.ContainerID)
+}
+
+// WaitRestarted waits until the registry runs in a container other than old.
+func (m *Manager) WaitRestarted(ctx context.Context, old string) error {
 	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
 		if t, ok := m.sys.Task(registryTask); ok && t.State == "running" && t.ContainerID != "" && t.ContainerID != old {
@@ -384,7 +438,15 @@ func (m *Manager) waitRestarted(ctx context.Context, old string) error {
 }
 
 func (m *Manager) storageSize(ctx context.Context) (int64, error) {
-	out, code, err := m.execute(ctx, []string{"du", "-sk", storageDir})
+	if m.StorageSize != nil {
+		return m.StorageSize(ctx)
+	}
+	return m.DiskSize(ctx)
+}
+
+// DiskSize is the size of the registry's local volume.
+func (m *Manager) DiskSize(ctx context.Context) (int64, error) {
+	out, code, err := m.Execute(ctx, []string{"du", "-sk", storageDir})
 	if err != nil {
 		return 0, err
 	}
@@ -396,8 +458,8 @@ func (m *Manager) storageSize(ctx context.Context) (int64, error) {
 	return kib * 1024, err
 }
 
-// execute runs a command in the registry container and returns its output.
-func (m *Manager) execute(ctx context.Context, cmd []string) ([]byte, int, error) {
+// Execute runs a command in the registry container and returns its output.
+func (m *Manager) Execute(ctx context.Context, cmd []string) ([]byte, int, error) {
 	s, err := m.exec.Open(m.sys.NodeID(), registryTask, cmd, false, 0, 0)
 	if err != nil {
 		return nil, 0, err

@@ -24,7 +24,7 @@
 | **Scaling** | `autoscale set/get/off/history`, `quota list/set/unset`, `usage` |
 | **Databases** | `db engines/create/list/get/delete/credentials/network/failover/metrics`, Valkey: `db keys/key/cmd/info`, PostgreSQL: `db sql/roles/role/grant/revoke/privileges/databases/database/schema/describe/rows/extension/sessions/session/settings/config/addon/replication/backup/backups/restore` |
 | **Storage** | `s3 endpoints/buckets/mb/ls/cp/rm/du/bindings` |
-| **Registry** | `registry info/repos/images/delete/events/gc/lifecycle/upstreams` |
+| **Registry** | `registry info/repos/images/delete/events/gc/lifecycle/storage/upstreams` |
 | **Networking** | `sg apply/get/list/delete/check/service`, `firewall apply/get/list/delete/effective/counters/drops`, `middlewares apply/list/delete`, `traefik settings`, `network`, `domain get/set`, `certificates list/renew` |
 | **Observability** | `metrics`, `traffic`, `requests`, `health services/incidents`, `alerts rules/channels/active/events`, `audit` |
 | **Access** | `iam users/groups/roles/policies/attach/detach/attachments/simulate/actions/access-keys/tokens/mfa/password/settings`, `sts assume-role` |

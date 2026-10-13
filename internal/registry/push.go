@@ -46,6 +46,7 @@ type Descriptor struct {
 	Size        int64             `json:"size"`
 	Annotations map[string]string `json:"annotations,omitempty"`
 	Platform    map[string]any    `json:"platform,omitempty"`
+	URLs        []string          `json:"urls,omitempty"`
 }
 
 type ociManifest struct {
@@ -270,7 +271,13 @@ func (b *Browser) pushBlob(ctx context.Context, repo, dir string, d Descriptor) 
 // send is a push-scoped request with a body (no client timeout: layers are
 // hundreds of megabytes; ctx bounds it).
 func (b *Browser) send(ctx context.Context, method, path, contentType string, body io.Reader, size int64, repo string) (*http.Response, error) {
-	tok, err := b.Issuer.Issue(BrowserSubject, repoAccess(repo, "pull", "push"), time.Now())
+	return b.sendAs(ctx, method, path, contentType, body, size, repoAccess(repo, "pull", "push"))
+}
+
+// sendAs is send with explicit token access (a cross-repository mount
+// needs pull on the source repository too).
+func (b *Browser) sendAs(ctx context.Context, method, path, contentType string, body io.Reader, size int64, access []Access) (*http.Response, error) {
+	tok, err := b.Issuer.Issue(BrowserSubject, access, time.Now())
 	if err != nil {
 		return nil, err
 	}

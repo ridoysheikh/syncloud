@@ -36,6 +36,8 @@ func (s *Server) s3Error(w http.ResponseWriter, what string, err error) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such S3 endpoint")
 	case errors.Is(err, store.ErrNameTaken):
 		writeError(w, http.StatusConflict, CodeConflict, "an S3 endpoint with that name exists")
+	case errors.As(err, new(s3.ErrInUseBy)):
+		writeError(w, http.StatusConflict, CodeConflict, err.Error())
 	case errors.Is(err, store.ErrInUse):
 		writeError(w, http.StatusConflict, CodeConflict, "services are bound to this endpoint; remove their bindings first")
 	case errors.As(err, &me) && me.StatusCode == http.StatusNotFound:

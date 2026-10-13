@@ -2,6 +2,17 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.1.9]
+
+### Added
+
+- **Registry images in S3.** The built-in registry can keep its images in an S3 bucket instead of on the controller's disk. Switching copies every image through a temporary registry and checks the copy before the registry moves. Pushes pause during the copy; pulls keep working. After leaving the controller's disk, the images are deleted from it. Nodes download layers from the bucket directly. Switching back to disk works the same way, and an old S3 location is kept for you to delete. In the dashboard: **Registry › Storage**. From the CLI: `synctl registry storage get|set`.
+
+### Changed
+
+- Registry garbage collection now runs a dry run first. It refuses to delete anything if the dry run would keep no images while repositories still have tags, which protects against storage that lists objects wrongly.
+- An S3 endpoint the registry uses can't be deleted. Editing its credentials restarts the registry with the new ones.
+
 ## [0.1.8]
 
 ### Added

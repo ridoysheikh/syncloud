@@ -142,6 +142,6 @@ func (a *app) registryCmd() *cobra.Command {
 		},
 	}
 	evCmd.Flags().IntVar(&limit, "limit", 50, "how many events to show (max 1000)")
-	r.AddCommand(evCmd, a.lifecycleCmd(), a.gcCmd(), a.upstreamsCmd())
+	r.AddCommand(evCmd, a.lifecycleCmd(), a.gcCmd(), a.storageCmd(), a.upstreamsCmd())
 	return r
 }

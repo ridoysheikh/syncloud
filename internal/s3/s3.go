@@ -61,7 +61,17 @@ type Manager struct {
 	st  *store.Store
 	box *secrets.Box
 	now func() time.Time
+	// InUse names a platform consumer of an endpoint (by ID) that blocks
+	// its deletion, e.g. the registry's storage ("" = none).
+	InUse func(ctx context.Context, id string) string
+	// OnChange is called after an endpoint is updated (its ID).
+	OnChange func(id string)
 }
+
+// ErrInUseBy means a platform consumer still uses the endpoint.
+type ErrInUseBy struct{ By string }
+
+func (e ErrInUseBy) Error() string { return "the endpoint is used by " + e.By }
 
 func New(st *store.Store, box *secrets.Box) *Manager {
 	return &Manager{st: st, box: box, now: time.Now}
@@ -158,6 +168,9 @@ func (m *Manager) Put(ctx context.Context, ref string, in EndpointInput) (Endpoi
 	if err := m.st.PutS3Endpoint(ctx, e); err != nil {
 		return Endpoint{}, err
 	}
+	if ref != "" && m.OnChange != nil {
+		m.OnChange(e.ID)
+	}
 	return m.Get(ctx, e.ID)
 }
 
@@ -165,6 +178,11 @@ func (m *Manager) Delete(ctx context.Context, ref string) error {
 	e, err := m.st.S3EndpointByRef(ctx, ref)
 	if err != nil {
 		return err
+	}
+	if m.InUse != nil {
+		if by := m.InUse(ctx, e.ID); by != "" {
+			return ErrInUseBy{by}
+		}
 	}
 	return m.st.DeleteS3Endpoint(ctx, e.ID)
 }
@@ -262,6 +280,31 @@ func (m *Manager) CreateBucket(ctx context.Context, ref, name string) error {
 		return err
 	}
 	return cl.MakeBucket(ctx, name, minio.MakeBucketOptions{Region: e.Region})
+}
+
+// CheckWritable checks that a bucket exists and accepts writes under
+// prefix, by writing and removing a small object.
+func (m *Manager) CheckWritable(ctx context.Context, ref, bucket, prefix string) error {
+	cl, err := m.client(ctx, ref)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if ok, err := cl.BucketExists(ctx, bucket); err != nil {
+		return ErrInvalid{fmt.Errorf("check bucket %s: %w", bucket, err)}
+	} else if !ok {
+		return ErrInvalid{fmt.Errorf("bucket %s does not exist", bucket)}
+	}
+	key := strings.TrimSuffix(prefix, "/")
+	if key != "" {
+		key += "/"
+	}
+	key += ".syncloud-check-" + auth.NewID("")
+	if _, err := cl.PutObject(ctx, bucket, key, strings.NewReader("ok"), 2, minio.PutObjectOptions{}); err != nil {
+		return ErrInvalid{fmt.Errorf("bucket %s refuses writes: %w", bucket, err)}
+	}
+	return cl.RemoveObject(ctx, bucket, key, minio.RemoveObjectOptions{})
 }
 
 // Object is one entry of a listing: an object or a "folder" (common prefix).

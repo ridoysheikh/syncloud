@@ -15,6 +15,7 @@ synctl backups config set --endpoint https://s3.example.com --region eu-central-
 
 - **Schedule:** hourly by default (`--interval`). The newest 48 are kept (`--retain`).
 - **Contents:** one encrypted bundle holding a consistent database snapshot, the cluster CA, the registry and Traefik keys, and the master key wrapped by your **recovery key**.
+- **Registry images are not in the bundle.** On the controller's disk, they are lost with the server. Rebuild or re-push them after a restore. [Keep them in S3](../guides/storage.md#registry-images-in-s3) and the restored registry has them all.
 - **On demand:** `synctl backups run` backs up now. `synctl backups download -f file.synbak` saves a copy without S3.
 
 The header warns until backups run, and again when they fail.

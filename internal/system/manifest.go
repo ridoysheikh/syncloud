@@ -1,6 +1,7 @@
 // Package system runs the platform's own components as system tasks on the
-// controller node (D20, §5.0): Traefik, VictoriaMetrics, VictoriaLogs, and
-// (next) the registry and BuildKit. Versions are pinned per SynCloud release.
+// controller node (D20, §5.0): Traefik, the registry, the optional Git
+// server, VictoriaMetrics and VictoriaLogs. Versions are pinned per
+// SynCloud release.
 package system
 
 import (
@@ -63,6 +64,13 @@ const GitServerTaskID = "sys-git"
 // RegistryAddr is where Traefik (host network) reaches the registry.
 const RegistryAddr = "127.0.0.1:5000"
 
+// RegistryCopyAddr is the temporary registry that images are copied into
+// while the registry switches storage (Phase 19); only the controller uses it.
+const RegistryCopyAddr = "127.0.0.1:5002"
+
+// RegistryCopyTaskID is that temporary registry's system task.
+const RegistryCopyTaskID = "sys-registry-copy"
+
 // Network is the Docker bridge network system components share.
 const Network = "syncloud-system"
 
@@ -88,11 +96,32 @@ type Config struct {
 	// RegistryReadOnly rejects pushes while garbage collection runs; pulls
 	// keep working.
 	RegistryReadOnly bool
+	// RegistryS3 keeps the registry's images in S3 (nil = the local volume).
+	RegistryS3 *RegistryS3
+	// RegistryCopy runs the temporary registry on the storage being
+	// switched to (nil = none).
+	RegistryCopy *RegistryCopy
 	// TraefikSettings adds the global static Traefik flags (§5.7).
 	TraefikSettings traefik.Settings
 	// GitServer runs the built-in Forgejo when set.
 	GitServer *GitServerConfig
 }
+
+// RegistryS3 is a bucket (and optional prefix) the registry keeps its
+// images in, with the S3 endpoint's credentials. Layer downloads are
+// redirected to presigned S3 URLs, so nodes fetch layers from the bucket.
+type RegistryS3 struct {
+	URL             string // http(s)://host[:port]
+	Region          string
+	AccessKeyID     string
+	SecretAccessKey string
+	PathStyle       bool
+	Bucket          string
+	Prefix          string // "" = the bucket root
+}
+
+// RegistryCopy is the temporary registry's storage (S3 nil = the local volume).
+type RegistryCopy struct{ S3 *RegistryS3 }
 
 // GitServerConfig is the built-in Git server (Forgejo).
 type GitServerConfig struct {
@@ -124,6 +153,10 @@ var Components = []Component{
 	{
 		TaskID: "sys-registry", Name: "Registry", Description: "Private Docker registry with token auth (§5.9)",
 		spec: registrySpec,
+	},
+	{
+		TaskID: RegistryCopyTaskID, Name: "Registry copy", Description: "Temporary registry while images move to new storage (Phase 19)",
+		spec: registryCopySpec,
 	},
 	{
 		TaskID: GitServerTaskID, Name: "Git server", Description: "Built-in Forgejo: private Git repositories (§5.8), optional",
@@ -197,30 +230,64 @@ func registrySpec(c Config) *agentv1.TaskSpec {
 		"headers": map[string][]string{TraefikTokenHeader: {c.TraefikToken}},
 		"timeout": "3s", "threshold": 5, "backoff": "10s",
 	}})
-	spec := &agentv1.TaskSpec{
-		TaskId: "sys-registry", Name: "syncloud-registry", Image: ImageRegistry,
-		Env: map[string]string{
-			"REGISTRY_HTTP_ADDR":                 RegistryAddr,
-			"REGISTRY_HTTP_DEBUG_ADDR":           "127.0.0.1:5001",
-			"REGISTRY_NOTIFICATIONS_ENDPOINTS":   string(notify),
-			"REGISTRY_STORAGE_DELETE_ENABLED":    "true",
-			"REGISTRY_AUTH_TOKEN_REALM":          c.RegistryRealm,
-			"REGISTRY_AUTH_TOKEN_SERVICE":        "syncloud-registry",
-			"REGISTRY_AUTH_TOKEN_ISSUER":         "syncloud",
-			"REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE": "/etc/syncloud/registry-token.crt",
-			"REGISTRY_LOG_LEVEL":                 "info",
-			"OTEL_TRACES_EXPORTER":               "none",
-		},
+	spec := registryTask(c, "sys-registry", "syncloud-registry", RegistryAddr, "127.0.0.1:5001", c.RegistryS3)
+	spec.Env["REGISTRY_NOTIFICATIONS_ENDPOINTS"] = string(notify)
+	if c.RegistryReadOnly {
+		spec.Env["REGISTRY_STORAGE_MAINTENANCE_READONLY"] = `{"enabled": true}`
+	}
+	return spec
+}
+
+// registryCopySpec is the temporary registry images are copied into while
+// the registry switches storage. It has the same token auth but sends no
+// notifications, so copies are not recorded as pushes.
+func registryCopySpec(c Config) *agentv1.TaskSpec {
+	if c.RegistryCopy == nil {
+		return nil
+	}
+	return registryTask(c, RegistryCopyTaskID, "syncloud-registry-copy", RegistryCopyAddr, "127.0.0.1:5003", c.RegistryCopy.S3)
+}
+
+// registryTask is a registry on loopback with token auth, keeping images
+// in s3 or (nil) the local volume. The volume stays mounted on S3 too, so
+// it can be emptied after the images moved out of it.
+func registryTask(c Config, id, name, addr, debugAddr string, s3 *RegistryS3) *agentv1.TaskSpec {
+	env := map[string]string{
+		"REGISTRY_HTTP_ADDR":                 addr,
+		"REGISTRY_HTTP_DEBUG_ADDR":           debugAddr,
+		"REGISTRY_STORAGE_DELETE_ENABLED":    "true",
+		"REGISTRY_AUTH_TOKEN_REALM":          c.RegistryRealm,
+		"REGISTRY_AUTH_TOKEN_SERVICE":        "syncloud-registry",
+		"REGISTRY_AUTH_TOKEN_ISSUER":         "syncloud",
+		"REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE": "/etc/syncloud/registry-token.crt",
+		"REGISTRY_LOG_LEVEL":                 "info",
+		"OTEL_TRACES_EXPORTER":               "none",
+	}
+	if s3 != nil {
+		region := s3.Region
+		if region == "" {
+			region = "us-east-1" // the driver requires one; most S3-compatible stores ignore it
+		}
+		env["REGISTRY_STORAGE"] = "s3"
+		env["REGISTRY_STORAGE_S3_REGIONENDPOINT"] = s3.URL
+		env["REGISTRY_STORAGE_S3_REGION"] = region
+		env["REGISTRY_STORAGE_S3_ACCESSKEY"] = s3.AccessKeyID
+		env["REGISTRY_STORAGE_S3_SECRETKEY"] = s3.SecretAccessKey
+		env["REGISTRY_STORAGE_S3_BUCKET"] = s3.Bucket
+		env["REGISTRY_STORAGE_S3_FORCEPATHSTYLE"] = fmt.Sprint(s3.PathStyle)
+		env["REGISTRY_STORAGE_S3_SECURE"] = fmt.Sprint(strings.HasPrefix(s3.URL, "https://"))
+		if s3.Prefix != "" {
+			env["REGISTRY_STORAGE_S3_ROOTDIRECTORY"] = "/" + s3.Prefix
+		}
+	}
+	return &agentv1.TaskSpec{
+		TaskId: id, Name: name, Image: ImageRegistry, Env: env,
 		Mounts: []*agentv1.Mount{
 			{Type: agentv1.Mount_TYPE_VOLUME, Source: "syncloud-registry", Target: "/var/lib/registry"},
 			{Type: agentv1.Mount_TYPE_BIND, Source: c.RegistryTokenCert, Target: "/etc/syncloud/registry-token.crt", ReadOnly: true},
 		},
 		NetworkMode: "host", System: true,
 	}
-	if c.RegistryReadOnly {
-		spec.Env["REGISTRY_STORAGE_MAINTENANCE_READONLY"] = `{"enabled": true}`
-	}
-	return spec
 }
 
 // RegistryEventsPath receives the registry's notifications (authenticated

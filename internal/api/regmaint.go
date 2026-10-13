@@ -25,7 +25,7 @@ func (s *Server) maintError(w http.ResponseWriter, what string, err error) {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, inv.Error())
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, CodeNotFound, "no lifecycle policy for this repository")
-	case errors.Is(err, regmaint.ErrBusy):
+	case errors.Is(err, regmaint.ErrBusy), errors.Is(err, regmaint.ErrSwitching):
 		writeError(w, http.StatusConflict, CodeConflict, err.Error())
 	case errors.Is(err, regmaint.ErrNoRegistry):
 		writeError(w, http.StatusServiceUnavailable, CodeInternal, err.Error())

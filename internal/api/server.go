@@ -36,6 +36,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/quota"
 	"github.com/ridoysheikh/syncloud/internal/registry"
 	"github.com/ridoysheikh/syncloud/internal/regmaint"
+	"github.com/ridoysheikh/syncloud/internal/regstorage"
 	"github.com/ridoysheikh/syncloud/internal/s3"
 	"github.com/ridoysheikh/syncloud/internal/secrets"
 	"github.com/ridoysheikh/syncloud/internal/shell"
@@ -81,6 +82,7 @@ type Server struct {
 	builds                *builds.Manager
 	metrics               *metrics.Store
 	regMaint              *regmaint.Manager
+	regStorage            *regstorage.Manager
 	upstreams             *upstream.Manager
 	registryHosts         func() []string
 	autoscaler            *autoscale.Manager
@@ -163,6 +165,8 @@ type Options struct {
 	Metrics *metrics.Store
 	// RegistryMaint applies lifecycle policies and runs GC (§5.10); may be nil.
 	RegistryMaint *regmaint.Manager
+	// RegistryStorage switches the registry between disk and S3 (Phase 19); may be nil.
+	RegistryStorage *regstorage.Manager
 	// Upstreams stores third-party registry credentials (§5.9); may be nil.
 	Upstreams *upstream.Manager
 	// RegistryHosts are the names images use for the private registry.
@@ -231,6 +235,7 @@ func New(o Options) *Server {
 		builds:                o.Builds,
 		metrics:               o.Metrics,
 		regMaint:              o.RegistryMaint,
+		regStorage:            o.RegistryStorage,
 		upstreams:             o.Upstreams,
 		registryHosts:         o.RegistryHosts,
 		autoscaler:            o.Autoscaler,
@@ -299,6 +304,8 @@ func (s *Server) Routes() []Route {
 		{Method: "PUT", Path: "/api/v1/registry/upstreams", h: s.handlePutUpstream},
 		{Method: "DELETE", Path: "/api/v1/registry/upstreams/{id}", h: s.handleDeleteUpstream},
 		{Method: "POST", Path: "/api/v1/registry/gc", h: s.handleStartGC},
+		{Method: "GET", Path: "/api/v1/registry/storage", h: s.handleGetRegistryStorage},
+		{Method: "PUT", Path: "/api/v1/registry/storage", h: s.handleSetRegistryStorage},
 		{Method: "POST", Path: "/api/v1/setup", Public: true, h: s.handleSetup},
 		{Method: "POST", Path: "/api/v1/auth/login", Public: true, h: s.handleLogin},
 		{Method: "POST", Path: "/api/v1/auth/logout", h: s.handleLogout},

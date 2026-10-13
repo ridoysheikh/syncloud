@@ -7755,6 +7755,62 @@
         }
       }
     },
+    "/api/v1/registry/storage": {
+      "get": {
+        "operationId": "getStorage",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Where the registry keeps its images (controller disk or S3) and the running or last storage switch",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryStorage"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setStorage",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Switch the registry to the controller disk or an S3 bucket: images are copied first (pushes pause, pulls keep working), then the old disk copy is freed; an old S3 prefix is kept",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryStorageTarget"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Switch started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryStorage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid target, or the bucket is missing or refuses writes"
+          },
+          "409": {
+            "description": "A cleanup or switch is running"
+          }
+        }
+      }
+    },
     "/api/v1/registry/upstreams": {
       "get": {
         "operationId": "listUpstreamCredentials",
@@ -20753,6 +20809,127 @@
             "type": "string"
           }
         }
+      },
+      "RegistryStorageTarget": {
+        "type": "object",
+        "required": [
+          "driver"
+        ],
+        "properties": {
+          "driver": {
+            "type": "string",
+            "enum": [
+              "disk",
+              "s3"
+            ]
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "S3 endpoint ID or name (s3)"
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Key prefix inside the bucket (\"\" = the bucket root)"
+          }
+        }
+      },
+      "RegistryStorageSwitch": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/RegistryStorageTarget"
+          },
+          "to": {
+            "$ref": "#/components/schemas/RegistryStorageTarget"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "step": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "object",
+            "properties": {
+              "repositories": {
+                "type": "integer"
+              },
+              "repositoriesDone": {
+                "type": "integer"
+              },
+              "images": {
+                "type": "integer"
+              },
+              "imagesDone": {
+                "type": "integer"
+              },
+              "blobs": {
+                "type": "integer"
+              },
+              "skipped": {
+                "type": "integer"
+              },
+              "bytes": {
+                "type": "integer"
+              },
+              "current": {
+                "type": "string"
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          },
+          "kept": {
+            "type": "string",
+            "description": "Where the old images were left (when leaving S3)"
+          },
+          "freedBytes": {
+            "type": "integer",
+            "description": "Controller disk freed (when leaving the disk)"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "actor": {
+            "type": "string"
+          }
+        }
+      },
+      "RegistryStorage": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RegistryStorageTarget"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "endpointName": {
+                "type": "string"
+              },
+              "endpointUrl": {
+                "type": "string"
+              },
+              "switch": {
+                "$ref": "#/components/schemas/RegistryStorageSwitch"
+              }
+            }
+          }
+        ]
       }
     }
   }
