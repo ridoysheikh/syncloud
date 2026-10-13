@@ -2,6 +2,12 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.2.0]
+
+### Added
+
+- **The recovery key is kept on the controller.** The root user can open it at any time under **Settings › Backups › Recovery key**, or with `synctl backups recovery-key show`. Installs from before can't show their old key: **Create recovery key** (`synctl backups recovery-key create`) makes a new kept key and re-keys the backups in S3 so it opens them all. Nothing is re-encrypted, so services and data aren't affected.
+
 ## [0.1.9]
 
 ### Added

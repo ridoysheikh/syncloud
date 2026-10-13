@@ -998,6 +998,105 @@
         }
       }
     },
+    "/api/v1/backups/recovery-key": {
+      "get": {
+        "operationId": "getRecoveryKey",
+        "tags": [
+          "backups"
+        ],
+        "summary": "The recovery key kept on this instance (root user only)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "stored": {
+                      "type": "boolean",
+                      "description": "false on installs whose key was never kept"
+                    },
+                    "recoveryKey": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the root user"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createRecoveryKey",
+        "tags": [
+          "backups"
+        ],
+        "summary": "Create and keep a recovery key on an install whose key was never kept (root user only). Stored backups are re-keyed so the new key opens them, and a fresh backup runs. Data is not re-encrypted",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "stored": {
+                      "type": "boolean",
+                      "description": "false on installs whose key was never kept"
+                    },
+                    "recoveryKey": {
+                      "type": "string"
+                    },
+                    "rekey": {
+                      "type": "object",
+                      "properties": {
+                        "rekeyed": {
+                          "type": "integer"
+                        },
+                        "skipped": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "failed": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "rekeyError": {
+                      "type": "string"
+                    },
+                    "backup": {
+                      "$ref": "#/components/schemas/BackupObject"
+                    },
+                    "backupError": {
+                      "type": "string"
+                    },
+                    "storeError": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the root user"
+          },
+          "409": {
+            "description": "A key is already kept"
+          }
+        }
+      }
+    },
     "/api/v1/network/mesh": {
       "get": {
         "operationId": "getMesh",

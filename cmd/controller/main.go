@@ -146,6 +146,9 @@ func serve(args []string) error {
 		if err := st.SetSetting(ctx, store.SettingRecoverySuffixHash, auth.HashToken(secrets.RecoveryKeySuffix(recoveryKey))); err != nil {
 			return err
 		}
+		if err := backup.StoreRecoveryKey(ctx, st, box, recoveryKey); err != nil {
+			return err
+		}
 		// For install.sh to show once; removed when setup completes.
 		if err := os.WriteFile(filepath.Join(cfg.DataDir, recoveryKeyFile), []byte(recoveryKey+"\n"), 0o600); err != nil {
 			return err
@@ -859,7 +862,7 @@ func serve(args []string) error {
 	if token != "" {
 		printSetupBanner(domains.Endpoints().DashboardURL, token, recoveryKey)
 	} else if recoveryKey != "" {
-		log.Warn("a recovery key was created for this install; save it now, it is needed to restore backups", "recovery_key", recoveryKey,
+		log.Warn("a recovery key was created for this install; it is needed to restore backups (the root user can open it under Settings → Backups; keep a copy offline too)", "recovery_key", recoveryKey,
 			"file", filepath.Join(cfg.DataDir, recoveryKeyFile))
 	}
 
@@ -900,8 +903,9 @@ func printSetupBanner(url, token, recoveryKey string) {
 	line("Setup token:", token+"  (valid 1 hour; restart for a new one)")
 	if recoveryKey != "" {
 		line("Recovery key:", recoveryKey)
-		fmt.Fprintln(os.Stderr, "\n  Store the recovery key somewhere safe. It is shown only once and is")
-		fmt.Fprintln(os.Stderr, "  needed to restore backups. Setup asks for its last 6 characters.")
+		fmt.Fprintln(os.Stderr, "\n  The recovery key is needed to restore backups. The root user can open it")
+		fmt.Fprintln(os.Stderr, "  later (Settings → Backups), but keep a copy offline too: it is lost with")
+		fmt.Fprintln(os.Stderr, "  this server. Setup asks for its last 6 characters.")
 	}
 	fmt.Fprintln(os.Stderr, "  "+strings.Repeat("─", 66)+"\n")
 }

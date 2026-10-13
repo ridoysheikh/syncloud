@@ -416,6 +416,8 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/backups", h: s.handleListBackups},
 		{Method: "POST", Path: "/api/v1/backups", h: s.handleRunBackup},
 		{Method: "GET", Path: "/api/v1/backups/download", h: s.handleDownloadBackup},
+		{Method: "GET", Path: "/api/v1/backups/recovery-key", h: s.handleGetRecoveryKey},
+		{Method: "POST", Path: "/api/v1/backups/recovery-key", h: s.handleCreateRecoveryKey},
 		{Method: "GET", Path: "/api/v1/network/mesh", h: s.handleMesh},
 		{Method: "PUT", Path: "/api/v1/nodes/{id}/schedulable", h: s.handleSetSchedulable},
 		{Method: "POST", Path: "/api/v1/nodes/{id}/drain", h: s.handleDrainNode},

@@ -407,3 +407,64 @@ func s3Client(c Config) (*minio.Client, error) {
 func (m *Manager) WriteBundle(ctx context.Context, w io.Writer) error {
 	return Create(ctx, m.st, m.box, m.dataDir, w)
 }
+
+// RekeyResult is the outcome of re-keying the stored backups.
+type RekeyResult struct {
+	Rekeyed int `json:"rekeyed"`
+	// Skipped were made with another master key and left as they are.
+	Skipped []string `json:"skipped"`
+	// Failed could not be read or written (name: error).
+	Failed []string `json:"failed"`
+}
+
+// RekeyAll re-keys every stored backup in place so it opens with the
+// current recovery key (Phase 19b). Backups are not run meanwhile.
+func (m *Manager) RekeyAll(ctx context.Context) (RekeyResult, error) {
+	res := RekeyResult{Skipped: []string{}, Failed: []string{}}
+	m.run.Lock()
+	defer m.run.Unlock()
+	m.mu.Lock()
+	cfg := m.cfg
+	m.mu.Unlock()
+	if cfg == nil {
+		return res, ErrNotConfigured
+	}
+	cl, err := s3Client(*cfg)
+	if err != nil {
+		return res, err
+	}
+	objs, err := list(ctx, cl, *cfg)
+	if err != nil {
+		return res, err
+	}
+	for _, o := range objs {
+		key := objectKey(*cfg, o.Name)
+		err := func() error {
+			obj, err := cl.GetObject(ctx, cfg.Bucket, key, minio.GetObjectOptions{})
+			if err != nil {
+				return err
+			}
+			defer obj.Close()
+			var buf bytes.Buffer
+			if _, err := buf.ReadFrom(obj); err != nil {
+				return err
+			}
+			out, err := Rekey(buf.Bytes(), m.box)
+			if err != nil {
+				return err
+			}
+			_, err = cl.PutObject(ctx, cfg.Bucket, key, bytes.NewReader(out), int64(len(out)), minio.PutObjectOptions{ContentType: "application/octet-stream"})
+			return err
+		}()
+		switch {
+		case errors.Is(err, ErrOtherMasterKey):
+			res.Skipped = append(res.Skipped, o.Name)
+		case err != nil:
+			res.Failed = append(res.Failed, o.Name+": "+err.Error())
+		default:
+			res.Rekeyed++
+		}
+	}
+	m.log.Info("backups re-keyed", "rekeyed", res.Rekeyed, "skipped", len(res.Skipped), "failed", len(res.Failed))
+	return res, nil
+}

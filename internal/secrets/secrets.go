@@ -6,10 +6,12 @@ package secrets
 import (
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 const keyFile = "master.key"
@@ -17,11 +19,71 @@ const keyFile = "master.key"
 type Box struct {
 	aead    cipher.AEAD
 	key     []byte
+	dataDir string // where the wrapped copy lives ("" = not loaded from disk)
+
+	mu      sync.RWMutex
 	wrapped []byte
 }
 
 // Wrapped returns the master key wrapped by the recovery key (safe to back up).
-func (b *Box) Wrapped() []byte { return b.wrapped }
+func (b *Box) Wrapped() []byte {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.wrapped
+}
+
+// Verify reports whether recoveryKey unwraps this master key.
+func (b *Box) Verify(recoveryKey string) error {
+	master, err := Unwrap(b.Wrapped(), recoveryKey)
+	if err != nil {
+		return err
+	}
+	if subtle.ConstantTimeCompare(master, b.key) != 1 {
+		return ErrWrongRecoveryKey
+	}
+	return nil
+}
+
+// Rewrap wraps the master key with recoveryKey and makes it the copy that
+// is stored and put into backups (recovery key rotation, Phase 19b). The
+// master key, and so everything sealed with it, is unchanged.
+func (b *Box) Rewrap(recoveryKey string) error {
+	if b.dataDir == "" {
+		return errors.New("the master key was not loaded from a data directory")
+	}
+	wrapped, err := Wrap(b.key, recoveryKey)
+	if err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := writeAtomic(filepath.Join(b.dataDir, wrappedFile), wrapped); err != nil {
+		return err
+	}
+	b.wrapped = wrapped
+	return nil
+}
+
+// writeAtomic replaces path (0600) so a crash leaves the old or new file, never half of one.
+func writeAtomic(path string, data []byte) error {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
 
 // LoadOrCreate reads <dataDir>/master.key, creating it (0600) on first start,
 // and makes sure a wrapped copy exists. When it creates a new recovery key
@@ -32,6 +94,7 @@ func LoadOrCreate(dataDir string) (box *Box, recoveryKey string, err error) {
 	if err != nil {
 		return nil, "", err
 	}
+	box.dataDir = dataDir
 	wpath := filepath.Join(dataDir, wrappedFile)
 	box.wrapped, err = os.ReadFile(wpath)
 	if errors.Is(err, os.ErrNotExist) {

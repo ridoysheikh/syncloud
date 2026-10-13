@@ -20,7 +20,9 @@ synctl backups config set --endpoint https://s3.example.com --region eu-central-
 
 The header warns until backups run, and again when they fail.
 
-> Without the recovery key (`SYNRK-…`, printed at install), a backup can't be opened. Keep it offline.
+> Without the recovery key (`SYNRK-…`), a backup can't be opened. It is kept on the controller: the root user can open it at any time under **Settings → Backups → Recovery key**, or with `synctl backups recovery-key show`. Keep a copy offline too, because the copy on the controller is lost with the server.
+>
+> **Installs from before keys were kept** can't show their key. **Create recovery key** (or `synctl backups recovery-key create`) makes a new key that is kept, and re-keys the backups in S3 so it opens them all. Services and data aren't affected; nothing is re-encrypted. Downloaded `.synbak` files from before still need the old key.
 
 ## Restore, or move to a new server
 

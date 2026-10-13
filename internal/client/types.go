@@ -305,6 +305,32 @@ func (c *Client) RunBackup(ctx context.Context) (BackupObject, error) {
 	return out, c.Do(ctx, "POST", "/api/v1/backups", nil, &out)
 }
 
+// RecoveryKey is the recovery key kept on the instance.
+type RecoveryKey struct {
+	Stored      bool   `json:"stored"`
+	RecoveryKey string `json:"recoveryKey"`
+	Rekey       *struct {
+		Rekeyed int      `json:"rekeyed"`
+		Skipped []string `json:"skipped"`
+		Failed  []string `json:"failed"`
+	} `json:"rekey"`
+	RekeyError  string        `json:"rekeyError"`
+	Backup      *BackupObject `json:"backup"`
+	BackupError string        `json:"backupError"`
+	StoreError  string        `json:"storeError"`
+}
+
+func (c *Client) GetRecoveryKey(ctx context.Context) (RecoveryKey, error) {
+	var out RecoveryKey
+	return out, c.Do(ctx, "GET", "/api/v1/backups/recovery-key", nil, &out)
+}
+
+// CreateRecoveryKey creates and keeps a key on an install whose key was never kept.
+func (c *Client) CreateRecoveryKey(ctx context.Context) (RecoveryKey, error) {
+	var out RecoveryKey
+	return out, c.Do(ctx, "POST", "/api/v1/backups/recovery-key", nil, &out)
+}
+
 type MeshPeer struct {
 	NodeID        string     `json:"nodeId"`
 	Name          string     `json:"name"`

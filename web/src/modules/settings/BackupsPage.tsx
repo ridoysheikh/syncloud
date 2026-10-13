@@ -12,6 +12,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
+import { RecoveryKeyPanel } from "./RecoveryKeyPanel";
 
 interface BackupObject {
   name: string;
@@ -94,9 +95,11 @@ export function BackupsPage() {
         }
       />
       <Alert tone="info">
-        Each backup holds a database snapshot, the internal CA and keys, encrypted with the master key. Restoring needs the recovery key shown at install:{" "}
+        Each backup holds a database snapshot, the internal CA and keys, encrypted with the master key. Restoring needs the recovery key below:{" "}
         <code className="font-mono">syncloud-controller restore --s3-endpoint … --recovery-key …</code>
       </Alert>
+
+      <RecoveryKeyPanel />
 
       <div className={cn("grid lg:grid-cols-2", gap)}>
         <Panel

@@ -95,29 +95,63 @@ func Create(ctx context.Context, st *store.Store, box *secrets.Box, dataDir stri
 	if len(wrapped) == 0 {
 		return errors.New("no wrapped master key: backups need a recovery key")
 	}
-	var hdr bytes.Buffer
-	hdr.WriteString(magic)
-	_ = binary.Write(&hdr, binary.BigEndian, uint32(len(wrapped)))
-	hdr.Write(wrapped)
-	if _, err := w.Write(hdr.Bytes()); err != nil {
+	if _, err := w.Write(header(wrapped)); err != nil {
 		return err
 	}
 	_, err = w.Write(box.Seal(tgz.Bytes(), []byte(aad)))
 	return err
 }
 
-// Restore unpacks bundle into dataDir using the recovery key. dataDir must not
-// hold a database unless force is set. It returns the restored file names.
-func Restore(bundle []byte, recoveryKey, dataDir string, force bool) ([]string, error) {
+func header(wrapped []byte) []byte {
+	var hdr bytes.Buffer
+	hdr.WriteString(magic)
+	_ = binary.Write(&hdr, binary.BigEndian, uint32(len(wrapped)))
+	hdr.Write(wrapped)
+	return hdr.Bytes()
+}
+
+// split returns a bundle's wrapped master key and sealed body.
+func split(bundle []byte) (wrapped, sealed []byte, err error) {
 	if !bytes.HasPrefix(bundle, []byte(magic)) || len(bundle) < len(magic)+4 {
-		return nil, errors.New("not a SynCloud backup")
+		return nil, nil, errors.New("not a SynCloud backup")
 	}
 	rest := bundle[len(magic):]
 	n := binary.BigEndian.Uint32(rest[:4])
 	if int(n) > len(rest)-4 {
-		return nil, errors.New("corrupt backup header")
+		return nil, nil, errors.New("corrupt backup header")
 	}
-	wrapped, sealed := rest[4:4+n], rest[4+n:]
+	return rest[4 : 4+n], rest[4+n:], nil
+}
+
+// ErrOtherMasterKey means a bundle was sealed with another master key
+// (another install, or one from before a restore onto a new key).
+var ErrOtherMasterKey = errors.New("the backup was made with another master key")
+
+// Rekey gives a bundle the box's current wrapped master key, so it opens
+// with the current recovery key (Phase 19b). The body is checked to be
+// sealed with the box's master key and is kept byte for byte.
+func Rekey(bundle []byte, box *secrets.Box) ([]byte, error) {
+	_, sealed, err := split(bundle)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := box.Open(sealed, []byte(aad)); err != nil {
+		return nil, ErrOtherMasterKey
+	}
+	wrapped := box.Wrapped()
+	if len(wrapped) == 0 {
+		return nil, errors.New("no wrapped master key")
+	}
+	return append(header(wrapped), sealed...), nil
+}
+
+// Restore unpacks bundle into dataDir using the recovery key. dataDir must not
+// hold a database unless force is set. It returns the restored file names.
+func Restore(bundle []byte, recoveryKey, dataDir string, force bool) ([]string, error) {
+	wrapped, sealed, err := split(bundle)
+	if err != nil {
+		return nil, err
+	}
 	master, err := secrets.Unwrap(wrapped, recoveryKey)
 	if err != nil {
 		return nil, err

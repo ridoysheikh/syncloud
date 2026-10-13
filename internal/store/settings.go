@@ -15,6 +15,9 @@ const (
 	// SettingRecoverySuffixHash lets the setup wizard confirm the user saved the
 	// recovery key (they type its last 6 characters).
 	SettingRecoverySuffixHash = "recovery.suffix_hash"
+	// SettingRecoveryKey is the recovery key, sealed with the master key, so
+	// the root user can look it up later.
+	SettingRecoveryKey = "recovery.key"
 )
 
 // GetSetting returns ("", false, nil) when the key is not set.

@@ -29,6 +29,8 @@ type testEnv struct {
 	st    *store.Store
 	token string
 	c     *http.Client
+	// recoveryKey is the key the test install was created with.
+	recoveryKey string
 }
 
 func newEnv(t *testing.T) *testEnv {
@@ -47,7 +49,7 @@ func newEnv(t *testing.T) *testEnv {
 		"index.html":      {Data: []byte("<html>dashboard</html>")},
 		"assets/app-1.js": {Data: []byte("console.log(1)")},
 	}
-	box, err := secrets.New(make([]byte, 32))
+	box, rk, err := secrets.LoadOrCreate(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +69,7 @@ func newEnv(t *testing.T) *testEnv {
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
-	return &testEnv{srv: srv, st: st, token: tok, c: &http.Client{Jar: jar}}
+	return &testEnv{srv: srv, st: st, token: tok, c: &http.Client{Jar: jar}, recoveryKey: rk}
 }
 
 func (e *testEnv) do(t *testing.T, method, path string, body any, hdr map[string]string) (*http.Response, map[string]any) {
