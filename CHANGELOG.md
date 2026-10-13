@@ -2,10 +2,11 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
-## [Unreleased]
+## [0.2.1]
 
 ### Changed
 
+- **Adding a node shows what's happening.** The join script now runs in six numbered steps, each with its time: it checks the controller, installs Docker (showing its output), installs nftables, downloads the agent with a progress bar, joins, and checks that the controller's agent port is reachable. It then streams the agent's log until the agent connects. Downloads have timeouts and retries, so an unreachable controller fails fast with a reason instead of hanging. If the agent doesn't connect within 90 seconds, the script says which ports to open. `--quiet` shows only the steps. The **Add node** dialog follows the new server live, from joined to connected to **Ready**, with a timer and hints when it takes long.
 - **A new setup page.** First-run setup is now a wide, four-step wizard: verify the server, the workspace, the root account, and a review. A step rail shows progress, and a preview shows the header and browser tab. The password field shows its strength and what it still needs. The review sums up every step, with links back to edit it. An error from the server sends you back to the step it belongs to. On phones, the rail becomes a row of step numbers.
 
 ## [0.2.0]

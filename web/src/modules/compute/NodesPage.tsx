@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { LayoutGrid, Plus, Rows3 } from "lucide-react";
+import { Check, LayoutGrid, Loader2, Plus, Rows3 } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { api, ApiError } from "@/lib/api";
 import { useNodes, type Node } from "@/lib/nodes";
 import { PageHeader } from "@/ui/PageHeader";
@@ -9,7 +10,7 @@ import { StatTile } from "@/ui/StatTile";
 import { Dialog } from "@/ui/Dialog";
 import { Alert, Button, Field, IconButton } from "@/ui/controls";
 import { cn, gap, pad } from "@/ui/cn";
-import { NodeGrid, NodesTable } from "@/entities/nodes";
+import { NodeGrid, NodesTable, nodeUrl } from "@/entities/nodes";
 import { confirmAction } from "@/ui/dialogs";
 import { CopyBox } from "@/ui/CopyBox";
 
@@ -153,11 +154,17 @@ function AddNodeDialog({
   const [token, setToken] = useState<JoinToken | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { data: nodes = [] } = useNodes();
+  // Nodes that existed when the token was made; anything else joined with it.
+  const [known, setKnown] = useState<Set<string> | null>(null);
+  const [since, setSince] = useState(0);
 
   const create = async () => {
     setBusy(true);
     setError(null);
     try {
+      setKnown(new Set(nodes.map((n) => n.id)));
+      setSince(Date.now());
       setToken(
         await api<JoinToken>("POST", "/nodes/join-tokens", {
           ttlMinutes: 60,
@@ -173,9 +180,11 @@ function AddNodeDialog({
   };
   const close = () => {
     setToken(null);
+    setKnown(null);
     setError(null);
     onClose();
   };
+  const joined = known ? nodes.filter((n) => !known.has(n.id)) : [];
   const origin = window.location.origin;
 
   return (
@@ -217,13 +226,15 @@ function AddNodeDialog({
             />
           </Field>
           <p className="text-faint text-xs">
-            Installs Docker and nftables if missing, downloads the agent from
-            this controller (checksum-verified), joins and starts it as a
-            systemd service. Add{" "}
+            Checks the controller, installs Docker and nftables if missing
+            (Docker takes 1–3 minutes), downloads the agent from this
+            controller (checksum-verified), joins, and waits until it connects.
+            It prints every step with its time. Add{" "}
             <code className="font-mono">--advertise-address IP</code> if other
             nodes must reach this one on a different address. Expires{" "}
             {new Date(token.expiresAt).toLocaleTimeString()}.
           </p>
+          <JoinProgress nodes={joined} since={since} />
           <details className="text-xs">
             <summary className="text-muted cursor-pointer">
               Agent already installed?
@@ -237,5 +248,74 @@ function AddNodeDialog({
         </div>
       )}
     </Dialog>
+  );
+}
+
+function fmtElapsed(ms: number) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** Live progress of servers joining with the token just created. */
+function JoinProgress({ nodes, since }: { nodes: Node[]; since: number }) {
+  const [now, setNow] = useState(Date.now());
+  const waiting = nodes.length === 0 || nodes.some((n) => n.status !== "ready");
+  useEffect(() => {
+    if (!waiting) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [waiting]);
+  const elapsed = now - since;
+  const n = nodes[0];
+  const stages = [
+    { label: "Join token created", done: true },
+    {
+      label: n ? `Joined as ${n.name}` : "Waiting for the server to run the command",
+      done: !!n,
+    },
+    { label: "Agent connected", done: !!n && (n.connected || n.status === "ready") },
+    { label: "Ready for tasks", done: n?.status === "ready" },
+  ];
+  const current = stages.findIndex((s) => !s.done);
+  return (
+    <div className="bg-raised border-line flex flex-col gap-1.5 rounded-sm border p-2.5 text-xs">
+      <div className="flex items-center justify-between">
+        <span className="text-faint text-[11px] font-medium tracking-wide uppercase">Progress</span>
+        <span className="text-faint font-mono text-[11px] tabular-nums">{fmtElapsed(elapsed)}</span>
+      </div>
+      <ol className="flex flex-col gap-1">
+        {stages.map((s, i) => (
+          <li key={s.label} className={cn("flex items-center gap-2", !s.done && i !== current && "text-faint")}>
+            {s.done ? (
+              <Check className="text-ok size-3.5 shrink-0" />
+            ) : i === current ? (
+              <Loader2 className="text-accent size-3.5 shrink-0 animate-spin" />
+            ) : (
+              <span className="border-line-strong size-3.5 shrink-0 rounded-full border" />
+            )}
+            <span className="min-w-0 truncate">{s.label}</span>
+          </li>
+        ))}
+      </ol>
+      {n?.status === "ready" && (
+        <Link to={nodeUrl(n.name) as string} className="text-accent mt-0.5 hover:underline">
+          Open {n.name} →
+        </Link>
+      )}
+      {nodes.length > 1 && <span className="text-muted">{nodes.length} servers joined.</span>}
+      {!n && elapsed > 4 * 60_000 && (
+        <p className="text-muted mt-0.5">
+          Still waiting? The script shows each step on the server. If it stopped at a step, the message there says
+          why. If it finished but nothing shows here, the token may have expired or been used.
+        </p>
+      )}
+      {n && n.status !== "ready" && elapsed > 6 * 60_000 && (
+        <p className="text-muted mt-0.5">
+          {n.name} joined but isn&apos;t connected yet. On it, run{" "}
+          <code className="font-mono">journalctl -u syncloud-agent -f</code>. Usually the controller&apos;s agent
+          port (TCP 7443) or WireGuard (UDP 51820) is blocked.
+        </p>
+      )}
+    </div>
   );
 }
