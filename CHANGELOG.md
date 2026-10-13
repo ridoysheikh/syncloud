@@ -2,6 +2,12 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [Unreleased]
+
+### Changed
+
+- **A new setup page.** First-run setup is now a wide, four-step wizard: verify the server, the workspace, the root account, and a review. A step rail shows progress, and a preview shows the header and browser tab. The password field shows its strength and what it still needs. The review sums up every step, with links back to edit it. An error from the server sends you back to the step it belongs to. On phones, the rail becomes a row of step numbers.
+
 ## [0.2.0]
 
 ### Added
