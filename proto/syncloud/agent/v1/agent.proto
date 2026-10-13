@@ -22,6 +22,7 @@ message ConnectRequest {
     LogBatch logs = 6;
     ExecOutput exec_output = 7;
     UpgradeResult upgrade_result = 8;
+    TaskEvent task_event = 9;
   }
 }
 
@@ -256,6 +257,17 @@ message TaskStatus {
   int64 started_at_unix = 8;
   string spec_hash = 9;
   string ip = 10;               // address on the task's network (the "syncloud" network for services)
+  string health_error = 11;     // why the agent's last health check failed ("" after a pass)
+}
+
+// TaskEvent is one step of starting or checking a task (pulling its image,
+// starting its container, a health check result), for deployment logs.
+message TaskEvent {
+  string task_id = 1;
+  string kind = 2;              // pull | pulled | start | started | exited | health | healthy | unhealthy | failed
+  string level = 3;             // info | warn | error
+  string message = 4;
+  int64 at_unix_ms = 5;
 }
 
 // NetworkConfig is this node's view of the WireGuard mesh (§8). It is sent

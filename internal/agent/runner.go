@@ -32,6 +32,8 @@ type Runner struct {
 	log    *slog.Logger
 	// Status updates for the controller; dropped when no session is listening.
 	out chan *agentv1.TaskStatus
+	// Events are the steps of starting and checking tasks (deployment logs).
+	events chan *agentv1.TaskEvent
 	// NetworkReady reports whether tasks may join TaskNetwork yet (nil: always).
 	NetworkReady func() error
 	// OnStart is called when a managed container starts (it may need to
@@ -39,6 +41,9 @@ type Runner struct {
 	OnStart func()
 	// prePulls holds images being pulled ahead of deployments.
 	prePulls sync.Map
+	// stopping holds containers stopped on purpose (by ID), so their exit
+	// is not reported as a crash.
+	stopping sync.Map
 
 	mu     sync.Mutex
 	locks  map[string]*sync.Mutex
@@ -50,7 +55,7 @@ type Runner struct {
 const TaskNetwork = "syncloud"
 
 func NewRunner(d *docker.Client, log *slog.Logger) *Runner {
-	return &Runner{docker: d, log: log, out: make(chan *agentv1.TaskStatus, 256), locks: map[string]*sync.Mutex{},
+	return &Runner{docker: d, log: log, out: make(chan *agentv1.TaskStatus, 256), events: make(chan *agentv1.TaskEvent, 512), locks: map[string]*sync.Mutex{},
 		probes: map[string]*prober{}, ctx: context.Background()}
 }
 
@@ -71,6 +76,23 @@ func (r *Runner) emit(s *agentv1.TaskStatus) {
 	case r.out <- s:
 	default:
 		r.log.Warn("task status dropped (controller not reading)", "task", s.TaskId)
+	}
+}
+
+// Event levels.
+const (
+	levelInfo  = "info"
+	levelWarn  = "warn"
+	levelError = "error"
+)
+
+// event reports one step of a task for its deployment's log.
+func (r *Runner) event(taskID, kind, level, format string, args ...any) {
+	e := &agentv1.TaskEvent{TaskId: taskID, Kind: kind, Level: level, Message: fmt.Sprintf(format, args...), AtUnixMs: time.Now().UnixMilli()}
+	select {
+	case r.events <- e:
+	default:
+		r.log.Warn("task event dropped (controller not reading)", "task", taskID)
 	}
 }
 
@@ -99,6 +121,7 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 	status := &agentv1.TaskStatus{TaskId: spec.TaskId, Image: spec.Image, SpecHash: hash}
 	fail := func(err error) {
 		r.log.Error("task failed", "task", spec.TaskId, "err", err)
+		r.event(spec.TaskId, "failed", levelError, "%v", err)
 		status.State, status.Error = agentv1.TaskState_TASK_STATE_FAILED, err.Error()
 		r.emit(status)
 	}
@@ -111,6 +134,7 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 	for _, c := range existing {
 		if c.Labels[LabelSpecHash] == hash {
 			if c.State != "running" {
+				r.event(spec.TaskId, "start", levelInfo, "starting the existing container %s (%s)", c.ID[:12], c.State)
 				if err := r.docker.Start(ctx, c.ID); err != nil {
 					fail(err)
 					return
@@ -125,6 +149,8 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 	// Spec changed (or no container yet): replace.
 	for _, c := range existing {
 		r.log.Info("replacing container", "task", spec.TaskId, "container", c.ID[:12])
+		r.event(spec.TaskId, "start", levelInfo, "replacing container %s, which runs an older spec", c.ID[:12])
+		r.stopping.Store(c.ID, true)
 		if err := r.docker.Stop(ctx, c.ID, 15*time.Second); err != nil {
 			fail(err)
 			return
@@ -142,11 +168,21 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 		status.State = agentv1.TaskState_TASK_STATE_PULLING
 		r.emit(proto.Clone(status).(*agentv1.TaskStatus))
 		r.log.Info("pulling image", "image", spec.Image)
+		auth := "anonymously"
+		if spec.GetRegistryAuth() != "" {
+			auth = "with registry credentials"
+		}
+		r.event(spec.TaskId, "pull", levelInfo, "pulling image %s %s", spec.Image, auth)
 		trustRegistry(r.log, spec.Image, spec.GetRegistryCa())
-		if err := r.docker.Pull(ctx, spec.Image, spec.GetRegistryAuth()); err != nil {
-			fail(err)
+		start := time.Now()
+		res, err := r.docker.PullInfo(ctx, spec.Image, spec.GetRegistryAuth())
+		if err != nil {
+			fail(fmt.Errorf("pull failed after %s: %w", time.Since(start).Round(100*time.Millisecond), err))
 			return
 		}
+		r.event(spec.TaskId, "pulled", levelInfo, "pulled %s in %s: %s", spec.Image, time.Since(start).Round(100*time.Millisecond), pullSummary(res))
+	} else {
+		r.event(spec.TaskId, "pull", levelInfo, "image %s is already on this node", spec.Image)
 	}
 
 	mode := spec.NetworkMode
@@ -187,6 +223,7 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 	status.State = agentv1.TaskState_TASK_STATE_STARTING
 	r.emit(proto.Clone(status).(*agentv1.TaskStatus))
 
+	r.event(spec.TaskId, "start", levelInfo, "creating the container%s", networkNote(mode))
 	id, err := r.docker.Create(ctx, spec.Name, createRequest(spec, hash))
 	if err != nil {
 		fail(err)
@@ -198,8 +235,55 @@ func (r *Runner) Run(ctx context.Context, spec *agentv1.TaskSpec) {
 		return
 	}
 	r.log.Info("task started", "task", spec.TaskId, "container", id[:12])
+	st := r.inspect(ctx, id, spec.TaskId)
+	addr := ""
+	if st.Ip != "" {
+		addr = " with address " + st.Ip
+	}
+	hc := "no health check: it counts as healthy once running"
+	if h := spec.GetHealth(); h != nil {
+		hc = "health check: " + describeCheck(h)
+	}
+	r.event(spec.TaskId, "started", levelInfo, "container %s started%s; %s", id[:12], addr, hc)
 	r.startProbe(spec, id, hash)
-	r.emit(r.inspect(ctx, id, spec.TaskId))
+	r.emit(st)
+}
+
+func networkNote(mode string) string {
+	if mode == "" {
+		return ""
+	}
+	return " on network " + mode
+}
+
+func pullSummary(p docker.PullResult) string {
+	parts := []string{fmt.Sprintf("%d %s downloaded (%s)", p.Downloaded, pluralLayer(p.Downloaded), humanBytes(p.Bytes))}
+	if p.Cached > 0 {
+		parts = append(parts, fmt.Sprintf("%d already on the node", p.Cached))
+	}
+	if p.Digest != "" {
+		parts = append(parts, "digest "+p.Digest)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func pluralLayer(n int) string {
+	if n == 1 {
+		return "layer"
+	}
+	return "layers"
+}
+
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KiB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d B", n)
 }
 
 // Stop stops (and optionally removes) the task's containers.
@@ -212,6 +296,7 @@ func (r *Runner) Stop(ctx context.Context, taskID string, timeout time.Duration,
 		return
 	}
 	for _, c := range existing {
+		r.stopping.Store(c.ID, true)
 		if err := r.docker.Stop(ctx, c.ID, timeout); err != nil {
 			r.log.Warn("stop", "task", taskID, "err", err)
 		}
@@ -279,8 +364,9 @@ func (r *Runner) inspect(ctx context.Context, containerID, taskID string) *agent
 	if c.State.Health != nil {
 		s.Health = c.State.Health.Status
 	}
-	if h := r.probeHealth(taskID); h != "" && c.State.Running {
+	if h, herr := r.probeHealth(taskID); h != "" && c.State.Running {
 		s.Health = h // the agent's own probe (§5.6) wins over a Docker HEALTHCHECK
+		s.HealthError = herr
 	}
 	if t, err := time.Parse(time.RFC3339Nano, c.State.StartedAt); err == nil && !t.IsZero() {
 		s.StartedAtUnix = t.Unix()
@@ -315,7 +401,11 @@ func (r *Runner) Watch(ctx context.Context) {
 				if e.Action == "start" && r.OnStart != nil {
 					r.OnStart()
 				}
-				r.emit(r.inspect(ctx, e.Actor.ID, taskID))
+				st := r.inspect(ctx, e.Actor.ID, taskID)
+				if e.Action == "die" {
+					r.reportExit(ctx, e.Actor.ID, taskID)
+				}
+				r.emit(st)
 			}
 		}
 		if err := <-errc; ctx.Err() == nil {
@@ -421,6 +511,44 @@ func restartName(p agentv1.RestartPolicy) string {
 	default:
 		return "unless-stopped"
 	}
+}
+
+// reportExit logs why a task's container stopped, with its last output,
+// unless the controller asked for the stop.
+func (r *Runner) reportExit(ctx context.Context, containerID, taskID string) {
+	if _, ok := r.stopping.LoadAndDelete(containerID); ok {
+		return
+	}
+	c, err := r.docker.Inspect(ctx, containerID)
+	if err != nil {
+		return
+	}
+	why := fmt.Sprintf("container exited with code %d", c.State.ExitCode)
+	switch {
+	case c.State.OOMKilled:
+		why += " (killed: out of memory, raise the memory limit)"
+	case c.State.ExitCode == 137:
+		why += " (killed)"
+	case c.State.Error != "":
+		why += ": " + c.State.Error
+	}
+	tctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if lines, err := r.docker.Tail(tctx, containerID, 15); err == nil && len(lines) > 0 {
+		var b strings.Builder
+		for _, l := range lines {
+			b.WriteString("\n" + truncate(l.Line, 500))
+		}
+		why += "; last output:" + b.String()
+	}
+	r.event(taskID, "exited", levelError, "%s", why)
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // PrePull downloads an image ahead of a deployment unless it is already

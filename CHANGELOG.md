@@ -2,6 +2,17 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.2.4]
+
+### Fixed
+
+- **WireGuard tunnels are no longer torn down every 30 seconds.** Each agent re-applied its mesh config every 30 seconds and whenever a container started, replacing every WireGuard peer. That dropped each tunnel's session and any endpoint WireGuard had learned behind NAT. On a LAN the re-handshake is instant. Over the internet it cost a round trip, and packets sent meanwhile were lost: the controller's probes of tasks on other nodes timed out, and those tasks dropped out of Traefik's routes. Peers are now updated in place, and an endpoint is only set when the controller's value changes.
+
+### Added
+
+- **Detailed deployment logs, kept with each deployment.** Besides the deployment's own steps, the log now records each task's steps. Agents report which node a task was scheduled on, the image pull (digest, layers, size, time, or that the image was already there), the container start and its address, and each health check result with its exact error. A crashed container adds its exit code, an out-of-memory note and its last 15 lines of output. The controller adds its own probe of each task over the private network. When that probe fails, the log says whether the WireGuard tunnel to the node works, so a closed UDP 51820 is told apart from a port the app doesn't listen on. Git deployments start with the build's steps, and the deployment page shows the build output. Placement failures, backoff and lost nodes are logged once each. The log can be filtered to problems or to one node, and `synctl` prints node, task and level for each step.
+- The task tables show why a task's last health check failed, and the controller probe's error while it is failing, not only once the task is unreachable.
+
 ## [0.2.3]
 
 ### Fixed

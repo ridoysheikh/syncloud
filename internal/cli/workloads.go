@@ -1037,7 +1037,21 @@ func (a *app) printDeployment(d client.DeploymentDetail) error {
 	}
 	fmt.Fprintln(a.out, "\nTimeline:")
 	for _, e := range d.Events {
-		fmt.Fprintf(a.out, "  %s  %-14s %s\n", e.At.Local().Format("15:04:05"), e.Kind, e.Message)
+		where := ""
+		if e.Node != "" {
+			where = e.Node
+			if id := strings.TrimPrefix(e.TaskID, "task_"); len(id) >= 8 {
+				where += "/" + id[:8]
+			}
+			where += "  "
+		}
+		lvl := ""
+		if e.Level == "warn" || e.Level == "error" {
+			lvl = strings.ToUpper(e.Level) + " "
+		}
+		// Multi-line messages (a crashed task's last output) are indented.
+		msg := strings.ReplaceAll(e.Message, "\n", "\n      ")
+		fmt.Fprintf(a.out, "  %s  %-14s %s%s%s\n", e.At.Local().Format("15:04:05.000"), e.Kind, where, lvl, msg)
 	}
 	if len(d.Runs) > 0 {
 		fmt.Fprintln(a.out, "\nHook runs:")

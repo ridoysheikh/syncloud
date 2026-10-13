@@ -421,3 +421,63 @@ func (m *Manager) List(ctx context.Context) ([]NodeView, error) {
 	}
 	return out, nil
 }
+
+// PathTo describes the controller's WireGuard link to a node, for messages
+// about tasks the controller cannot reach ("" when unknown).
+func (m *Manager) PathTo(ctx context.Context, nodeID string) string {
+	all, err := m.st.ListNodeNetworks(ctx)
+	if err != nil {
+		return ""
+	}
+	var ctl, target store.NodeNetwork
+	for _, n := range all {
+		if n.NodeName == ControllerNode {
+			ctl = n
+		}
+		if n.NodeID == nodeID {
+			target = n
+		}
+	}
+	switch {
+	case target.NodeID == "":
+		return "the node is not part of the private network"
+	case target.NodeID == ctl.NodeID:
+		return "" // a task on the controller's own node
+	case ctl.NodeID == "":
+		return "the controller's node is not part of the private network"
+	case target.PublicKey == "":
+		return target.NodeName + " has no WireGuard key yet"
+	}
+	m.mu.Lock()
+	st := m.status[ctl.NodeID]
+	m.mu.Unlock()
+	if st == nil {
+		return "the controller's own agent reports no network status"
+	}
+	if st.GetError() != "" {
+		return "the controller's network is not applied: " + st.GetError()
+	}
+	for _, p := range st.GetPeers() {
+		if p.GetPublicKey() != target.PublicKey {
+			continue
+		}
+		ep := p.GetEndpoint()
+		if ep == "" {
+			ep = target.Endpoint
+		}
+		hs := "no WireGuard handshake yet"
+		if t := p.GetLastHandshakeUnix(); t > 0 {
+			hs = fmt.Sprintf("last WireGuard handshake %s ago", time.Since(time.Unix(t, 0)).Round(time.Second))
+		}
+		addr := MeshAddr(target.MeshIndex)
+		// The agent connects to each peer's mesh address every heartbeat: a
+		// live check of the tunnel itself (0 = no answer).
+		if p.GetRttMs() == 0 {
+			return fmt.Sprintf("the controller's node cannot reach %s's mesh address %s through WireGuard either (%s, endpoint %s): the tunnel is down; check that UDP %d is open both ways between the nodes' public addresses (cloud firewall or security group) and that the endpoint is the node's reachable address",
+				target.NodeName, addr, hs, ep, ListenPort)
+		}
+		return fmt.Sprintf("the WireGuard tunnel to %s works (%s reaches %s in %.1f ms, %s), so the probe is lost between %s's host and the container: check the app listens on 0.0.0.0 and the node's forwarding (Docker's firewall rules, rp_filter)",
+			target.NodeName, ControllerNode, addr, p.GetRttMs(), hs, target.NodeName)
+	}
+	return fmt.Sprintf("the controller has no WireGuard peer for %s (endpoint %q)", target.NodeName, target.Endpoint)
+}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ridoysheikh/syncloud/internal/auth"
+	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
@@ -78,6 +79,9 @@ func (m *Manager) recordDeployment(ctx context.Context, serviceID string, fromRe
 	if err := m.st.StartDeployment(ctx, d); err != nil {
 		return "", err
 	}
+	if d.BuildID != "" {
+		m.logBuild(ctx, d.ID, d.BuildID)
+	}
 	what := fmt.Sprintf("revision %d → %d", fromRev, toRev)
 	if fromRev == 0 {
 		what = fmt.Sprintf("first deployment, revision %d", toRev)
@@ -86,11 +90,137 @@ func (m *Manager) recordDeployment(ctx context.Context, serviceID string, fromRe
 	return d.ID, nil
 }
 
+// logBuild copies the steps of the build that produced a deployment's image
+// into its log, so a git deployment reads from commit to serving.
+func (m *Manager) logBuild(ctx context.Context, depID, buildID string) {
+	b, err := m.st.BuildByID(ctx, buildID)
+	if err != nil {
+		return
+	}
+	sha := b.SHA
+	if len(sha) > 12 {
+		sha = sha[:12]
+	}
+	ref := strings.TrimPrefix(strings.TrimPrefix(b.Ref, "refs/heads/"), "refs/tags/")
+	m.deploymentLog(ctx, depID, store.DeploymentEvent{At: b.CreatedAt, Kind: "build-queued", Level: "info",
+		Message: fmt.Sprintf("build of commit %s on %s queued (%s)", sha, ref, b.Trigger)})
+	if b.StartedAt != nil {
+		m.deploymentLog(ctx, depID, store.DeploymentEvent{At: *b.StartedAt, Kind: "build-started", Level: "info",
+			Message: fmt.Sprintf("build started after %s in the queue (job run %s)", b.StartedAt.Sub(b.CreatedAt).Round(time.Second), b.RunID)})
+	}
+	if b.FinishedAt != nil {
+		took := ""
+		if b.StartedAt != nil {
+			took = " in " + b.FinishedAt.Sub(*b.StartedAt).Round(time.Second).String()
+		}
+		msg := fmt.Sprintf("build %s%s; image %s", b.Status, took, b.Image)
+		if b.CheckRunID != "" {
+			msg += "; after-build checks passed"
+		}
+		m.deploymentLog(ctx, depID, store.DeploymentEvent{At: *b.FinishedAt, Kind: "build-done", Level: "info", Message: msg})
+	}
+}
+
 // DeploymentEvent appends a step to a deployment's timeline.
 func (m *Manager) DeploymentEvent(ctx context.Context, depID, kind, msg string) {
-	if err := m.st.AddDeploymentEvent(ctx, depID, kind, msg, m.now().UTC()); err != nil {
+	m.deploymentLog(ctx, depID, store.DeploymentEvent{Kind: kind, Level: levelOf(kind), Message: msg})
+}
+
+func (m *Manager) deploymentLog(ctx context.Context, depID string, e store.DeploymentEvent) {
+	if e.At.IsZero() {
+		e.At = m.now().UTC()
+	}
+	if err := m.st.AddDeploymentEvent(ctx, depID, e); err != nil {
 		m.log.Warn("record deployment event", "deployment", depID, "err", err)
 	}
+}
+
+func levelOf(kind string) string {
+	switch kind {
+	case store.DeployFailed, "hook-failed":
+		return "error"
+	case "task-failed", "task-lost", "unplaced", "backoff", store.DeployRolledBack:
+		return "warn"
+	}
+	return "info"
+}
+
+// logAfterDeploy is how long after a deployment ends its tasks' steps (a
+// crash or failed health check soon after) still go to its log.
+const logAfterDeploy = 15 * time.Minute
+
+// deploymentFor returns the deployment whose log takes a task's steps: the
+// one that rolled out the task's revision, while it runs or shortly after.
+func (m *Manager) deploymentFor(ctx context.Context, t store.Task) string {
+	d, err := m.st.DeploymentOfRevision(ctx, t.ServiceID, t.Revision)
+	if err != nil || (d.FinishedAt != nil && m.now().Sub(*d.FinishedAt) > logAfterDeploy) {
+		return ""
+	}
+	return d.ID
+}
+
+// TaskEvent records a step of one task (its node's agent pulling or
+// starting it, a health check, the controller's probe) in its deployment's
+// log.
+func (m *Manager) TaskEvent(ctx context.Context, t store.Task, kind, level, msg string, at time.Time) {
+	if depID := m.deploymentFor(ctx, t); depID != "" {
+		m.deploymentLog(ctx, depID, m.taskEntry(t, kind, level, msg, at))
+	}
+}
+
+func (m *Manager) taskEntry(t store.Task, kind, level, msg string, at time.Time) store.DeploymentEvent {
+	e := store.DeploymentEvent{At: at, Kind: kind, Level: level, TaskID: t.ID, Message: msg}
+	if n, ok := m.nodes.Get(t.NodeID); ok {
+		e.Node = n.Name
+	}
+	return e
+}
+
+// noteOnce records a deployment step unless the same note was the last one
+// of its kind (a placement retried every 15 seconds logs once).
+func (m *Manager) noteOnce(ctx context.Context, depID, kind, msg string) {
+	key := depID + "/" + kind
+	if last, ok := m.notes.Load(key); ok && last.(string) == msg {
+		return
+	}
+	m.notes.Store(key, msg)
+	m.DeploymentEvent(ctx, depID, kind, msg)
+}
+
+// onTaskEvent takes a step an agent reports for one of its tasks.
+func (m *Manager) onTaskEvent(node store.Node, e *agentv1.TaskEvent) {
+	if !strings.HasPrefix(e.GetTaskId(), TaskIDPrefix) {
+		return
+	}
+	ctx := context.Background()
+	t, err := m.st.TaskByID(ctx, e.GetTaskId())
+	if err != nil {
+		return
+	}
+	switch e.GetKind() {
+	case "health", "unhealthy":
+		m.healthErrs.Store(t.ID, strings.TrimPrefix(e.GetMessage(), "not ready yet (start period): "))
+	case "healthy":
+		m.healthErrs.Delete(t.ID)
+	}
+	kind := "task-" + e.GetKind()
+	if e.GetKind() == "failed" {
+		kind = "task-error" // "task-failed" is the controller's note that it replaces the task
+	}
+	at := m.now().UTC()
+	if ms := e.GetAtUnixMs(); ms > 0 {
+		at = time.UnixMilli(ms).UTC()
+	}
+	t.NodeID = node.ID
+	m.TaskEvent(ctx, t, kind, e.GetLevel(), e.GetMessage(), at)
+}
+
+// healthError is why a task's last health check on its node failed.
+func (m *Manager) healthError(taskID string) string {
+	if v, ok := m.healthErrs.Load(taskID); ok {
+		return v.(string)
+	}
+	return ""
 }
 
 func taskFailure(t store.Task) string {

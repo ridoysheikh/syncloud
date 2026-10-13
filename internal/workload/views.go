@@ -39,19 +39,21 @@ type ServiceView struct {
 
 // TaskView is a task as the API shows it.
 type TaskView struct {
-	ID          string     `json:"id"`
-	ServiceID   string     `json:"serviceId"`
-	Project     string     `json:"project"`
-	Environment string     `json:"environment"`
-	Service     string     `json:"service"`
-	Revision    int        `json:"revision"`
-	NodeID      string     `json:"nodeId"`
-	Node        string     `json:"node"`
-	Desired     string     `json:"desired"`
-	State       string     `json:"state"`
-	IP          string     `json:"ip"`
-	ContainerID string     `json:"containerId"`
-	Health      string     `json:"health"`
+	ID          string `json:"id"`
+	ServiceID   string `json:"serviceId"`
+	Project     string `json:"project"`
+	Environment string `json:"environment"`
+	Service     string `json:"service"`
+	Revision    int    `json:"revision"`
+	NodeID      string `json:"nodeId"`
+	Node        string `json:"node"`
+	Desired     string `json:"desired"`
+	State       string `json:"state"`
+	IP          string `json:"ip"`
+	ContainerID string `json:"containerId"`
+	Health      string `json:"health"`
+	// HealthError is why the last health check on the task's node failed.
+	HealthError string     `json:"healthError,omitempty"`
 	ExitCode    int        `json:"exitCode"`
 	Error       string     `json:"error"`
 	CreatedAt   time.Time  `json:"createdAt"`
@@ -160,6 +162,7 @@ func (m *Manager) taskView(ctx context.Context, t store.Task) (TaskView, error) 
 	}
 	if t.State == store.TaskRunning {
 		v.Central, v.CentralError = CentralCheck(t.ID)
+		v.HealthError = m.healthError(t.ID)
 	}
 	sv, err := m.st.ServiceByID(ctx, t.ServiceID)
 	if err == nil {

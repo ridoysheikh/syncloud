@@ -35,6 +35,8 @@ type Hooks struct {
 	OnConnect func(c Conn)
 	// OnTaskStatus runs for every task status the agent reports.
 	OnTaskStatus func(node store.Node, s *agentv1.TaskStatus)
+	// OnTaskEvent runs for every step of a task the agent reports.
+	OnTaskEvent func(node store.Node, e *agentv1.TaskEvent)
 	// OnHeartbeat runs for every heartbeat.
 	OnHeartbeat func(node store.Node, hb *agentv1.Heartbeat)
 	// OnDisconnect runs when the stream ends.
@@ -262,6 +264,12 @@ func (g *Gateway) Connect(stream grpc.BidiStreamingServer[agentv1.ConnectRequest
 				for _, h := range g.hooks {
 					if h.OnTaskStatus != nil {
 						h.OnTaskStatus(node, m.TaskStatus)
+					}
+				}
+			case *agentv1.ConnectRequest_TaskEvent:
+				for _, h := range g.hooks {
+					if h.OnTaskEvent != nil {
+						h.OnTaskEvent(node, m.TaskEvent)
 					}
 				}
 			case *agentv1.ConnectRequest_Logs:

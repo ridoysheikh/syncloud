@@ -2,10 +2,12 @@ package health
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -134,6 +136,12 @@ func (m *Monitor) probeTasks(ctx context.Context) {
 	wg.Wait()
 	now := m.now().UTC()
 	changed := false
+	type note struct {
+		task              store.Task
+		level, msg        string
+		unreachable, path bool
+	}
+	var notes []note
 	m.tasks.mu.Lock()
 	live := map[string]bool{}
 	for i, j := range jobs {
@@ -143,7 +151,8 @@ func (m *Monitor) probeTasks(ctx context.Context) {
 			c = &TaskCheck{}
 			m.tasks.checks[j.task.ID] = c
 		}
-		was := c.State == "unreachable"
+		prev := c.State
+		was := prev == "unreachable"
 		c.Checked, c.Target = now, j.url+j.addr
 		if err := results[i]; err != nil {
 			c.Fails++
@@ -154,6 +163,18 @@ func (m *Monitor) probeTasks(ctx context.Context) {
 			}
 		} else {
 			c.Fails, c.Error, c.State = 0, "", "ok"
+		}
+		// The deployment log gets each change of what the controller sees.
+		switch {
+		case c.State == "ok" && prev == "":
+			notes = append(notes, note{task: j.task, level: "info", msg: "reachable from the controller over the private network at " + c.Target})
+		case c.State == "ok" && prev != "ok":
+			notes = append(notes, note{task: j.task, level: "info", msg: "reachable from the controller again at " + c.Target + "; back in routing"})
+		case c.State == "failing" && (prev == "" || prev == "ok"):
+			notes = append(notes, note{task: j.task, level: "warn", msg: fmt.Sprintf("the controller cannot reach the task at %s: %s (check %d of %d before routing leaves it out)", c.Target, c.Error, c.Fails, taskFailLimit)})
+		case c.State == "unreachable" && !was:
+			notes = append(notes, note{task: j.task, level: "error", unreachable: true, path: true,
+				msg: fmt.Sprintf("unreachable from the controller after %d checks: %s; Traefik no longer routes to it", c.Fails, c.Error)})
 		}
 		if was != (c.State == "unreachable") {
 			changed = true
@@ -176,6 +197,18 @@ func (m *Monitor) probeTasks(ctx context.Context) {
 	if changed {
 		m.wl.InvalidateRoutes()
 	}
+	for _, n := range notes {
+		msg := n.msg
+		if n.path && m.cfg.MeshPath != nil {
+			if p := m.cfg.MeshPath(ctx, n.task.NodeID); p != "" {
+				msg += ". Private network: " + p
+			}
+		}
+		m.wl.TaskEvent(ctx, n.task, "probe", n.level, msg, now)
+		if n.unreachable {
+			m.log.Warn("task unreachable from the controller", "task", n.task.ID, "detail", msg)
+		}
+	}
 }
 
 func (m *Monitor) probeTask(ctx context.Context, url, addr string) error {
@@ -189,7 +222,7 @@ func (m *Monitor) probeTask(ctx context.Context, url, addr string) error {
 		req.Header.Set("User-Agent", "SynCloud-Health")
 		resp, err := m.tasks.client.Do(req)
 		if err != nil {
-			return err
+			return explainProbe(ctx, err)
 		}
 		resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 400 {
@@ -199,9 +232,23 @@ func (m *Monitor) probeTask(ctx context.Context, url, addr string) error {
 	}
 	c, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return err
+		return explainProbe(ctx, err)
 	}
 	return c.Close()
+}
+
+// explainProbe turns a probe error into what it says about the path.
+func explainProbe(ctx context.Context, err error) error {
+	msg := err.Error()
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded) || strings.Contains(msg, "i/o timeout"):
+		return fmt.Errorf("no answer within 3s (packets are dropped on the way: the WireGuard tunnel, a firewall, or the node's forwarding): %w", err)
+	case strings.Contains(msg, "connection refused"):
+		return fmt.Errorf("connection refused (the node answered but nothing listens on the port; check the port the app binds and that it listens on 0.0.0.0): %w", err)
+	case strings.Contains(msg, "no route to host"), strings.Contains(msg, "network is unreachable"):
+		return fmt.Errorf("no route to the task's subnet (the private network is not set up on the controller): %w", err)
+	}
+	return err
 }
 
 // TaskReachable reports whether routing may use a task: true unless the

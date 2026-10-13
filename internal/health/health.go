@@ -99,6 +99,9 @@ type Config struct {
 	// ProbeToken marks probes so Traefik keeps them out of the services'
 	// traffic (traefik.Provider.ProbeToken).
 	ProbeToken string
+	// MeshPath describes the controller's private-network link to a node,
+	// for tasks it cannot reach (nil: not said).
+	MeshPath func(ctx context.Context, nodeID string) string
 }
 
 type Monitor struct {

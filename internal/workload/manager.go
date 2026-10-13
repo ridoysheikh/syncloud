@@ -55,6 +55,10 @@ type Manager struct {
 	OnTaskChange func()
 	// AdmitCount checks a count quota (domains) before adding one.
 	AdmitCount func(ctx context.Context, envID, what string) error
+	// notes holds the last placement note per deployment (noteOnce).
+	notes sync.Map
+	// healthErrs holds why each task's last health check failed (agents report it).
+	healthErrs sync.Map
 	unplacedMu sync.Mutex
 	unplaced   map[string]Unplaced
 	// imageKick wakes the image watcher (a push to the built-in registry).
@@ -118,7 +122,7 @@ func NewManager(st *store.Store, gw *agentgw.Gateway, reg *nodes.Registry, netRe
 }
 
 func (m *Manager) Hooks() agentgw.Hooks {
-	return agentgw.Hooks{OnConnect: m.onConnect, OnTaskStatus: m.onTaskStatus}
+	return agentgw.Hooks{OnConnect: m.onConnect, OnTaskStatus: m.onTaskStatus, OnTaskEvent: m.onTaskEvent}
 }
 
 // Enqueue schedules a reconcile of one service.
@@ -269,7 +273,11 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			if n, err := m.st.IncDeploymentFailures(ctx, dep.ID); err == nil {
 				dep.Failed = n
 			}
-			m.DeploymentEvent(ctx, dep.ID, "task-failed", taskFailure(t))
+			msg := taskFailure(t)
+			if he := m.healthError(t.ID); t.State == store.TaskRunning && he != "" {
+				msg += ": " + he
+			}
+			m.deploymentLog(ctx, dep.ID, m.taskEntry(t, "task-failed", "warn", msg+"; replacing it", now.UTC()))
 		}
 	}
 	var active []store.Task
@@ -281,6 +289,9 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 		switch {
 		case t.NodeID == "" || !ok || node.Status == store.NodeNotReady:
 			// The node is gone or unreachable: replace the task elsewhere.
+			if hasDep && t.Revision == dep.ToRev {
+				m.deploymentLog(ctx, dep.ID, m.taskEntry(t, "task-lost", "warn", "its node is gone or not ready; replacing the task on another node", now.UTC()))
+			}
 			m.setDesired(ctx, t, store.TaskLost, now)
 			m.sendStop(t)
 			changed = true
@@ -347,6 +358,9 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 	if missing > 0 {
 		if wait := m.backoff(sv.ID, now); wait > 0 {
 			status = fmt.Sprintf("tasks keep failing; next attempt in %s", wait.Round(time.Second))
+			if hasDep {
+				m.noteOnce(ctx, dep.ID, "backoff", "tasks keep failing: waiting before starting more (backoff)")
+			}
 			m.enqueueAfter(sv.ID, wait)
 		} else {
 			room := max(2*desired, desired+1) - len(current) - len(old)
@@ -359,6 +373,9 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 				nodeID, why := m.place(ctx, spec, sv.ID, sv.Revision, false)
 				if nodeID == "" {
 					status = "cannot place task: " + why
+					if hasDep {
+						m.noteOnce(ctx, dep.ID, "unplaced", status+" (retrying every 15s)")
+					}
 					m.enqueueAfter(sv.ID, 15*time.Second)
 					break
 				}
@@ -370,12 +387,13 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 					break
 				}
 				m.publishTask(ctx, t)
+				if hasDep {
+					m.notes.Delete(dep.ID + "/unplaced")
+					m.deploymentLog(ctx, dep.ID, m.taskEntry(t, "task-placed", "info", fmt.Sprintf("scheduled task of revision %d (%s placement)", sv.Revision, placementName(spec)), now.UTC()))
+				}
 				m.sendRun(ctx, sv, spec, t)
 				current = append(current, t)
 				changed = true
-			}
-			if hasDep && placed > 0 {
-				m.DeploymentEvent(ctx, dep.ID, "tasks-started", fmt.Sprintf("started %d %s of revision %d", placed, plural(placed, "task"), sv.Revision))
 			}
 		}
 	}
@@ -434,6 +452,7 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			_ = m.st.FinishDeployment(ctx, dep.ID, store.DeploySucceeded, "", now)
 			m.DeploymentEvent(ctx, dep.ID, store.DeploySucceeded, fmt.Sprintf("all %d tasks of revision %d serve traffic", desired, dep.ToRev))
 			m.progress.Delete(dep.ID)
+			m.forgetNotes(dep.ID)
 			if m.DeployHooks != nil {
 				m.DeployHooks.RunPostDeploy(context.WithoutCancel(ctx), sv, dep)
 			}
@@ -1021,6 +1040,11 @@ func (m *Manager) onTaskStatus(node store.Node, s *agentv1.TaskStatus) {
 		m.sendStop(t)
 		return
 	}
+	if he := s.GetHealthError(); he != "" {
+		m.healthErrs.Store(t.ID, he)
+	} else if s.GetHealth() == "healthy" || state != store.TaskRunning {
+		m.healthErrs.Delete(t.ID)
+	}
 	prevIP := t.IP
 	t.State, t.IP, t.Health, t.ExitCode, t.Error, t.UpdatedAt = state, s.GetIp(), s.GetHealth(), int(s.GetExitCode()), s.GetError(), now
 	if s.GetContainerId() != "" {
@@ -1101,4 +1125,16 @@ func (m *Manager) publishTask(ctx context.Context, t store.Task) {
 	if v, err := m.taskView(ctx, t); err == nil {
 		m.bus.Publish(TopicTask, v)
 	}
+}
+
+func placementName(spec Spec) string {
+	if spec.Placement.Strategy == "" {
+		return "spread"
+	}
+	return spec.Placement.Strategy
+}
+
+func (m *Manager) forgetNotes(depID string) {
+	m.notes.Delete(depID + "/unplaced")
+	m.notes.Delete(depID + "/backoff")
 }

@@ -943,6 +943,7 @@ func (m *Manager) built(ctx context.Context, b store.Build) {
 		b.Message = "not deployed: a newer commit of " + gitremote.ShortRef(b.Ref) + " is already deployed"
 		desc = "Built; a newer commit is already deployed"
 	} else if err == nil && g.AutoDeploy {
+		_ = m.st.UpdateBuild(ctx, b) // stored finished first: the deployment's log copies the build's steps
 		if err := m.Deploy(ctx, b); err != nil {
 			b.Message = "deploy failed: " + err.Error()
 			state, desc = gitprovider.StateFailure, "Built, but the "+b.Message

@@ -602,6 +602,9 @@ type DeploymentDetail struct {
 	Events []struct {
 		At      time.Time `json:"at"`
 		Kind    string    `json:"kind"`
+		Level   string    `json:"level"`
+		Node    string    `json:"node"`
+		TaskID  string    `json:"taskId"`
 		Message string    `json:"message"`
 	} `json:"events"`
 	Runs []JobRun `json:"runs"`

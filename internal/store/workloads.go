@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -888,8 +889,15 @@ type DeploymentEvent struct {
 	ID      int64     `json:"id"`
 	At      time.Time `json:"at"`
 	Kind    string    `json:"kind"`
+	Level   string    `json:"level"` // info | warn | error
+	Node    string    `json:"node,omitempty"`
+	TaskID  string    `json:"taskId,omitempty"`
 	Message string    `json:"message"`
 }
+
+// MaxDeploymentEvents bounds one deployment's log (a crash-looping task
+// would otherwise grow it without end).
+const MaxDeploymentEvents = 2000
 
 // StartDeployment supersedes any running deployment of the service and
 // records a new one.
@@ -1018,16 +1026,32 @@ func (s *Store) ListProjectDeployments(ctx context.Context, projectID string, f 
 	return out, rows.Err()
 }
 
-// AddDeploymentEvent appends a step to a deployment's timeline.
-func (s *Store) AddDeploymentEvent(ctx context.Context, depID, kind, message string, at time.Time) error {
-	_, err := s.W.ExecContext(ctx, `INSERT INTO deployment_events (deployment_id, at, kind, message) VALUES (?, ?, ?, ?)`,
-		depID, at.Unix(), kind, message)
+// AddDeploymentEvent appends a step to a deployment's timeline. Past
+// MaxDeploymentEvents steps only terminal ones are kept, after one note that
+// the log was cut.
+func (s *Store) AddDeploymentEvent(ctx context.Context, depID string, e DeploymentEvent) error {
+	if e.Level == "" {
+		e.Level = "info"
+	}
+	var n int
+	if err := s.R.QueryRowContext(ctx, `SELECT COUNT(*) FROM deployment_events WHERE deployment_id = ?`, depID).Scan(&n); err != nil {
+		return err
+	}
+	terminal := e.Kind == DeploySucceeded || e.Kind == DeployFailed || e.Kind == DeployRolledBack || e.Kind == DeployCancelled
+	switch {
+	case n == MaxDeploymentEvents && !terminal:
+		e = DeploymentEvent{At: e.At, Kind: "truncated", Level: "warn", Message: fmt.Sprintf("more than %d steps: further task steps are not recorded", MaxDeploymentEvents)}
+	case n > MaxDeploymentEvents && !terminal:
+		return nil
+	}
+	_, err := s.W.ExecContext(ctx, `INSERT INTO deployment_events (deployment_id, at, at_ms, kind, level, node, task_id, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		depID, e.At.Unix(), e.At.UnixMilli(), e.Kind, e.Level, e.Node, e.TaskID, e.Message)
 	return err
 }
 
 // DeploymentEvents returns a deployment's timeline, oldest first.
 func (s *Store) DeploymentEvents(ctx context.Context, depID string) ([]DeploymentEvent, error) {
-	rows, err := s.R.QueryContext(ctx, `SELECT id, at, kind, message FROM deployment_events WHERE deployment_id = ? ORDER BY id`, depID)
+	rows, err := s.R.QueryContext(ctx, `SELECT id, at, at_ms, kind, level, node, task_id, message FROM deployment_events WHERE deployment_id = ? ORDER BY id`, depID)
 	if err != nil {
 		return nil, err
 	}
@@ -1035,14 +1059,38 @@ func (s *Store) DeploymentEvents(ctx context.Context, depID string) ([]Deploymen
 	out := []DeploymentEvent{}
 	for rows.Next() {
 		var e DeploymentEvent
-		var at int64
-		if err := rows.Scan(&e.ID, &at, &e.Kind, &e.Message); err != nil {
+		var at, atMs int64
+		if err := rows.Scan(&e.ID, &at, &atMs, &e.Kind, &e.Level, &e.Node, &e.TaskID, &e.Message); err != nil {
 			return nil, err
 		}
 		e.At = time.Unix(at, 0).UTC()
+		if atMs > 0 {
+			e.At = time.UnixMilli(atMs).UTC()
+		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// DeploymentOfRevision returns the newest deployment that rolled a service
+// out to rev.
+func (s *Store) DeploymentOfRevision(ctx context.Context, serviceID string, rev int) (Deployment, error) {
+	var d Deployment
+	var started int64
+	var finished sql.NullInt64
+	err := s.R.QueryRowContext(ctx, `SELECT id, status, started_at, finished_at FROM deployments WHERE service_id = ? AND to_rev = ?
+		ORDER BY started_at DESC, rowid DESC LIMIT 1`, serviceID, rev).Scan(&d.ID, &d.Status, &started, &finished)
+	if errors.Is(err, sql.ErrNoRows) {
+		return d, ErrNotFound
+	} else if err != nil {
+		return d, err
+	}
+	d.ServiceID, d.ToRev, d.StartedAt = serviceID, rev, time.Unix(started, 0).UTC()
+	if finished.Valid {
+		t := time.Unix(finished.Int64, 0).UTC()
+		d.FinishedAt = &t
+	}
+	return d, nil
 }
 
 // IncDeploymentFailures counts a failed task of the deployment's revision.

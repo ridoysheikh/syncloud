@@ -56,7 +56,8 @@ export function TaskState({
   const label =
     desired === "stopped" && state === "running" ? "stopping" : state;
   const badge = <StatusBadge tone={stateTone(state)}>{label}</StatusBadge>;
-  if (compact || (!error && central !== "unreachable")) {
+  const probeBad = central === "unreachable" || central === "failing";
+  if (compact || (!error && !probeBad)) {
     return error ? <span title={error}>{badge}</span> : badge;
   }
   return (
@@ -67,22 +68,34 @@ export function TaskState({
           {error}
         </span>
       )}
-      {central === "unreachable" && (
+      {probeBad && (
         <span
           className="text-warn max-w-xs truncate"
-          title={`The controller cannot reach this task over the private network (${centralError ?? ""}); Traefik routes around it.`}
+          title={`The controller cannot reach this task over the private network: ${centralError ?? ""}${central === "unreachable" ? " Traefik routes around it." : ""}`}
         >
-          unreachable from controller
+          {central === "unreachable"
+            ? "unreachable from controller"
+            : "controller probe failing"}
+          {centralError && <span className="text-muted">: {centralError}</span>}
         </span>
       )}
     </div>
   );
 }
 
-/** A task's health check result, or a dash without a check. */
-export function TaskHealth({ health }: { health: string }) {
+/**
+ * A task's health check result, or a dash without a check, with why the
+ * last check failed while it is not healthy.
+ */
+export function TaskHealth({
+  health,
+  error,
+}: {
+  health: string;
+  error?: string;
+}) {
   if (!health) return <span className="text-faint">—</span>;
-  return (
+  const label = (
     <span
       className={cn(
         healthTone[health] === "ok" && "text-ok",
@@ -93,6 +106,15 @@ export function TaskHealth({ health }: { health: string }) {
       {health}
     </span>
   );
+  if (!error || health === "healthy") return label;
+  return (
+    <div className="flex flex-col items-start gap-0.5 py-0.5">
+      {label}
+      <span className="text-muted max-w-xs truncate" title={error}>
+        {error}
+      </span>
+    </div>
+  );
 }
 
 type Filter = "all" | "running" | "starting" | "problems" | "stopped";
@@ -101,7 +123,7 @@ const isProblem = (t: Task) =>
   ["exited", "failed", "lost"].includes(t.state) ||
   !!t.error ||
   t.health === "unhealthy" ||
-  t.central === "unreachable";
+  (!!t.central && t.central !== "ok");
 const filters: Record<Filter, (t: Task) => boolean> = {
   all: () => true,
   running: (t) => t.state === "running" && t.desired === "running",
@@ -195,7 +217,10 @@ export function TasksTable({
         />
       ),
     },
-    { header: "Health", cell: (t) => <TaskHealth health={t.health} /> },
+    {
+      header: "Health",
+      cell: (t) => <TaskHealth health={t.health} error={t.healthError} />,
+    },
     {
       header: "Rev",
       cell: (t) => <span className="text-muted">{t.revision}</span>,

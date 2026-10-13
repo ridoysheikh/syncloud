@@ -116,37 +116,74 @@ func (c *Client) ImageExists(ctx context.Context, ref string) (bool, error) {
 // Pull pulls ref ("name:tag" or "name@digest"). registryAuth is the
 // base64url-encoded JSON auth config, or "" for anonymous pulls.
 func (c *Client) Pull(ctx context.Context, ref, registryAuth string) error {
+	_, err := c.PullInfo(ctx, ref, registryAuth)
+	return err
+}
+
+// PullResult summarizes a finished pull from its progress stream.
+type PullResult struct {
+	Digest     string // sha256:… of the manifest ("" when Docker did not say)
+	Downloaded int    // layers fetched
+	Cached     int    // layers already on the node
+	Bytes      int64  // compressed size of the fetched layers
+}
+
+// PullInfo pulls an image and summarizes what was fetched.
+func (c *Client) PullInfo(ctx context.Context, ref, registryAuth string) (PullResult, error) {
+	var res PullResult
 	req, err := http.NewRequestWithContext(ctx, "POST",
 		"http://docker/"+APIVersion+"/images/create?"+url.Values{"fromImage": {ref}}.Encode(), nil)
 	if err != nil {
-		return err
+		return res, err
 	}
 	if registryAuth != "" {
 		req.Header.Set("X-Registry-Auth", registryAuth)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return res, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		var e struct{ Message string }
 		_ = json.Unmarshal(b, &e)
-		return &Error{Status: resp.StatusCode, Message: e.Message}
+		return res, &Error{Status: resp.StatusCode, Message: e.Message}
 	}
 	// The pull streams JSON progress; failures appear as an "error" field mid-stream.
+	sizes := map[string]int64{}
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
 	for sc.Scan() {
 		var msg struct {
-			Error string `json:"error"`
+			Error    string `json:"error"`
+			Status   string `json:"status"`
+			ID       string `json:"id"`
+			Progress struct {
+				Total int64 `json:"total"`
+			} `json:"progressDetail"`
 		}
-		if json.Unmarshal(sc.Bytes(), &msg) == nil && msg.Error != "" {
-			return fmt.Errorf("pull %s: %s", ref, msg.Error)
+		if json.Unmarshal(sc.Bytes(), &msg) != nil {
+			continue
+		}
+		if msg.Error != "" {
+			return res, fmt.Errorf("pull %s: %s", ref, msg.Error)
+		}
+		switch {
+		case msg.Status == "Downloading" && msg.Progress.Total > sizes[msg.ID]:
+			sizes[msg.ID] = msg.Progress.Total
+		case msg.Status == "Pull complete":
+			res.Downloaded++
+		case msg.Status == "Already exists":
+			res.Cached++
+		case strings.HasPrefix(msg.Status, "Digest: "):
+			res.Digest = strings.TrimPrefix(msg.Status, "Digest: ")
 		}
 	}
-	return sc.Err()
+	for _, n := range sizes {
+		res.Bytes += n
+	}
+	return res, sc.Err()
 }
 
 // EnsureNetwork creates a bridge network if it doesn't exist.
@@ -279,6 +316,7 @@ type ContainerState struct {
 	Status    string `json:"Status"`
 	Running   bool   `json:"Running"`
 	ExitCode  int    `json:"ExitCode"`
+	OOMKilled bool   `json:"OOMKilled"`
 	Error     string `json:"Error"`
 	StartedAt string `json:"StartedAt"`
 	Health    *struct {
@@ -412,6 +450,18 @@ func (c *Client) Logs(ctx context.Context, id string, since time.Time, fn func(L
 	if !since.IsZero() {
 		q.Set("since", fmt.Sprintf("%d.%09d", since.Unix(), since.Nanosecond()))
 	}
+	return c.logs(ctx, id, q, fn)
+}
+
+// Tail returns a container's last n lines of output.
+func (c *Client) Tail(ctx context.Context, id string, n int) ([]LogEntry, error) {
+	var out []LogEntry
+	q := url.Values{"stdout": {"1"}, "stderr": {"1"}, "timestamps": {"1"}, "tail": {fmt.Sprint(n)}}
+	err := c.logs(ctx, id, q, func(e LogEntry) { out = append(out, e) })
+	return out, err
+}
+
+func (c *Client) logs(ctx context.Context, id string, q url.Values, fn func(LogEntry)) error {
 	resp, err := c.do(ctx, "GET", "/containers/"+id+"/logs", q, nil)
 	if err != nil {
 		return err

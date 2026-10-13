@@ -391,6 +391,8 @@ func writer(ctx context.Context, stream grpc.BidiStreamingClient[agentv1.Connect
 			return ctx.Err()
 		case s := <-runner.out:
 			msg = &agentv1.ConnectRequest{Msg: &agentv1.ConnectRequest_TaskStatus{TaskStatus: s}}
+		case e := <-runner.events:
+			msg = &agentv1.ConnectRequest{Msg: &agentv1.ConnectRequest_TaskEvent{TaskEvent: e}}
 		case msg = <-extra:
 		case l := <-logs.out:
 			msg = logs.batch(l)

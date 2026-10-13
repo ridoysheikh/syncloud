@@ -570,7 +570,7 @@ func serve(args []string) error {
 	probeToken := rand.Text()
 	healthMon := health.New(st, workloads, bus, log, health.Config{
 		BaseDomain: domains.Base, HTTPAddr: cfg.PublicHTTP, HTTPSAddr: cfg.PublicHTTPS, VictoriaMetricsURL: cfg.VictoriaMetricsURL,
-		ProbeToken: probeToken,
+		ProbeToken: probeToken, MeshPath: meshMgr.PathTo,
 	})
 	go healthMon.Run(ctx)
 	go workloads.RunImageWatch(ctx) // auto-deploy new pushes of image services' tags

@@ -115,6 +115,10 @@ export interface DeploymentEvent {
   id: number;
   at: string;
   kind: string;
+  level: "info" | "warn" | "error";
+  /** The node and task a step ran on (task steps only). */
+  node?: string;
+  taskId?: string;
   message: string;
 }
 
@@ -187,6 +191,8 @@ export interface Task {
   /** The controller's probe over the private network (§5.6). */
   central?: "ok" | "failing" | "unreachable";
   centralError?: string;
+  /** Why the last health check on the task's node failed. */
+  healthError?: string;
   exitCode: number;
   error: string;
   createdAt: string;

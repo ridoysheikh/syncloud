@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import {
@@ -9,13 +9,20 @@ import {
   CircleDot,
   CircleStop,
   CircleX,
+  Download,
   GitCommitHorizontal,
+  Hammer,
+  HeartPulse,
+  MapPin,
+  Network,
   History,
   Package,
   Play,
   RefreshCw,
+  Rocket,
   RotateCcw,
   Settings2,
+  Skull,
   ShieldAlert,
   SkipForward,
   SquareTerminal,
@@ -51,6 +58,8 @@ import { cn, gap } from "@/ui/cn";
 import { LogsView } from "@/modules/logs/LogsView";
 import { TasksTable } from "@/entities/tasks";
 import { Select } from "@/ui/select";
+import { Segmented } from "@/ui/choice";
+import { useLazyList } from "@/ui/paging";
 
 /* Deployment history, the deployment page and their actions (Phase 15a). */
 
@@ -394,11 +403,28 @@ export function DeploymentsTable({
 
 const eventIcon: Record<string, { icon: LucideIcon; tone?: string }> = {
   started: { icon: Play },
+  "build-queued": { icon: GitCommitHorizontal },
+  "build-started": { icon: Hammer },
+  "build-done": { icon: Package, tone: "text-ok" },
   "hook-started": { icon: SquareTerminal },
   "hook-succeeded": { icon: CircleCheck, tone: "text-ok" },
   "hook-failed": { icon: CircleX, tone: "text-bad" },
   "hooks-done": { icon: CircleCheck, tone: "text-ok" },
   "tasks-started": { icon: Boxes },
+  "task-placed": { icon: MapPin },
+  "task-pull": { icon: Download },
+  "task-pulled": { icon: Download, tone: "text-ok" },
+  "task-start": { icon: Rocket },
+  "task-started": { icon: Rocket, tone: "text-ok" },
+  "task-health": { icon: HeartPulse },
+  "task-healthy": { icon: HeartPulse, tone: "text-ok" },
+  "task-unhealthy": { icon: HeartPulse },
+  "task-exited": { icon: Skull },
+  "task-error": { icon: CircleX },
+  "task-lost": { icon: TriangleAlert },
+  probe: { icon: Network },
+  unplaced: { icon: MapPin },
+  backoff: { icon: RefreshCw },
   serving: { icon: Activity, tone: "text-ok" },
   drained: { icon: CircleStop },
   "task-failed": { icon: TriangleAlert, tone: "text-warn" },
@@ -407,46 +433,140 @@ const eventIcon: Record<string, { icon: LucideIcon; tone?: string }> = {
   rolled_back: { icon: RotateCcw, tone: "text-warn" },
   cancelled: { icon: Ban },
   superseded: { icon: SkipForward },
+  truncated: { icon: TriangleAlert },
 };
 
-function Timeline({ events }: { events: DeploymentEvent[] }) {
-  if (!events.length)
-    return (
-      <p className="text-muted text-xs">
-        No steps recorded (deployments before this version have none).
-      </p>
-    );
+const levelTone = { warn: "text-warn", error: "text-bad" } as const;
+
+const clock = (at: string) => {
+  const d = new Date(at);
+  return `${d.toLocaleTimeString([], { hour12: false })}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+};
+
+type LogView = "all" | "problems";
+
+/**
+ * A deployment's log: its own steps and those of each task (placement,
+ * image pull, container start, health checks on the node, the controller's
+ * probe), oldest first, kept with the deployment.
+ */
+function DeploymentLog({ events }: { events: DeploymentEvent[] }) {
+  const [view, setView] = useState<LogView>("all");
+  const [node, setNode] = useState("");
+  const nodes = useMemo(
+    () =>
+      [
+        ...new Set(events.map((e) => e.node).filter(Boolean)),
+      ].sort() as string[],
+    [events],
+  );
+  const problems = events.filter((e) => e.level !== "info").length;
+  const rows = useMemo(
+    () =>
+      events.filter(
+        (e) =>
+          (view === "all" || e.level !== "info") &&
+          (!node || !e.node || e.node === node),
+      ),
+    [events, view, node],
+  );
+  const { shown, more } = useLazyList(rows);
   return (
-    <ol className="flex flex-col text-xs">
-      {events.map((e, i) => {
-        const m = eventIcon[e.kind] ?? { icon: CircleDot };
-        const Icon = m.icon;
-        return (
-          <li key={e.id} className="flex gap-2">
-            <div className="flex flex-col items-center">
-              <Icon
-                className={cn(
-                  "mt-0.5 size-3.5 shrink-0",
-                  m.tone ?? "text-muted",
-                )}
-              />
-              {i < events.length - 1 && (
-                <span className="bg-line my-0.5 w-px flex-1" />
-              )}
-            </div>
-            <div className="flex min-w-0 flex-1 flex-wrap items-baseline justify-between gap-x-2 pb-2">
-              <span className="min-w-0 break-words">{e.message}</span>
-              <time
-                className="text-faint shrink-0 font-mono"
-                title={new Date(e.at).toLocaleString()}
+    <Panel
+      title="Deployment log"
+      actions={
+        events.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {nodes.length > 1 && (
+              <Select
+                value={node}
+                onChange={setNode}
+                aria-label="Node"
+                size="sm"
+                className="max-w-40"
               >
-                {new Date(e.at).toLocaleTimeString()}
-              </time>
-            </div>
-          </li>
-        );
-      })}
-    </ol>
+                <option value="">All nodes</option>
+                {nodes.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </Select>
+            )}
+            <Segmented
+              size="sm"
+              label="Steps"
+              value={view}
+              onChange={setView}
+              options={[
+                { value: "all", label: `All ${events.length}` },
+                { value: "problems", label: `Problems ${problems}` },
+              ]}
+            />
+          </div>
+        )
+      }
+    >
+      {!events.length ? (
+        <p className="text-muted text-xs">
+          No steps recorded (deployments before this version have none).
+        </p>
+      ) : !rows.length ? (
+        <p className="text-muted text-xs">No step matches.</p>
+      ) : (
+        <ol className="flex flex-col text-xs">
+          {shown.map((e, i) => {
+            const m = eventIcon[e.kind] ?? { icon: CircleDot };
+            const Icon = m.icon;
+            const tone =
+              e.level !== "info"
+                ? levelTone[e.level]
+                : (m.tone ?? "text-muted");
+            return (
+              <li key={e.id} className="flex gap-2">
+                <div className="flex flex-col items-center">
+                  <Icon className={cn("mt-0.5 size-3.5 shrink-0", tone)} />
+                  {i < shown.length - 1 && (
+                    <span className="bg-line my-0.5 w-px flex-1" />
+                  )}
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5 pb-2 sm:flex-row sm:items-baseline sm:gap-2">
+                  <time
+                    className="text-faint shrink-0 font-mono"
+                    title={new Date(e.at).toLocaleString()}
+                  >
+                    {clock(e.at)}
+                  </time>
+                  {e.node && (
+                    <span
+                      className="text-muted shrink-0 font-mono"
+                      title={e.taskId}
+                    >
+                      {e.node}
+                      {e.taskId && (
+                        <span className="text-faint">
+                          /{e.taskId.replace(/^task_/, "").slice(0, 8)}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  <span
+                    className={cn(
+                      "min-w-0 break-words whitespace-pre-wrap",
+                      e.level === "error" && "text-bad",
+                      e.level === "warn" && "text-warn",
+                    )}
+                  >
+                    {e.message}
+                  </span>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      {more}
+    </Panel>
   );
 }
 
@@ -492,6 +612,7 @@ function Changes({ d }: { d: Deployment }) {
 interface DeploymentDetail extends Deployment {
   events: DeploymentEvent[];
   runs: JobRun[];
+  build: { id: string; runId: string; sha: string; status: string } | null;
 }
 
 function HookRuns({ runs }: { runs: JobRun[] }) {
@@ -684,28 +805,33 @@ export function DeploymentPage() {
           tone={d.failedTasks ? "warn" : undefined}
         />
       </div>
-      <div className={cn("grid lg:grid-cols-2", gap)}>
-        <Panel title="What changed">
-          <div className="flex flex-col gap-2">
-            <div className="text-xs">
-              <span className="text-muted">Image </span>
-              <span className="font-mono break-all">{d.image}</span>
-              {d.buildId && (
-                <Link
-                  to={`${svcLink}?tab=builds` as string}
-                  className="text-accent ml-2 whitespace-nowrap"
-                >
-                  build
-                </Link>
-              )}
-            </div>
-            <Changes d={d} />
+      <Panel title="What changed">
+        <div className="flex flex-col gap-2">
+          <div className="text-xs">
+            <span className="text-muted">Image </span>
+            <span className="font-mono break-all">{d.image}</span>
+            {d.buildId && (
+              <Link
+                to={`${svcLink}?tab=builds` as string}
+                className="text-accent ml-2 whitespace-nowrap"
+              >
+                build
+              </Link>
+            )}
           </div>
+          <Changes d={d} />
+        </div>
+      </Panel>
+      <DeploymentLog events={d.events} />
+      {d.build?.runId && (
+        <Panel title={`Build output · ${d.build.sha.slice(0, 12)}`} flush>
+          <LogsView
+            key={d.build.runId}
+            filter={{ task: d.build.runId }}
+            showSource={false}
+          />
         </Panel>
-        <Panel title="Timeline">
-          <Timeline events={d.events} />
-        </Panel>
-      </div>
+      )}
       {d.runs.length > 0 && <HookRuns runs={d.runs} />}
       <Panel title={`Tasks of revision ${d.toRevision}`} flush>
         <TasksTable

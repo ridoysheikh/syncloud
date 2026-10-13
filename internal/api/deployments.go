@@ -142,6 +142,9 @@ type deploymentDetail struct {
 	deploymentView
 	Events []store.DeploymentEvent `json:"events"`
 	Runs   []jobs.RunView          `json:"runs"`
+	// Build is the build that produced the image (git deployments); its
+	// output is the job run's logs.
+	Build *store.Build `json:"build"`
 }
 
 // serviceDeployment resolves {id} within the service of the path.
@@ -180,6 +183,11 @@ func (s *Server) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 			for _, run := range runs {
 				out.Runs = append(out.Runs, s.jobs.View(r.Context(), run))
 			}
+		}
+	}
+	if d.BuildID != "" {
+		if b, err := s.store.BuildByID(r.Context(), d.BuildID); err == nil {
+			out.Build = &b
 		}
 	}
 	writeJSON(w, http.StatusOK, out)

@@ -38,6 +38,10 @@ type platform struct {
 	uapi         net.Listener
 	probe        net.Listener
 	probeAddr    string
+	// endpoints are the peer endpoints last configured (by public key), so
+	// an endpoint is only set when the controller's value changes and one
+	// WireGuard learned by roaming (NAT) is kept.
+	endpoints map[string]string
 }
 
 func (p *platform) close() {
@@ -283,6 +287,10 @@ func (m *Manager) ensureLink() (string, netlink.Link, error) {
 	return "userspace", link, err
 }
 
+// configureWireGuard brings the device's peers in line with cfg in place:
+// peers that left are removed, new ones added, and existing ones keep their
+// sessions. (Replacing every peer would tear down each tunnel on every apply,
+// which runs every 30 seconds and whenever a container starts.)
 func (m *Manager) configureWireGuard(cfg *agentv1.NetworkConfig) error {
 	c, err := wgctrl.New()
 	if err != nil {
@@ -291,19 +299,42 @@ func (m *Manager) configureWireGuard(cfg *agentv1.NetworkConfig) error {
 	defer c.Close()
 	port := int(cfg.GetListenPort())
 	keepalive := 25 * time.Second
-	wc := wgtypes.Config{PrivateKey: &m.key, ListenPort: &port, ReplacePeers: true}
+	wc := wgtypes.Config{ListenPort: &port}
+	current := map[wgtypes.Key]wgtypes.Peer{}
+	if dev, err := c.Device(Interface); err == nil {
+		for _, p := range dev.Peers {
+			current[p.PublicKey] = p
+		}
+		if dev.PrivateKey != m.key {
+			wc.PrivateKey = &m.key
+			wc.ReplacePeers = true // a new identity: no session survives anyway
+			current = map[wgtypes.Key]wgtypes.Peer{}
+		}
+	} else {
+		wc.PrivateKey = &m.key
+	}
+	if m.sys.endpoints == nil || wc.ReplacePeers {
+		m.sys.endpoints = map[string]string{}
+	}
+	configured := map[string]string{}
+	want := map[wgtypes.Key]bool{}
 	for _, p := range cfg.GetPeers() {
 		key, err := wgtypes.ParseKey(p.GetPublicKey())
 		if err != nil {
 			return fmt.Errorf("peer %s key: %w", p.GetName(), err)
 		}
+		want[key] = true
 		pc := wgtypes.PeerConfig{PublicKey: key, ReplaceAllowedIPs: true, PersistentKeepaliveInterval: &keepalive}
-		if p.GetEndpoint() != "" {
-			ua, err := net.ResolveUDPAddr("udp", p.GetEndpoint())
-			if err != nil {
-				return fmt.Errorf("peer %s endpoint: %w", p.GetName(), err)
+		cur, exists := current[key]
+		if ep := p.GetEndpoint(); ep != "" {
+			configured[p.GetPublicKey()] = ep
+			if !exists || cur.Endpoint == nil || m.sys.endpoints[p.GetPublicKey()] != ep {
+				ua, err := net.ResolveUDPAddr("udp", ep)
+				if err != nil {
+					return fmt.Errorf("peer %s endpoint: %w", p.GetName(), err)
+				}
+				pc.Endpoint = ua
 			}
-			pc.Endpoint = ua
 		}
 		for _, a := range p.GetAllowedIps() {
 			pfx, err := netip.ParsePrefix(a)
@@ -312,12 +343,45 @@ func (m *Manager) configureWireGuard(cfg *agentv1.NetworkConfig) error {
 			}
 			pc.AllowedIPs = append(pc.AllowedIPs, *ipnet(pfx))
 		}
+		if exists && pc.Endpoint == nil && cur.PersistentKeepaliveInterval == keepalive && sameIPs(cur.AllowedIPs, pc.AllowedIPs) {
+			continue // unchanged
+		}
 		wc.Peers = append(wc.Peers, pc)
+	}
+	for key := range current {
+		if !want[key] {
+			wc.Peers = append(wc.Peers, wgtypes.PeerConfig{PublicKey: key, Remove: true})
+		}
+	}
+	if wc.PrivateKey == nil && len(wc.Peers) == 0 {
+		if dev, err := c.Device(Interface); err == nil && dev.ListenPort == port {
+			m.sys.endpoints = configured
+			return nil // nothing to change
+		}
 	}
 	if err := c.ConfigureDevice(Interface, wc); err != nil {
 		return fmt.Errorf("configure WireGuard: %w", err)
 	}
+	m.sys.endpoints = configured
 	return nil
+}
+
+func sameIPs(a, b []net.IPNet) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	key := func(n net.IPNet) string { return n.String() }
+	seen := map[string]int{}
+	for _, n := range a {
+		seen[key(n)]++
+	}
+	for _, n := range b {
+		if seen[key(n)] == 0 {
+			return false
+		}
+		seen[key(n)]--
+	}
+	return true
 }
 
 func (m *Manager) peerStatus() []*agentv1.PeerStatus {
