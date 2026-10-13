@@ -15777,6 +15777,272 @@
           }
         }
       }
+    },
+    "/api/v1/branding": {
+      "get": {
+        "operationId": "getBranding",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Workspace name, title and whether a logo is set (public)",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Branding"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setBranding",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Set the workspace name and browser title (empty = the default)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 60
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Branding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid"
+          }
+        }
+      }
+    },
+    "/api/v1/branding/logo": {
+      "put": {
+        "operationId": "setBrandingLogo",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Upload the workspace logo: a PNG, JPEG or WebP image up to 512 KB (data URL or base64); it is made square, and the favicon is made from it",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "logo"
+                ],
+                "properties": {
+                  "logo": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Branding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not an accepted image"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteBrandingLogo",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Go back to the default logo",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Branding"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/smtp": {
+      "get": {
+        "operationId": "getSMTP",
+        "tags": [
+          "settings"
+        ],
+        "summary": "The platform SMTP server used for alert emails (no password)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SMTPView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setSMTP",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Set the platform SMTP server",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SMTPSettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SMTPView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteSMTP",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Turn platform email off (channels with their own server keep working)",
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          }
+        }
+      }
+    },
+    "/api/v1/settings/smtp/test": {
+      "post": {
+        "operationId": "testSMTP",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Send a test email to one address",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "to"
+                ],
+                "properties": {
+                  "to": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tried: sent, or the server's error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sent": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad address, or SMTP is not set up"
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/rules/defaults": {
+      "post": {
+        "operationId": "restoreDefaultAlertRules",
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Recreate missing System alert rules and the Admins email channel",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "added": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -15893,6 +16159,18 @@
           "recoveryKeySuffix": {
             "type": "string",
             "description": "Last 6 characters of the recovery key printed at install (required when status.recoveryConfirmRequired)"
+          },
+          "workspaceName": {
+            "type": "string",
+            "description": "Workspace name (optional)"
+          },
+          "title": {
+            "type": "string",
+            "description": "Browser tab title (optional)"
+          },
+          "logo": {
+            "type": "string",
+            "description": "Logo as a data URL or base64 PNG, JPEG or WebP (optional)"
           }
         }
       },
@@ -18712,7 +18990,7 @@
           },
           "smtpHost": {
             "type": "string",
-            "description": "email"
+            "description": "Optional: the channel's own server; empty uses Settings \u2192 Email"
           },
           "smtpPort": {
             "type": "integer",
@@ -18815,7 +19093,14 @@
               "node",
               "deployment",
               "build",
-              "job"
+              "job",
+              "node_overload",
+              "database_failover",
+              "database_health",
+              "system_component",
+              "backup",
+              "certificate",
+              "controller_disk"
             ]
           },
           "severity": {
@@ -18846,7 +19131,7 @@
               "error_rate",
               "latency"
             ],
-            "description": "metric rules"
+            "description": "metric: cpu | memory | rps | error_rate | latency; node_overload: cpu | memory | disk"
           },
           "query": {
             "type": "string",
@@ -18874,7 +19159,8 @@
             "default": ">"
           },
           "threshold": {
-            "type": "number"
+            "type": "number",
+            "description": "metric/promql/log: the threshold; node_overload, controller_disk: percent; backup: hours without a successful backup; certificate: days before expiry"
           },
           "windowSeconds": {
             "type": "integer",
@@ -18900,6 +19186,14 @@
             "type": "string",
             "format": "date-time",
             "readOnly": true
+          },
+          "repeatHours": {
+            "type": "integer",
+            "description": "Re-send a firing alert this often (0 = never)"
+          },
+          "system": {
+            "type": "boolean",
+            "description": "One of the default System rules"
           }
         }
       },
@@ -21029,6 +21323,93 @@
             }
           }
         ]
+      },
+      "Branding": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Workspace name (default SynCloud)"
+          },
+          "title": {
+            "type": "string",
+            "description": "Browser tab title (default: the name)"
+          },
+          "hasLogo": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string",
+            "description": "Changes with every logo upload"
+          }
+        }
+      },
+      "SMTPSettings": {
+        "type": "object",
+        "required": [
+          "host",
+          "from"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "description": "Default 587 (starttls), 465 (tls), 25 (none)"
+          },
+          "security": {
+            "type": "string",
+            "enum": [
+              "starttls",
+              "tls",
+              "none"
+            ]
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "description": "Write only; empty keeps the stored one"
+          },
+          "from": {
+            "type": "string"
+          },
+          "fromName": {
+            "type": "string",
+            "description": "Default: the workspace name"
+          }
+        }
+      },
+      "SMTPView": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "security": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "hasPassword": {
+            "type": "boolean"
+          },
+          "from": {
+            "type": "string"
+          },
+          "fromName": {
+            "type": "string"
+          }
+        }
       }
     }
   }

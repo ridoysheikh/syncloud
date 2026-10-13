@@ -1,5 +1,6 @@
 import { createRootRoute, createRoute, createRouter, Outlet, redirect } from "@tanstack/react-router";
 import { FileQuestion } from "lucide-react";
+import { useBrandingHead } from "@/lib/branding";
 import { meQuery, queryClient, statusQuery } from "@/lib/auth";
 import { modules } from "@/modules";
 import { AppShell } from "@/shell/AppShell";
@@ -8,8 +9,13 @@ import { LoginPage } from "@/pages/LoginPage";
 import { EmptyState } from "@/ui/EmptyState";
 import { ErrorView } from "@/ui/ErrorBoundary";
 
+function Root() {
+  useBrandingHead();
+  return <Outlet />;
+}
+
 const rootRoute = createRootRoute({
-  component: Outlet,
+  component: Root,
   notFoundComponent: () => (
     <EmptyState icon={FileQuestion} title="Page not found">
       This page does not exist.

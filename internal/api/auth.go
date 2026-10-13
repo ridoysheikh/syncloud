@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/branding"
 	"github.com/ridoysheikh/syncloud/internal/secrets"
 	"github.com/ridoysheikh/syncloud/internal/store"
 	"github.com/ridoysheikh/syncloud/internal/version"
@@ -63,6 +64,10 @@ type setupRequest struct {
 	Password   string `json:"password"`
 	// RecoveryKeySuffix is the last 6 characters of the recovery key.
 	RecoveryKeySuffix string `json:"recoveryKeySuffix"`
+	// Workspace branding (Phase 21); empty values keep the defaults.
+	WorkspaceName string `json:"workspaceName"`
+	Title         string `json:"title"`
+	Logo          string `json:"logo"` // data URL or base64
 }
 
 // handleSetup exchanges the one-time setup token for the root account (§5.0, §7.1)
@@ -101,6 +106,18 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "the last 6 characters of the recovery key do not match; it was printed with the setup token")
 		return
 	}
+	// Branding is checked before the account exists, so a bad logo never
+	// leaves setup half done.
+	var logo []byte
+	if req.Logo != "" {
+		if logo, err = branding.DecodeDataURL(req.Logo); err == nil {
+			_, err = branding.Render(logo)
+		}
+		if err != nil {
+			s.brandingError(w, "setup logo", err)
+			return
+		}
+	}
 	hash, err := auth.HashPassword(req.Password)
 	if errors.Is(err, auth.ErrWeakPassword) {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
@@ -108,6 +125,12 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	} else if err != nil {
 		s.internalError(w, "hash password", err)
 		return
+	}
+	if s.branding != nil && (req.WorkspaceName != "" || req.Title != "") {
+		if _, err := s.branding.SetText(r.Context(), req.WorkspaceName, req.Title); err != nil {
+			s.brandingError(w, "setup branding", err)
+			return
+		}
 	}
 
 	u := store.User{ID: auth.NewID("usr_"), Email: req.Email, Name: req.Name, PasswordHash: hash, IsRoot: true, CreatedAt: now.Truncate(time.Second)}
@@ -117,6 +140,11 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	} else if err != nil {
 		s.internalError(w, "create root user", err)
 		return
+	}
+	if s.branding != nil && logo != nil {
+		if _, err := s.branding.SetLogo(r.Context(), logo); err != nil {
+			s.log.Warn("setup logo", "err", err) // checked above; the account exists either way
+		}
 	}
 	s.audit(r, u.ID, "setup:CreateRoot", "srn:syncloud:user/"+u.ID, nil)
 	s.log.Info("setup completed", "user", u.Email)

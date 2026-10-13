@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"net"
@@ -33,6 +34,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/auth"
 	"github.com/ridoysheikh/syncloud/internal/autoscale"
 	"github.com/ridoysheikh/syncloud/internal/backup"
+	"github.com/ridoysheikh/syncloud/internal/branding"
 	"github.com/ridoysheikh/syncloud/internal/builds"
 	"github.com/ridoysheikh/syncloud/internal/certs"
 	"github.com/ridoysheikh/syncloud/internal/cli"
@@ -153,6 +155,11 @@ func serve(args []string) error {
 		if err := os.WriteFile(filepath.Join(cfg.DataDir, recoveryKeyFile), []byte(recoveryKey+"\n"), 0o600); err != nil {
 			return err
 		}
+	}
+
+	brand := branding.New(st)
+	if err := brand.Load(ctx); err != nil {
+		return err
 	}
 
 	token, err := auth.EnsureSetupToken(ctx, st, time.Now())
@@ -639,6 +646,62 @@ func serve(args []string) error {
 	gw.AddHooks(agentgw.Hooks{OnHeartbeat: fwStats.OnHeartbeat})
 	alertMgr := alerts.New(st, box, metricStore, logStore, healthMon, bus, log)
 	alertMgr.DashboardURL = func() string { return domains.Endpoints().DashboardURL }
+	alertMgr.Brand = func() (string, []byte) {
+		if imgs := brand.Images(); imgs != nil {
+			return brand.Get().Name, imgs.Logo
+		}
+		logo, _ := fs.ReadFile(web.FS(), "logo-square.png")
+		return brand.Get().Name, logo
+	}
+	alertMgr.Sources = alerts.Sources{
+		Databases: func(ctx context.Context) ([]alerts.DatabaseState, error) {
+			views, err := dbMgr.List(ctx)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]alerts.DatabaseState, 0, len(views))
+			for _, v := range views {
+				var down []string
+				for _, mb := range v.Members {
+					if mb.State != store.TaskRunning || mb.Error != "" {
+						down = append(down, mb.Name)
+					}
+				}
+				reason := ""
+				if len(down) > 0 {
+					reason = fmt.Sprintf("%d of %d members not running (%s)", len(down), len(v.Members), strings.Join(down, ", "))
+				}
+				out = append(out, alerts.DatabaseState{ID: v.ID, Name: v.Name, Project: v.Project, Environment: v.Environment, Engine: v.Engine, Health: v.Health, Reason: reason})
+			}
+			return out, nil
+		},
+		ControllerDisk: func() (uint64, uint64, error) {
+			var fsStat syscall.Statfs_t
+			if err := syscall.Statfs(cfg.DataDir, &fsStat); err != nil {
+				return 0, 0, err
+			}
+			total := fsStat.Blocks * uint64(fsStat.Bsize)
+			return total - fsStat.Bavail*uint64(fsStat.Bsize), total, nil
+		},
+	}
+	if cfg.SystemTasks {
+		alertMgr.Sources.Components = func() []alerts.ComponentState {
+			var out []alerts.ComponentState
+			for _, t := range sysMgr.List() {
+				out = append(out, alerts.ComponentState{ID: t.TaskID, Name: t.Name, State: t.State, Error: t.Error})
+			}
+			return out
+		}
+	}
+	// The default System rules and Admins channel, once the root user exists.
+	ensureAlertDefaults := func() {
+		if root, err := st.RootUser(ctx); err == nil {
+			if err := alertMgr.EnsureDefaults(ctx, root.Email); err != nil {
+				log.Warn("create the default alert rules", "err", err)
+			}
+		}
+	}
+	ensureAlertDefaults()
 	go alertMgr.Run(ctx)
 	workload.Endpoints = func(sv store.Service, spec workload.Spec, custom []store.Domain, routing []store.PortRouting) []string {
 		scheme, port, base := "https", httpsPort, domains.Base()
@@ -762,6 +825,11 @@ func serve(args []string) error {
 		return fmt.Errorf("load backup settings: %w", err)
 	}
 	go backups.Run(ctx)
+	alertMgr.Sources.Backup = func() alerts.BackupState {
+		_, on := backups.Config()
+		b := backups.Status()
+		return alerts.BackupState{Configured: on, LastRunAt: b.LastRunAt, LastSuccessAt: b.LastSuccessAt, LastError: b.LastError}
+	}
 
 	// Cloud Shell runs on the controller node and reaches the API over the
 	// private network (the listener below).
@@ -831,7 +899,9 @@ func serve(args []string) error {
 		},
 		ControllerSchedulable: cfg.ControllerSchedulable,
 		ACME:                  api.ACMEInfo{Enabled: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail},
+		Branding:              brand,
 		OnSetup: func() {
+			ensureAlertDefaults()
 			_ = os.Remove(filepath.Join(cfg.DataDir, setupTokenFile))
 			_ = os.Remove(filepath.Join(cfg.DataDir, recoveryKeyFile))
 		},

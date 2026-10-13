@@ -6,7 +6,19 @@ All notable changes are listed here. Versions follow [semantic versioning](https
 
 ### Added
 
+- **Workspace branding.** Setup asks for a workspace name, and optionally a browser title and a logo. **Settings › General** changes them later. The name shows in the header, on the sign-in page and in alert emails. The logo is a square PNG, JPEG or WebP up to 512 KB, and the browser icon is made from it. Unset values keep SynCloud's name and logo. From the CLI: `synctl settings branding get|set`.
+- **Email settings.** **Settings › Email** holds one SMTP server (STARTTLS, TLS or none) with a test button. Email channels now need only recipients. Alert emails come in HTML with your logo and name, plus plain text. From the CLI: `synctl settings smtp get|set|test|disable`.
+- **System alerts, on by default.** New rule types: node overload (CPU, memory or disk), database failover, database health, system component down, backups failing, certificate expiring, and controller disk filling up. A new install, or an existing one on upgrade, gets a set of System rules that email the root user through an **Admins** channel once email is set up. They can be edited or disabled, and **Restore defaults** brings back deleted ones. Node-offline alerts say how many tasks moved to other nodes.
+- **Reminders.** A firing alert is sent again every **Remind every** hours (the System rules default to 12, 0 = never).
 - **The recovery key is kept on the controller.** The root user can open it at any time under **Settings › Backups › Recovery key**, or with `synctl backups recovery-key show`. Installs from before can't show their old key: **Create recovery key** (`synctl backups recovery-key create`) makes a new kept key and re-keys the backups in S3 so it opens them all. Nothing is re-encrypted, so services and data aren't affected.
+
+### Changed
+
+- Email channels created before this release keep their own SMTP server. New ones use **Settings › Email**.
+
+### Upgrading
+
+- On first start, the System alert rules and the **Admins** email channel (the root user's address) are created. Add an SMTP server under **Settings › Email** to receive them.
 
 ## [0.1.9]
 

@@ -135,6 +135,24 @@ func (a *app) alertRulesCmd() *cobra.Command {
 	_ = apply.MarkFlagRequired("file")
 	rules.AddCommand(apply,
 		&cobra.Command{
+			Use: "restore-defaults", Short: "Recreate missing System rules and the Admins email channel", Args: cobra.NoArgs,
+			Annotations: op("restoreDefaultAlertRules"),
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				c, err := a.client()
+				if err != nil {
+					return err
+				}
+				var out struct {
+					Added int `json:"added"`
+				}
+				if err := c.Do(ctx(cmd), "POST", "/api/v1/alerts/rules/defaults", nil, &out); err != nil {
+					return err
+				}
+				fmt.Fprintf(a.out, "Added %d System rules.\n", out.Added)
+				return nil
+			},
+		},
+		&cobra.Command{
 			Use: "list", Aliases: []string{"ls"}, Short: "List alert rules", Args: cobra.NoArgs, Annotations: op("listAlertRules"),
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				c, err := a.client()
@@ -155,6 +173,17 @@ func (a *app) alertRulesCmd() *cobra.Command {
 						cond = fmt.Sprintf("(%v) %v %v", r["query"], r["op"], r["threshold"])
 					case "log":
 						cond = fmt.Sprintf("log %q level=%v %v %v", r["text"], orDash(fmt.Sprint(r["level"])), r["op"], r["threshold"])
+					case "node_overload":
+						cond = fmt.Sprintf("node %v > %v%%", r["metric"], r["threshold"])
+					case "controller_disk":
+						cond = fmt.Sprintf("controller disk > %v%%", r["threshold"])
+					case "backup":
+						cond = fmt.Sprintf("backup failed or older than %vh", r["threshold"])
+					case "certificate":
+						cond = fmt.Sprintf("certificate expires within %v days", r["threshold"])
+					}
+					if r["system"] == true {
+						cond += " (system)"
 					}
 					scope := strings.Trim(fmt.Sprintf("%v/%v/%v", orEmpty(r["project"]), orEmpty(r["environment"]), orEmpty(r["service"])), "/")
 					on := "on"
@@ -218,8 +247,9 @@ func (a *app) alertChannelsCmd() *cobra.Command {
 		Use: "add NAME --type TYPE", Short: "Add a channel, or replace the one with the same name",
 		Example: `  synctl alerts channels add ops --type slack --url https://hooks.slack.com/services/…
   synctl alerts channels add oncall --type telegram --bot-token 123:ABC --chat-id -100200300
+  synctl alerts channels add mail --type email --to ops@example.com   # sent through synctl settings smtp
   SYNCLOUD_SMTP_PASSWORD=… synctl alerts channels add mail --type email --smtp-host smtp.example.com \
-      --username alerts --from alerts@example.com --to ops@example.com`,
+      --username alerts --from alerts@example.com --to ops@example.com   # the channel's own server`,
 		Args: cobra.ExactArgs(1), Annotations: op("createAlertChannel", "updateAlertChannel"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if typ == "" {
@@ -249,7 +279,7 @@ func (a *app) alertChannelsCmd() *cobra.Command {
 	f.StringVar(&cfg.URL, "url", "", "webhook, Slack or Discord URL")
 	f.StringVar(&cfg.BotToken, "bot-token", "", "Telegram bot token")
 	f.StringVar(&cfg.ChatID, "chat-id", "", "Telegram chat ID")
-	f.StringVar(&cfg.SMTPHost, "smtp-host", "", "email: SMTP server")
+	f.StringVar(&cfg.SMTPHost, "smtp-host", "", "email: the channel's own SMTP server (default: synctl settings smtp)")
 	f.IntVar(&cfg.SMTPPort, "smtp-port", 0, "email: SMTP port (default 587; 465 = implicit TLS)")
 	f.StringVar(&cfg.Username, "username", "", "email: SMTP user")
 	f.StringVar(&cfg.From, "from", "", "email: sender address")

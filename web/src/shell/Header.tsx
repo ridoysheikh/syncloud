@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, ChevronDown, LogOut, Menu, SquareTerminal, TriangleAlert, X } from "lucide-react";
+import { BrandMark } from "@/lib/branding";
 import { backupQuery } from "@/lib/backups";
 import { api, type User } from "@/lib/api";
 import { stopStream, useStreamState } from "@/lib/stream";
@@ -30,9 +31,8 @@ export function Header({
           {menuOpen ? <X className="size-4" /> : <Menu className="size-4" />}
         </IconButton>
       )}
-      <div className="flex shrink-0 items-center gap-2 lg:w-[11.5rem]">
-        <img src="/favicon.svg" alt="" className="size-5" />
-        <span className="font-semibold tracking-tight">SynCloud</span>
+      <div className="flex min-w-0 shrink items-center lg:w-[11.5rem] lg:shrink-0">
+        <BrandMark />
       </div>
 
       <div className="flex-1" />

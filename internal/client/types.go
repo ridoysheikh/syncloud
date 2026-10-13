@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -329,6 +330,73 @@ func (c *Client) GetRecoveryKey(ctx context.Context) (RecoveryKey, error) {
 func (c *Client) CreateRecoveryKey(ctx context.Context) (RecoveryKey, error) {
 	var out RecoveryKey
 	return out, c.Do(ctx, "POST", "/api/v1/backups/recovery-key", nil, &out)
+}
+
+// SMTP is the platform mail server (Phase 20a).
+type SMTP struct {
+	Configured  bool   `json:"configured,omitempty"`
+	Host        string `json:"host"`
+	Port        int    `json:"port,omitempty"`
+	Security    string `json:"security,omitempty"`
+	Username    string `json:"username,omitempty"`
+	Password    string `json:"password,omitempty"`
+	HasPassword bool   `json:"hasPassword,omitempty"`
+	From        string `json:"from"`
+	FromName    string `json:"fromName,omitempty"`
+}
+
+func (c *Client) GetSMTP(ctx context.Context) (SMTP, error) {
+	var out SMTP
+	return out, c.Do(ctx, "GET", "/api/v1/settings/smtp", nil, &out)
+}
+
+func (c *Client) SetSMTP(ctx context.Context, in SMTP) (SMTP, error) {
+	var out SMTP
+	body := map[string]any{"host": in.Host, "port": in.Port, "security": in.Security, "username": in.Username, "password": in.Password, "from": in.From, "fromName": in.FromName}
+	return out, c.Do(ctx, "PUT", "/api/v1/settings/smtp", body, &out)
+}
+
+func (c *Client) DeleteSMTP(ctx context.Context) error {
+	return c.Do(ctx, "DELETE", "/api/v1/settings/smtp", nil, nil)
+}
+
+// TestSMTP sends a test email; sendErr is the server's answer when it failed.
+func (c *Client) TestSMTP(ctx context.Context, to string) (sendErr string, err error) {
+	var out struct {
+		Sent  bool   `json:"sent"`
+		Error string `json:"error"`
+	}
+	err = c.Do(ctx, "POST", "/api/v1/settings/smtp/test", map[string]string{"to": to}, &out)
+	return out.Error, err
+}
+
+// Branding is the workspace name, title and logo (Phase 21).
+type Branding struct {
+	Name    string `json:"name"`
+	Title   string `json:"title"`
+	HasLogo bool   `json:"hasLogo"`
+	Version string `json:"version"`
+}
+
+func (c *Client) GetBranding(ctx context.Context) (Branding, error) {
+	var out Branding
+	return out, c.Do(ctx, "GET", "/api/v1/branding", nil, &out)
+}
+
+func (c *Client) SetBranding(ctx context.Context, name, title string) (Branding, error) {
+	var out Branding
+	return out, c.Do(ctx, "PUT", "/api/v1/branding", map[string]string{"name": name, "title": title}, &out)
+}
+
+// SetBrandingLogo uploads a PNG, JPEG or WebP image.
+func (c *Client) SetBrandingLogo(ctx context.Context, image []byte) (Branding, error) {
+	var out Branding
+	return out, c.Do(ctx, "PUT", "/api/v1/branding/logo", map[string]string{"logo": base64.StdEncoding.EncodeToString(image)}, &out)
+}
+
+func (c *Client) DeleteBrandingLogo(ctx context.Context) (Branding, error) {
+	var out Branding
+	return out, c.Do(ctx, "DELETE", "/api/v1/branding/logo", nil, &out)
 }
 
 type MeshPeer struct {

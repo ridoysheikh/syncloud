@@ -53,6 +53,8 @@ import { JobsPage } from "./compute/JobsPage";
 import { IncidentsPage, ServiceHealthPage } from "./health/HealthPages";
 import { RegistryDashboard, RepositoriesPage } from "./registry/RegistryPages";
 import { UpstreamsPage } from "./registry/UpstreamsPage";
+import { GeneralPage } from "./settings/GeneralPage";
+import { EmailPage } from "./settings/EmailPage";
 import { PlatformPage } from "./settings/PlatformPage";
 import { DomainsPage } from "./settings/DomainsPage";
 import { BackupsPage } from "./settings/BackupsPage";
@@ -269,6 +271,8 @@ export const modules: DashboardModule[] = [
     icon: Settings,
     order: 110,
     pages: [
+      { path: "/settings/general", label: "General", component: GeneralPage },
+      { path: "/settings/email", label: "Email", component: EmailPage },
       { path: "/settings/platform", label: "Platform", component: PlatformPage },
       { path: "/settings/domains", label: "Domains", component: DomainsPage },
       { path: "/settings/backups", label: "Backups", component: BackupsPage },

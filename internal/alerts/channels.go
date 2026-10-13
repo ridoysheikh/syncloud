@@ -3,17 +3,13 @@ package alerts
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/mail"
-	"net/smtp"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -65,13 +61,22 @@ func (c *ChannelConfig) Validate(typ string) (string, error) {
 		}
 		return "chat " + c.ChatID, nil
 	case "email":
-		if c.SMTPHost == "" || c.From == "" || len(c.To) == 0 {
-			return "", errors.New("email needs smtpHost, from and at least one address in to")
+		// Recipients only: the platform SMTP (Settings → Email) sends. A
+		// channel may still carry its own server (smtpHost and from).
+		if len(c.To) == 0 {
+			return "", errors.New("email needs at least one address in to")
 		}
-		if c.SMTPPort == 0 {
-			c.SMTPPort = 587
+		addrs := c.To
+		if c.SMTPHost != "" {
+			if c.From == "" {
+				return "", errors.New("an email channel with its own smtpHost needs from")
+			}
+			if c.SMTPPort == 0 {
+				c.SMTPPort = 587
+			}
+			addrs = append([]string{c.From}, c.To...)
 		}
-		for _, a := range append([]string{c.From}, c.To...) {
+		for _, a := range addrs {
 			if _, err := mail.ParseAddress(a); err != nil {
 				return "", fmt.Errorf("invalid address %q", a)
 			}
@@ -83,7 +88,7 @@ func (c *ChannelConfig) Validate(typ string) (string, error) {
 
 // Notification is what a channel delivers.
 type Notification struct {
-	Kind     string    `json:"status"` // firing | resolved | event | test
+	Kind     string    `json:"status"` // firing | reminder | resolved | event | test
 	Rule     string    `json:"rule"`
 	Severity string    `json:"severity"`
 	Instance string    `json:"instance"` // e.g. shop/production/web or node w2
@@ -95,7 +100,7 @@ type Notification struct {
 
 // Title is a one-line summary.
 func (n Notification) Title() string {
-	prefix := map[string]string{"firing": "FIRING", "resolved": "RESOLVED", "event": "ALERT", "test": "TEST"}[n.Kind]
+	prefix := map[string]string{"firing": "FIRING", "resolved": "RESOLVED", "event": "ALERT", "test": "TEST", "reminder": "STILL FIRING"}[n.Kind]
 	return fmt.Sprintf("[%s] %s: %s", prefix, n.Rule, n.Instance)
 }
 
@@ -158,68 +163,16 @@ func Send(ctx context.Context, typ string, c ChannelConfig, n Notification) erro
 	case "telegram":
 		return postJSON(ctx, TelegramAPI+"/bot"+c.BotToken+"/sendMessage", map[string]any{"chat_id": c.ChatID, "text": n.Text(), "disable_web_page_preview": true})
 	case "email":
-		return sendMail(ctx, c, n)
+		// Without a manager there is no platform SMTP: only a channel's own server.
+		if c.SMTPHost == "" {
+			return ErrNoSMTP
+		}
+		msg, err := buildMail(mailParts{From: c.From, FromName: "SynCloud", To: c.To, Subject: n.Title(), Text: n.Text(),
+			HTML: renderHTML("SynCloud", false, n), At: n.At})
+		if err != nil {
+			return err
+		}
+		return deliver(ctx, channelSMTP(c), c.To, msg)
 	}
 	return fmt.Errorf("unknown channel type %q", typ)
-}
-
-func sendMail(ctx context.Context, c ChannelConfig, n Notification) error {
-	addr := net.JoinHostPort(c.SMTPHost, strconv.Itoa(c.SMTPPort))
-	msg := "From: " + c.From + "\r\nTo: " + strings.Join(c.To, ", ") + "\r\nSubject: " + n.Title() +
-		"\r\nDate: " + n.At.Format(time.RFC1123Z) + "\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n" +
-		strings.ReplaceAll(n.Text(), "\n", "\r\n") + "\r\n"
-	var auth smtp.Auth
-	if c.Username != "" {
-		auth = smtp.PlainAuth("", c.Username, c.Password, c.SMTPHost)
-	}
-	if c.SMTPPort != 465 {
-		// 587/25: STARTTLS when the server offers it (net/smtp does that).
-		done := make(chan error, 1)
-		go func() { done <- smtp.SendMail(addr, auth, c.From, c.To, []byte(msg)) }()
-		select {
-		case err := <-done:
-			return err
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(20 * time.Second):
-			return errors.New("SMTP timed out")
-		}
-	}
-	// 465: implicit TLS.
-	d := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 10 * time.Second}, Config: &tls.Config{ServerName: c.SMTPHost}}
-	conn, err := d.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
-	cl, err := smtp.NewClient(conn, c.SMTPHost)
-	if err != nil {
-		return err
-	}
-	defer cl.Close()
-	if auth != nil {
-		if err := cl.Auth(auth); err != nil {
-			return err
-		}
-	}
-	if err := cl.Mail(c.From); err != nil {
-		return err
-	}
-	for _, to := range c.To {
-		if err := cl.Rcpt(to); err != nil {
-			return err
-		}
-	}
-	w, err := cl.Data()
-	if err != nil {
-		return err
-	}
-	if _, err := w.Write([]byte(msg)); err != nil {
-		return err
-	}
-	if err := w.Close(); err != nil {
-		return err
-	}
-	return cl.Quit()
 }

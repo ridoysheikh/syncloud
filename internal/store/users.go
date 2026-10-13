@@ -64,6 +64,12 @@ func (s *Store) UserByID(ctx context.Context, id string) (User, error) {
 		`SELECT id, email, name, password_hash, is_root, created_at FROM users WHERE id = ?`, id))
 }
 
+// RootUser returns the root account (ErrNotFound before setup).
+func (s *Store) RootUser(ctx context.Context) (User, error) {
+	return scanUser(s.R.QueryRowContext(ctx,
+		`SELECT id, email, name, password_hash, is_root, created_at FROM users WHERE is_root = 1 ORDER BY created_at LIMIT 1`))
+}
+
 func scanUser(row *sql.Row) (User, error) {
 	var u User
 	var created int64

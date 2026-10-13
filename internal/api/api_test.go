@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/branding"
 	"github.com/ridoysheikh/syncloud/internal/certs"
 	"github.com/ridoysheikh/syncloud/internal/domain"
 	"github.com/ridoysheikh/syncloud/internal/events"
@@ -46,7 +47,8 @@ func newEnv(t *testing.T) *testEnv {
 		t.Fatal(err)
 	}
 	web := fstest.MapFS{
-		"index.html":      {Data: []byte("<html>dashboard</html>")},
+		"index.html":      {Data: []byte(`<html><head><link rel="icon" href="/favicon.ico" sizes="any" /><link rel="apple-touch-icon" href="/apple-touch-icon.png" /><title>SynCloud</title></head>dashboard</html>`)},
+		"logo-square.png": {Data: []byte("default-logo")},
 		"assets/app-1.js": {Data: []byte("console.log(1)")},
 	}
 	box, rk, err := secrets.LoadOrCreate(t.TempDir())
@@ -64,7 +66,7 @@ func newEnv(t *testing.T) *testEnv {
 	domains.OnChange(func(ep domain.Endpoints) { cm.SetHosts([]string{ep.BaseDomain, domain.RegistryHost(ep.BaseDomain)}) })
 	s := New(Options{
 		Store: st, Secrets: box, Registry: reg, Bus: bus, Log: log, Web: web,
-		Domains: domains, Detector: domain.NewDetector("203.0.113.10"), Certs: cm,
+		Domains: domains, Detector: domain.NewDetector("203.0.113.10"), Certs: cm, Branding: branding.New(st),
 	})
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
@@ -207,7 +209,7 @@ func TestSPAFallbackAndAPINotFound(t *testing.T) {
 		}
 		b, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if resp.StatusCode != 200 || string(b) != "<html>dashboard</html>" {
+		if resp.StatusCode != 200 || !strings.Contains(string(b), "dashboard</html>") {
 			t.Fatalf("%s: %d %q", p, resp.StatusCode, b)
 		}
 	}

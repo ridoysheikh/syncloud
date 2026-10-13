@@ -1,7 +1,7 @@
 import { useCallback, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { BellRing, Plus, Send, Trash2 } from "lucide-react";
+import { BellRing, Plus, RotateCcw, Send, Trash2 } from "lucide-react";
 import { usePaged } from "@/lib/paged";
 import { api, ApiError } from "@/lib/api";
 import { since } from "@/lib/nodes";
@@ -18,6 +18,7 @@ import {
   IconButton,
   Input,
   StatusBadge,
+  Toggle,
 } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { Tabs } from "@/ui/Tabs";
@@ -44,6 +45,10 @@ export interface AlertRule {
   threshold: number;
   windowSeconds?: number;
   forSeconds: number;
+  /** Re-send a firing alert this often (0 = never). */
+  repeatHours?: number;
+  /** One of the default System rules. */
+  system?: boolean;
   channels: string[];
 }
 
@@ -69,7 +74,7 @@ interface AlertEvent {
   id: number;
   rule: string;
   severity: Severity;
-  kind: "firing" | "resolved" | "event";
+  kind: "firing" | "reminder" | "resolved" | "event";
   label: string;
   message: string;
   delivery: string;
@@ -134,6 +139,8 @@ export function AlertsPage() {
   const rules = useAlertRules();
   const channels = useAlertChannels();
   const firing = (active.data ?? []).filter((a) => a.state === "firing");
+  const smtp = useSMTP();
+  const emailChannels = (channels.data ?? []).some((c) => c.type === "email");
   return (
     <div className={cn("flex flex-col", gap)}>
       <PageHeader
@@ -147,6 +154,15 @@ export function AlertsPage() {
           </Link>
         }
       />
+      {emailChannels && smtp.data && !smtp.data.configured && (
+        <Alert tone="warn">
+          Email alerts can&apos;t be sent yet: add an SMTP server under{" "}
+          <Link to={"/settings/email" as string} className="underline">
+            Settings → Email
+          </Link>
+          . Until then they are recorded in the history only.
+        </Alert>
+      )}
       <div className={cn("grid grid-cols-2 md:grid-cols-4", gap)}>
         <StatTile
           label="Firing"
@@ -236,8 +252,20 @@ function ActiveTab({
   );
 }
 
+/** Rule types that watch the platform rather than a service (Phase 20b). */
+export const platformTypes = new Set([
+  "node",
+  "node_overload",
+  "system_component",
+  "backup",
+  "certificate",
+  "controller_disk",
+]);
+
 export function describeRule(r: AlertRule) {
-  const scope = [r.project, r.environment, r.service].filter(Boolean).join("/");
+  const scope =
+    [r.project, r.environment, r.service].filter(Boolean).join("/") ||
+    (platformTypes.has(r.type) ? "platform" : "");
   const w = r.windowSeconds ? ` over ${r.windowSeconds / 60}m` : "";
   let cond = "";
   switch (r.type) {
@@ -255,6 +283,27 @@ export function describeRule(r: AlertRule) {
       break;
     case "node":
       cond = "node not reporting";
+      break;
+    case "node_overload":
+      cond = `node ${r.metric} above ${r.threshold}%${r.metric === "disk" ? "" : w}`;
+      break;
+    case "database_failover":
+      cond = "a database gets a new primary";
+      break;
+    case "database_health":
+      cond = "database degraded or down";
+      break;
+    case "system_component":
+      cond = "a system component is not running";
+      break;
+    case "backup":
+      cond = `a backup fails or none succeeds for ${r.threshold}h`;
+      break;
+    case "certificate":
+      cond = `a certificate expires within ${r.threshold} days or can't renew`;
+      break;
+    case "controller_disk":
+      cond = `controller disk above ${r.threshold}%`;
       break;
     default:
       cond = `${r.type} failed`;
@@ -279,11 +328,36 @@ function RulesTab() {
     mutationFn: (id: string) => api("DELETE", `/alerts/rules/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
   });
+  const restore = useMutation({
+    mutationFn: () => api<{ added: number }>("POST", "/alerts/rules/defaults"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
+  });
   return (
-    <Panel title="Rules" flush>
-      {(toggle.error || del.error) && (
+    <Panel
+      title="Rules"
+      flush
+      actions={
+        <Button
+          onClick={() => restore.mutate()}
+          disabled={restore.isPending}
+          title="Recreate missing System rules and the Admins email channel"
+        >
+          <RotateCcw className="size-3.5" /> Restore defaults
+        </Button>
+      }
+    >
+      {(toggle.error || del.error || restore.error) && (
         <div className="p-2">
-          <Alert>{errText(toggle.error ?? del.error)}</Alert>
+          <Alert>{errText(toggle.error ?? del.error ?? restore.error)}</Alert>
+        </div>
+      )}
+      {restore.data && (
+        <div className="p-2">
+          <Alert tone="info">
+            {restore.data.added
+              ? `Added ${restore.data.added} System rules.`
+              : "Every System rule is already there."}
+          </Alert>
         </div>
       )}
       <DataTable
@@ -308,6 +382,18 @@ function RulesTab() {
                 {r.name}
               </Link>
             ),
+          },
+          {
+            header: "",
+            cell: (r) =>
+              r.system && (
+                <span
+                  className="text-faint text-[11px]"
+                  title="A default rule; Restore defaults brings it back if deleted"
+                >
+                  system
+                </span>
+              ),
           },
           {
             header: "Severity",
@@ -382,15 +468,17 @@ const channelFields: Record<
     { key: "botToken", label: "Bot token", secret: true },
     { key: "chatId", label: "Chat ID" },
   ],
-  email: [
-    { key: "smtpHost", label: "SMTP host" },
-    { key: "smtpPort", label: "Port", hint: "587 (STARTTLS) or 465 (TLS)" },
-    { key: "username", label: "User name" },
-    { key: "password", label: "Password", secret: true },
-    { key: "from", label: "From" },
-    { key: "to", label: "To", hint: "Comma-separated addresses" },
-  ],
+  email: [{ key: "to", label: "To", hint: "Comma-separated addresses" }],
 };
+
+/** An email channel's own server, instead of Settings → Email. */
+const ownServerFields: (typeof channelFields)["email"] = [
+  { key: "smtpHost", label: "SMTP host" },
+  { key: "smtpPort", label: "Port", hint: "587 (STARTTLS) or 465 (TLS)" },
+  { key: "username", label: "User name" },
+  { key: "password", label: "Password", secret: true },
+  { key: "from", label: "From" },
+];
 
 function ChannelsTab() {
   const qc = useQueryClient();
@@ -398,6 +486,8 @@ function ChannelsTab() {
   const [type, setType] = useState<AlertChannel["type"]>("slack");
   const [name, setName] = useState("");
   const [cfg, setCfg] = useState<Record<string, string>>({});
+  const [ownServer, setOwnServer] = useState(false);
+  const smtp = useSMTP();
   const [tested, setTested] = useState<Record<string, string>>({});
   const create = useMutation({
     mutationFn: () => {
@@ -408,6 +498,10 @@ function ChannelsTab() {
           .map((s) => s.trim())
           .filter(Boolean);
         config.smtpPort = Number(cfg.smtpPort) || 0;
+        if (!ownServer) {
+          for (const f of ownServerFields) delete config[f.key];
+          config.smtpPort = 0;
+        }
       }
       return api("POST", "/alerts/channels", { name, type, config });
     },
@@ -530,7 +624,10 @@ function ChannelsTab() {
               placeholder="ops"
             />
           </Field>
-          {channelFields[type].map((f) => (
+          {[
+            ...channelFields[type],
+            ...(type === "email" && ownServer ? ownServerFields : []),
+          ].map((f) => (
             <Field key={f.key} label={f.label} hint={f.hint}>
               <Input
                 type={f.secret ? "password" : "text"}
@@ -543,6 +640,29 @@ function ChannelsTab() {
               />
             </Field>
           ))}
+          {type === "email" && (
+            <>
+              {!ownServer && smtp.data && !smtp.data.configured && (
+                <Alert tone="warn">
+                  Email is not set up yet. Add the SMTP server under{" "}
+                  <Link to={"/settings/email" as string} className="underline">
+                    Settings → Email
+                  </Link>
+                  .
+                </Alert>
+              )}
+              {!ownServer && smtp.data?.configured && (
+                <p className="text-muted text-xs">
+                  Sent through {smtp.data.host} from {smtp.data.from}.
+                </p>
+              )}
+              <Toggle
+                checked={ownServer}
+                onChange={setOwnServer}
+                label="Use its own SMTP server"
+              />
+            </>
+          )}
           <p className="text-faint text-xs">
             URLs, tokens and passwords are stored encrypted and never shown
             again.
@@ -635,4 +755,24 @@ function HistoryTab() {
       />
     </Panel>
   );
+}
+
+export interface SMTPView {
+  configured: boolean;
+  host: string;
+  port: number;
+  security: "starttls" | "tls" | "none";
+  username: string;
+  hasPassword: boolean;
+  from: string;
+  fromName: string;
+}
+
+/** The platform SMTP server (Settings → Email). */
+export function useSMTP() {
+  return useQuery({
+    queryKey: ["settings", "smtp"],
+    queryFn: () => api<SMTPView>("GET", "/settings/smtp"),
+    retry: false,
+  });
 }

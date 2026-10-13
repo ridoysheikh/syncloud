@@ -9,15 +9,22 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   Activity,
+  Archive,
   ArrowDown,
+  ArrowLeftRight,
   ArrowUp,
   BellRing,
+  Boxes,
   Code,
+  Database,
+  Gauge,
   Hammer,
+  HardDrive,
   HeartPulse,
   Rocket,
   ScrollText,
   Server,
+  ShieldAlert,
   Timer,
   Info,
   Siren,
@@ -48,6 +55,13 @@ const typeIcons: Record<string, typeof Activity> = {
   build: Hammer,
   job: Timer,
   promql: Code,
+  node_overload: Gauge,
+  database_failover: ArrowLeftRight,
+  database_health: Database,
+  system_component: Boxes,
+  backup: Archive,
+  certificate: ShieldAlert,
+  controller_disk: HardDrive,
 };
 
 const types: { id: string; title: string; text: string }[] = [
@@ -85,6 +99,76 @@ const types: { id: string; title: string; text: string }[] = [
   },
 ];
 
+/** What the platform itself does (Phase 20b). */
+const platformTypes: { id: string; title: string; text: string }[] = [
+  {
+    id: "node_overload",
+    title: "Node overload",
+    text: "A node's CPU, memory or disk stays above a threshold",
+  },
+  {
+    id: "database_failover",
+    title: "Database failover",
+    text: "A managed database gets a new primary",
+  },
+  {
+    id: "database_health",
+    title: "Database health",
+    text: "A managed database turns degraded or down",
+  },
+  {
+    id: "system_component",
+    title: "System component",
+    text: "Traefik, the registry, metrics, logs or the Git server stop",
+  },
+  {
+    id: "backup",
+    title: "Backups",
+    text: "A controller backup fails, or none succeeds for hours",
+  },
+  {
+    id: "certificate",
+    title: "Certificates",
+    text: "A certificate is about to expire or can't be renewed",
+  },
+  {
+    id: "controller_disk",
+    title: "Controller disk",
+    text: "The controller's data disk fills up",
+  },
+];
+
+/** Thresholds of the platform types: unit and default. */
+const platformThreshold: Record<string, { label: string; hint: string; def: number }> = {
+  node_overload: { label: "Above", hint: "percent", def: 90 },
+  backup: { label: "No success for", hint: "hours", def: 26 },
+  certificate: { label: "Expires within", hint: "days", def: 14 },
+  controller_disk: { label: "Above", hint: "percent full", def: 85 },
+};
+
+const eventTypes = ["deployment", "build", "job", "database_failover"];
+
+/** A rule switched to another type gets that type's defaults. */
+function withType(r: AlertRule, type: string): AlertRule {
+  const x: AlertRule = { ...r, type };
+  const p = platformThreshold[type];
+  if (p) x.threshold = p.def;
+  if (type === "node_overload") {
+    x.metric = "cpu";
+    x.windowSeconds = 600;
+  } else if (type === "metric") {
+    x.metric = "error_rate";
+    x.threshold = 5;
+    x.windowSeconds = 300;
+  }
+  if (!["metric", "log", "health", "deployment", "build", "job"].includes(type)) x.service = "";
+  if (!["metric", "log", "health", "deployment", "build", "job", "database_failover", "database_health"].includes(type)) {
+    x.project = "";
+    x.environment = "";
+  }
+  return x;
+}
+
 const metricUnits: Record<string, string> = {
   error_rate: "% of requests answered 5xx",
   latency: "ms, p95",
@@ -104,6 +188,7 @@ const blank: AlertRule = {
   threshold: 5,
   windowSeconds: 300,
   forSeconds: 60,
+  repeatHours: 12,
   channels: [],
 };
 
@@ -172,7 +257,10 @@ export function AlertRulePage() {
   };
   const thresholded =
     r.type === "metric" || r.type === "log" || r.type === "promql";
-  const scoped = r.type !== "node" && r.type !== "promql";
+  const platform = platformThreshold[r.type];
+  const projectScoped = ["metric", "log", "health", "deployment", "build", "job", "database_failover", "database_health"].includes(r.type);
+  const serviceScoped = ["metric", "log", "health", "deployment", "build", "job"].includes(r.type);
+  const scoped = projectScoped;
   const d = describeRule(r);
 
   if (!isNew && rules.isSuccess && !existing) {
@@ -212,10 +300,11 @@ export function AlertRulePage() {
         }
       />
       <Section title="What to watch">
+        <span className="text-muted text-xs">Services</span>
         <ChoiceCards
-          label="What to watch"
+          label="Service checks"
           value={r.type}
-          onChange={(v) => set("type", v)}
+          onChange={(v) => setR((x) => withType(x, v))}
           columns={4}
           options={types.map((t) => ({
             value: t.id,
@@ -224,9 +313,22 @@ export function AlertRulePage() {
             icon: typeIcons[t.id],
           }))}
         />
+        <span className="text-muted mt-1 text-xs">Platform</span>
+        <ChoiceCards
+          label="Platform checks"
+          value={r.type}
+          onChange={(v) => setR((x) => withType(x, v))}
+          columns={4}
+          options={platformTypes.map((t) => ({
+            value: t.id,
+            title: t.title,
+            description: t.text,
+            icon: typeIcons[t.id],
+          }))}
+        />
       </Section>
 
-      {(scoped || r.type === "promql") && (
+      {(scoped || r.type === "promql" || platform) && (
         <Section title="Condition">
           {scoped && (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -266,6 +368,7 @@ export function AlertRulePage() {
                 <Select
                   value={r.service ?? ""}
                   onChange={(v) => set("service", v)}
+                  disabled={!serviceScoped}
                   className="w-full"
                 >
                   <option value="">any service</option>
@@ -326,6 +429,44 @@ export function AlertRulePage() {
                   <option value="fatal">fatal</option>
                 </Select>
               </Field>
+            </div>
+          )}
+          {r.type === "node_overload" && (
+            <Field label="Resource">
+              <Select
+                value={r.metric ?? "cpu"}
+                onChange={(v) => set("metric", v)}
+                className="w-full"
+              >
+                <option value="cpu">CPU (average over the window)</option>
+                <option value="memory">Memory (the whole window)</option>
+                <option value="disk">Disk (now)</option>
+              </Select>
+            </Field>
+          )}
+          {platform && (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <Field label={platform.label} hint={platform.hint}>
+                <Input
+                  type="number"
+                  step="any"
+                  min={1}
+                  value={r.threshold}
+                  onChange={(e) => set("threshold", Number(e.target.value))}
+                />
+              </Field>
+              {r.type === "node_overload" && r.metric !== "disk" && (
+                <Field label="Over" hint="minutes">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={(r.windowSeconds ?? 300) / 60}
+                    onChange={(e) =>
+                      set("windowSeconds", Math.round(Number(e.target.value) * 60))
+                    }
+                  />
+                </Field>
+              )}
             </div>
           )}
           {thresholded && (
@@ -389,7 +530,7 @@ export function AlertRulePage() {
               ]}
             />
           </ChoiceField>
-          {!["deployment", "build", "job"].includes(r.type) && (
+          {!eventTypes.includes(r.type) && (
             <Field label="Fire after" hint="seconds the condition must hold">
               <Input
                 type="number"
@@ -400,6 +541,19 @@ export function AlertRulePage() {
             </Field>
           )}
         </div>
+        {!eventTypes.includes(r.type) && (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <Field label="Remind every" hint="hours while it fires; 0 = never">
+              <Input
+                type="number"
+                min={0}
+                max={168}
+                value={r.repeatHours ?? 0}
+                onChange={(e) => set("repeatHours", Number(e.target.value))}
+              />
+            </Field>
+          </div>
+        )}
         <ChoiceField label="Channels">
           <ChipSelect
             label="Channels"
@@ -423,7 +577,8 @@ export function AlertRulePage() {
         />
         <p className="text-muted text-xs">
           Fires for <span className="font-mono">{d.scope}</span> when {d.cond};
-          checked every 30 seconds, and notifies again when it resolves.
+          checked every 30 seconds
+          {eventTypes.includes(r.type) ? ", once per event." : ", and notifies again when it resolves."}
         </p>
         {save.error && (
           <Alert>

@@ -38,7 +38,7 @@ type Rule struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Enabled  bool   `json:"enabled"`
-	Type     string `json:"type"`     // metric | promql | log | health | node | deployment | build | job
+	Type     string `json:"type"`     // metric | promql | log | health | node | deployment | build | job, or a system type (system.go)
 	Severity string `json:"severity"` // info | warning | critical
 	// Scope: empty matches every project, environment or service.
 	Project     string `json:"project,omitempty"`
@@ -56,10 +56,15 @@ type Rule struct {
 	Threshold     float64 `json:"threshold"`
 	WindowSeconds int     `json:"windowSeconds,omitempty"`
 	// ForSeconds is how long the condition must hold before firing.
-	ForSeconds int       `json:"forSeconds"`
-	Channels   []string  `json:"channels"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	ForSeconds int `json:"forSeconds"`
+	// RepeatHours re-sends a firing alert this often (0 = never).
+	RepeatHours int `json:"repeatHours"`
+	// System marks the default rules (Phase 20c); they can be edited,
+	// disabled or deleted, and restored.
+	System    bool      `json:"system,omitempty"`
+	Channels  []string  `json:"channels"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // Types and metrics, with what they measure.
@@ -68,6 +73,10 @@ var (
 		"metric": "a service metric crosses a threshold", "promql": "a PromQL expression crosses a threshold",
 		"log": "log lines matching a pattern", "health": "a service is degraded or down", "node": "a node stops reporting",
 		"deployment": "a deployment fails", "build": "a build fails", "job": "a job run fails",
+		"node_overload": "a node's CPU, memory or disk is above a threshold", "database_failover": "a managed database gets a new primary",
+		"database_health": "a managed database is degraded or down", "system_component": "a system component (Traefik, registry, …) is not running",
+		"backup": "controller backups fail or stop", "certificate": "a certificate is about to expire or can't be renewed",
+		"controller_disk": "the controller's data disk is filling up",
 	}
 	RuleMetrics = map[string]string{
 		"cpu": "CPU % of one core (average per task)", "memory": "memory % of the limit (busiest task)",
@@ -89,7 +98,15 @@ func (r *Rule) Validate() error {
 		return invalid("name is required (at most 100 characters)")
 	}
 	if _, ok := RuleTypes[r.Type]; !ok {
-		return invalid("type must be metric, promql, log, health, node, deployment, build or job")
+		types := make([]string, 0, len(RuleTypes))
+		for t := range RuleTypes {
+			types = append(types, t)
+		}
+		sort.Strings(types)
+		return invalid("type must be one of %s", strings.Join(types, ", "))
+	}
+	if r.RepeatHours < 0 || r.RepeatHours > 168 {
+		return invalid("repeatHours must be 0–168")
 	}
 	if r.Severity == "" {
 		r.Severity = "warning"
@@ -101,6 +118,12 @@ func (r *Rule) Validate() error {
 		if strings.ContainsAny(s, "\"\\\n") {
 			return invalid("invalid scope %q", s)
 		}
+	}
+	if ok, err := r.validateSystem(); ok {
+		if err != nil {
+			return err
+		}
+		return r.validateCommon()
 	}
 	switch r.Type {
 	case "metric", "promql", "log":
@@ -139,6 +162,10 @@ func (r *Rule) Validate() error {
 			return invalid("level must be error, warn or fatal")
 		}
 	}
+	return r.validateCommon()
+}
+
+func (r *Rule) validateCommon() error {
 	if r.ForSeconds < 0 || r.ForSeconds > 86400 {
 		return invalid("forSeconds must be 0–86400")
 	}
@@ -174,15 +201,22 @@ type Manager struct {
 	now     func() time.Time
 	// DashboardURL links notifications to the dashboard.
 	DashboardURL func() string
+	// Brand returns the workspace name and logo (PNG) for emails (Phase 21).
+	Brand func() (name string, logo []byte)
+	// Sources of the system rule types (Phase 20b); nil skips a type.
+	Sources Sources
 
-	mu     sync.Mutex
-	states map[string]map[string]*store.AlertState // rule ID → key
-	cursor time.Time                               // failures after this were notified
+	mu       sync.Mutex
+	states   map[string]map[string]*store.AlertState // rule ID → key
+	cursor   time.Time                               // failures after this were notified
+	dbCursor int64                                   // database events up to this ID were seen
+	dbReady  bool
+	lastSent map[string]time.Time // rule ID + key → last firing notification
 }
 
 func New(st *store.Store, box *secrets.Box, m MetricsSource, l LogsSource, h HealthSource, bus *events.Bus, log *slog.Logger) *Manager {
 	return &Manager{st: st, box: box, metrics: m, logs: l, health: h, bus: bus, log: log, now: time.Now,
-		states: map[string]map[string]*store.AlertState{}}
+		states: map[string]map[string]*store.AlertState{}, lastSent: map[string]time.Time{}}
 }
 
 // ── rules ──────────────────────────────────────────────────────────────────
@@ -345,7 +379,15 @@ func (m *Manager) TestChannel(ctx context.Context, id string) error {
 	}
 	n := Notification{Kind: "test", Rule: "Test notification", Severity: "info", Instance: c.Name,
 		Message: "Notifications from SynCloud reach this channel.", At: m.now().UTC(), URL: m.dashboardURL()}
-	return Send(ctx, c.Type, cfg, n)
+	return m.send(ctx, c.Type, cfg, n)
+}
+
+// send delivers to a channel; email goes through the platform SMTP.
+func (m *Manager) send(ctx context.Context, typ string, cfg ChannelConfig, n Notification) error {
+	if typ == "email" {
+		return m.sendEmail(ctx, cfg, n)
+	}
+	return Send(ctx, typ, cfg, n)
 }
 
 func (m *Manager) openConfig(c store.AlertChannel) (ChannelConfig, error) {
@@ -427,6 +469,27 @@ func (m *Manager) Evaluate(ctx context.Context) {
 	if ferr == nil {
 		m.cursor = now
 	}
+	if !m.dbReady { // only failovers from now on
+		if id, err := m.st.LastDatabaseEventID(ctx); err == nil {
+			m.dbCursor, m.dbReady = id, true
+		}
+	}
+	var failovers []store.DatabaseEvent
+	dberr := errors.New("database events not read yet")
+	if m.dbReady {
+		failovers, dberr = m.st.DatabaseEventsAfter(ctx, "failover", m.dbCursor)
+	}
+	dbs := map[string]store.Database{}
+	if dberr == nil {
+		for _, e := range failovers {
+			m.dbCursor = max(m.dbCursor, e.ID)
+		}
+		if list, err := m.st.ListDatabases(ctx); err == nil {
+			for _, d := range list {
+				dbs[d.ID] = d
+			}
+		}
+	}
 	for _, r := range rules {
 		if !r.Enabled {
 			continue
@@ -435,6 +498,11 @@ func (m *Manager) Evaluate(ctx context.Context) {
 		case "deployment", "build", "job":
 			if ferr == nil {
 				m.events(ctx, r, failures, services)
+			}
+			continue
+		case "database_failover":
+			if dberr == nil {
+				m.failovers(ctx, r, failovers, dbs)
 			}
 			continue
 		}
@@ -465,9 +533,15 @@ func (m *Manager) transition(ctx context.Context, r Rule, obs []observation, now
 			cur[o.key] = s
 		}
 		s.Label, s.Value, s.Message = o.label, o.value, o.message
-		if s.State == "pending" && now.Sub(s.Since) >= time.Duration(r.ForSeconds)*time.Second {
+		sent := r.ID + "/" + o.key
+		switch {
+		case s.State == "pending" && now.Sub(s.Since) >= time.Duration(r.ForSeconds)*time.Second:
 			s.State = "firing"
 			m.notify(ctx, r, "firing", *s)
+			m.setSent(sent, now)
+		case s.State == "firing" && r.RepeatHours > 0 && now.Sub(m.sentAt(sent, now)) >= time.Duration(r.RepeatHours)*time.Hour:
+			m.notify(ctx, r, "reminder", *s)
+			m.setSent(sent, now)
 		}
 		_ = m.st.PutAlertState(ctx, *s)
 	}
@@ -480,9 +554,29 @@ func (m *Manager) transition(ctx context.Context, r Rule, obs []observation, now
 			res.Message = "resolved: " + s.Message
 			m.notify(ctx, r, "resolved", res)
 		}
+		m.mu.Lock()
+		delete(m.lastSent, r.ID+"/"+key)
+		m.mu.Unlock()
 		delete(cur, key)
 		_ = m.st.DeleteAlertState(ctx, r.ID, key)
 	}
+}
+
+func (m *Manager) setSent(key string, at time.Time) {
+	m.mu.Lock()
+	m.lastSent[key] = at
+	m.mu.Unlock()
+}
+
+// sentAt is when an alert last notified (def when unknown).
+func (m *Manager) sentAt(key string, def time.Time) time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if t, ok := m.lastSent[key]; ok {
+		return t
+	}
+	m.lastSent[key] = def
+	return def
 }
 
 // notify records a notification and delivers it to the rule's channels in
@@ -513,7 +607,7 @@ func (m *Manager) notify(ctx context.Context, r Rule, kind string, s store.Alert
 			}
 			cfg, err := m.openConfig(c)
 			if err == nil {
-				err = Send(dctx, c.Type, cfg, n)
+				err = m.send(dctx, c.Type, cfg, n)
 			}
 			if err != nil {
 				results = append(results, c.Name+": "+err.Error())
@@ -596,7 +690,7 @@ func (m *Manager) observe(ctx context.Context, r Rule, services map[string]store
 	case "node":
 		return m.observeNodes(ctx)
 	}
-	return nil, fmt.Errorf("unknown rule type %s", r.Type)
+	return m.observeSystem(ctx, r)
 }
 
 func (m *Manager) observeMetric(ctx context.Context, r Rule, services map[string]store.Service) ([]observation, error) {
@@ -762,6 +856,18 @@ func (m *Manager) observeNodes(ctx context.Context) ([]observation, error) {
 		msg := "not reporting"
 		if n.LastSeenAt != nil {
 			msg += " since " + n.LastSeenAt.UTC().Format(time.RFC3339)
+		}
+		// Its tasks are replaced on other nodes (node failover).
+		if tasks, err := m.st.NodeTasks(ctx, n.ID); err == nil {
+			lost := 0
+			for _, t := range tasks {
+				if t.Desired == store.TaskLost {
+					lost++
+				}
+			}
+			if lost > 0 {
+				msg += fmt.Sprintf("; %d tasks were replaced on other nodes", lost)
+			}
 		}
 		out = append(out, observation{key: n.ID, label: "node " + n.Name, message: msg})
 	}

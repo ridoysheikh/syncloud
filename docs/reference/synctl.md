@@ -28,7 +28,7 @@
 | **Networking** | `sg apply/get/list/delete/check/service`, `firewall apply/get/list/delete/effective/counters/drops`, `middlewares apply/list/delete`, `traefik settings`, `network`, `domain get/set`, `certificates list/renew` |
 | **Observability** | `metrics`, `traffic`, `requests`, `health services/incidents`, `alerts rules/channels/active/events`, `audit` |
 | **Access** | `iam users/groups/roles/policies/attach/detach/attachments/simulate/actions/access-keys/tokens/mfa/password/settings`, `sts assume-role` |
-| **Cluster** | `nodes list/join-tokens/cordon/drain/delete/rejoin-command/shell/metrics/upgrade-agents`, `pools …`, `system health/tasks/upgrade`, `backups config/run/list/download/recovery-key`, `integrations git …`, `integrations git-server …` |
+| **Cluster** | `nodes list/join-tokens/cordon/drain/delete/rejoin-command/shell/metrics/upgrade-agents`, `pools …`, `system health/tasks/upgrade`, `backups config/run/list/download/recovery-key`, `settings branding/smtp`, `integrations git …`, `integrations git-server …` |
 | **Anything else** | `api METHOD PATH [-d BODY]` sends a signed request to any endpoint |
 
 Every API operation has a synctl command. A test in the repository keeps the two in step.

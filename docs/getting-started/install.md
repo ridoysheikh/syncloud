@@ -67,14 +67,16 @@ Open the dashboard URL. The setup page asks for:
 
 - the setup token;
 - the last 6 characters of the recovery key, to prove you saved it;
+- the **workspace name**, and optionally a browser title and a logo ([branding](../guides/monitoring.md#workspace-branding)): all can be changed later under **Settings → General**;
 - an email and password for the **root account**.
 
 The root account bypasses permission checks. For daily work, create normal users under **IAM** ([Access control](../guides/access-control.md)).
 
-## Two things to do next
+## Three things to do next
 
 1. **Settings → Backups:** add an S3 destination. The header shows a warning until backups run ([Backup and restore](../operations/backup-restore.md)).
-2. **Compute → Nodes → Add node:** join your other servers ([Add nodes](add-nodes.md)).
+2. **Settings → Email:** add an SMTP server. Built-in alerts (node offline, overload, database failover, failing backups…) email the root account once it is set ([Alerts](../guides/monitoring.md#alerts)).
+3. **Compute → Nodes → Add node:** join your other servers ([Add nodes](add-nodes.md)).
 
 A single server works too: the controller is also a node. By default it doesn't take general workloads, but a project can be [allowed to use it](../operations/nodes-and-pools.md#which-nodes-a-project-may-use).
 

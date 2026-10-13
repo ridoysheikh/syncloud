@@ -14,6 +14,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/alerts"
 	"github.com/ridoysheikh/syncloud/internal/autoscale"
 	"github.com/ridoysheikh/syncloud/internal/backup"
+	"github.com/ridoysheikh/syncloud/internal/branding"
 	"github.com/ridoysheikh/syncloud/internal/builds"
 	"github.com/ridoysheikh/syncloud/internal/certs"
 	"github.com/ridoysheikh/syncloud/internal/dbs"
@@ -69,6 +70,7 @@ type Server struct {
 	certs                 *certs.Manager
 	acme                  ACMEInfo
 	onSetup               func()
+	branding              *branding.Manager
 	backups               *backup.Manager
 	mesh                  *mesh.Manager
 	downloadsDir          string
@@ -200,6 +202,8 @@ type Options struct {
 	Bus                   *events.Bus
 	Log                   *slog.Logger
 	Web                   fs.FS
+	// Branding is the workspace name, title and logo (Phase 21); may be nil.
+	Branding *branding.Manager
 	// Now is overridable for tests.
 	Now func() time.Time
 }
@@ -222,6 +226,7 @@ func New(o Options) *Server {
 		certs:                 o.Certs,
 		acme:                  o.ACME,
 		onSetup:               o.OnSetup,
+		branding:              o.Branding,
 		backups:               o.Backups,
 		mesh:                  o.Mesh,
 		downloadsDir:          o.DownloadsDir,
@@ -287,6 +292,10 @@ type Route struct {
 func (s *Server) Routes() []Route {
 	return []Route{
 		{Method: "GET", Path: "/api/v1/system/status", Public: true, h: s.handleStatus},
+		{Method: "GET", Path: "/api/v1/branding", Public: true, h: s.handleGetBranding},
+		{Method: "PUT", Path: "/api/v1/branding", h: s.handleSetBranding},
+		{Method: "PUT", Path: "/api/v1/branding/logo", h: s.handleSetBrandingLogo},
+		{Method: "DELETE", Path: "/api/v1/branding/logo", h: s.handleDeleteBrandingLogo},
 		{Method: "GET", Path: "/api/v1/openapi.json", Public: true, h: handleOpenAPI},
 		{Method: "GET", Path: "/api/v1/system/tasks", h: s.handleSystemTasks},
 		{Method: "GET", Path: "/api/v1/registry/token", Public: true, h: s.handleRegistryToken},
@@ -557,7 +566,12 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/alerts/rules", h: s.handleCreateAlertRule},
 		{Method: "PUT", Path: "/api/v1/alerts/rules/{id}", h: s.handleUpdateAlertRule},
 		{Method: "DELETE", Path: "/api/v1/alerts/rules/{id}", h: s.handleDeleteAlertRule},
+		{Method: "POST", Path: "/api/v1/alerts/rules/defaults", h: s.handleRestoreAlertDefaults},
 		{Method: "GET", Path: "/api/v1/alerts/active", h: s.handleActiveAlerts},
+		{Method: "GET", Path: "/api/v1/settings/smtp", h: s.handleGetSMTP},
+		{Method: "PUT", Path: "/api/v1/settings/smtp", h: s.handleSetSMTP},
+		{Method: "DELETE", Path: "/api/v1/settings/smtp", h: s.handleDeleteSMTP},
+		{Method: "POST", Path: "/api/v1/settings/smtp/test", h: s.handleTestSMTP},
 		{Method: "GET", Path: "/api/v1/alerts/events", h: s.handleAlertEvents},
 		{Method: "GET", Path: "/api/v1/traffic", h: s.handleTraffic},
 		{Method: "GET", Path: "/api/v1/traffic/map", h: s.handleTrafficMap},
@@ -619,7 +633,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such endpoint")
 	})
-	mux.Handle("/", spaHandler(s.web))
+	mux.HandleFunc("GET /branding/{file}", s.handleBrandingFile)
+	mux.Handle("/", spaHandler(s.web, s.brandIndex))
 
 	return s.recoverPanics(s.logRequests(checkOrigin(securityHeaders(mux))))
 }

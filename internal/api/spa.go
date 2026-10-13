@@ -10,7 +10,7 @@ import (
 
 // spaHandler serves the built dashboard and falls back to index.html for
 // client-side routes. Hashed assets are cached forever; index.html never is.
-func spaHandler(web fs.FS) http.Handler {
+func spaHandler(web fs.FS, brand func([]byte) []byte) http.Handler {
 	files := http.FileServerFS(web)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -39,6 +39,6 @@ func spaHandler(web fs.FS) http.Handler {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
-		_, _ = w.Write(index)
+		_, _ = w.Write(brand(index))
 	})
 }

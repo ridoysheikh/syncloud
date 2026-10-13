@@ -406,6 +406,35 @@ func (s *Store) DatabaseEvents(ctx context.Context, databaseID string, limit int
 	return out, rows.Err()
 }
 
+// LastDatabaseEventID is the newest event's ID (0 = none).
+func (s *Store) LastDatabaseEventID(ctx context.Context) (int64, error) {
+	var id sql.NullInt64
+	err := s.R.QueryRowContext(ctx, `SELECT max(id) FROM database_events`).Scan(&id)
+	return id.Int64, err
+}
+
+// DatabaseEventsAfter returns events of a kind with IDs after afterID,
+// oldest first (for alerts).
+func (s *Store) DatabaseEventsAfter(ctx context.Context, kind string, afterID int64) ([]DatabaseEvent, error) {
+	rows, err := s.R.QueryContext(ctx, `SELECT id, database_id, at, kind, from_value, to_value, reason, actor FROM database_events
+		WHERE kind = ? AND id > ? ORDER BY id`, kind, afterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DatabaseEvent
+	for rows.Next() {
+		var e DatabaseEvent
+		var at int64
+		if err := rows.Scan(&e.ID, &e.DatabaseID, &at, &e.Kind, &e.From, &e.To, &e.Reason, &e.Actor); err != nil {
+			return nil, err
+		}
+		e.At = time.Unix(at, 0).UTC()
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) execOne(ctx context.Context, q string, args ...any) error {
 	res, err := s.W.ExecContext(ctx, q, args...)
 	if err != nil {
