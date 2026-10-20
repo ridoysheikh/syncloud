@@ -679,7 +679,25 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "list tasks", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": s.filterItems(r, items, itemServiceField)})
+	// Database members run on nodes too: they are listed with the
+	// databases the principal may see.
+	if s.databases != nil {
+		items = append(items, s.databases.Tasks(r.Context())...)
+	}
+	action, _ := r.Context().Value(authzActionKey).(string)
+	p, _ := principal(r.Context())
+	all := action == "" || p.isRoot() || s.can(r, action, "srn:syncloud:*")
+	out := []workload.TaskView{}
+	for _, t := range items {
+		res := serviceSRN(t.Project, t.Environment, t.Service)
+		if t.Kind == workload.KindDatabase {
+			res = databaseSRN(t.Project, t.Environment, t.Database)
+		}
+		if all || s.can(r, action, res) {
+			out = append(out, t)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
 func (s *Server) handleRestartTask(w http.ResponseWriter, r *http.Request) {

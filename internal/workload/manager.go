@@ -108,6 +108,7 @@ type Manager struct {
 	failures map[string][]time.Time // service -> recent task failures
 	routes   routeCache
 	progress sync.Map // deployment ID -> tasks of the new revision last seen serving
+	rebalancer
 }
 
 func NewManager(st *store.Store, gw *agentgw.Gateway, reg *nodes.Registry, netReady NetworkReady, bus *events.Bus, log *slog.Logger) *Manager {
@@ -122,7 +123,7 @@ func NewManager(st *store.Store, gw *agentgw.Gateway, reg *nodes.Registry, netRe
 }
 
 func (m *Manager) Hooks() agentgw.Hooks {
-	return agentgw.Hooks{OnConnect: m.onConnect, OnTaskStatus: m.onTaskStatus, OnTaskEvent: m.onTaskEvent}
+	return agentgw.Hooks{OnConnect: m.onConnect, OnTaskStatus: m.onTaskStatus, OnTaskEvent: m.onTaskEvent, OnHeartbeat: m.onHeartbeat}
 }
 
 // Enqueue schedules a reconcile of one service.
@@ -183,6 +184,7 @@ func (m *Manager) Run(ctx context.Context) {
 	t := time.NewTicker(resyncEvery)
 	defer t.Stop()
 	m.EnqueueAll()
+	go m.runRebalancer(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -324,6 +326,10 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 			old = append(old, t)
 			continue
 		}
+		if _, moving := m.moving.Load(t.ID); moving {
+			old = append(old, t) // the rebalancer started its replacement
+			continue
+		}
 		if t.Revision == sv.Revision {
 			current = append(current, t)
 		} else {
@@ -380,18 +386,14 @@ func (m *Manager) reconcile(ctx context.Context, serviceID string) {
 					break
 				}
 				placed++
-				t := store.Task{ID: auth.NewID(TaskIDPrefix), ServiceID: sv.ID, Revision: sv.Revision, NodeID: nodeID,
-					Desired: "running", State: store.TaskPending, CreatedAt: now.Truncate(time.Second)}
-				if err := m.st.CreateTask(ctx, t); err != nil {
-					m.log.Error("create task", "service", sv.ID, "err", err)
+				t, err := m.startTask(ctx, sv, spec, nodeID, now)
+				if err != nil {
 					break
 				}
-				m.publishTask(ctx, t)
 				if hasDep {
 					m.notes.Delete(dep.ID + "/unplaced")
 					m.deploymentLog(ctx, dep.ID, m.taskEntry(t, "task-placed", "info", fmt.Sprintf("scheduled task of revision %d (%s placement)", sv.Revision, placementName(spec)), now.UTC()))
 				}
-				m.sendRun(ctx, sv, spec, t)
 				current = append(current, t)
 				changed = true
 			}
@@ -638,9 +640,18 @@ func (m *Manager) backoff(serviceID string, now time.Time) time.Duration {
 // are about to free would stall the deploy. Spreading likewise counts only
 // tasks of that revision.
 func (m *Manager) place(ctx context.Context, spec Spec, serviceID string, rev int, platform bool) (string, string) {
-	all, err := m.st.ActiveTasks(ctx)
+	cands, err := m.candidates(ctx, spec, serviceID, rev, platform)
 	if err != nil {
 		return "", err.Error()
+	}
+	return Place(cands, spec.Resources, spec.Placement.Strategy)
+}
+
+// candidates is every node as Place sees it for a task of spec.
+func (m *Manager) candidates(ctx context.Context, spec Spec, serviceID string, rev int, platform bool) ([]Candidate, error) {
+	all, err := m.st.ActiveTasks(ctx)
+	if err != nil {
+		return nil, err
 	}
 	type usage struct {
 		cpu      float64 // reserved
@@ -717,7 +728,20 @@ func (m *Manager) place(ctx context.Context, spec Spec, serviceID string, rev in
 		}
 		cands = append(cands, c)
 	}
-	return Place(cands, spec.Resources, spec.Placement.Strategy)
+	return cands, nil
+}
+
+// startTask creates a task of sv's current revision on nodeID and sends it there.
+func (m *Manager) startTask(ctx context.Context, sv store.Service, spec Spec, nodeID string, now time.Time) (store.Task, error) {
+	t := store.Task{ID: auth.NewID(TaskIDPrefix), ServiceID: sv.ID, Revision: sv.Revision, NodeID: nodeID,
+		Desired: "running", State: store.TaskPending, CreatedAt: now.Truncate(time.Second)}
+	if err := m.st.CreateTask(ctx, t); err != nil {
+		m.log.Error("create task", "service", sv.ID, "err", err)
+		return t, err
+	}
+	m.publishTask(ctx, t)
+	m.sendRun(ctx, sv, spec, t)
+	return t, nil
 }
 
 func (m *Manager) setDesired(ctx context.Context, t store.Task, state string, now time.Time) {

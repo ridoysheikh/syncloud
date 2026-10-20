@@ -11,6 +11,7 @@ import { IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn } from "@/ui/cn";
 import { NodeLink } from "./nodes";
 import { ServiceLink } from "./services";
+import { DatabaseLink } from "./databases";
 
 export { TaskDots, taskCounts } from "./TaskDots";
 
@@ -173,7 +174,16 @@ export function TasksTable({
       (t) =>
         filters[filter](t) &&
         (!needle ||
-          [t.id, t.service, t.project, t.environment, t.node, t.ip]
+          [
+            t.id,
+            t.service,
+            t.database,
+            t.member,
+            t.project,
+            t.environment,
+            t.node,
+            t.ip,
+          ]
             .join(" ")
             .toLowerCase()
             .includes(needle)),
@@ -196,13 +206,16 @@ export function TasksTable({
   if (showService)
     columns.push({
       header: "Service",
-      cell: (t) => (
-        <ServiceLink
-          project={t.project}
-          environment={t.environment}
-          name={t.service}
-        />
-      ),
+      cell: (t) =>
+        t.kind === "database" ? (
+          <DatabaseLink task={t} />
+        ) : (
+          <ServiceLink
+            project={t.project}
+            environment={t.environment}
+            name={t.service}
+          />
+        ),
     });
   columns.push(
     {
@@ -219,11 +232,20 @@ export function TasksTable({
     },
     {
       header: "Health",
-      cell: (t) => <TaskHealth health={t.health} error={t.healthError} />,
+      cell: (t) =>
+        t.kind === "database" ? (
+          <span className="text-muted">{t.role || "—"}</span>
+        ) : (
+          <TaskHealth health={t.health} error={t.healthError} />
+        ),
     },
     {
       header: "Rev",
-      cell: (t) => <span className="text-muted">{t.revision}</span>,
+      cell: (t) => (
+        <span className="text-muted">
+          {t.kind === "database" ? "—" : t.revision}
+        </span>
+      ),
     },
   );
   if (showNode)
@@ -254,7 +276,8 @@ export function TasksTable({
     {
       header: "",
       cell: (t) =>
-        t.desired === "running" && (
+        t.desired === "running" &&
+        t.kind !== "database" && (
           <div className="flex">
             {t.state === "running" && (
               <IconButton label="Open a shell" onClick={() => setShell(t)}>

@@ -2,6 +2,17 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.2.6]
+
+### Added
+
+- **Tasks are rebalanced across nodes all the time, not only when they start.** Every 20 seconds the controller checks what each node really uses, and the number of tasks it runs. It moves one service task at a time:
+  - off a node that has stayed busy for a minute (75% of its CPU or 85% of its memory) to a node with room;
+  - from the node with the most tasks to the one with the fewest, while they differ by two or more. A new node takes its share of tasks without a redeploy.
+
+  A move starts the replacement first and stops the old task once the replacement serves, so there's no downtime. A move never puts more of one service's tasks on a node than before, and never makes the target node busy. Services that are deploying, pinned to nodes or placed with `binpack` aren't moved. There's at most one move a minute, and each service waits 10 minutes between moves. If a replacement doesn't serve within 10 minutes, the task stays where it was. The controller log records each move and why it was made.
+- **Database members show in the Tasks page and on node pages.** Each member is listed with its database, member name and role, and counts toward the node's tasks. Database members count as load when rebalancing but are never moved, because their data lives on their node.
+
 ## [0.2.5]
 
 ### Fixed

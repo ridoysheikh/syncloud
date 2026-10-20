@@ -63,7 +63,21 @@ type TaskView struct {
 	// ok, failing or unreachable ("" when not probed).
 	Central      string `json:"central,omitempty"`
 	CentralError string `json:"centralError,omitempty"`
+	// Kind is "service", or "database" for a database member: Database and
+	// Engine name it, Member is its name in the database (m0, s1…) and Role
+	// its part (primary, replica, sentinel).
+	Kind     string `json:"kind"`
+	Database string `json:"database,omitempty"`
+	Engine   string `json:"engine,omitempty"`
+	Member   string `json:"member,omitempty"`
+	Role     string `json:"role,omitempty"`
 }
+
+// Task kinds.
+const (
+	KindService  = "service"
+	KindDatabase = "database"
+)
 
 // CentralCheck returns the controller's probe state of a task (set by the
 // health monitor).
@@ -155,7 +169,7 @@ func (m *Manager) taskView(ctx context.Context, t store.Task) (TaskView, error) 
 	v := TaskView{
 		ID: t.ID, ServiceID: t.ServiceID, Revision: t.Revision, NodeID: t.NodeID, Desired: t.Desired, State: t.State,
 		IP: t.IP, ContainerID: t.ContainerID, Health: t.Health, ExitCode: t.ExitCode, Error: t.Error,
-		CreatedAt: t.CreatedAt, StartedAt: t.StartedAt, FinishedAt: t.FinishedAt,
+		CreatedAt: t.CreatedAt, StartedAt: t.StartedAt, FinishedAt: t.FinishedAt, Kind: KindService,
 	}
 	if n, ok := m.nodes.Get(t.NodeID); ok {
 		v.Node = n.Name

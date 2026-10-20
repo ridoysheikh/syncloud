@@ -198,6 +198,12 @@ export interface Task {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  /** "database" for a database member: database, engine, member and role name it. */
+  kind: "service" | "database";
+  database?: string;
+  engine?: string;
+  member?: string;
+  role?: string;
 }
 
 export interface Project {
@@ -311,6 +317,16 @@ export function useTasks(service?: { id: string; path: string }) {
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [qc, service?.id],
+  );
+  // Database members are listed with all tasks; they change with their database.
+  useEffect(
+    () =>
+      service
+        ? undefined
+        : subscribe("database.updated", () =>
+            qc.invalidateQueries({ queryKey: ["tasks"], exact: true }),
+          ),
+    [qc, service],
   );
   return useQuery({
     queryKey: key,

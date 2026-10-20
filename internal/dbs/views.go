@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ridoysheikh/syncloud/internal/store"
+	"github.com/ridoysheikh/syncloud/internal/workload"
 )
 
 // View is a database as the API shows it.
@@ -311,4 +312,38 @@ func (m *Manager) Events(ctx context.Context, id string, limit int, before strin
 		ev = []store.DatabaseEvent{}
 	}
 	return ev, err
+}
+
+// Tasks lists every database member as a task, for the Tasks page and node
+// pages: members run on nodes like service tasks and count as their load.
+func (m *Manager) Tasks(ctx context.Context) []workload.TaskView {
+	dbs, err := m.st.ListDatabases(ctx)
+	if err != nil {
+		return nil
+	}
+	members, err := m.st.AllDatabaseMembers(ctx)
+	if err != nil {
+		return nil
+	}
+	desired := map[string]string{}
+	for _, mb := range members {
+		desired[mb.ID] = mb.Desired
+	}
+	out := []workload.TaskView{}
+	for _, d := range dbs {
+		v := m.View(ctx, d)
+		for _, x := range v.Members {
+			des := desired[x.ID]
+			if des != "running" && (x.State == store.TaskStopped || x.State == store.TaskLost || x.State == store.TaskExited || x.State == store.TaskFailed) {
+				continue
+			}
+			since := x.Since
+			out = append(out, workload.TaskView{
+				ID: x.ID, Project: d.Project, Environment: d.Environment, NodeID: x.NodeID, Node: x.Node,
+				Desired: des, State: x.State, IP: x.IP, Error: x.Error, CreatedAt: x.Since, StartedAt: &since,
+				Kind: workload.KindDatabase, Database: d.Name, Engine: d.Engine, Member: x.Name, Role: x.Role,
+			})
+		}
+	}
+	return out
 }

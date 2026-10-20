@@ -42,6 +42,29 @@ const (
 // nor in use, whichever is more.
 func (c Candidate) FreeMemory() int { return c.MemoryMiB - max(c.ReservedMemory, c.UsedMemory) }
 
+// load is the share of the node's CPU in use.
+func (c Candidate) load() float64 {
+	if c.CPU <= 0 {
+		return 1
+	}
+	return c.CPULoad / c.CPU
+}
+
+// memoryShare is the share of the node's memory reserved or in use.
+func (c Candidate) memoryShare() float64 {
+	if c.MemoryMiB <= 0 {
+		return 1
+	}
+	return float64(max(c.ReservedMemory, c.UsedMemory)) / float64(c.MemoryMiB)
+}
+
+// busy reports a node near its limits: it takes new tasks only once the
+// others are too, and the rebalancer moves tasks off it. Below that, real
+// usage does not steer spreading: idle nodes differ in their baseline load
+// (the controller runs the platform, a bigger node shows a lower share), and
+// ranking by it sent every new service's first task to the same node.
+func (c Candidate) busy() bool { return c.load() >= busyCPU || c.memoryShare() >= busyMemory }
+
 // Place picks a node for one task (§5.3): filter, then score. It returns ""
 // and a reason when no node fits.
 //
@@ -69,20 +92,6 @@ func Place(cands []Candidate, r Resources, strategy string) (string, string) {
 		}
 		return "", fmt.Sprintf("no node fits (%s)", summarize(reasons))
 	}
-	load := func(c Candidate) float64 {
-		if c.CPU <= 0 {
-			return 1
-		}
-		return c.CPULoad / c.CPU
-	}
-	// A node near its limits takes new tasks only once the others are too.
-	// Below that, real usage does not steer spreading: idle nodes differ in
-	// their baseline load (the controller runs the platform, a bigger node
-	// shows a lower share), and ranking by it sent every new service's first
-	// task to the same node.
-	busy := func(c Candidate) bool {
-		return load(c) >= busyCPU || c.MemoryMiB > 0 && float64(max(c.ReservedMemory, c.UsedMemory)) >= busyMemory*float64(c.MemoryMiB)
-	}
 	sort.SliceStable(fit, func(i, j int) bool {
 		a, b := fit[i], fit[j]
 		if strategy == "binpack" {
@@ -94,7 +103,7 @@ func Place(cands []Candidate, r Resources, strategy string) (string, string) {
 			if a.ServiceRuns != b.ServiceRuns {
 				return a.ServiceRuns < b.ServiceRuns // spread the service across nodes
 			}
-			if ba, bb := busy(a), busy(b); ba != bb {
+			if ba, bb := a.busy(), b.busy(); ba != bb {
 				return bb
 			}
 			if a.TotalRuns != b.TotalRuns {
@@ -102,7 +111,7 @@ func Place(cands []Candidate, r Resources, strategy string) (string, string) {
 			}
 			// Then the node with the most CPU to spare, in 10% steps so
 			// noise in the load does not reshuffle similar nodes.
-			if la, lb := int(load(a)*10), int(load(b)*10); la != lb {
+			if la, lb := int(a.load()*10), int(b.load()*10); la != lb {
 				return la < lb
 			}
 		}
