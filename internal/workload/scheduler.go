@@ -31,6 +31,13 @@ func Allocatable(cores int, memoryBytes uint64) (float64, int) {
 	return max(cpu, 0), max(mem, 0)
 }
 
+// A node whose CPU or memory use is at least this share of what it can give
+// is busy: spreading skips it while another node is not.
+const (
+	busyCPU    = 0.75
+	busyMemory = 0.85
+)
+
 // FreeMemory is the memory a new task can have: what is neither reserved
 // nor in use, whichever is more.
 func (c Candidate) FreeMemory() int { return c.MemoryMiB - max(c.ReservedMemory, c.UsedMemory) }
@@ -68,6 +75,14 @@ func Place(cands []Candidate, r Resources, strategy string) (string, string) {
 		}
 		return c.CPULoad / c.CPU
 	}
+	// A node near its limits takes new tasks only once the others are too.
+	// Below that, real usage does not steer spreading: idle nodes differ in
+	// their baseline load (the controller runs the platform, a bigger node
+	// shows a lower share), and ranking by it sent every new service's first
+	// task to the same node.
+	busy := func(c Candidate) bool {
+		return load(c) >= busyCPU || c.MemoryMiB > 0 && float64(max(c.ReservedMemory, c.UsedMemory)) >= busyMemory*float64(c.MemoryMiB)
+	}
 	sort.SliceStable(fit, func(i, j int) bool {
 		a, b := fit[i], fit[j]
 		if strategy == "binpack" {
@@ -78,6 +93,12 @@ func Place(cands []Candidate, r Resources, strategy string) (string, string) {
 		} else {
 			if a.ServiceRuns != b.ServiceRuns {
 				return a.ServiceRuns < b.ServiceRuns // spread the service across nodes
+			}
+			if ba, bb := busy(a), busy(b); ba != bb {
+				return bb
+			}
+			if a.TotalRuns != b.TotalRuns {
+				return a.TotalRuns < b.TotalRuns // then the same number of tasks on each node
 			}
 			// Then the node with the most CPU to spare, in 10% steps so
 			// noise in the load does not reshuffle similar nodes.

@@ -62,6 +62,49 @@ func TestPlaceSharedAndReserved(t *testing.T) {
 	}
 }
 
+// Idle nodes get the same number of tasks whatever their baseline load; a
+// busy node gets new tasks only once every node is busy.
+func TestPlaceSpreadsEvenly(t *testing.T) {
+	cands := []Candidate{
+		{ID: "ctl", Name: "ctl", CPU: 3.9, MemoryMiB: 3600, CPULoad: 0.5, UsedMemory: 900, Eligible: true},
+		{ID: "w1", Name: "w1", CPU: 7.9, MemoryMiB: 7200, CPULoad: 0.1, UsedMemory: 400, Eligible: true},
+		{ID: "w2", Name: "w2", CPU: 1.9, MemoryMiB: 1800, CPULoad: 0.3, UsedMemory: 300, Eligible: true},
+	}
+	r := Resources{CPU: 0.1, Memory: 64}
+	for range 30 { // 30 one-task services, as a scheduler without load sees them
+		id, why := Place(cands, r, "spread")
+		if id == "" {
+			t.Fatal(why)
+		}
+		for i := range cands {
+			if cands[i].ID == id {
+				cands[i].TotalRuns++
+			}
+		}
+	}
+	for _, c := range cands {
+		if c.TotalRuns != 10 {
+			t.Errorf("%s got %d tasks, want 10", c.Name, c.TotalRuns)
+		}
+	}
+	// w1 is busy: the others take new tasks although it has fewer.
+	cands[1].TotalRuns, cands[1].CPULoad = 0, 7
+	if id, _ := Place(cands, r, "spread"); id == "w1" {
+		t.Error("spread picked the busy node")
+	}
+	cands[1].CPULoad, cands[1].UsedMemory = 0.1, 6500
+	if id, _ := Place(cands, r, "spread"); id == "w1" {
+		t.Error("spread picked a node short of memory")
+	}
+	// The service's own spread still comes first.
+	cands[1].UsedMemory = 400
+	cands[1].ServiceRuns = 1
+	cands[0].TotalRuns, cands[2].TotalRuns = 50, 50
+	if id, _ := Place(cands, r, "spread"); id == "w1" {
+		t.Error("spread put a second task of the service on the same node")
+	}
+}
+
 func TestCPUShares(t *testing.T) {
 	for _, c := range []struct {
 		r    Resources

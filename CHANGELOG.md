@@ -2,6 +2,16 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.2.5]
+
+### Fixed
+
+- **Tasks are spread evenly across nodes.** With the `spread` placement, once each node had the same number of the service's tasks, the node with the lowest CPU load won. On an idle cluster that was always the same node: idle nodes differ in their baseline load, since the controller runs the platform and a bigger node shows a lower share. So every new service's first task, and every job run, build and database member, went to one node. Spreading now evens out the number of tasks on each node, and CPU load only breaks ties. A node using 75% of its CPU or 85% of its memory is busy and takes new tasks only when every other node is busy too.
+
+### Upgrading
+
+- Tasks already running stay where they are. Redeploy a service to spread its tasks again.
+
 ## [0.2.4]
 
 ### Fixed
