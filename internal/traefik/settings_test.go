@@ -32,7 +32,9 @@ func TestSettingsValidate(t *testing.T) {
 
 func TestStaticArgsAreStable(t *testing.T) {
 	s := DefaultSettings()
-	if got := s.StaticArgs(); !slices.Equal(got, []string{"--log.level=INFO", "--serversTransport.forwardingTimeouts.dialTimeout=2s"}) {
+	if got := s.StaticArgs(); !slices.Equal(got, []string{"--log.level=INFO",
+		"--entrypoints.web.transport.respondingTimeouts.readTimeout=180s", "--entrypoints.websecure.transport.respondingTimeouts.readTimeout=180s",
+		"--serversTransport.forwardingTimeouts.dialTimeout=2s"}) {
 		t.Fatalf("defaults add flags: %v", got)
 	}
 	s.ReadTimeout, s.IdleTimeout, s.TrustedIPs, s.ProxyProtocol, s.HTTP3 = "120s", "5m", []string{"10.0.0.0/8"}, true, true
@@ -54,7 +56,9 @@ func TestStaticArgsAreStable(t *testing.T) {
 		}
 	}
 	base := []string{"--ping=true", "--log.level=INFO"}
-	if got := WithStatic(base, Settings{LogLevel: "DEBUG"}); !slices.Equal(got, []string{"--ping=true", "--log.level=DEBUG", "--serversTransport.forwardingTimeouts.dialTimeout=2s"}) {
+	if got := WithStatic(base, Settings{LogLevel: "DEBUG", ReadTimeout: "0s"}); !slices.Equal(got, []string{"--ping=true", "--log.level=DEBUG",
+		"--entrypoints.web.transport.respondingTimeouts.readTimeout=0s", "--entrypoints.websecure.transport.respondingTimeouts.readTimeout=0s",
+		"--serversTransport.forwardingTimeouts.dialTimeout=2s"}) {
 		t.Fatalf("WithStatic: %v", got)
 	}
 }

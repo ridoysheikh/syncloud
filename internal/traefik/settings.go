@@ -20,8 +20,9 @@ const SettingGlobal = "traefik.settings"
 type Settings struct {
 	// Static: entrypoints and proxy behaviour.
 	LogLevel string `json:"logLevel"` // DEBUG | INFO | WARN | ERROR
-	// Responding timeouts of the public entrypoints ("" = Traefik's default;
-	// "0s" disables the limit).
+	// Responding timeouts of the public entrypoints ("" = the default:
+	// DefaultReadTimeout, then Traefik's; "0s" disables the limit). The
+	// registry has its own entrypoint and RegistryReadTimeout.
 	ReadTimeout  string `json:"readTimeout"`
 	WriteTimeout string `json:"writeTimeout"`
 	IdleTimeout  string `json:"idleTimeout"`
@@ -50,6 +51,15 @@ type Settings struct {
 
 // DefaultDialTimeout bounds connecting to a task (over the private network).
 const DefaultDialTimeout = "2s"
+
+// DefaultReadTimeout bounds reading a whole request on the public
+// entrypoints (Traefik's own is 60s).
+const DefaultReadTimeout = "180s"
+
+// RegistryReadTimeout is the registry entrypoint's: a push sends each image
+// layer in one request, and a large layer over a slow link takes minutes
+// (cut off, the push fails with 499).
+const RegistryReadTimeout = "30m"
 
 // DefaultSettings are what a fresh install uses.
 func DefaultSettings() Settings {
@@ -137,8 +147,12 @@ func (s Settings) StaticArgs() []string {
 		level = "INFO"
 	}
 	args := []string{"--log.level=" + level}
+	read := s.ReadTimeout
+	if read == "" {
+		read = DefaultReadTimeout
+	}
 	for _, ep := range []string{"web", "websecure"} {
-		for k, v := range map[string]string{"readTimeout": s.ReadTimeout, "writeTimeout": s.WriteTimeout, "idleTimeout": s.IdleTimeout} {
+		for k, v := range map[string]string{"readTimeout": read, "writeTimeout": s.WriteTimeout, "idleTimeout": s.IdleTimeout} {
 			if v != "" {
 				args = append(args, fmt.Sprintf("--entrypoints.%s.transport.respondingTimeouts.%s=%s", ep, k, v))
 			}

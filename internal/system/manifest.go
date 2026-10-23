@@ -64,6 +64,11 @@ const GitServerTaskID = "sys-git"
 // RegistryAddr is where Traefik (host network) reaches the registry.
 const RegistryAddr = "127.0.0.1:5000"
 
+// RegistryEntrypointAddr is Traefik's loopback entrypoint for the registry:
+// connections to the registry host on 443 are passed to it, so pushes get
+// a longer read timeout than the public entrypoints.
+const RegistryEntrypointAddr = "127.0.0.1:5003"
+
 // RegistryCopyAddr is the temporary registry that images are copied into
 // while the registry switches storage (Phase 19); only the controller uses it.
 const RegistryCopyAddr = "127.0.0.1:5002"
@@ -202,6 +207,10 @@ func traefikSpec(c Config) *agentv1.TaskSpec {
 			"--entrypoints.websecure.address=" + c.HTTPSAddr,
 			"--entrypoints.websecure.http.tls=true",
 			"--entrypoints.admin.address=" + c.AdminAddr,
+			"--entrypoints.registry.address=" + RegistryEntrypointAddr,
+			"--entrypoints.registry.http.tls=true",
+			"--entrypoints.registry.proxyProtocol.trustedIPs=127.0.0.1/32",
+			"--entrypoints.registry.transport.respondingTimeouts.readTimeout=" + traefik.RegistryReadTimeout,
 			"--ping=true",
 			"--ping.entrypoint=admin",
 			"--metrics.prometheus=true",

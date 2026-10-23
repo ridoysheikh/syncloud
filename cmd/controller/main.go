@@ -764,7 +764,7 @@ func serve(args []string) error {
 	}
 	traefikProvider := &traefik.Provider{
 		Token: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: controllerURL,
-		RegistryURL: "http://" + system.RegistryAddr, BaseDomain: domains.Base, HTTPSPort: httpsPort,
+		RegistryURL: "http://" + system.RegistryAddr, RegistryEntrypoint: system.RegistryEntrypointAddr, BaseDomain: domains.Base, HTTPSPort: httpsPort,
 		ServiceRoutes: func() []traefik.ServiceRoute {
 			var out []traefik.ServiceRoute
 			for _, r := range workloads.Routes(context.Background(), domains.Base()) {

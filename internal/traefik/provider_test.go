@@ -3,6 +3,7 @@ package traefik
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -250,5 +251,27 @@ func TestProbeTwins(t *testing.T) {
 	p.ProbeToken = ""
 	if _, ok := p.Config().HTTP.Routers["svc-svc_ab12-http_probe"]; ok {
 		t.Error("a probe twin without a token")
+	}
+}
+
+func TestRegistryEntrypoint(t *testing.T) {
+	p := &Provider{ControllerURL: "http://127.0.0.1:7070", BaseDomain: func() string { return "example.com" },
+		RegistryURL: "http://127.0.0.1:5000", RegistryEntrypoint: "127.0.0.1:5003"}
+	c := p.Config()
+	if eps := c.HTTP.Routers["syncloud-registry"].EntryPoints; !slices.Equal(eps, []string{"registry"}) {
+		t.Errorf("registry router entrypoints %v", eps)
+	}
+	b, _ := json.Marshal(c.TCP)
+	for _, want := range []string{
+		`"rule":"HostSNI(` + "`registry.example.com`" + `)"`, `"tls":{"passthrough":true}`,
+		`{"address":"127.0.0.1:5003"}`, `"syncloud-registry-tls":{"proxyProtocol":{"version":1}}`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("missing %s in %s", want, b)
+		}
+	}
+	edge, _ := json.Marshal(p.EdgeConfig())
+	if strings.Contains(string(edge), RegistryRouteName) {
+		t.Errorf("edge config has the registry route: %s", edge)
 	}
 }

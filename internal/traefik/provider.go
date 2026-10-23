@@ -227,6 +227,10 @@ type Provider struct {
 	ControllerURL string
 	// RegistryURL is where Traefik reaches the registry ("" disables its route).
 	RegistryURL string
+	// RegistryEntrypoint is the address of Traefik's own registry entrypoint
+	// ("" serves the registry on websecure): TLS connections to the registry
+	// host on 443 are passed there, for its longer read timeout.
+	RegistryEntrypoint string
 	// BaseDomain returns the current base domain ("" until one is set, §5.0.2).
 	BaseDomain func() string
 	// HTTPSPort is the public HTTPS port when it is not 443 (development).
@@ -281,6 +285,10 @@ func IsProbe(name string) bool {
 // AgentRouteName is the TCP route that passes agent.<domain>:443 to the
 // agent gateway.
 const AgentRouteName = "syncloud-agent"
+
+// RegistryRouteName is the TCP route that passes registry.<domain>:443 to
+// the registry entrypoint.
+const RegistryRouteName = "syncloud-registry-tls"
 
 const (
 	svcController = "syncloud-controller"
@@ -434,8 +442,17 @@ func (p *Provider) Config() Dynamic {
 		Rule: "PathPrefix(`/`)", Priority: 1, EntryPoints: web, Middlewares: []string{"syncloud-to-dashboard"}, Service: svcController,
 	}
 	d.HTTP.Routers["syncloud-dashboard"] = Router{Rule: host(base), EntryPoints: websecure, Service: svcController, TLS: &RouterTLS{}}
+	var tcpRoutes []TCPRoute
 	if p.RegistryURL != "" {
-		d.HTTP.Routers["syncloud-registry"] = Router{Rule: host(registryHost), EntryPoints: websecure, Service: svcRegistry, TLS: &RouterTLS{}}
+		eps := websecure
+		if p.RegistryEntrypoint != "" {
+			// Only there: an HTTPS router for the host on websecure would take
+			// the connections ahead of the TCP route.
+			eps = []string{"registry"}
+			tcpRoutes = append(tcpRoutes, TCPRoute{Name: RegistryRouteName, Entrypoint: "websecure", Host: registryHost,
+				Servers: []string{p.RegistryEntrypoint}, Passthrough: true, ProxyProtocol: true})
+		}
+		d.HTTP.Routers["syncloud-registry"] = Router{Rule: host(registryHost), EntryPoints: eps, Service: svcRegistry, TLS: &RouterTLS{}}
 	}
 	if p.Certificates != nil {
 		d.TLS.Certificates = p.Certificates()
@@ -446,8 +463,9 @@ func (p *Provider) Config() Dynamic {
 		}
 	}
 	if p.TCPRoutes != nil {
-		d.TCP = tcpConfig(p.TCPRoutes())
+		tcpRoutes = append(tcpRoutes, p.TCPRoutes()...)
 	}
+	d.TCP = tcpConfig(tcpRoutes)
 	if p.UDPRoutes != nil {
 		d.UDP = udpConfig(p.UDPRoutes())
 	}
@@ -574,6 +592,7 @@ func (p *Provider) EdgeConfig() map[string]any {
 		for _, k := range []string{"routers", "services", "serversTransports"} {
 			if m, ok := t[k].(map[string]any); ok {
 				delete(m, AgentRouteName)
+				delete(m, RegistryRouteName)
 			}
 		}
 	}

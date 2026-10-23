@@ -24,7 +24,7 @@ These become Traefik command-line flags. Saving a change restarts every replica,
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| Read, write and idle timeouts | Traefik's: 60s, none, 180s | Of the public entrypoints. |
+| Read, write and idle timeouts | 180s, none, 180s | Of the public entrypoints. The read timeout covers a whole request, including its upload. The registry has its own entrypoint with a 30 minute read timeout, so pushes of large image layers aren't cut off. |
 | Trusted proxies | none | IPs or CIDRs whose `X-Forwarded-*` headers are kept. **Use Cloudflare ranges** fills in Cloudflare's published list. |
 | PROXY protocol | off | From trusted proxies only. |
 | HTTP/3 | off | Over UDP on the HTTPS port. |

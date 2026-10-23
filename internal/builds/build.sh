@@ -124,6 +124,20 @@ while IFS= read -r kv; do [ -n "$kv" ] && set -- "$@" --opt "build-arg:$kv"; don
 ${BUILD_VARS:-}
 EOF
 [ $# -eq 0 ] || step "build arguments: $(printf '%s\n' "${BUILD_VARS:-}" | sed 's/=.*//' | tr '\n' ' ')"
-exec buildctl-daemonless.sh build --progress=plain --frontend dockerfile.v0 \
-  --local context=. --local dockerfile="$dfdir" --opt filename="$dfname" \
-  --import-cache "$CACHE" --export-cache "$CACHE,mode=max" --output "$OUTPUT" "$@"
+# A push that fails on the way (a dropped connection, a proxy timeout) is
+# tried again: the layers are built already, so a retry only pushes.
+set -o pipefail
+attempt=1
+while :; do
+  if buildctl-daemonless.sh build --progress=plain --frontend dockerfile.v0 \
+    --local context=. --local dockerfile="$dfdir" --opt filename="$dfname" \
+    --import-cache "$CACHE" --export-cache "$CACHE,mode=max" --output "$OUTPUT" "$@" 2>&1 | tee /tmp/build.log; then
+    exit 0
+  fi
+  if [ "$attempt" -ge 3 ] || ! grep -qE 'error writing (layer )?blob|failed to (copy|push)|unexpected status from (PUT|POST|PATCH|HEAD) request|connection reset|broken pipe|i/o timeout' /tmp/build.log; then
+    exit 1
+  fi
+  attempt=$((attempt + 1))
+  step "pushing failed; trying again ($attempt of 3)"
+  sleep $((attempt * 5))
+done
