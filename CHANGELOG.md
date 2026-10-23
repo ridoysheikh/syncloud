@@ -2,7 +2,7 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
-## [0.2.7]
+## [0.2.8]
 
 ### Upgrading
 
@@ -10,9 +10,14 @@ All notable changes are listed here. Versions follow [semantic versioning](https
 
 ### Fixed
 
+- **Pushes of large image layers no longer fail with `499`.** Traefik stops reading a request after 60 seconds by default, and a push sends each image layer in one request. So a large layer over a slow link failed partway through, in Git builds and in `docker push`. Connections to the registry host on 443 now go to a registry-only Traefik entrypoint with a 30 minute read timeout. Other routes get a 180 second read timeout (it was 60 seconds). If a push still fails during a build, the build tries the push again up to 2 more times; the layers are already built, so a retry only pushes.
+
+## [0.2.7]
+
+### Fixed
+
 - **Deploying or redeploying a build that's already running now rolls it out.** Before, deploying the running build applied an unchanged spec, so nothing happened and no revision was made. Now it makes a new revision, restarts the tasks and resolves the image tag again.
 - **Registry logins are no longer rate limited after they succeed.** The registry token endpoint shared the dashboard's login limit of 10 requests per 5 minutes per IP, and it counted successful logins too. Docker asks for a token for each repository and action, so a CI job pushing a few images hit `429 Too Many Requests`. Now only failed registry logins count, with an allowance of 100 per 5 minutes per IP. Authenticated pulls and pushes are never limited.
-- **Pushes of large image layers no longer fail with `499`.** Traefik stops reading a request after 60 seconds by default, and a push sends each image layer in one request. So a large layer over a slow link failed partway through, in Git builds and in `docker push`. Connections to the registry host on 443 now go to a registry-only Traefik entrypoint with a 30 minute read timeout. Other routes get a 180 second read timeout (it was 60 seconds). If a push still fails during a build, the build tries the push again up to 2 more times; the layers are already built, so a retry only pushes.
 - **In a monorepo, one push webhook builds every service.** A webhook for any service now checks every service built from the same repository, so services you didn't add a webhook for no longer wait for their next poll. Path filters still decide which services build.
 
 ### Added
