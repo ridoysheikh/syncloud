@@ -36,12 +36,14 @@ func (s *Server) handleRegistryToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	if !s.loginLimiter.Allow(clientIP(r), now) {
-		writeError(w, http.StatusTooManyRequests, CodeRateLimited, "too many attempts, try again later")
+	ip := clientIP(r)
+	if s.registryLimiter.Blocked(ip, now) {
+		writeError(w, http.StatusTooManyRequests, CodeRateLimited, "too many failed registry logins, try again later")
 		return
 	}
 	u, credID, err := s.registryUser(r, user, pass, now)
 	if errors.Is(err, store.ErrNotFound) {
+		s.registryLimiter.Fail(ip, now)
 		s.audit(r, "", "registry:Login", "srn:syncloud:registry", map[string]any{"result": "denied", "username": user})
 		w.Header().Set("WWW-Authenticate", `Basic realm="SynCloud registry"`)
 		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "invalid registry credentials")

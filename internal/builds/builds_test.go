@@ -51,6 +51,11 @@ func TestBuildSpec(t *testing.T) {
 		t.Errorf("tag build output: %s %v", tagged.Env["OUTPUT"], err)
 	}
 
+	rebuilt, err := m.buildSpec(context.Background(), sv, g, store.Build{SHA: sha, Ref: "refs/heads/main", Image: "@registry/shop/web:" + sha[:12] + "-r1"})
+	if err != nil || !strings.Contains(rebuilt.Env["OUTPUT"], "registry.example.com/shop/web:"+sha[:12]+"-r1,") {
+		t.Errorf("rebuild output: %s %v", rebuilt.Env["OUTPUT"], err)
+	}
+
 	m.cfg.RegistryHost = func() string { return "" }
 	if _, err := m.buildSpec(context.Background(), sv, g, store.Build{SHA: sha}); err == nil {
 		t.Error("built without a registry host")
@@ -121,6 +126,21 @@ func TestDockerTag(t *testing.T) {
 	for in, want := range map[string]string{"feature/x": "feature-x", "v1.2.0": "v1.2.0", ".hidden": "hidden", "": "ref"} {
 		if got := dockerTag(in); got != want {
 			t.Errorf("dockerTag(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSameRepo(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"https://github.com/acme/mono.git", "https://github.com/Acme/mono", true},
+		{"https://github.com/acme/mono/", "https://github.com/acme/mono.git", true},
+		{"https://github.com/acme/mono", "https://github.com/acme/other", false},
+	} {
+		if got := sameRepo(c.a, c.b); got != c.want {
+			t.Errorf("sameRepo(%s, %s) = %v", c.a, c.b, got)
 		}
 	}
 }

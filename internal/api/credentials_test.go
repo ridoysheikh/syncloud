@@ -180,4 +180,19 @@ func TestRegistryTokenEndpoint(t *testing.T) {
 			t.Fatalf("%s: root not granted pull,push: %s", name, b)
 		}
 	}
+	// Successful logins are never limited (a CI pushing many images asks
+	// for many tokens); failed ones are.
+	for i := 0; i < 150; i++ {
+		if code, _ := get("anything", pat["token"].(string), q); code != 200 {
+			t.Fatalf("login %d: %d", i, code)
+		}
+	}
+	limited := false
+	for i := 0; i < 120 && !limited; i++ {
+		code, _ := get(key["id"].(string), "wrong-secret", q)
+		limited = code == http.StatusTooManyRequests
+	}
+	if !limited {
+		t.Fatal("failed registry logins were not limited")
+	}
 }

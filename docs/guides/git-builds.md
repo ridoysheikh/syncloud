@@ -36,6 +36,7 @@ Options for monorepos and releases:
 
 - `--context services/api`: build from a sub-folder.
 - `--path "services/api/**" --path "!services/api/docs/**"`: only commits that change these paths trigger a build.
+- One push webhook is enough for a monorepo: a webhook for any service checks every service built from the same repository.
 - `--branch "release/*"`: any matching branch. `--tags "v*"` also builds new tags.
 - `--no-auto-deploy`: build, but deploy each build by hand.
 
@@ -59,6 +60,9 @@ synctl builds list api -p shop          # status, commit, duration
 synctl builds run api -p shop --wait    # build the branch head now and stream the log
 synctl builds deploy BUILD_ID           # deploy a build by hand (or an older one)
 ```
+
+- **Rebuild** (or `synctl builds run --sha COMMIT`) builds a commit again, even one that already built. Use it after you change build settings or variables. A rebuild gets its own image tag (`<commit>-r1`, …), so earlier images stay deployable. Polls and webhooks build each commit once.
+- **Deploy** on a build that's already running is a redeploy: a new revision that restarts the tasks.
 
 - A build that succeeds is deployed as a new revision with the trigger **Git**, showing the commit and branch ([Deployments](deployments.md)).
 - If a newer commit of the same branch is already deployed, an older build isn't deployed over it.

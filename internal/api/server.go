@@ -119,6 +119,10 @@ type Server struct {
 	loginLimiter *attemptLimiter
 	setupLimiter *attemptLimiter
 	joinLimiter  *attemptLimiter
+	// registryLimiter counts failed registry logins only: Docker asks for a
+	// token per repository and action, so a CI pushing several images makes
+	// many requests in a row.
+	registryLimiter *attemptLimiter
 }
 
 type Options struct {
@@ -274,6 +278,7 @@ func New(o Options) *Server {
 		loginLimiter:          newAttemptLimiter(10, 5*time.Minute),
 		setupLimiter:          newAttemptLimiter(10, 5*time.Minute),
 		joinLimiter:           newAttemptLimiter(20, 5*time.Minute),
+		registryLimiter:       newAttemptLimiter(100, 5*time.Minute),
 	}
 	if o.Store != nil {
 		v, _, _ := o.Store.GetSetting(context.Background(), SettingRequireMFA)

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GitBranch, Hammer, Rocket, Unplug } from "lucide-react";
+import { GitBranch, Hammer, RefreshCw, Rocket, Unplug } from "lucide-react";
 import { usePaged } from "@/lib/paged";
 import { api, ApiError } from "@/lib/api";
 import { since } from "@/lib/nodes";
@@ -18,7 +18,7 @@ import {
 import { cn, gap } from "@/ui/cn";
 import { LogsView } from "@/modules/logs/LogsView";
 import { Link } from "@tanstack/react-router";
-import { serviceUrl } from "@/lib/workloads";
+import { servicePath, serviceUrl } from "@/lib/workloads";
 import {
   BranchInput,
   RepoPicker,
@@ -534,14 +534,28 @@ export function BuildsTable({
     mutationFn: (runId: string) => api("POST", `/runs/${runId}/cancel`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["builds"] }),
   });
+  // A rebuild of the same commit gets its own image tag: changed build
+  // settings or variables take effect, and earlier images stay deployable.
+  const rebuild = useMutation({
+    mutationFn: (b: Build) =>
+      api(
+        "POST",
+        `${servicePath({ project: b.project, environment: b.environment, name: b.service })}/builds`,
+        { ref: b.ref, sha: b.sha },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["builds"] }),
+  });
   const shown = data.find((b) => b.id === open);
   return (
     <>
       <Panel title="Builds" flush>
-        {(deploy.error || cancel.error) && (
+        {(deploy.error || cancel.error || rebuild.error) && (
           <div className="p-2">
             <Alert>
-              {errText(deploy.error ?? cancel.error, "Request failed")}
+              {errText(
+                deploy.error ?? cancel.error ?? rebuild.error,
+                "Request failed",
+              )}
             </Alert>
           </div>
         )}
@@ -664,7 +678,23 @@ export function BuildsTable({
                         )) && deploy.mutate(b.id)
                       }
                     >
-                      <Rocket className="size-3.5" /> Deploy
+                      <Rocket className="size-3.5" />{" "}
+                      {b.deployed ? "Redeploy" : "Deploy"}
+                    </Button>
+                  )}
+                  {(b.status === "succeeded" ||
+                    b.status === "failed" ||
+                    b.status === "skipped") && (
+                    <Button
+                      variant="ghost"
+                      disabled={rebuild.isPending}
+                      onClick={async () =>
+                        (await confirmAction(
+                          `Build ${b.sha.slice(0, 12)} again?`,
+                        )) && rebuild.mutate(b)
+                      }
+                    >
+                      <RefreshCw className="size-3.5" /> Rebuild
                     </Button>
                   )}
                 </span>

@@ -2,6 +2,18 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.2.7]
+
+### Fixed
+
+- **Deploying or redeploying a build that's already running now rolls it out.** Before, deploying the running build applied an unchanged spec, so nothing happened and no revision was made. Now it makes a new revision, restarts the tasks and resolves the image tag again.
+- **Registry logins are no longer rate limited after they succeed.** The registry token endpoint shared the dashboard's login limit of 10 requests per 5 minutes per IP, and it counted successful logins too. Docker asks for a token for each repository and action, so a CI job pushing a few images hit `429 Too Many Requests`. Now only failed registry logins count, with an allowance of 100 per 5 minutes per IP. Authenticated pulls and pushes are never limited.
+- **In a monorepo, one push webhook builds every service.** A webhook for any service now checks every service built from the same repository, so services you didn't add a webhook for no longer wait for their next poll. Path filters still decide which services build.
+
+### Added
+
+- **Rebuild any commit.** **Rebuild** on the Builds tab (or `synctl builds run`) builds a commit again, even if it has built successfully before. Use it after you change build settings or variables. Each rebuild gets its own image tag (`<commit>-r1`, `-r2`, …), so earlier images can still be deployed. Polls and webhooks still build each commit only once.
+
 ## [0.2.6]
 
 ### Added

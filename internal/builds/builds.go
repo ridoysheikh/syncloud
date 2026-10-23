@@ -410,10 +410,34 @@ func branchFound(refs map[string]string, g store.GitSource) error {
 	return fmt.Errorf("branch %s not found in the repository", g.Branch)
 }
 
-// Check asks for an immediate poll of a source after a push webhook.
+// Check asks for an immediate poll of a source after a push webhook, and
+// of every other source building the same repository: in a monorepo one
+// webhook serves all its services (path filters pick which ones build).
 func (m *Manager) Check(sourceID string) {
-	_ = m.st.RecordGitWebhook(context.Background(), sourceID, m.now())
+	ctx := context.Background()
+	_ = m.st.RecordGitWebhook(ctx, sourceID, m.now())
 	m.check(sourceID, "webhook")
+	g, err := m.st.GitSourceByID(ctx, sourceID)
+	if err != nil {
+		return
+	}
+	all, err := m.st.ListGitSources(ctx)
+	if err != nil {
+		return
+	}
+	for _, o := range all {
+		if o.ID != sourceID && sameRepo(o.URL, g.URL) {
+			m.check(o.ID, "webhook")
+		}
+	}
+}
+
+// sameRepo compares clone URLs, ignoring case, a trailing slash or ".git".
+func sameRepo(a, b string) bool {
+	norm := func(u string) string {
+		return strings.TrimSuffix(strings.TrimRight(strings.ToLower(u), "/"), ".git")
+	}
+	return norm(a) == norm(b)
 }
 
 func (m *Manager) check(sourceID, trigger string) {
@@ -572,17 +596,31 @@ func (m *Manager) token(ctx context.Context, g store.GitSource) string {
 	return string(b)
 }
 
-// enqueue records a build of sha; a commit is never built twice.
+// errBuilt: polls and webhooks build a commit once; rebuilds are by hand.
+var errBuilt = errors.New("commit already built")
+
+// enqueue records a build of sha. Automatic triggers skip a commit built
+// before; a manual build of one is a rebuild with its own image tag, so
+// the earlier image stays deployable.
 func (m *Manager) enqueue(ctx context.Context, g store.GitSource, ref, sha, base, trigger string) (store.Build, error) {
 	sv, err := m.st.ServiceByID(ctx, g.ServiceID)
 	if err != nil {
 		return store.Build{}, err
 	}
-	b := store.Build{ID: auth.NewID("bld_"), ServiceID: sv.ID, SHA: sha, Ref: ref, BaseSHA: base, Trigger: trigger, Status: BuildQueued,
-		Image: "@registry/" + Repository(sv) + ":" + sha[:12], CreatedAt: m.now().UTC().Truncate(time.Second)}
-	if err := m.st.CreateBuild(ctx, b); errors.Is(err, store.ErrNameTaken) {
+	n, err := m.st.BuildCount(ctx, sv.ID, sha)
+	if err != nil {
 		return store.Build{}, err
-	} else if err != nil {
+	}
+	if n > 0 && trigger != "manual" {
+		return store.Build{}, errBuilt
+	}
+	tag := sha[:12]
+	if n > 0 {
+		tag += fmt.Sprintf("-r%d", n)
+	}
+	b := store.Build{ID: auth.NewID("bld_"), ServiceID: sv.ID, SHA: sha, Ref: ref, BaseSHA: base, Trigger: trigger, Status: BuildQueued,
+		Image: "@registry/" + Repository(sv) + ":" + tag, CreatedAt: m.now().UTC().Truncate(time.Second)}
+	if err := m.st.CreateBuild(ctx, b); err != nil {
 		return store.Build{}, err
 	}
 	m.log.Info("build queued", "service", sv.Project+"/"+sv.Name, "sha", sha[:12], "trigger", trigger)
@@ -595,8 +633,10 @@ func (m *Manager) enqueue(ctx context.Context, g store.GitSource, ref, sha, base
 	return b, nil
 }
 
-// BuildNow queues a commit: the head of ref (a branch or tag name; ""
-// means the source's branch) or the given sha. Path filters do not apply.
+// BuildNow queues a commit: the head of ref (a branch or tag name, or a
+// full refs/heads/… or refs/tags/… ref; "" means the source's branch) or
+// the given sha. Path filters do not apply, and a commit built before is
+// built again (a rebuild picks up changed build settings and variables).
 func (m *Manager) BuildNow(ctx context.Context, sv store.Service, ref, sha string) (store.Build, error) {
 	g, err := m.st.GitSourceByService(ctx, sv.ID)
 	if err != nil {
@@ -608,10 +648,15 @@ func (m *Manager) BuildNow(ctx context.Context, sv store.Service, ref, sha strin
 		}
 		ref = g.Branch
 	}
+	fullRef := "refs/heads/" + ref
+	if name, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+		ref, fullRef = name, "refs/heads/"+name
+	} else if name, ok := strings.CutPrefix(ref, "refs/tags/"); ok {
+		ref, fullRef = name, "refs/tags/"+name
+	}
 	if err := gitremote.ValidatePattern(ref); err != nil || gitremote.IsPattern(ref) {
 		return store.Build{}, ErrInvalid{fmt.Errorf("invalid branch or tag %q", ref)}
 	}
-	fullRef := "refs/heads/" + ref
 	if sha == "" {
 		refs, err := gitremote.LsRemote(ctx, g.URL, m.token(ctx, g))
 		if err != nil {
@@ -628,11 +673,7 @@ func (m *Manager) BuildNow(ctx context.Context, sv store.Service, ref, sha strin
 	if len(sha) != 40 || strings.Trim(sha, "0123456789abcdef") != "" {
 		return store.Build{}, ErrInvalid{errors.New("sha must be a full 40-character commit hash")}
 	}
-	b, err := m.enqueue(ctx, g, fullRef, sha, "", "manual")
-	if errors.Is(err, store.ErrNameTaken) {
-		return store.Build{}, ErrInvalid{fmt.Errorf("commit %s was already built; redeploy that build instead", sha[:12])}
-	}
-	return b, err
+	return m.enqueue(ctx, g, fullRef, sha, "", "manual")
 }
 
 // Repository is the registry path for a service's images.
@@ -732,7 +773,11 @@ func (m *Manager) buildSpec(ctx context.Context, sv store.Service, g store.GitSo
 	auths[host] = map[string]string{"registrytoken": tok}
 	dockerCfg, _ := json.Marshal(map[string]any{"auths": auths})
 	image := host + "/" + repo
-	names := image + ":" + b.SHA[:12]
+	tag := b.SHA[:12]
+	if i := strings.LastIndexByte(b.Image, ':'); i > strings.LastIndexByte(b.Image, '/') {
+		tag = b.Image[i+1:] // a rebuild's own tag
+	}
+	names := image + ":" + tag
 	if name, ok := strings.CutPrefix(b.Ref, "refs/tags/"); ok {
 		names += "," + image + ":" + dockerTag(name)
 	} else {
@@ -961,7 +1006,9 @@ func (m *Manager) built(ctx context.Context, b store.Build) {
 	}
 }
 
-// Deploy rolls out a successful build's image as a new revision.
+// Deploy rolls out a successful build's image as a new revision, also when
+// that image is the one running (a redeploy: tasks restart and the tag is
+// resolved again).
 func (m *Manager) Deploy(ctx context.Context, b store.Build) error {
 	if b.Status != BuildSucceeded {
 		return ErrInvalid{errors.New("only succeeded builds can be deployed")}
@@ -973,6 +1020,10 @@ func (m *Manager) Deploy(ctx context.Context, b store.Build) error {
 	spec, err := m.wl.SpecFor(ctx, sv.ID, sv.Revision)
 	if err != nil {
 		return err
+	}
+	if spec.Image == b.Image {
+		spec.RedeployedAt = m.now().UTC().Format(time.RFC3339Nano)
+		ctx = workload.WithImageRefresh(ctx)
 	}
 	spec.Image = b.Image
 	_, _, err = m.wl.Apply(ctx, store.Environment{ID: sv.EnvironmentID}, sv.Name, spec, -1, "build:"+b.ID)

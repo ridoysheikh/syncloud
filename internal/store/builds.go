@@ -229,14 +229,18 @@ func scanBuild(r scanner) (Build, error) {
 	return b, err
 }
 
-// CreateBuild records a build; ErrNameTaken means this commit was built already.
+// CreateBuild records a build.
 func (s *Store) CreateBuild(ctx context.Context, b Build) error {
 	_, err := s.W.ExecContext(ctx, `INSERT INTO builds (id, service_id, sha, ref, trigger, status, image, created_at, base_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.ID, b.ServiceID, b.SHA, b.Ref, b.Trigger, b.Status, b.Image, b.CreatedAt.Unix(), b.BaseSHA)
-	if isUnique(err) {
-		return ErrNameTaken
-	}
 	return err
+}
+
+// BuildCount returns how many builds of a commit a service has.
+func (s *Store) BuildCount(ctx context.Context, serviceID, sha string) (int, error) {
+	var n int
+	err := s.R.QueryRowContext(ctx, `SELECT count(*) FROM builds WHERE service_id = ? AND sha = ?`, serviceID, sha).Scan(&n)
+	return n, err
 }
 
 func (s *Store) UpdateBuild(ctx context.Context, b Build) error {
