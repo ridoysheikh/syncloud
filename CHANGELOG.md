@@ -2,6 +2,16 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.2.9]
+
+### Added
+
+- **Edit variables as a `.env` file.** **Edit as .env** next to **Paste .env** opens all of a service's or environment's variables as `KEY=VALUE` lines. **Apply** replaces the variables with what's in the text, so you can add, change, rename and remove several at once. Values with line breaks still need to be edited one by one.
+
+### Fixed
+
+- **The variables editor uses the full width of the page.** It was capped at a fixed width, so long names and values were cut off on wide screens.
+
 ## [0.2.8]
 
 ### Upgrading

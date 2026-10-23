@@ -643,7 +643,7 @@ function ServiceVariables({
         </Button>
       }
     >
-      <div className="flex max-w-3xl flex-col gap-2">
+      <div className="flex flex-col gap-2">
         <p className="text-muted text-xs">
           This service's own variables. It also inherits the{" "}
           <Link to={projectTo} className="text-accent">

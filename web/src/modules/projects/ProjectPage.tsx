@@ -286,7 +286,7 @@ function SharedVariables({
         </Button>
       }
     >
-      <div className="flex max-w-3xl flex-col gap-2">
+      <div className="flex flex-col gap-2">
         <p className="text-muted text-xs">
           Every service in <span className="text-fg">{env}</span> gets these
           variables. A service's own variable with the same name wins. Saving

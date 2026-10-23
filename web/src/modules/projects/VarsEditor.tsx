@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { ClipboardPaste, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
+import {
+  ClipboardPaste,
+  Eye,
+  EyeOff,
+  FileText,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { Button, IconButton, Input } from "@/ui/controls";
 import { cn } from "@/ui/cn";
 
@@ -61,6 +68,18 @@ function parseDotenv(text: string): VarRow[] {
   return rows;
 }
 
+/** Writes rows as a .env file, quoting values parseDotenv would otherwise change. */
+function toDotenv(rows: VarRow[]): string {
+  return rows
+    .filter((r) => r.key.trim())
+    .map((r) => {
+      const v = r.value;
+      const quote = v !== v.trim() || /^["']/.test(v);
+      return `${r.key.trim()}=${quote ? `"${v}"` : v}`;
+    })
+    .join("\n");
+}
+
 /**
  * Key/value editor for environment variables. `inherited` lists variables
  * that come from elsewhere (the environment's shared variables) and shows
@@ -78,32 +97,42 @@ export function VarsEditor({
   inheritedLabel?: string;
 }) {
   const [reveal, setReveal] = useState(false);
-  const [pasting, setPasting] = useState(false);
-  const [paste, setPaste] = useState("");
+  // "paste" adds variables from a .env; "edit" replaces all rows with one.
+  const [mode, setMode] = useState<"" | "paste" | "edit">("");
+  const [text, setText] = useState("");
   const set = (i: number, patch: Partial<VarRow>) =>
     onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const own = new Set(rows.map((r) => r.key.trim()));
   const inheritedRows = toRows(inherited);
 
-  const applyPaste = () => {
-    const parsed = parseDotenv(paste);
+  // Values with line breaks can't be written as one .env line.
+  const multiline = rows.some((r) => r.key.trim() && r.value.includes("\n"));
+  const toggle = (m: "paste" | "edit") => {
+    setMode(mode === m ? "" : m);
+    setText(m === "edit" && mode !== m ? toDotenv(rows) : "");
+  };
+
+  const applyText = () => {
     const byKey = new Map(
-      rows.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r]),
+      (mode === "edit" ? [] : rows.filter((r) => r.key.trim())).map((r) => [
+        r.key.trim(),
+        r,
+      ]),
     );
-    for (const p of parsed) byKey.set(p.key, p);
+    for (const p of parseDotenv(text)) byKey.set(p.key, p);
     onChange([...byKey.values()]);
-    setPaste("");
-    setPasting(false);
+    setText("");
+    setMode("");
   };
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-1">
         <span className="text-faint text-xs">
           {rows.filter((r) => r.key.trim()).length} variable
           {rows.filter((r) => r.key.trim()).length === 1 ? "" : "s"}
         </span>
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           <Button
             variant="ghost"
             onClick={() => setReveal(!reveal)}
@@ -118,71 +147,99 @@ export function VarsEditor({
           </Button>
           <Button
             variant="ghost"
-            onClick={() => setPasting(!pasting)}
+            onClick={() => toggle("edit")}
+            disabled={multiline}
+            title={
+              multiline
+                ? "A value has line breaks; edit the variables one by one"
+                : undefined
+            }
             type="button"
           >
+            <FileText className="size-3.5" /> Edit as .env
+          </Button>
+          <Button variant="ghost" onClick={() => toggle("paste")} type="button">
             <ClipboardPaste className="size-3.5" /> Paste .env
           </Button>
         </div>
       </div>
-      {pasting && (
+      {mode && (
         <div className="flex flex-col gap-1.5">
           <textarea
-            value={paste}
-            onChange={(e) => setPaste(e.target.value)}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
             placeholder={"DATABASE_URL=postgres://…\nLOG_LEVEL=info"}
             spellCheck={false}
-            className="bg-bg border-line-strong h-32 w-full rounded-input border p-2 font-mono text-xs"
+            autoFocus
+            className={cn(
+              "bg-bg border-line-strong w-full rounded-input border p-2 font-mono text-xs",
+              mode === "edit" ? "h-64" : "h-32",
+            )}
           />
-          <div>
-            <Button type="button" onClick={applyPaste} disabled={!paste.trim()}>
-              Add variables
+          {mode === "edit" && (
+            <span className="text-faint text-xs">
+              Replaces all variables with these lines. Values are shown in plain
+              text.
+            </span>
+          )}
+          <div className="flex gap-1">
+            <Button
+              type="button"
+              onClick={applyText}
+              disabled={mode === "paste" && !text.trim()}
+            >
+              {mode === "edit" ? "Apply" : "Add variables"}
+            </Button>
+            <Button variant="ghost" type="button" onClick={() => setMode("")}>
+              Cancel
             </Button>
           </div>
         </div>
       )}
-      <div className="flex flex-col gap-1">
-        {rows.map((r, i) => (
-          <div
-            key={i}
-            className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] gap-1"
-          >
-            <Input
-              value={r.key}
-              onChange={(e) => set(i, { key: e.target.value })}
-              placeholder="NAME"
-              className={cn(
-                "h-7 font-mono text-xs",
-                r.key.trim() && !keyRE.test(r.key.trim()) && "border-bad",
-              )}
-            />
-            <Input
-              value={r.value}
-              onChange={(e) => set(i, { value: e.target.value })}
-              placeholder="value"
-              type={reveal ? "text" : "password"}
-              autoComplete="off"
-              className="h-7 font-mono text-xs"
-            />
-            <IconButton
-              label="Remove"
-              type="button"
-              onClick={() => onChange(rows.filter((_, j) => j !== i))}
+      {mode !== "edit" && (
+        <div className="flex flex-col gap-1">
+          {rows.map((r, i) => (
+            <div
+              key={i}
+              className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] gap-1"
             >
-              <Trash2 className="size-3.5" />
-            </IconButton>
+              <Input
+                value={r.key}
+                onChange={(e) => set(i, { key: e.target.value })}
+                placeholder="NAME"
+                className={cn(
+                  "h-7 font-mono text-xs",
+                  r.key.trim() && !keyRE.test(r.key.trim()) && "border-bad",
+                )}
+              />
+              <Input
+                value={r.value}
+                onChange={(e) => set(i, { value: e.target.value })}
+                placeholder="value"
+                type={reveal ? "text" : "password"}
+                autoComplete="off"
+                className="h-7 font-mono text-xs"
+              />
+              <IconButton
+                label="Remove"
+                type="button"
+                onClick={() => onChange(rows.filter((_, j) => j !== i))}
+              >
+                <Trash2 className="size-3.5" />
+              </IconButton>
+            </div>
+          ))}
+          <div>
+            <Button
+              variant="ghost"
+              type="button"
+              onClick={() => onChange([...rows, { key: "", value: "" }])}
+            >
+              <Plus className="size-3.5" /> Add variable
+            </Button>
           </div>
-        ))}
-        <div>
-          <Button
-            variant="ghost"
-            type="button"
-            onClick={() => onChange([...rows, { key: "", value: "" }])}
-          >
-            <Plus className="size-3.5" /> Add variable
-          </Button>
         </div>
-      </div>
+      )}
       {inheritedRows.length > 0 && (
         <div className="border-line flex flex-col gap-0.5 border-t pt-2">
           <span className="text-muted text-xs">{inheritedLabel} variables</span>
