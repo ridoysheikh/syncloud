@@ -1819,3 +1819,172 @@ func (c *Client) CheckImage(ctx context.Context, project, env, service string) (
 	var out ImageUpdate
 	return out, c.Do(ctx, "POST", svcPath(project, env, service)+"/auto-deploy/check", nil, &out)
 }
+
+// FirewallSSH is the built-in SSH access of every node (Phase 24).
+type FirewallSSH struct {
+	Ports      []int    `json:"ports"`
+	Sources    []string `json:"sources"`
+	Rate       int      `json:"rate"`
+	Burst      int      `json:"burst"`
+	Exempt     []string `json:"exempt"`
+	AutoBan    bool     `json:"autoBan"`
+	BanMinutes int      `json:"banMinutes"`
+}
+
+func (c *Client) GetFirewallSSH(ctx context.Context) (FirewallSSH, error) {
+	var out FirewallSSH
+	return out, c.Do(ctx, "GET", "/api/v1/firewall/ssh", nil, &out)
+}
+
+func (c *Client) SetFirewallSSH(ctx context.Context, s FirewallSSH) (FirewallSSH, error) {
+	var out FirewallSSH
+	return out, c.Do(ctx, "PUT", "/api/v1/firewall/ssh", s, &out)
+}
+
+// FirewallBlock is a source every node's firewall (or one node's) drops.
+type FirewallBlock struct {
+	ID        string     `json:"id"`
+	Source    string     `json:"source"`
+	Node      string     `json:"node"`
+	Reason    string     `json:"reason"`
+	CreatedBy string     `json:"createdBy"`
+	Auto      bool       `json:"auto"`
+	CreatedAt time.Time  `json:"createdAt"`
+	ExpiresAt *time.Time `json:"expiresAt"`
+}
+
+func (c *Client) ListFirewallBlocks(ctx context.Context, node string) ([]FirewallBlock, error) {
+	var out list[FirewallBlock]
+	q := ""
+	if node != "" {
+		q = "?node=" + url.QueryEscape(node)
+	}
+	return out.Items, c.Do(ctx, "GET", "/api/v1/firewall/blocks"+q, nil, &out)
+}
+
+// CreateFirewallBlock blocks a source (minutes 0 = until removed).
+func (c *Client) CreateFirewallBlock(ctx context.Context, source, node string, minutes int, reason string, force bool) (FirewallBlock, error) {
+	var out FirewallBlock
+	return out, c.Do(ctx, "POST", "/api/v1/firewall/blocks", map[string]any{"source": source, "node": node, "minutes": minutes, "reason": reason, "force": force}, &out)
+}
+
+func (c *Client) DeleteFirewallBlock(ctx context.Context, id string) error {
+	return c.Do(ctx, "DELETE", "/api/v1/firewall/blocks/"+url.PathEscape(id), nil, nil)
+}
+
+// NodeFirewall is a node's firewall at a glance.
+type NodeFirewall struct {
+	Enabled bool   `json:"enabled"`
+	Node    string `json:"node"`
+	Rules   []struct {
+		ID          string   `json:"id"`
+		Kind        string   `json:"kind"`
+		Protocol    string   `json:"protocol"`
+		Ports       string   `json:"ports"`
+		Sources     []string `json:"sources"`
+		Description string   `json:"description"`
+		Packets     uint64   `json:"packets"`
+	} `json:"rules"`
+	SSHPorts  []int `json:"sshPorts"`
+	Listeners []struct {
+		Protocol string `json:"protocol"`
+		Address  string `json:"address"`
+		Port     int    `json:"port"`
+		Process  string `json:"process"`
+		Verdict  string `json:"verdict"`
+		Rule     string `json:"rule"`
+	} `json:"listeners"`
+	Blocks []FirewallBlock `json:"blocks"`
+	Drops  []struct {
+		At        time.Time `json:"at"`
+		Src       string    `json:"src"`
+		Protocol  string    `json:"protocol"`
+		Port      int       `json:"port"`
+		Packets   uint64    `json:"packets"`
+		Direction string    `json:"direction"`
+	} `json:"drops"`
+}
+
+func (c *Client) GetNodeFirewall(ctx context.Context, nodeID string) (NodeFirewall, error) {
+	var out NodeFirewall
+	return out, c.Do(ctx, "GET", "/api/v1/nodes/"+url.PathEscape(nodeID)+"/firewall", nil, &out)
+}
+
+// ProtectionSpec is a project's traffic protection (Phase 25).
+type ProtectionSpec struct {
+	Enabled   bool `json:"enabled"`
+	RateLimit struct {
+		Average int    `json:"average"`
+		Burst   int    `json:"burst"`
+		Period  string `json:"period"`
+	} `json:"rateLimit"`
+	ClientIP struct {
+		Source string `json:"source"`
+		Depth  int    `json:"depth"`
+		Header string `json:"header"`
+	} `json:"clientIp"`
+	MaxConcurrent int      `json:"maxConcurrent"`
+	MaxBodyMB     int      `json:"maxBodyMb"`
+	Block         []string `json:"block"`
+	Bypass        struct {
+		IPs       []string `json:"ips"`
+		Header    string   `json:"header"`
+		HasSecret bool     `json:"hasSecret"`
+		Paths     []string `json:"paths"`
+	} `json:"bypass"`
+	Redis struct {
+		DatabaseID string `json:"databaseId"`
+	} `json:"redis"`
+	Guard struct {
+		Rate           int `json:"rate"`
+		Burst          int `json:"burst"`
+		MaxConnections int `json:"maxConnections"`
+		BanMinutes     int `json:"banMinutes"`
+	} `json:"guard"`
+}
+
+type ProjectProtection struct {
+	Project string         `json:"project"`
+	Spec    ProtectionSpec `json:"spec"`
+	Redis   struct {
+		Name     string `json:"name"`
+		Health   string `json:"health"`
+		Active   bool   `json:"active"`
+		Fallback bool   `json:"fallback"`
+	} `json:"redis"`
+	Valkeys []struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Environment string `json:"environment"`
+		Health      string `json:"health"`
+	} `json:"valkeys"`
+	OwnNodes bool `json:"ownNodes"`
+	Stats    *struct {
+		Limited float64 `json:"limited"`
+		Blocked float64 `json:"blocked"`
+		Total   float64 `json:"total"`
+	} `json:"stats"`
+	Secret string `json:"secret"`
+}
+
+func (c *Client) GetProjectProtection(ctx context.Context, project string) (ProjectProtection, error) {
+	var out ProjectProtection
+	return out, c.Do(ctx, "GET", "/api/v1/projects/"+url.PathEscape(project)+"/protection", nil, &out)
+}
+
+// SetProjectProtection saves a spec; extra carries secret, generateSecret or clearSecret.
+func (c *Client) SetProjectProtection(ctx context.Context, project string, s ProtectionSpec, extra map[string]any) (ProjectProtection, error) {
+	body := map[string]any{}
+	b, _ := json.Marshal(s)
+	_ = json.Unmarshal(b, &body)
+	for k, v := range extra {
+		body[k] = v
+	}
+	var out ProjectProtection
+	return out, c.Do(ctx, "PUT", "/api/v1/projects/"+url.PathEscape(project)+"/protection", body, &out)
+}
+
+func (c *Client) CreateProtectionValkey(ctx context.Context, project, env string) (ProjectProtection, error) {
+	var out ProjectProtection
+	return out, c.Do(ctx, "POST", "/api/v1/projects/"+url.PathEscape(project)+"/protection/valkey", map[string]any{"environment": env}, &out)
+}

@@ -11,6 +11,7 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { DropLogPanel } from "./SecurityGroups";
+import { BlocksPanel, SSHAccessPanel } from "./HostFirewall";
 import { NodePicker } from "@/entities/nodes";
 import { ChoiceCards, ChoiceField } from "@/ui/choice";
 import { confirmAction } from "@/ui/dialogs";
@@ -128,6 +129,8 @@ export function FirewallPage() {
           ]}
         />
       </Panel>
+      <SSHAccessPanel />
+      <BlocksPanel />
       <EffectiveRules nodes={nodes.data ?? []} />
       <DropLogPanel />
     </div>

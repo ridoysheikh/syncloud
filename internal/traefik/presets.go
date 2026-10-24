@@ -24,12 +24,32 @@ type RateLimit struct {
 	Burst           int              `json:"burst"`
 	Period          string           `json:"period,omitempty"`
 	SourceCriterion *SourceCriterion `json:"sourceCriterion,omitempty"`
+	// Redis shares the counters between Traefik replicas (Phase 25).
+	Redis *RateLimitRedis `json:"redis,omitempty"`
 }
 
+// RateLimitRedis is where a rate limit keeps its counters.
+type RateLimitRedis struct {
+	Endpoints []string `json:"endpoints"`
+	Password  string   `json:"password,omitempty"`
+	DB        int      `json:"db"`
+}
+
+// SourceCriterion says how a client is told apart: by its address (the
+// connection's, or X-Forwarded-For at a depth) or by a request header.
 type SourceCriterion struct {
-	IPStrategy struct {
-		Depth int `json:"depth"`
-	} `json:"ipStrategy"`
+	IPStrategy        *IPStrategy `json:"ipStrategy,omitempty"`
+	RequestHeaderName string      `json:"requestHeaderName,omitempty"`
+}
+
+type IPStrategy struct {
+	Depth int `json:"depth"`
+}
+
+// InFlightReq caps a client's concurrent requests.
+type InFlightReq struct {
+	Amount          int              `json:"amount"`
+	SourceCriterion *SourceCriterion `json:"sourceCriterion,omitempty"`
 }
 
 type BasicAuth struct {
@@ -317,7 +337,7 @@ func RenderPreset(typ string, raw json.RawMessage) (Middleware, error) {
 		if err := json.Unmarshal(raw, &c); err != nil {
 			return Middleware{}, err
 		}
-		return Middleware{RateLimit: &RateLimit{Average: c.Average, Burst: c.Burst, Period: "1s", SourceCriterion: &SourceCriterion{}}}, nil
+		return Middleware{RateLimit: &RateLimit{Average: c.Average, Burst: c.Burst, Period: "1s", SourceCriterion: &SourceCriterion{IPStrategy: &IPStrategy{}}}}, nil
 	case "basic-auth":
 		var c basicAuthConfig
 		if err := json.Unmarshal(raw, &c); err != nil {

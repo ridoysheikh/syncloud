@@ -27,8 +27,10 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/gitconn"
 	"github.com/ridoysheikh/syncloud/internal/gitserver"
 	"github.com/ridoysheikh/syncloud/internal/health"
+	"github.com/ridoysheikh/syncloud/internal/hostfw"
 	"github.com/ridoysheikh/syncloud/internal/ingress"
 	"github.com/ridoysheikh/syncloud/internal/jobs"
+	"github.com/ridoysheikh/syncloud/internal/lbprotect"
 	"github.com/ridoysheikh/syncloud/internal/logs"
 	"github.com/ridoysheikh/syncloud/internal/mesh"
 	"github.com/ridoysheikh/syncloud/internal/metrics"
@@ -99,6 +101,8 @@ type Server struct {
 	pools                 *nodepool.Manager
 	edges                 *edge.Manager
 	ingress               *ingress.Manager
+	hostFW                *hostfw.Manager
+	protection            *lbprotect.Manager
 	upgrades              *upgrade.Service
 	s3                    *s3.Manager
 	agentRollout          *rollout.Manager
@@ -196,6 +200,8 @@ type Options struct {
 	Pools            *nodepool.Manager
 	Edges            *edge.Manager
 	Ingress          *ingress.Manager
+	HostFirewall     *hostfw.Manager
+	Protection       *lbprotect.Manager
 	Upgrades         *upgrade.Service
 	S3               *s3.Manager
 	AgentRollout     *rollout.Manager
@@ -264,6 +270,8 @@ func New(o Options) *Server {
 		pools:                 o.Pools,
 		edges:                 o.Edges,
 		ingress:               o.Ingress,
+		hostFW:                o.HostFirewall,
+		protection:            o.Protection,
 		upgrades:              o.Upgrades,
 		s3:                    o.S3,
 		startedAt:             time.Now(),
@@ -450,6 +458,9 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/projects/{project}/ingress", h: s.handleGetProjectIngress},
 		{Method: "PUT", Path: "/api/v1/projects/{project}/ingress", h: s.handleSetProjectIngress},
 		{Method: "POST", Path: "/api/v1/projects/{project}/ingress/cut-over", h: s.handleCutOverProjectIngress},
+		{Method: "GET", Path: "/api/v1/projects/{project}/protection", h: s.handleGetProjectProtection},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/protection", h: s.handleSetProjectProtection},
+		{Method: "POST", Path: "/api/v1/projects/{project}/protection/valkey", h: s.handleCreateProtectionValkey},
 		{Method: "GET", Path: "/api/v1/databases", h: s.handleListAllDatabases},
 		{Method: "POST", Path: "/api/v1/databases", h: s.handleCreateDatabase},
 		{Method: "GET", Path: "/api/v1/databases/engines", h: s.handleListDatabaseEngines},
@@ -604,6 +615,12 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/firewall/nodes/{id}/effective", h: s.handleEffectiveFirewall},
 		{Method: "GET", Path: "/api/v1/firewall/drops", h: s.handleFirewallDrops},
 		{Method: "GET", Path: "/api/v1/firewall/counters", h: s.handleFirewallCounters},
+		{Method: "GET", Path: "/api/v1/firewall/ssh", h: s.handleGetFirewallSSH},
+		{Method: "PUT", Path: "/api/v1/firewall/ssh", h: s.handleSetFirewallSSH},
+		{Method: "GET", Path: "/api/v1/firewall/blocks", h: s.handleListFirewallBlocks},
+		{Method: "POST", Path: "/api/v1/firewall/blocks", h: s.handleCreateFirewallBlock},
+		{Method: "DELETE", Path: "/api/v1/firewall/blocks/{id}", h: s.handleDeleteFirewallBlock},
+		{Method: "GET", Path: "/api/v1/nodes/{id}/firewall", h: s.handleNodeFirewall},
 		{Method: "GET", Path: "/api/v1/security-groups", h: s.handleListAllSecurityGroups},
 		{Method: "GET", Path: "/api/v1/projects/{project}/security-groups", h: s.handleListSecurityGroups},
 		{Method: "POST", Path: "/api/v1/projects/{project}/security-groups", h: s.handleCreateSecurityGroup},

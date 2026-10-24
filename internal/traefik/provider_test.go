@@ -339,3 +339,49 @@ func TestProjectIngressScopes(t *testing.T) {
 		t.Errorf("a node no project chose serves %v", other)
 	}
 }
+
+// A protected route gets a bypass twin (without the limits) and a deny twin
+// (403) ranked right above it, and the body limit on every request (Phase 25).
+func TestProtectedRoutes(t *testing.T) {
+	p := &Provider{ControllerURL: "http://127.0.0.1:7070", BaseDomain: func() string { return "example.com" }, ProbeToken: "tok",
+		Middlewares: func() map[string]Middleware {
+			return map[string]Middleware{"lb-x-rate": {RateLimit: &RateLimit{Average: 1, Burst: 1}}, "lb-x-body": {Buffering: &Buffering{MaxRequestBodyBytes: 10}}}
+		},
+		ServiceRoutes: func() []ServiceRoute {
+			return []ServiceRoute{
+				{Name: "svc-a-web", Host: "shop.example.com", Servers: []string{"http://10.91.1.2:80"}, Protect: &Protection{
+					Limits: []string{"lb-x-rate"}, Always: []string{"lb-x-body"}, Deny: []string{"203.0.113.0/24", "bad`)"},
+					BypassIPs: []string{"192.0.2.1/32"}, BypassHeader: "X-Syncloud-Bypass", BypassSecret: "abcdefghijklmnop1234", BypassPaths: []string{"/healthz"},
+				}},
+				{Name: "dom-b", Host: "shop.example.com", Path: "/api", Servers: []string{"http://10.91.1.3:80"}},
+			}
+		}}
+	c := p.Config()
+	base, by, deny, probe := c.HTTP.Routers["svc-a-web"], c.HTTP.Routers["svc-a-web_bypass"], c.HTTP.Routers["svc-a-web_deny"], c.HTTP.Routers["svc-a-web_probe"]
+	if base.Middlewares[0] != "lb-x-body" || base.Middlewares[1] != "lb-x-rate" {
+		t.Errorf("base chain %v", base.Middlewares)
+	}
+	if by.Priority != base.Priority+1 || deny.Priority != base.Priority+2 || slices.Contains(by.Middlewares, "lb-x-rate") || by.Middlewares[0] != "lb-x-body" {
+		t.Errorf("twins %+v %+v (base %d)", by, deny, base.Priority)
+	}
+	if !strings.Contains(by.Rule, "Header(`X-Syncloud-Bypass`, `abcdefghijklmnop1234`)") || !strings.Contains(by.Rule, "PathPrefix(`/healthz`)") || !strings.Contains(by.Rule, "ClientIP(`192.0.2.1/32`)") {
+		t.Errorf("bypass rule %s", by.Rule)
+	}
+	if deny.Rule != "(Host(`shop.example.com`)) && (ClientIP(`203.0.113.0/24`))" || deny.Middlewares[0] != MiddlewareDeny {
+		t.Errorf("deny %+v", deny)
+	}
+	if c.HTTP.Middlewares[MiddlewareDeny].IPAllowList == nil {
+		t.Error("no deny middleware")
+	}
+	// A longer rule on the same host (the /api domain) still outranks the twins.
+	if api := c.HTTP.Routers["dom-b"]; api.Priority <= deny.Priority {
+		t.Errorf("/api priority %d <= deny %d", api.Priority, deny.Priority)
+	}
+	if probe.Priority <= deny.Priority || slices.Contains(probe.Middlewares, "lb-x-rate") {
+		t.Errorf("probe %+v", probe)
+	}
+	b, _ := json.Marshal(p.Redacted())
+	if strings.Contains(string(b), "abcdefghijklmnop1234") {
+		t.Error("the bypass secret is not redacted")
+	}
+}

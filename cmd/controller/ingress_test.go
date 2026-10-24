@@ -44,7 +44,7 @@ func TestIngressRoutesDuringAMove(t *testing.T) {
 		{Name: "dom-1", Host: "shop.example.com", Project: "shop", ServiceID: "svc_1"},
 	}
 	got := map[string]string{}
-	for _, r := range ingressRoutes(routes, ing, base, noChain) {
+	for _, r := range ingressRoutes(routes, ing, base, noChain, nil) {
 		got[r.Name] = r.Host
 		switch r.Name {
 		case "svc-svc_1-http":

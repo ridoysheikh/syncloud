@@ -123,7 +123,7 @@ Edge nodes serve every project that uses the default load balancer, the same as 
 
 ## Project load balancers
 
-A project can have its own load-balancer nodes. Its public traffic (HTTP, HTTPS and its public TCP/UDP ports) then goes straight to those nodes and never passes through the controller. Set it under **Project → Settings → Load balancer**, or:
+A project can have its own load-balancer nodes. Its public traffic (HTTP, HTTPS and its public TCP/UDP ports) then goes straight to those nodes and never passes through the controller. Set it under **Project → Load balancer**, or:
 
 ```sh
 synctl projects ingress shop --nodes lb1,lb2   # its own nodes, in order
@@ -139,5 +139,27 @@ synctl projects ingress shop --controller      # back to the controller
 - **If every chosen node is down, the project is unreachable**, because DNS points at them and there is no fallback to the controller. The "system component" alert fires (`load balancers of <project>`). Keep at least two nodes for production projects.
 - Removing a node that is a project's only load balancer is refused unless you pass `--force` (`synctl nodes delete ID --force`). That project then goes back to the controller.
 - Public database endpoints stay on the controller and edge pools.
+
+### Protection
+
+**Project → Load balancer → Protection** puts Traefik-managed protection in front of every route of the project, on whichever load balancer serves it (`synctl projects protection PROJECT`):
+
+- **Rate limit** per client (requests per second, minute or hour, with a burst). Over it, clients get 429.
+- **Concurrent requests** per client and a **request body limit** (413 when exceeded).
+- **Who is a client:** the connection's address, `X-Forwarded-For` at a depth (behind a proxy), or a header such as `CF-Connecting-IP` (behind Cloudflare).
+- **Block list:** these clients get 403.
+- **Bypass:** requests from listed IPs, under listed paths (health checks, webhooks), or carrying the secret header (`X-Syncloud-Bypass` by default; generate the secret once) skip the rate and concurrency limits. **Off** turns all protection off and keeps the settings.
+- **Shared counters:** without Redis each load balancer counts on its own. **Create Valkey** makes a small managed Valkey in the project (listed under Databases) or you pick an existing one, and all of the project's load balancers share their counters. If it goes down, each node counts on its own until it is back, and an alert fires (Traefik would otherwise answer 500).
+- **Network guard** (on the project's own nodes): the host firewall drops floods before they reach Traefik: new connections per second and concurrent connections per source on 80/443, with an optional auto-ban. Bypass IPs are exempt. A node shared by several projects uses the most permissive guard among them.
+
+```sh
+synctl projects protection shop --on --rate 50 --per 1s --burst 100 --concurrent 20 --body-mb 10
+synctl projects protection shop --client-ip header:CF-Connecting-IP --block 203.0.113.0/24
+synctl projects protection shop --bypass-ips 198.51.100.7 --bypass-paths /healthz --generate-secret
+synctl projects protection shop --create-valkey production
+synctl projects protection shop --guard-rate 100 --guard-conns 200 --guard-ban 30
+```
+
+The tab shows the last hour's requests, and how many were limited or blocked.
 
 Every replica, with the projects it serves, is listed on **Network → Load balancers**.

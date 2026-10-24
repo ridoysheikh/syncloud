@@ -15,9 +15,15 @@ import (
 // contents change with traffic, so drift detection ignores them.
 const (
 	SetHostDrops = "host_drops"
-	SetInDrops   = "sg_in_drops"
-	SetOutDrops  = "sg_out_drops"
-	setPlatform  = "sg_platform"
+	// Phase 24: IPv6 host drops, sources over a guard's limit, blocks.
+	SetHostDrops6   = "host_drops6"
+	SetLimitDrops   = "limit_drops"
+	SetLimitDrops6  = "limit_drops6"
+	RuleForwardSeal = "builtin:forward-seal"
+	RuleBlocked     = "builtin:blocked"
+	SetInDrops      = "sg_in_drops"
+	SetOutDrops     = "sg_out_drops"
+	setPlatform     = "sg_platform"
 	// Counter names of the built-in security group rules.
 	RulePlatform = "builtin:platform"
 	RuleInDeny   = "builtin:sg-in-deny"
@@ -211,6 +217,10 @@ func renderSecurityRule(r *agentv1.SecurityRule, known map[string]bool) ([]strin
 	return lines, nil
 }
 
+// dynamicSet matches the sets whose elements change by themselves: drop
+// logs, guards' per-source state and blocks (their timeouts run out).
+var dynamicSet = regexp.MustCompile(`^set (\w+_drops6?|g\d+_[rc][46]|icmp_r[46]|blocked[46]) \{`)
+
 // StripDynamic removes what changes with traffic from an `nft -s list
 // table` listing (the drop sets' elements and counts), so drift detection
 // only sees configuration changes.
@@ -220,7 +230,7 @@ func StripDynamic(listing string) string {
 	for _, l := range strings.Split(listing, "\n") {
 		t := strings.TrimSpace(l)
 		switch {
-		case strings.HasPrefix(t, "set ") && strings.Contains(t, "_drops {"):
+		case strings.HasPrefix(t, "set ") && dynamicSet.MatchString(t):
 			inDrops = true
 		case inDrops && t == "}":
 			inDrops, inElems = false, false
@@ -298,7 +308,7 @@ func ParseCounters(data []byte) (map[string]Counts, map[DropKey]uint64, error) {
 			if json.Unmarshal(raw, &s) != nil {
 				continue
 			}
-			dir := map[string]string{SetHostDrops: "host", SetInDrops: "in", SetOutDrops: "out"}[s.Name]
+			dir := map[string]string{SetHostDrops: "host", SetHostDrops6: "host", SetLimitDrops: "limit", SetLimitDrops6: "limit", SetInDrops: "in", SetOutDrops: "out"}[s.Name]
 			if dir == "" {
 				continue
 			}
@@ -315,7 +325,7 @@ func ParseCounters(data []byte) (map[string]Counts, map[DropKey]uint64, error) {
 				}
 				k := DropKey{Direction: dir, Port: port}
 				switch {
-				case dir == "host" && len(parts) == 2:
+				case (dir == "host" || dir == "limit") && len(parts) == 2:
 					k.Src, k.Protocol = parts[0], parts[1]
 				case dir != "host" && len(parts) == 3:
 					k.Src, k.Dst, k.Protocol = parts[0], parts[1], parts[2]

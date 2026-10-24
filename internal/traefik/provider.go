@@ -163,6 +163,7 @@ type Middleware struct {
 	Compress       *Compress       `json:"compress,omitempty"`
 	CircuitBreaker *CircuitBreaker `json:"circuitBreaker,omitempty"`
 	Buffering      *Buffering      `json:"buffering,omitempty"`
+	InFlightReq    *InFlightReq    `json:"inFlightReq,omitempty"`
 }
 
 type StripPrefix struct {
@@ -193,6 +194,8 @@ type ServiceRoute struct {
 	RedirectTo  string
 	// Ingress is who serves the route (nil: the controller and edge pools).
 	Ingress *ingress.Target
+	// Protect is its project's protection (nil: none, Phase 25).
+	Protect *Protection
 }
 
 // Scope is the Traefik replica a configuration is for: Platform replicas
@@ -400,6 +403,13 @@ func (p *Provider) ConfigFor(sc Scope) Dynamic {
 				Regex: `^https?://[^/]+(.*)`, Replacement: "https://" + hostOnly(r.RedirectTo) + "${1}", Permanent: true}}
 			chain = []string{mw}
 		}
+		// The project's protection (Phase 25) runs first: requests that
+		// bypass it skip only its limits, blocked clients get a 403.
+		free, full := chain, chain
+		if pr := r.Protect; pr != nil {
+			free = append(append([]string{}, pr.Always...), chain...)
+			full = append(append(append([]string{}, pr.Always...), pr.Limits...), chain...)
+		}
 		servers := make([]Server, 0, len(r.Servers))
 		for _, u := range r.Servers {
 			servers = append(servers, Server{URL: u})
@@ -424,21 +434,38 @@ func (p *Provider) ConfigFor(sc Scope) Dynamic {
 			name := r.Name + ProbeSuffix
 			d.HTTP.Services[name] = Service{LoadBalancer: plb}
 			pr := Router{Rule: "(" + rule + ") && Header(`" + ProbeHeader + "`, `" + p.ProbeToken + "`)",
-				EntryPoints: web, Middlewares: chain, Service: name}
+				EntryPoints: web, Middlewares: free, Service: name}
+			pr.Priority = len(pr.Rule) * 10
 			if base != "" {
 				pr.EntryPoints, pr.TLS = websecure, &RouterTLS{}
 			}
 			d.HTTP.Routers[name] = pr
 		}
-		if base == "" {
-			d.HTTP.Routers[r.Name] = Router{Rule: rule, EntryPoints: web, Middlewares: chain, Service: r.Name}
-			continue
+		// Explicit priorities (Traefik's default is the rule's length, kept
+		// here in tens) so a route's twins rank right above it and below
+		// any longer rule on the same host.
+		prio := len(rule) * 10
+		add := func(name, rule string, mws []string, prio int) {
+			if base == "" {
+				d.HTTP.Routers[name] = Router{Rule: rule, Priority: prio, EntryPoints: web, Middlewares: mws, Service: r.Name}
+				return
+			}
+			d.HTTP.Routers[name] = Router{Rule: rule, Priority: prio, EntryPoints: websecure, Middlewares: mws, Service: r.Name, TLS: &RouterTLS{}}
+			if set.RedirectHTTPS {
+				d.HTTP.Routers[name+"-http"] = Router{Rule: rule, Priority: prio, EntryPoints: web, Middlewares: []string{"syncloud-https"}, Service: r.Name}
+			} else {
+				d.HTTP.Routers[name+"-http"] = Router{Rule: rule, Priority: prio, EntryPoints: web, Middlewares: mws, Service: r.Name}
+			}
 		}
-		d.HTTP.Routers[r.Name] = Router{Rule: rule, EntryPoints: websecure, Middlewares: chain, Service: r.Name, TLS: &RouterTLS{}}
-		if set.RedirectHTTPS {
-			d.HTTP.Routers[r.Name+"-http"] = Router{Rule: rule, EntryPoints: web, Middlewares: []string{"syncloud-https"}, Service: r.Name}
-		} else {
-			d.HTTP.Routers[r.Name+"-http"] = Router{Rule: rule, EntryPoints: web, Middlewares: chain, Service: r.Name}
+		add(r.Name, rule, full, prio)
+		if pr := r.Protect; pr != nil {
+			if cond := pr.bypassRule(); cond != "" && len(pr.Limits) > 0 {
+				add(r.Name+"_bypass", "("+rule+") && ("+cond+")", free, prio+1)
+			}
+			if cond := clientIPs(pr.Deny); cond != "" {
+				d.HTTP.Middlewares[MiddlewareDeny] = Middleware{IPAllowList: &IPAllowList{SourceRange: []string{"255.255.255.255/32"}}}
+				add(r.Name+"_deny", "("+rule+") && ("+cond+")", []string{MiddlewareDeny}, prio+2)
+			}
 		}
 	}
 
@@ -760,9 +787,26 @@ func (p *Provider) Redacted() map[string]any {
 							}
 						}
 					}
+					if rl, ok := m["rateLimit"].(map[string]any); ok {
+						if rd, ok := rl["redis"].(map[string]any); ok && rd["password"] != nil {
+							rd["password"] = "(redacted)"
+						}
+					}
+				}
+			}
+		}
+		// Header matchers carry secrets (bypass headers, the probe token).
+		if routers, ok := http["routers"].(map[string]any); ok {
+			for _, rt := range routers {
+				if m, ok := rt.(map[string]any); ok {
+					if rule, ok := m["rule"].(string); ok {
+						m["rule"] = headerValue.ReplaceAllString(rule, "Header(`$1`, `(redacted)`)")
+					}
 				}
 			}
 		}
 	}
 	return out
 }
+
+var headerValue = regexp.MustCompile("Header\\(`([^`]+)`, `[^`]*`\\)")

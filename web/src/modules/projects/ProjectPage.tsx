@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Boxes, Plus } from "lucide-react";
+import { Boxes, Layers, Plus } from "lucide-react";
+import { Select } from "@/ui/select";
 import { api, ApiError } from "@/lib/api";
 import {
   envPath,
@@ -29,7 +30,7 @@ import {
 } from "./VarsEditor";
 import { Tabs } from "@/ui/Tabs";
 import { ProjectNodesPanel } from "./NodeLimits";
-import { ProjectIngressPanel } from "./ProjectIngress";
+import { LoadBalancerTab } from "./ProjectProtection";
 import { DatabasesTable } from "@/modules/databases/DatabasesPage";
 import { useDatabases } from "@/lib/databases";
 import { ProjectDeployments } from "@/modules/compute/Deployments";
@@ -46,11 +47,52 @@ type Tab =
   | "databases"
   | "deployments"
   | "domains"
+  | "load-balancer"
   | "metrics"
   | "traffic"
   | "logs"
   | "variables"
   | "settings";
+
+const MANAGE = "\u0000manage";
+
+/** The project's environment, switched in place (keeps the open tab). */
+function EnvironmentSelect({
+  environments,
+  value,
+  counts,
+  onChange,
+  onManage,
+}: {
+  environments: string[];
+  value: string;
+  counts: Record<string, number>;
+  onChange: (env: string) => void;
+  onManage: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-muted flex items-center gap-1 text-xs">
+        <Layers className="size-3.5 shrink-0" aria-hidden />
+        Environment
+      </span>
+      <Select
+        size="sm"
+        aria-label="Environment"
+        value={value}
+        onChange={(v) => (v === MANAGE ? onManage() : v !== value && onChange(v))}
+        className="min-w-36"
+        options={[
+          ...environments.map((e) => {
+            const n = counts[e] ?? 0;
+            return { value: e, label: e, hint: `${n} ${n === 1 ? "service" : "services"}` };
+          }),
+          { value: MANAGE, label: "Manage environments…", text: "manage environments" },
+        ]}
+      />
+    </div>
+  );
+}
 
 /** One project: its environments, their services and shared variables. */
 export function ProjectPage() {
@@ -58,6 +100,7 @@ export function ProjectPage() {
     project: string;
     env?: string;
   };
+  const navigate = useNavigate();
   const { data: projects, isLoading } = useProjects();
   const { data: services = [] } = useServices();
   // ?tab=settings (links from elsewhere) opens that tab.
@@ -80,6 +123,10 @@ export function ProjectPage() {
     (s) => s.project === p.name && s.environment === env,
   );
   const newTo: string = `/projects/${p.name}/${env}/new-service`;
+  const counts: Record<string, number> = {};
+  for (const s of services) {
+    if (s.project === p.name) counts[s.environment] = (counts[s.environment] ?? 0) + 1;
+  }
 
   return (
     <div className={cn("flex flex-col", gap)}>
@@ -91,11 +138,20 @@ export function ProjectPage() {
         ]}
         title={p.name}
         actions={
-          <Link to={newTo}>
-            <Button variant="primary">
-              <Plus className="size-3.5" /> New service
-            </Button>
-          </Link>
+          <>
+            <EnvironmentSelect
+              environments={p.environments}
+              value={env}
+              counts={counts}
+              onChange={(e) => void navigate({ to: `/projects/${p.name}/${e}` as string })}
+              onManage={() => setTab("settings")}
+            />
+            <Link to={newTo}>
+              <Button variant="primary">
+                <Plus className="size-3.5" /> New service
+              </Button>
+            </Link>
+          </>
         }
       />
       {p.description && (
@@ -111,6 +167,7 @@ export function ProjectPage() {
               "databases",
               "deployments",
               "domains",
+              "load-balancer",
               "metrics",
               "traffic",
               "logs",
@@ -120,28 +177,10 @@ export function ProjectPage() {
           }
           value={tab}
           onChange={setTab}
-          label={(t) => (t === "variables" ? "Shared variables" : t)}
+          label={(t) =>
+            t === "variables" ? "Shared variables" : t === "load-balancer" ? "Load balancer" : t
+          }
         />
-        <div className="flex items-center gap-1 pb-1 sm:shadow-[inset_0_-1px_0_var(--color-line)]">
-          <span className="text-faint text-xs">Environment</span>
-          {p.environments.map((e) => {
-            const to: string = `/projects/${p.name}/${e}`;
-            return (
-              <Link
-                key={e}
-                to={to}
-                className={cn(
-                  "rounded-sm border px-1.5 py-0.5 text-xs",
-                  e === env
-                    ? "border-line-accent text-fg bg-accent/10"
-                    : "border-line text-muted hover:text-fg",
-                )}
-              >
-                {e}
-              </Link>
-            );
-          })}
-        </div>
       </div>
       <ErrorBoundary resetKey={tab}>
         {tab === "services" && <ServiceGrid services={inEnv} newTo={newTo} />}
@@ -156,6 +195,9 @@ export function ProjectPage() {
         )}
         {tab === "domains" && (
           <ProjectDomains key={env} project={p.name} env={env} services={inEnv} />
+        )}
+        {tab === "load-balancer" && (
+          <LoadBalancerTab key={p.name} project={p.name} environments={p.environments} />
         )}
         {tab === "metrics" && (
           <MetricsPanel key={env} path={envPath(p.name, env)} by="service" />
@@ -355,9 +397,6 @@ function ProjectSettings({
           nodes={nodes}
           services={services}
         />
-      </div>
-      <div className="lg:col-span-2">
-        <ProjectIngressPanel project={project} />
       </div>
       <div className="lg:col-span-2">
         <DangerZone project={project} services={services} />

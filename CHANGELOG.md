@@ -2,16 +2,31 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
-## [Unreleased]
+## [0.3.0]
 
 ### Upgrading
 
 - A database migration adds each project's load-balancer setting. Nothing changes until a project chooses its own nodes.
+- **Upgrade the agents** (Settings → Updates) for the locked-down firewall: older agents ignore its new rules (blocks, rate limits, the forward seal).
+- **SSH is now built in.** The original `default` firewall policy, which only allowed SSH, is removed, and its sources move to **Network → Firewall → SSH access**. If you edited that policy, it stays as it is.
+- **Ports published outside SynCloud are closed.** Anything a node forwards from a public interface (for example `docker run -p` by hand) is now dropped. Open such a port with a host policy, or run it as a SynCloud service.
 
 ### Added
 
-- **Projects can have their own load balancers.** Under **Project → Settings → Load balancer** (or `synctl projects ingress PROJECT --nodes n1,n2`), choose any nodes to serve a project's public traffic. They run Traefik for that project only, so its traffic goes straight to them and never passes through the controller. It also keeps flowing while the controller is down. Generated addresses move to the first node's `sslip.io` name. Custom domains need an A record for each node, and their DNS check lists the missing ones. When you switch, the previous load balancer keeps serving each custom domain until its DNS has moved, so there is no downtime. **Cut over now** ends this at once. An alert fires when every load balancer of a project is down.
+- **Projects can have their own load balancers.** Under **Project → Load balancer** (or `synctl projects ingress PROJECT --nodes n1,n2`), choose any nodes to serve a project's public traffic. They run Traefik for that project only, so its traffic goes straight to them and never passes through the controller. It also keeps flowing while the controller is down. Generated addresses move to the first node's `sslip.io` name. Custom domains need an A record for each node, and their DNS check lists the missing ones. When you switch, the previous load balancer keeps serving each custom domain until its DNS has moved, so there is no downtime. **Cut over now** ends this at once. An alert fires when every load balancer of a project is down.
 - **Network → Load balancers** (formerly Edge nodes) lists every Traefik replica and the projects it serves.
+- **Load-balancer protection.** **Project → Load balancer → Protection** (or `synctl projects protection`) adds Traefik-managed protection to every route of the project:
+  - a per-client rate limit, a cap on concurrent requests and a request body limit;
+  - a block list (answered with 403) and bypass rules (IPs, a secret header, paths), plus an off switch that keeps the settings;
+  - shared counters in a Valkey, created in one click or picked from the project's own. If it goes down, each load balancer counts on its own until it is back;
+  - on the project's own load-balancer nodes, a network guard that drops connection floods per source in the host firewall, with auto-ban.
+
+  The tab shows the last hour's limited and blocked requests.
+- **Locked-down host firewall.** Every node and the controller now accept only what SynCloud needs, SSH, and the ports SynCloud opens for services. Changes made by other tools are undone, and ports published outside SynCloud are closed.
+  - **SSH** is always open on 22 and on sshd's own ports. It is rate limited per source, and sources over the limit are auto-banned. Restrict who may connect under **Network → Firewall → SSH access** (or `synctl firewall ssh`).
+  - **Block list:** block an IP or CIDR on every node or on one, for a while or for good, from the drop log or a node's attempts (`synctl firewall block`). Blocked sources are dropped before connection tracking.
+  - **Firewall tab on each node:** open ports and why each is open, every listening socket with whether it can be reached, unauthorized attempts with source and port, and the node's blocks. The nodes list shows each node's attempts in the last hour.
+  - SYN cookies are on, and pings are rate limited per source. Drops are now recorded for IPv6 as well.
 
 ### Changed
 

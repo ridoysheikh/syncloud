@@ -16197,6 +16197,492 @@
           }
         }
       }
+    },
+    "/api/v1/firewall/ssh": {
+      "get": {
+        "operationId": "getFirewallSSH",
+        "tags": [
+          "firewall"
+        ],
+        "summary": "The built-in SSH access of every node (sources, rate limit, auto-ban)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FirewallSSH"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setFirewallSSH",
+        "tags": [
+          "firewall"
+        ],
+        "summary": "Change the built-in SSH access. SSH stays open on 22 and sshd's ports (disaster recovery); only who may connect and how often changes",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FirewallSSH"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FirewallSSH"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/firewall/blocks": {
+      "get": {
+        "operationId": "listFirewallBlocks",
+        "tags": [
+          "firewall"
+        ],
+        "summary": "Sources every node's firewall drops before anything else (by hand or auto-ban)",
+        "parameters": [
+          {
+            "name": "node",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "only blocks that apply to this node"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirewallBlock"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createFirewallBlock",
+        "tags": [
+          "firewall"
+        ],
+        "summary": "Block a source on every node or one, for a while or until removed. Cluster nodes' addresses cannot be blocked; your own address needs force",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "source"
+                ],
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "description": "IP or CIDR (at most a /8 or IPv6 /16)"
+                  },
+                  "node": {
+                    "type": "string",
+                    "description": "node name; empty = every node"
+                  },
+                  "minutes": {
+                    "type": "integer",
+                    "description": "0 = until removed"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "force": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FirewallBlock"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/firewall/blocks/{id}": {
+      "delete": {
+        "operationId": "deleteFirewallBlock",
+        "tags": [
+          "firewall"
+        ],
+        "summary": "Unblock a source",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/firewall": {
+      "get": {
+        "operationId": "getNodeFirewall",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "A node's host firewall: state, open ports and why, listening sockets with their verdict (open, restricted, blocked, local, private), recent unauthorized attempts and blocks",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "node": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "object"
+                    },
+                    "rules": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "syncloud",
+                              "ssh",
+                              "service",
+                              "database",
+                              "load-balancer",
+                              "policy"
+                            ]
+                          },
+                          "protocol": {
+                            "type": "string"
+                          },
+                          "ports": {
+                            "type": "string"
+                          },
+                          "sources": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "packets": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "guards": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "blocked": {
+                      "type": "integer",
+                      "description": "packets dropped from blocked sources"
+                    },
+                    "denied": {
+                      "type": "integer",
+                      "description": "packets dropped by the default deny and the forward seal"
+                    },
+                    "sshPorts": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
+                    "listeners": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "protocol": {
+                            "type": "string"
+                          },
+                          "address": {
+                            "type": "string"
+                          },
+                          "port": {
+                            "type": "integer"
+                          },
+                          "process": {
+                            "type": "string"
+                          },
+                          "verdict": {
+                            "type": "string",
+                            "enum": [
+                              "open",
+                              "restricted",
+                              "blocked",
+                              "local",
+                              "private"
+                            ]
+                          },
+                          "rule": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "listenersAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirewallBlock"
+                      }
+                    },
+                    "drops": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirewallDrop"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/protection": {
+      "get": {
+        "operationId": "getProjectProtection",
+        "tags": [
+          "projects"
+        ],
+        "summary": "A project's traffic protection: rate limits, concurrency and body limits, block and bypass lists, shared counters, network guard, and the last hour's limited and blocked requests",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectProtection"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "setProjectProtection",
+        "tags": [
+          "projects"
+        ],
+        "summary": "Change a project's traffic protection. The bypass secret is write-only: set, generate (returned once) or clear it",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ProtectionSpec"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "secret": {
+                        "type": "string",
+                        "description": "set the bypass secret"
+                      },
+                      "generateSecret": {
+                        "type": "boolean"
+                      },
+                      "clearSecret": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectProtection"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/protection/valkey": {
+      "post": {
+        "operationId": "createProtectionValkey",
+        "tags": [
+          "projects"
+        ],
+        "summary": "Create a small managed Valkey in an environment of the project for shared rate-limit counters, and use it",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "environment"
+                ],
+                "properties": {
+                  "environment": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "default <project>-ratelimit"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectProtection"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -19621,7 +20107,8 @@
             "enum": [
               "host",
               "in",
-              "out"
+              "out",
+              "limit"
             ]
           },
           "src": {
@@ -21692,6 +22179,274 @@
               "type": "string"
             },
             "description": "custom domains the previous ingress still serves until their DNS moves"
+          }
+        }
+      },
+      "FirewallSSH": {
+        "type": "object",
+        "description": "How SSH is reached on every node. It is always open on 22 and on every port sshd listens on.",
+        "properties": {
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "extra ports besides 22 and the detected sshd ports"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IPs or CIDRs allowed; empty = anywhere"
+          },
+          "rate": {
+            "type": "integer",
+            "description": "new connections per source and minute (0 = no limit)"
+          },
+          "burst": {
+            "type": "integer"
+          },
+          "exempt": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "sources never rate limited (cluster nodes always are)"
+          },
+          "autoBan": {
+            "type": "boolean",
+            "description": "block a source over the rate on that node for banMinutes"
+          },
+          "banMinutes": {
+            "type": "integer"
+          }
+        }
+      },
+      "FirewallBlock": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string",
+            "description": "\"\" = every node"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "auto": {
+            "type": "boolean",
+            "description": "made by auto-ban"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "null = until removed"
+          }
+        }
+      },
+      "ProtectionSpec": {
+        "type": "object",
+        "description": "A project's traffic protection on every route, on whichever load balancer serves it",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "off keeps the settings but applies none"
+          },
+          "rateLimit": {
+            "type": "object",
+            "properties": {
+              "average": {
+                "type": "integer",
+                "description": "requests per period and client (0 = off)"
+              },
+              "burst": {
+                "type": "integer"
+              },
+              "period": {
+                "type": "string",
+                "enum": [
+                  "1s",
+                  "1m",
+                  "1h"
+                ]
+              }
+            }
+          },
+          "clientIp": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "connection",
+                  "forwarded",
+                  "header"
+                ]
+              },
+              "depth": {
+                "type": "integer",
+                "description": "X-Forwarded-For depth (forwarded)"
+              },
+              "header": {
+                "type": "string",
+                "description": "e.g. CF-Connecting-IP (header)"
+              }
+            }
+          },
+          "maxConcurrent": {
+            "type": "integer",
+            "description": "requests in flight per client (0 = no cap)"
+          },
+          "maxBodyMb": {
+            "type": "integer",
+            "description": "request body cap in MB (0 = no cap)"
+          },
+          "block": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "client IPs/CIDRs answered with 403"
+          },
+          "bypass": {
+            "type": "object",
+            "description": "requests that skip the limits (never the block list)",
+            "properties": {
+              "ips": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "header": {
+                "type": "string"
+              },
+              "hasSecret": {
+                "type": "boolean",
+                "readOnly": true
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "redis": {
+            "type": "object",
+            "properties": {
+              "databaseId": {
+                "type": "string",
+                "description": "a Valkey of the project that keeps shared counters (\"\" = per node)"
+              }
+            }
+          },
+          "guard": {
+            "type": "object",
+            "description": "network guard on the project's own load-balancer nodes (80/443)",
+            "properties": {
+              "rate": {
+                "type": "integer",
+                "description": "new connections per second and source"
+              },
+              "burst": {
+                "type": "integer"
+              },
+              "maxConnections": {
+                "type": "integer"
+              },
+              "banMinutes": {
+                "type": "integer",
+                "description": "auto-ban sources over it (0 = no ban)"
+              }
+            }
+          }
+        }
+      },
+      "ProjectProtection": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/ProtectionSpec"
+          },
+          "redis": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "health": {
+                "type": "string"
+              },
+              "active": {
+                "type": "boolean",
+                "description": "counters are shared now"
+              },
+              "fallback": {
+                "type": "boolean",
+                "description": "the Valkey is down: each load balancer counts on its own"
+              }
+            }
+          },
+          "valkeys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "environment": {
+                  "type": "string"
+                },
+                "health": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "ownNodes": {
+            "type": "boolean"
+          },
+          "stats": {
+            "type": "object",
+            "properties": {
+              "limited": {
+                "type": "number"
+              },
+              "blocked": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              }
+            },
+            "description": "the last hour"
+          },
+          "secret": {
+            "type": "string",
+            "description": "the bypass secret, only right after generateSecret"
           }
         }
       }

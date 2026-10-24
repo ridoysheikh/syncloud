@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowDownToLine, ArrowUpFromLine, Pencil, Plus, Route as RouteIcon, Server, ShieldCheck, ShieldX, Trash2, X } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Ban, Gauge, Pencil, Plus, Route as RouteIcon, Server, ShieldCheck, ShieldX, Trash2, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useNodes } from "@/lib/nodes";
 import { useProjects, useServices } from "@/lib/workloads";
@@ -14,6 +14,7 @@ import { ChipSelect, ChoiceField, Segmented } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
 import { Combobox, Select } from "@/ui/select";
+import { useBlocker } from "./HostFirewall";
 
 export interface SGRule {
   protocol: "tcp" | "udp" | "icmp" | "any";
@@ -590,7 +591,7 @@ export function ServiceSecurityPanel({ path, project, env, name }: { path: strin
 interface Drop {
   at: string;
   node: string;
-  direction: "host" | "in" | "out";
+  direction: "host" | "in" | "out" | "limit";
   src: string;
   srcName?: string;
   dst?: string;
@@ -603,6 +604,7 @@ interface Drop {
 /** The drop log (§8.3): connection attempts a default deny dropped. */
 export function DropLogPanel() {
   const nodes = useNodes();
+  const { block, dialog } = useBlocker();
   const [direction, setDirection] = useState("");
   const [node, setNode] = useState("");
   const [since, setSince] = useState("1h");
@@ -635,6 +637,7 @@ export function DropLogPanel() {
               { value: "in", label: "inbound", icon: ArrowDownToLine },
               { value: "out", label: "outbound", icon: ArrowUpFromLine },
               { value: "host", label: "host", icon: Server },
+              { value: "limit", label: "rate limited", icon: Gauge },
             ]}
           />
           <Select value={node} onChange={setNode} size="sm">
@@ -654,6 +657,7 @@ export function DropLogPanel() {
         </>
       }
     >
+      {dialog}
       {error && (
         <div className="p-3">
           <Alert tone="warn">{error instanceof ApiError ? error.message : "Unavailable"}</Alert>
@@ -668,15 +672,34 @@ export function DropLogPanel() {
           {
             header: "Where",
             cell: (d) => (
-              <StatusBadge tone={d.direction === "host" ? "warn" : "bad"}>
-                {d.direction === "host" ? `host ${d.node}` : d.direction === "in" ? `in · ${d.node}` : `out · ${d.node}`}
+              <StatusBadge tone={d.direction === "host" || d.direction === "limit" ? "warn" : "bad"}>
+                {d.direction === "host"
+                  ? `host ${d.node}`
+                  : d.direction === "limit"
+                    ? `limit · ${d.node}`
+                    : d.direction === "in"
+                      ? `in · ${d.node}`
+                      : `out · ${d.node}`}
               </StatusBadge>
             ),
           },
           { header: "Source", cell: (d) => who(d.src, d.srcName) },
-          { header: "Destination", className: "w-full", cell: (d) => (d.direction === "host" ? <span className="text-muted">node {d.node}</span> : who(d.dst, d.dstName)) },
+          {
+            header: "Destination",
+            className: "w-full",
+            cell: (d) => (d.direction === "host" || d.direction === "limit" ? <span className="text-muted">node {d.node}</span> : who(d.dst, d.dstName)),
+          },
           { header: "Port", cell: (d) => <span className="font-mono">{`${d.protocol}/${d.port}`}</span> },
           { header: "Packets", cell: (d) => <span className="font-mono">{d.packets}</span> },
+          {
+            header: "",
+            cell: (d) =>
+              d.direction === "host" || d.direction === "limit" ? (
+                <Button onClick={() => block(d.src, d.node)}>
+                  <Ban className="size-3.5" /> Block
+                </Button>
+              ) : null,
+          },
         ]}
       />
     </Panel>

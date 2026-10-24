@@ -394,3 +394,37 @@ func (m *Manager) networkChanged() {
 		m.OnNetworkChange()
 	}
 }
+
+// ValkeyTarget is a Valkey that load balancers keep shared rate-limit
+// counters in (Phase 25): its current primary and the app password.
+type ValkeyTarget struct {
+	ID, Name, Project, Environment string
+	Endpoint, Password             string // host:port of the primary ("" while none runs)
+	Health                         string
+}
+
+// Healthy reports whether Traefik can use it now.
+func (t ValkeyTarget) Healthy() bool {
+	return t.Endpoint != "" && (t.Health == "healthy" || t.Health == "degraded")
+}
+
+// ValkeyTarget returns a Valkey database's primary, password and health.
+func (m *Manager) ValkeyTarget(ctx context.Context, id string) (ValkeyTarget, error) {
+	d, err := m.st.DatabaseByID(ctx, id)
+	if err != nil {
+		return ValkeyTarget{}, err
+	}
+	if d.Engine != EngineValkey {
+		return ValkeyTarget{}, ErrInvalid{fmt.Errorf("%s is not a Valkey database", d.Name)}
+	}
+	t := ValkeyTarget{ID: d.ID, Name: d.Name, Project: d.Project, Environment: d.Environment, Health: m.View(ctx, d).Health}
+	if primary, _ := m.endpoints(ctx, d); primary != "" {
+		t.Endpoint = addr(primary, Port)
+	}
+	sec, err := m.secrets(d)
+	if err != nil {
+		return t, err
+	}
+	t.Password = sec.Password
+	return t, nil
+}

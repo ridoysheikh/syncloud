@@ -74,6 +74,8 @@ type Manager struct {
 	dropSeen map[firewall.DropKey]uint64 // live set counters at the last read
 	dropNew  map[firewall.DropKey]uint64 // not reported yet
 	secErr   string
+
+	listenersAt time.Time // listening sockets last reported
 }
 
 // New loads (or creates) the node's WireGuard key. With enabled false the
@@ -335,6 +337,13 @@ func (m *Manager) Status() *agentv1.NetworkStatus {
 	rtt := m.rtt
 	m.mu.Unlock()
 	st.Counters, st.Drops, st.SecurityError = m.takeCounters()
+	if time.Since(m.listenersAt) >= time.Minute {
+		// Listening sockets, for the node's firewall view (Phase 24).
+		if ls, err := Listeners("/proc"); err == nil {
+			st.Listeners, st.ListenersSent = ls, true
+			m.listenersAt = time.Now()
+		}
+	}
 	for _, p := range m.peerStatus() {
 		p.RttMs = rtt[p.GetPublicKey()]
 		st.Peers = append(st.Peers, p)

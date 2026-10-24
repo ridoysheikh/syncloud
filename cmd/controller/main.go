@@ -52,9 +52,11 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/gitremote"
 	"github.com/ridoysheikh/syncloud/internal/gitserver"
 	"github.com/ridoysheikh/syncloud/internal/health"
+	"github.com/ridoysheikh/syncloud/internal/hostfw"
 	"github.com/ridoysheikh/syncloud/internal/imageref"
 	"github.com/ridoysheikh/syncloud/internal/ingress"
 	"github.com/ridoysheikh/syncloud/internal/jobs"
+	"github.com/ridoysheikh/syncloud/internal/lbprotect"
 	"github.com/ridoysheikh/syncloud/internal/logs"
 	"github.com/ridoysheikh/syncloud/internal/mesh"
 	"github.com/ridoysheikh/syncloud/internal/metrics"
@@ -360,7 +362,54 @@ func serve(args []string) error {
 		}
 		return out
 	}
-	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts, IsEdge: isEdge, IsIngress: isIngress, PublicPorts: publicPorts})
+	// The locked-down host firewall (Phase 24): built-in SSH with its guard,
+	// the block list and auto-ban, listening ports.
+	hostFW := hostfw.New(st, log)
+	if err := hostFW.Load(ctx); err != nil {
+		return fmt.Errorf("load the host firewall settings: %w", err)
+	}
+	hostFW.ProtectedIn = func(p netip.Prefix) bool {
+		var addrs []string
+		if ip, err := detector.PublicIP(context.Background()); err == nil {
+			addrs = append(addrs, ip)
+		}
+		if nets, err := st.ListNodeNetworks(context.Background()); err == nil {
+			for _, n := range nets {
+				if h, _, err := net.SplitHostPort(n.Endpoint); err == nil {
+					addrs = append(addrs, h)
+				}
+			}
+		}
+		for _, a := range addrs {
+			if ip, err := netip.ParseAddr(a); err == nil && p.Contains(ip.Unmap()) {
+				return true
+			}
+		}
+		return false
+	}
+	// Projects' traffic protection on their load balancers (Phase 25).
+	protect := lbprotect.New(st, box, log)
+	if err := protect.Load(ctx); err != nil {
+		return fmt.Errorf("load project protection: %w", err)
+	}
+	protect.Valkey = func(ctx context.Context, id string) (dbs.ValkeyTarget, error) {
+		if d := dbRef.Load(); d != nil {
+			return d.ValkeyTarget(ctx, id)
+		}
+		return dbs.ValkeyTarget{}, errors.New("managed databases are starting")
+	}
+	protect.IngressNodes, protect.Assigned = ingressMgr.Nodes, ingressMgr.Assigned
+	hostFW.AutoBan = protect.AutoBan
+	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts, IsEdge: isEdge, IsIngress: isIngress, PublicPorts: publicPorts,
+		Host: func(node string, cluster []string) ([]*agentv1.FirewallRule, []*agentv1.FirewallGuard, []*agentv1.FirewallBlock) {
+			rules, guards, blocks := hostFW.For(node, cluster)
+			return rules, append(guards, protect.Guards(node)...), blocks
+		}})
+	hostFW.OnChange = func() { meshMgr.Changed(context.Background()) }
+	protect.OnChange = hostFW.OnChange
+	go protect.Run(ctx)
+	gw.AddHooks(agentgw.Hooks{OnHeartbeat: hostFW.OnHeartbeat})
+	go hostFW.Run(ctx)
 	gw.AddHooks(meshMgr.Hooks())
 	go meshMgr.Run(ctx)
 	certHosts := func(ep domain.Endpoints) []string {
@@ -373,7 +422,7 @@ func serve(args []string) error {
 		}
 		if workloads != nil {
 			// With the old generated addresses of projects moving ingress.
-			for _, r := range ingressRoutes(workloads.Routes(context.Background(), ep.BaseDomain), ingressMgr, ep.BaseDomain, noChain) {
+			for _, r := range ingressRoutes(workloads.Routes(context.Background(), ep.BaseDomain), ingressMgr, ep.BaseDomain, noChain, nil) {
 				hosts = append(hosts, r.Host)
 			}
 		}
@@ -709,6 +758,9 @@ func serve(args []string) error {
 			if e := edgesRef.Load(); e != nil {
 				out = append(out, ingressComponents(ingressMgr, e)...)
 			}
+			for _, c := range protect.Components() {
+				out = append(out, alerts.ComponentState{ID: c.ID, Name: c.Name, State: c.State, Error: c.Error})
+			}
 			return out
 		}
 	}
@@ -808,7 +860,7 @@ func serve(args []string) error {
 		RegistryURL: "http://" + system.RegistryAddr, RegistryEntrypoint: system.RegistryEntrypointAddr, BaseDomain: domains.Base, HTTPSPort: httpsPort,
 		ServiceRoutes: func() []traefik.ServiceRoute {
 			base := domains.Base()
-			return ingressRoutes(workloads.Routes(context.Background(), base), ingressMgr, base, traefikExtras.Chain)
+			return ingressRoutes(workloads.Routes(context.Background(), base), ingressMgr, base, traefikExtras.Chain, protect.Protection)
 		},
 		EdgePool: func(name string) bool {
 			for _, v := range registry.List() {
@@ -818,7 +870,13 @@ func serve(args []string) error {
 			}
 			return false
 		},
-		Middlewares:       traefikExtras.Definitions,
+		Middlewares: func() map[string]traefik.Middleware {
+			out := traefikExtras.Definitions()
+			for k, v := range protect.Middlewares() {
+				out[k] = v
+			}
+			return out
+		},
 		Settings:          traefikExtras.Settings,
 		GitHost:           gitServer.Host,
 		GitServerURL:      "http://" + system.GitServerAddr,
@@ -968,6 +1026,8 @@ func serve(args []string) error {
 		Pools:            pools,
 		Edges:            edges,
 		Ingress:          ingressMgr,
+		HostFirewall:     hostFW,
+		Protection:       protect,
 		Upgrades:         upgrades,
 		S3:               s3Mgr,
 		AgentRollout:     agentRollout,

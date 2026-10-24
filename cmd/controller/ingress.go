@@ -15,12 +15,15 @@ import (
 // generated address its project's current ingress, a custom domain also the
 // previous one until its DNS moves. While a project moves, its old
 // generated addresses keep answering on the previous ingress as twins.
-func ingressRoutes(routes []workload.Route, ing *ingress.Manager, base string, chain func(serviceID string) ([]string, bool)) []traefik.ServiceRoute {
+func ingressRoutes(routes []workload.Route, ing *ingress.Manager, base string, chain func(serviceID string) ([]string, bool), protect func(project string) *traefik.Protection) []traefik.ServiceRoute {
 	out := make([]traefik.ServiceRoute, 0, len(routes))
 	for _, r := range routes {
 		mws, own := chain(r.ServiceID)
 		sr := traefik.ServiceRoute{Name: r.Name, Host: r.Host, Servers: r.Servers, Middlewares: mws, OwnRetry: own, HealthPath: r.HealthPath,
 			Path: r.Path, StripPrefix: r.StripPrefix, RedirectTo: r.RedirectTo}
+		if protect != nil {
+			sr.Protect = protect(r.Project)
+		}
 		if !r.Generated {
 			t := ing.Domain(r.Project, r.Host)
 			sr.Ingress = &t

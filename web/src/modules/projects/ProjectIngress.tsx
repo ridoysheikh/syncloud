@@ -9,7 +9,7 @@ import { Panel } from "@/ui/Panel";
 import { Alert, Button, StatusBadge } from "@/ui/controls";
 import { confirmDialog } from "@/ui/dialogs";
 
-/* Project settings › Load balancer (D22): the controller, or nodes the
+/* Project › Load balancer › Nodes (D22): the controller, or nodes the
    project chose, serve its public traffic. */
 
 interface IngressMove {
@@ -97,7 +97,7 @@ export function ProjectIngressPanel({ project }: { project: string }) {
   };
   const d = q.data;
   return (
-    <Panel title="Load balancer">
+    <Panel title="Nodes">
       <div className="flex flex-col gap-2 text-xs">
         <p className="text-muted">
           Which servers take this project's public traffic (HTTP, HTTPS and

@@ -91,6 +91,12 @@ func (m *Manager) apply(ctx context.Context, cfg *agentv1.NetworkConfig) (string
 	if err := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0o644); err != nil {
 		return mode, fmt.Errorf("enable IP forwarding: %w", err)
 	}
+	if m.firewallFor(cfg) != nil {
+		// SYN cookies keep the node answering under a SYN flood (Phase 24).
+		if err := os.WriteFile("/proc/sys/net/ipv4/tcp_syncookies", []byte("1"), 0o644); err != nil {
+			m.log.Warn("enable SYN cookies", "err", err)
+		}
+	}
 
 	gateway := subnet.Addr().Next()
 	err = m.docker.EnsureBridge(ctx, Network, subnet.String(), gateway.String(), map[string]string{

@@ -21,6 +21,7 @@ import { Panel } from "@/ui/Panel";
 import { StatTile } from "@/ui/StatTile";
 import { RangePicker, refetchFor, type Range } from "@/ui/RangePicker";
 import { Tabs } from "@/ui/Tabs";
+import { NodeFirewallTab } from "@/modules/network/HostFirewall";
 import { Terminal } from "@/ui/Terminal";
 import { Alert, Button } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
@@ -52,7 +53,7 @@ interface NodeMetricsHistory {
   >;
 }
 
-type Tab = "overview" | "tasks" | "shell";
+type Tab = "overview" | "tasks" | "firewall" | "shell";
 
 function formatUptime(sec: number) {
   const d = Math.floor(sec / 86400);
@@ -110,7 +111,7 @@ export function NodePage() {
         actions={<ScheduleActions node={node} />}
       />
       <Tabs
-        tabs={["overview", "tasks", "shell"] as Tab[]}
+        tabs={["overview", "tasks", "firewall", "shell"] as Tab[]}
         value={tab}
         onChange={setTab}
         label={(t) =>
@@ -118,7 +119,9 @@ export function NodePage() {
             ? `Tasks (${tasks.length})`
             : t === "shell"
               ? "Shell"
-              : t
+              : t === "firewall"
+                ? "Firewall"
+                : t
         }
       />
       <ErrorBoundary resetKey={tab}>
@@ -128,6 +131,7 @@ export function NodePage() {
             <TasksTable tasks={tasks} loading={tasksLoading} showNode={false} />
           </Panel>
         )}
+        {tab === "firewall" && <NodeFirewallTab nodeId={node.id} />}
         {tab === "shell" && <NodeShell node={node} />}
       </ErrorBoundary>
     </div>

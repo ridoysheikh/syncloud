@@ -107,6 +107,9 @@ type Options struct {
 	Firewall bool
 	// IsEdge reports edge nodes, which open HTTP and HTTPS (§8.5).
 	IsEdge func(nodeID string) bool
+	// Host adds the locked-down firewall's parts for a node (Phase 24): the
+	// SSH rule, guards and blocks. clusterSources are the nodes' addresses.
+	Host func(nodeName string, clusterSources []string) ([]*agentv1.FirewallRule, []*agentv1.FirewallGuard, []*agentv1.FirewallBlock)
 	// IsIngress reports nodes some project chose as its load balancers
 	// (D22): they open HTTP, HTTPS and those projects' public ports.
 	IsIngress func(nodeName string) bool
@@ -339,6 +342,14 @@ func FirewallFor(self store.NodeNetwork, all []store.NodeNetwork, policies []sto
 			}
 		}
 	}
+	if opts.Host != nil {
+		rules, guards, blocks := opts.Host(self.NodeName, fw.ClusterSources)
+		fw.Rules = append(fw.Rules, rules...)
+		fw.Guards, fw.Blocks = guards, blocks
+	}
+	// Nothing outside SynCloud opens a way in: forwarded connections from
+	// public interfaces are dropped (Phase 24).
+	fw.SealForward = true
 	for _, p := range policies {
 		if !p.AppliesTo(self.NodeID) {
 			continue

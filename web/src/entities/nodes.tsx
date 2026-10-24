@@ -1,5 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { Cpu, Server, Trash2 } from "lucide-react";
 import {
   bytes,
@@ -274,6 +276,25 @@ export function NodeGrid({ nodes }: { nodes: Node[] }) {
 
 export type ScheduleAction = "cordon" | "drain" | "uncordon";
 
+/** Packets each node's firewall dropped from the internet in the last hour
+ * (closed ports and rate limits), by node name. */
+function useAttempts(enabled: boolean) {
+  const { data } = useQuery({
+    queryKey: ["firewall", "attempts"],
+    queryFn: async () =>
+      (await api<{ items: { node: string; direction: string; packets: number }[] }>("GET", "/firewall/drops?since=1h")).items,
+    refetchInterval: 30_000,
+    enabled,
+  });
+  return useMemo(() => {
+    const out = new Map<string, number>();
+    for (const d of data ?? []) {
+      if (d.direction === "host" || d.direction === "limit") out.set(d.node, (out.get(d.node) ?? 0) + d.packets);
+    }
+    return out;
+  }, [data]);
+}
+
 /** The one node table: overview (compact) and the nodes page. */
 export function NodesTable({
   nodes,
@@ -290,6 +311,7 @@ export function NodesTable({
   onSchedule?: (n: Node, action: ScheduleAction) => void;
 }) {
   const perNode = useTasksPerNode();
+  const attempts = useAttempts(!compact);
   const columns: Column<Node>[] = [
     {
       header: "Name",
@@ -356,6 +378,17 @@ export function NodesTable({
   ];
   if (!compact) {
     columns.push(
+      {
+        header: "Attempts (1h)",
+        cell: (n) => {
+          const a = attempts.get(n.name) ?? 0;
+          return (
+            <span className={cn("font-mono tabular-nums", a > 0 ? "text-warn" : "text-faint")} title="Connections the firewall dropped in the last hour (closed ports and rate limits); see the node's Firewall tab">
+              {a.toLocaleString()}
+            </span>
+          );
+        },
+      },
       {
         header: "Load",
         cell: (n) => (

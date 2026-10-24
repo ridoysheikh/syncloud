@@ -294,6 +294,31 @@ message Firewall {
   // A config whose firewall differs from the last confirmed one must be
   // confirmed (ConfirmNetwork) within this many seconds, or the agent rolls back.
   uint32 confirm_timeout_seconds = 3;
+  // Sources dropped on public interfaces before anything else (Phase 24).
+  repeated FirewallBlock blocks = 4;
+  // Per-source limits on ports, checked before the accept rules.
+  repeated FirewallGuard guards = 5;
+  // Drop new connections forwarded from public interfaces (closes ports
+  // published outside SynCloud, e.g. docker run -p).
+  bool seal_forward = 6;
+}
+
+message FirewallBlock {
+  string source = 1;            // IP or CIDR
+  uint32 timeout_seconds = 2;   // remaining; 0 = until removed
+}
+
+// FirewallGuard limits each source on a port: over the limit, its new
+// connections are dropped and it is reported (DropFlow direction "limit").
+message FirewallGuard {
+  string id = 1;                // counter name, e.g. builtin:ssh
+  string protocol = 2;          // tcp | udp
+  string ports = 3;             // "22", "80,443" or a range
+  uint32 rate = 4;              // new connections per unit and source (0 = no rate limit)
+  string unit = 5;              // second | minute
+  uint32 burst = 6;
+  uint32 max_connections = 7;   // concurrent connections per source (0 = no limit)
+  repeated string exempt = 8;   // CIDRs never limited
 }
 
 message FirewallRule {
@@ -328,6 +353,16 @@ message NetworkStatus {
   repeated RuleCounter counters = 7; // per firewall rule, cumulative since the agent started (§8.3)
   repeated DropFlow drops = 8;       // flows dropped since the last heartbeat
   string security_error = 9;         // why security groups are not enforced on this node
+  repeated Listener listeners = 10;  // listening sockets, sent about once a minute (Phase 24)
+  bool listeners_sent = 11;          // listeners is set in this heartbeat (it may be empty)
+}
+
+// Listener is a socket listening on the node.
+message Listener {
+  string protocol = 1;          // tcp | udp
+  string address = 2;           // bound address ("0.0.0.0", "::", "127.0.0.1", …)
+  uint32 port = 3;
+  string process = 4;           // the owning process's name, when known
 }
 
 message RuleCounter {
@@ -339,7 +374,7 @@ message RuleCounter {
 // DropFlow is a connection attempt a default deny dropped, aggregated by
 // source, destination, protocol and port.
 message DropFlow {
-  string direction = 1;         // host (public interface) | in (to a container) | out (from a container)
+  string direction = 1;         // host (public interface) | in (to a container) | out (from a container) | limit (over a guard's limit)
   string src = 2;
   string dst = 3;
   string protocol = 4;          // tcp | udp

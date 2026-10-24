@@ -97,6 +97,8 @@ func RenderWith(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall, svcs []*agentv
 	b.WriteString("table ip syncloud\ndelete table ip syncloud\ntable inet syncloud\ndelete table inet syncloud\n")
 	b.WriteString("table inet syncloud {\n")
 
+	var sets strings.Builder // guard sets, written after the input chain
+	seal := ""
 	if fw != nil {
 		var v4, v6 []string
 		for _, s := range fw.GetClusterSources() {
@@ -116,11 +118,21 @@ func RenderWith(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall, svcs []*agentv
 		b.WriteString("\t\tiifname \"lo\" accept\n")
 		fmt.Fprintf(&b, "\t\tiifname { \"%s\", \"%s\", \"docker0\" } accept comment \"mesh and local containers\"\n", Interface, Bridge)
 		b.WriteString("\t\tiifname \"br-*\" accept comment \"other Docker networks\"\n")
+		// Pings are answered, but at most 10 per second per source.
+		b.WriteString("\t\ticmp type echo-request add @icmp_r4 { ip saddr limit rate over 10/second burst 20 packets } counter drop comment \"builtin:icmp-limit\"\n")
+		b.WriteString("\t\ticmpv6 type echo-request add @icmp_r6 { ip6 saddr limit rate over 10/second burst 20 packets } counter drop comment \"builtin:icmp-limit\"\n")
+		sets.WriteString("\tset icmp_r4 {\n\t\ttype ipv4_addr\n\t\tsize 65535\n\t\tflags dynamic,timeout\n\t\ttimeout 10s\n\t}\n")
+		sets.WriteString("\tset icmp_r6 {\n\t\ttype ipv6_addr\n\t\tsize 65535\n\t\tflags dynamic,timeout\n\t\ttimeout 10s\n\t}\n")
 		b.WriteString("\t\tip protocol icmp icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } accept\n")
 		b.WriteString("\t\tmeta l4proto ipv6-icmp accept comment \"neighbor discovery and path MTU\"\n")
 		port := cfg.GetListenPort()
 		fmt.Fprintf(&b, "\t\tudp dport %d ip saddr @cluster4 accept comment \"builtin:wireguard\"\n", port)
 		fmt.Fprintf(&b, "\t\tudp dport %d ip6 saddr @cluster6 accept comment \"builtin:wireguard\"\n", port)
+		// Limits come before the accept rules: a source over them is dropped
+		// whatever rule would let it in.
+		if err := renderGuards(&b, &sets, fw.GetGuards()); err != nil {
+			return "", err
+		}
 		for _, r := range fw.GetRules() {
 			lines, err := renderRule(r)
 			if err != nil {
@@ -131,8 +143,25 @@ func RenderWith(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall, svcs []*agentv
 			}
 		}
 		fmt.Fprintf(&b, "\t\tmeta l4proto { tcp, udp } update @%s { ip saddr . meta l4proto . th dport }\n", SetHostDrops)
+		fmt.Fprintf(&b, "\t\tmeta l4proto { tcp, udp } update @%s { ip6 saddr . meta l4proto . th dport }\n", SetHostDrops6)
 		b.WriteString("\t\tcounter drop comment \"default deny\"\n\t}\n")
 		writeDropSet(&b, SetHostDrops, "ipv4_addr . inet_proto . inet_service")
+		writeDropSet(&b, SetHostDrops6, "ipv6_addr . inet_proto . inet_service")
+		writeDropSet(&b, SetLimitDrops, "ipv4_addr . inet_proto . inet_service")
+		writeDropSet(&b, SetLimitDrops6, "ipv6_addr . inet_proto . inet_service")
+		b.WriteString(sets.String())
+		if err := renderBlocks(&b, fw.GetBlocks()); err != nil {
+			return "", err
+		}
+		if fw.GetSealForward() {
+			// Nothing reaches the node's containers or routes through it from
+			// a public interface except what SynCloud forwards itself.
+			fmt.Fprintf(&b, "\tchain sealed {\n"+
+				"\t\tmeta l4proto { tcp, udp } update @%s { ip saddr . meta l4proto . th dport }\n"+
+				"\t\tmeta l4proto { tcp, udp } update @%s { ip6 saddr . meta l4proto . th dport }\n"+
+				"\t\tcounter drop comment %q\n\t}\n", SetHostDrops, SetHostDrops6, RuleForwardSeal)
+			seal = fmt.Sprintf("\t\tct state new iifname != { %s } iifname != \"br-*\" jump sealed\n", internalIfaces)
+		}
 	}
 	secForward := ""
 	if sec != nil && sec.Policy != nil {
@@ -147,7 +176,7 @@ func RenderWith(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall, svcs []*agentv
 	}
 	fmt.Fprintf(&b, `	chain forward {
 		type filter hook forward priority filter - 10; policy accept;
-		# Container IPs are only reachable from the mesh and the local bridge.
+%[9]s		# Container IPs are only reachable from the mesh and the local bridge.
 		ip daddr %[1]s iifname != { "%[2]s", "%[3]s" } ct state new drop
 		# A VIP still addressed here has no running backend: fail fast.
 		ip daddr %[6]s meta l4proto tcp reject with tcp reset
@@ -160,7 +189,7 @@ func RenderWith(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall, svcs []*agentv
 		ip saddr %[4]s ip daddr != { %[5]s } oifname != "%[3]s" masquerade
 	}
 }
-`, cfg.GetContainerCidr(), Interface, Bridge, cfg.GetContainerSubnet(), internal, cfg.GetServiceCidr(), hairpinMark, secForward)
+`, cfg.GetContainerCidr(), Interface, Bridge, cfg.GetContainerSubnet(), internal, cfg.GetServiceCidr(), hairpinMark, secForward, seal)
 	return b.String(), nil
 }
 
