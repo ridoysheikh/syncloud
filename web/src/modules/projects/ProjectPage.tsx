@@ -29,6 +29,7 @@ import {
 } from "./VarsEditor";
 import { Tabs } from "@/ui/Tabs";
 import { ProjectNodesPanel } from "./NodeLimits";
+import { ProjectIngressPanel } from "./ProjectIngress";
 import { DatabasesTable } from "@/modules/databases/DatabasesPage";
 import { useDatabases } from "@/lib/databases";
 import { ProjectDeployments } from "@/modules/compute/Deployments";
@@ -354,6 +355,9 @@ function ProjectSettings({
           nodes={nodes}
           services={services}
         />
+      </div>
+      <div className="lg:col-span-2">
+        <ProjectIngressPanel project={project} />
       </div>
       <div className="lg:col-span-2">
         <DangerZone project={project} services={services} />

@@ -114,7 +114,8 @@ func TestGitServerRoute(t *testing.T) {
 	if !strings.Contains(d.HTTP.Routers["syncloud-https-redirect"].Rule, "git.example.com") {
 		t.Fatal("plain HTTP to git.example.com is not redirected")
 	}
-	if _, ok := p.EdgeConfig()["http"].(map[string]any)["routers"].(map[string]any)["syncloud-git"]; ok {
+	p.EdgePool = func(string) bool { return true }
+	if _, ok := p.EdgeConfig("e1")["http"].(map[string]any)["routers"].(map[string]any)["syncloud-git"]; ok {
 		t.Fatal("edges cannot reach the controller's loopback Git server")
 	}
 }

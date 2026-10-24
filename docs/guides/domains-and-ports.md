@@ -28,7 +28,7 @@ synctl services domains add web shop.example.com -p shop
 synctl services domains check shop.example.com
 ```
 
-Point the record at the controller's public IP, or at your [edge nodes](../operations/nodes-and-pools.md#edge-nodes).
+Point the record at the controller's public IP, or at your [edge nodes](../operations/nodes-and-pools.md#edge-nodes). If the project has its [own load balancers](../operations/nodes-and-pools.md#project-load-balancers), create one A record for each of them instead. The check shows which addresses are still missing.
 
 ### Share a domain by path
 

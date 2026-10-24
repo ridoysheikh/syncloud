@@ -25,7 +25,7 @@ interface Address {
   stripPrefix?: boolean;
   label?: boolean;
   allow?: string[];
-  dns?: { ready: boolean; record: string };
+  dns?: { ready: boolean; partial: boolean; missing: string[]; record: string };
   certificate?: { issuer: string; status: string; error?: string };
 }
 
@@ -214,9 +214,13 @@ export function ProjectDomains({
                       <StatusBadge tone="ok">DNS ok</StatusBadge>
                     ) : (
                       <span className="flex flex-col gap-0.5">
-                        <StatusBadge tone="warn">waiting for DNS</StatusBadge>
+                        <StatusBadge tone="warn">
+                          {a.dns.partial
+                            ? `missing ${a.dns.missing.join(", ")}`
+                            : "waiting for DNS"}
+                        </StatusBadge>
                         {a.dns.record && (
-                          <span className="text-muted font-mono break-all">
+                          <span className="text-muted font-mono break-all whitespace-pre-line">
                             {a.dns.record}
                           </span>
                         )}

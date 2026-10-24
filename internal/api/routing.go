@@ -181,7 +181,7 @@ func (s *Server) handleProjectAddresses(w http.ResponseWriter, r *http.Request) 
 		go func() {
 			defer wg.Done()
 			sem <- struct{}{}
-			c := s.checkDomain(ctx, host)
+			c := s.checkDomain(ctx, p.Name, host)
 			<-sem
 			mu.Lock()
 			hosts[host] = &c

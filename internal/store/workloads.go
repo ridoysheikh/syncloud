@@ -22,6 +22,23 @@ type Project struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	// Deleting: the project goes once its environments are gone (15d).
 	Deleting bool `json:"deleting"`
+	// IngressNodes serve the project's public traffic, by name, in order
+	// (empty = the controller and edge pools, D22). IngressMove is the
+	// previous ingress, still serving while DNS moves.
+	IngressNodes []string     `json:"ingressNodes"`
+	IngressMove  *IngressMove `json:"ingressMove,omitempty"`
+}
+
+// IngressMove is a project's ingress change in progress (Phase 23): the
+// previous ingress keeps serving each custom domain until its DNS points
+// at the new one.
+type IngressMove struct {
+	From []string `json:"from"` // previous ingress nodes (empty = the controller)
+	// FromController: the controller was a previous ingress too (the
+	// ingress changed again during a move).
+	FromController bool      `json:"fromController,omitempty"`
+	Moved          []string  `json:"moved"` // custom domains whose DNS has moved
+	StartedAt      time.Time `json:"startedAt"`
 }
 
 type Environment struct {
@@ -151,7 +168,7 @@ func (s *Store) CreateProject(ctx context.Context, p Project, env Environment) e
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
-	rows, err := s.R.QueryContext(ctx, `SELECT id, name, description, nodes, rollback_window, created_at, deleting FROM projects ORDER BY name`)
+	rows, err := s.R.QueryContext(ctx, `SELECT id, name, description, nodes, rollback_window, created_at, deleting, ingress_nodes, ingress_move FROM projects ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -160,11 +177,12 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 	for rows.Next() {
 		var p Project
 		var at int64
-		var nodes string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &nodes, &p.RollbackWindow, &at, &p.Deleting); err != nil {
+		var nodes, ingress, move string
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &nodes, &p.RollbackWindow, &at, &p.Deleting, &ingress, &move); err != nil {
 			return nil, err
 		}
 		p.Nodes = parseNodes(nodes)
+		p.IngressNodes, p.IngressMove = parseNodes(ingress), parseMove(move)
 		p.CreatedAt = time.Unix(at, 0).UTC()
 		out = append(out, p)
 	}
@@ -182,12 +200,13 @@ func (s *Store) ProjectByID(ctx context.Context, id string) (Project, error) {
 func (s *Store) project(ctx context.Context, where string, arg any) (Project, error) {
 	var p Project
 	var at int64
-	var nodes string
-	err := s.R.QueryRowContext(ctx, `SELECT id, name, description, nodes, rollback_window, created_at, deleting FROM projects WHERE `+where, arg).Scan(&p.ID, &p.Name, &p.Description, &nodes, &p.RollbackWindow, &at, &p.Deleting)
+	var nodes, ingress, move string
+	err := s.R.QueryRowContext(ctx, `SELECT id, name, description, nodes, rollback_window, created_at, deleting, ingress_nodes, ingress_move FROM projects WHERE `+where, arg).Scan(&p.ID, &p.Name, &p.Description, &nodes, &p.RollbackWindow, &at, &p.Deleting, &ingress, &move)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
 	p.Nodes = parseNodes(nodes)
+	p.IngressNodes, p.IngressMove = parseNodes(ingress), parseMove(move)
 	p.CreatedAt = time.Unix(at, 0).UTC()
 	return p, err
 }
@@ -222,6 +241,45 @@ func (s *Store) SetProjectNodes(ctx context.Context, id string, nodes []string) 
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SetProjectIngress sets the nodes serving a project's public traffic (nil =
+// the controller) and the move from the previous ingress (nil = settled).
+func (s *Store) SetProjectIngress(ctx context.Context, id string, nodes []string, move *IngressMove) error {
+	if nodes == nil {
+		nodes = []string{}
+	}
+	b, _ := json.Marshal(nodes)
+	m := ""
+	if move != nil {
+		mb, _ := json.Marshal(move)
+		m = string(mb)
+	}
+	res, err := s.W.ExecContext(ctx, `UPDATE projects SET ingress_nodes = ?, ingress_move = ? WHERE id = ?`, string(b), m, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func parseMove(s string) *IngressMove {
+	if s == "" {
+		return nil
+	}
+	var m IngressMove
+	if json.Unmarshal([]byte(s), &m) != nil {
+		return nil
+	}
+	if m.From == nil {
+		m.From = []string{}
+	}
+	if m.Moved == nil {
+		m.Moved = []string{}
+	}
+	return &m
 }
 
 func parseNodes(s string) []string {

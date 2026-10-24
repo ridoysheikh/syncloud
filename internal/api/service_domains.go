@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/ridoysheikh/syncloud/internal/domain"
@@ -12,29 +14,49 @@ import (
 )
 
 type domainCheck struct {
-	Host      string   `json:"host"`
-	Expected  string   `json:"expected"`  // the public IP the A record must point to
+	Host     string `json:"host"`
+	Expected string `json:"expected"` // the first public IP an A record must point to
+	// Targets are every IP the host must resolve to: the project's load
+	// balancers, or the controller (D22); Missing are those it does not.
+	Targets   []string `json:"targets"`
+	Missing   []string `json:"missing"`
 	Addresses []string `json:"addresses"` // what the host resolves to now
-	Ready     bool     `json:"ready"`
-	Record    string   `json:"record"` // the DNS record to create
+	Ready     bool     `json:"ready"`     // resolves to every target
+	Partial   bool     `json:"partial"`   // to some of them only
+	Record    string   `json:"record"`    // the DNS records to create, one per line
 }
 
-func (s *Server) checkDomain(ctx context.Context, host string) domainCheck {
-	c := domainCheck{Host: host, Addresses: []string{}}
-	if s.detector != nil {
-		ip, err := s.detector.PublicIP(ctx)
-		if err == nil {
-			c.Expected = ip
-			c.Record = host + ". A " + ip
+// checkDomain checks a custom domain of project ("" = the controller's).
+func (s *Server) checkDomain(ctx context.Context, project, host string) domainCheck {
+	c := domainCheck{Host: host, Targets: []string{}, Missing: []string{}, Addresses: []string{}}
+	if s.ingress != nil && project != "" && len(s.ingress.Nodes(project)) > 0 {
+		c.Targets = append(c.Targets, s.ingress.Expected(ctx, project)...)
+	} else if s.detector != nil {
+		if ip, err := s.detector.PublicIP(ctx); err == nil {
+			c.Targets = append(c.Targets, ip)
 		}
+	}
+	var records []string
+	for _, ip := range c.Targets {
+		records = append(records, host+". A "+ip)
+	}
+	c.Record = strings.Join(records, "\n")
+	if len(c.Targets) > 0 {
+		c.Expected = c.Targets[0]
 	}
 	rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	ok, addrs := domain.Resolves(rctx, host, c.Expected)
+	_, addrs := domain.Resolves(rctx, host, c.Expected)
 	if addrs != nil {
 		c.Addresses = addrs
 	}
-	c.Ready = ok && c.Expected != ""
+	for _, ip := range c.Targets {
+		if !slices.Contains(c.Addresses, ip) {
+			c.Missing = append(c.Missing, ip)
+		}
+	}
+	c.Ready = len(c.Targets) > 0 && len(c.Missing) == 0
+	c.Partial = !c.Ready && len(c.Missing) < len(c.Targets)
 	return c
 }
 
@@ -54,7 +76,7 @@ func (s *Server) handleListServiceDomains(w http.ResponseWriter, r *http.Request
 	}
 	out := make([]item, 0, len(ds))
 	for _, d := range ds {
-		out = append(out, item{Domain: d, DNS: s.checkDomain(r.Context(), d.Host)})
+		out = append(out, item{Domain: d, DNS: s.checkDomain(r.Context(), sv.Project, d.Host)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
@@ -102,7 +124,7 @@ func (s *Server) handleAddServiceDomain(w http.ResponseWriter, r *http.Request) 
 	}
 	u, _ := currentUser(r.Context())
 	s.audit(r, u.ID, "service:AddDomain", "srn:syncloud:service/"+sv.Project+"/"+sv.Environment+"/"+sv.Name, map[string]any{"host": host, "path": d.Path, "redirectTo": d.RedirectTo})
-	writeJSON(w, http.StatusCreated, map[string]any{"domain": d, "dns": s.checkDomain(r.Context(), host)})
+	writeJSON(w, http.StatusCreated, map[string]any{"domain": d, "dns": s.checkDomain(r.Context(), sv.Project, host)})
 }
 
 func (s *Server) handleRemoveServiceDomain(w http.ResponseWriter, r *http.Request) {
@@ -132,5 +154,5 @@ func (s *Server) handleCheckDomain(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.checkDomain(r.Context(), host))
+	writeJSON(w, http.StatusOK, s.checkDomain(r.Context(), r.URL.Query().Get("project"), host))
 }

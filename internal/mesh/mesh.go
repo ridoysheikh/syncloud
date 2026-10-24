@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ridoysheikh/syncloud/internal/ingress"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -106,6 +107,9 @@ type Options struct {
 	Firewall bool
 	// IsEdge reports edge nodes, which open HTTP and HTTPS (§8.5).
 	IsEdge func(nodeID string) bool
+	// IsIngress reports nodes some project chose as its load balancers
+	// (D22): they open HTTP, HTTPS and those projects' public ports.
+	IsIngress func(nodeName string) bool
 	// PublicPorts are extra ports Traefik serves publicly on the
 	// controller and edge nodes (public databases, Phase 12e; public
 	// service ports, Phase 15c).
@@ -120,6 +124,17 @@ type PublicPort struct {
 	Sources  []string
 	// Kind names the rule ("database", "service").
 	Kind string
+	// Ingress is where the port is served (nil: the controller and edges).
+	Ingress *ingress.Target
+}
+
+// openOn reports whether the port is open on a node: platform nodes (the
+// controller and edge pools) open the default ingress's ports.
+func (p PublicPort) openOn(node string, platform bool) bool {
+	if p.Ingress == nil {
+		return platform
+	}
+	return p.Ingress.Served(node, platform)
 }
 
 type Manager struct {
@@ -302,15 +317,26 @@ func FirewallFor(self store.NodeNetwork, all []store.NodeNetwork, policies []sto
 			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:controller-" + p, Protocol: "tcp", Ports: p, Description: "controller (built-in)"})
 		}
 		for _, p := range public {
-			fw.Rules = append(fw.Rules, rule("", p))
+			if p.openOn(self.NodeName, true) {
+				fw.Rules = append(fw.Rules, rule("", p))
+			}
 		}
-	}
-	if opts.IsEdge != nil && opts.IsEdge(self.NodeID) {
-		for _, p := range []string{"80", "443"} {
-			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:edge-" + p, Protocol: "tcp", Ports: p, Description: "edge node (built-in)"})
-		}
-		for _, p := range public {
-			fw.Rules = append(fw.Rules, rule("edge-", p))
+	} else {
+		edge := opts.IsEdge != nil && opts.IsEdge(self.NodeID)
+		lb := opts.IsIngress != nil && opts.IsIngress(self.NodeName)
+		if edge || lb {
+			desc := "edge node (built-in)"
+			if !edge {
+				desc = "project load balancer (built-in)"
+			}
+			for _, p := range []string{"80", "443"} {
+				fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:edge-" + p, Protocol: "tcp", Ports: p, Description: desc})
+			}
+			for _, p := range public {
+				if p.openOn(self.NodeName, edge) {
+					fw.Rules = append(fw.Rules, rule("edge-", p))
+				}
+			}
 		}
 	}
 	for _, p := range policies {

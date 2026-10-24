@@ -117,4 +117,27 @@ Traefik keeps its last configuration, so **public traffic keeps flowing while th
 
 Point your domain's A records at the edge nodes' public addresses. sslip.io names always point at the controller.
 
-To check edge health, see **Network → Edge nodes** or run `synctl pools edges`.
+To check edge health, see **Network → Load balancers** or run `synctl pools edges`.
+
+Edge nodes serve every project that uses the default load balancer, the same as the controller.
+
+## Project load balancers
+
+A project can have its own load-balancer nodes. Its public traffic (HTTP, HTTPS and its public TCP/UDP ports) then goes straight to those nodes and never passes through the controller. Set it under **Project → Settings → Load balancer**, or:
+
+```sh
+synctl projects ingress shop --nodes lb1,lb2   # its own nodes, in order
+synctl projects ingress shop                   # show who serves it and where DNS must point
+synctl projects ingress shop --controller      # back to the controller
+```
+
+- **Any node can be chosen**, workers included. They keep running tasks, and several projects can share the same nodes. Each one runs a Traefik replica with only the routes of the projects that chose it.
+- **The controller and edge pools stop serving the project.** Its host firewall opens 80/443 on the chosen nodes, and the project's public ports open there only.
+- **Generated addresses** become `<name>.<first node's IP>.sslip.io`, which works without DNS setup but reaches the first node only. The first node in the list gives these addresses.
+- **Custom domains** need an A record for every chosen node. The domain's DNS check lists any that are missing.
+- **Switching has no downtime.** The previous load balancer keeps serving each custom domain until that domain's DNS points only at the new nodes (checked every minute), then drops it. **Cut over now** (`--cut-over`) ends this at once. Old generated addresses keep answering on the previous load balancer during the move.
+- **If every chosen node is down, the project is unreachable**, because DNS points at them and there is no fallback to the controller. The "system component" alert fires (`load balancers of <project>`). Keep at least two nodes for production projects.
+- Removing a node that is a project's only load balancer is refused unless you pass `--force` (`synctl nodes delete ID --force`). That project then goes back to the controller.
+- Public database endpoints stay on the controller and edge pools.
+
+Every replica, with the projects it serves, is listed on **Network → Load balancers**.

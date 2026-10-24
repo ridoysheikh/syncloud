@@ -36,21 +36,7 @@ func (a *app) nodesCmd() *cobra.Command {
 				return a.printer().table(ns, []string{"NAME", "STATUS", "OS", "CPU", "MEMORY", "DISK", "LAST SEEN", "ID"}, rows)
 			},
 		},
-		&cobra.Command{
-			Use: "delete ID", Aliases: []string{"rm"}, Short: "Remove a node (revokes its certificate)", Args: cobra.ExactArgs(1),
-			Annotations: op("deleteNode"),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				c, err := a.client()
-				if err != nil {
-					return err
-				}
-				if err := c.DeleteNode(ctx(cmd), args[0]); err != nil {
-					return err
-				}
-				fmt.Fprintf(a.out, "Removed node %s\n", args[0])
-				return nil
-			},
-		},
+		a.deleteNodeCmd(),
 		a.schedulableCmd("cordon", "Stop placing new tasks on a node", false),
 		a.schedulableCmd("uncordon", "Allow new tasks on a node again (ends a drain)", true),
 		&cobra.Command{
@@ -189,4 +175,27 @@ func (a *app) schedulableCmd(use, short string, on bool) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func (a *app) deleteNodeCmd() *cobra.Command {
+	var force bool
+	cmd := &cobra.Command{
+		Use: "delete ID", Aliases: []string{"rm"}, Short: "Remove a node (revokes its certificate)", Args: cobra.ExactArgs(1),
+		Long: `Removes a node. A project's only load balancer is kept unless --force is
+given: those projects then go back to the controller.`,
+		Annotations: op("deleteNode"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			if err := c.DeleteNode(ctx(cmd), args[0], force); err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "Removed node %s\n", args[0])
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&force, "force", false, "remove it even if it is a project's only load balancer")
+	return cmd
 }

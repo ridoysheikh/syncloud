@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/ridoysheikh/syncloud/internal/ingress"
 )
 
 // Dynamic is the subset of Traefik's dynamic configuration we generate.
@@ -98,12 +100,15 @@ type TCPRoute struct {
 	// Passthrough forwards the TLS connection undecrypted (the server
 	// terminates it); ProxyProtocol sends the client's address first.
 	Passthrough, ProxyProtocol bool
+	// Ingress is who serves the route (nil: the controller and edge pools).
+	Ingress *ingress.Target
 }
 
 // UDPRoute is a public UDP port of a service.
 type UDPRoute struct {
 	Name, Entrypoint string
 	Servers          []string // host:port
+	Ingress          *ingress.Target
 }
 
 type HTTPConfig struct {
@@ -186,6 +191,26 @@ type ServiceRoute struct {
 	Path        string
 	StripPrefix bool
 	RedirectTo  string
+	// Ingress is who serves the route (nil: the controller and edge pools).
+	Ingress *ingress.Target
+}
+
+// Scope is the Traefik replica a configuration is for: Platform replicas
+// (the controller and edge pools) serve the dashboard and every project on
+// the default ingress; any node serves the projects that chose it (D22).
+type Scope struct {
+	Node     string
+	Platform bool
+}
+
+// ControllerScope is the controller's own Traefik.
+var ControllerScope = Scope{Platform: true}
+
+func (sc Scope) serves(t *ingress.Target) bool {
+	if t == nil {
+		return sc.Platform
+	}
+	return t.Served(sc.Node, sc.Platform)
 }
 
 type RedirectScheme struct {
@@ -265,6 +290,9 @@ type Provider struct {
 	// uptime monitor's probes (requests carrying ProbeHeader with this
 	// value), so its checks never count as the service's traffic.
 	ProbeToken string
+	// EdgePool reports nodes of edge pools (they serve the platform's
+	// routes, as the controller does).
+	EdgePool func(node string) bool
 }
 
 // The uptime monitor marks its probes with ProbeHeader. They reach the app
@@ -298,8 +326,11 @@ const (
 	DevRegistryHost = "registry.localhost"
 )
 
-// Config builds the current dynamic configuration.
-func (p *Provider) Config() Dynamic {
+// Config builds the controller's dynamic configuration.
+func (p *Provider) Config() Dynamic { return p.ConfigFor(ControllerScope) }
+
+// ConfigFor builds the dynamic configuration of one Traefik replica.
+func (p *Provider) ConfigFor(sc Scope) Dynamic {
 	d := Dynamic{HTTP: HTTPConfig{Routers: map[string]Router{}, Services: map[string]Service{}, Middlewares: map[string]Middleware{}}}
 	d.HTTP.Services[svcController] = Service{LoadBalancer: LoadBalancer{Servers: []Server{{URL: p.ControllerURL}}, PassHostHeader: true}}
 	if p.RegistryURL != "" {
@@ -310,7 +341,27 @@ func (p *Provider) Config() Dynamic {
 	base := p.BaseDomain()
 	var routes []ServiceRoute
 	if p.ServiceRoutes != nil {
-		routes = p.ServiceRoutes()
+		for _, r := range p.ServiceRoutes() {
+			if sc.serves(r.Ingress) {
+				routes = append(routes, r)
+			}
+		}
+	}
+	var tcpIn []TCPRoute
+	if p.TCPRoutes != nil {
+		for _, r := range p.TCPRoutes() {
+			if sc.serves(r.Ingress) {
+				tcpIn = append(tcpIn, r)
+			}
+		}
+	}
+	var udpIn []UDPRoute
+	if p.UDPRoutes != nil {
+		for _, r := range p.UDPRoutes() {
+			if sc.serves(r.Ingress) {
+				udpIn = append(udpIn, r)
+			}
+		}
 	}
 	set := DefaultSettings()
 	if p.Settings != nil {
@@ -393,26 +444,38 @@ func (p *Provider) Config() Dynamic {
 
 	if base == "" {
 		// No base domain yet: plain HTTP, the dashboard answers on any host.
-		d.HTTP.Routers["syncloud-dashboard"] = Router{Rule: "PathPrefix(`/`)", Priority: 1, EntryPoints: web, Service: svcController}
-		if p.RegistryURL != "" {
-			d.HTTP.Routers["syncloud-registry"] = Router{Rule: host(DevRegistryHost), EntryPoints: web, Service: svcRegistry}
+		if sc.Platform {
+			d.HTTP.Routers["syncloud-dashboard"] = Router{Rule: "PathPrefix(`/`)", Priority: 1, EntryPoints: web, Service: svcController}
+			if p.RegistryURL != "" {
+				d.HTTP.Routers["syncloud-registry"] = Router{Rule: host(DevRegistryHost), EntryPoints: web, Service: svcRegistry}
+			}
 		}
 		// Plain TCP and UDP ports need no certificates.
-		if p.TCPRoutes != nil {
-			var plain []TCPRoute
-			for _, r := range p.TCPRoutes() {
-				if r.Plain {
-					plain = append(plain, r)
-				}
+		var plain []TCPRoute
+		for _, r := range tcpIn {
+			if r.Plain {
+				plain = append(plain, r)
 			}
-			d.TCP = tcpConfig(plain)
 		}
-		if p.UDPRoutes != nil {
-			d.UDP = udpConfig(p.UDPRoutes())
-		}
+		d.TCP = tcpConfig(plain)
+		d.UDP = udpConfig(udpIn)
 		return d
 	}
 
+	// ACME HTTP-01 challenges must stay on plain HTTP, ahead of the redirects.
+	d.HTTP.Routers["syncloud-acme"] = Router{
+		Rule: "PathPrefix(`/.well-known/acme-challenge/`)", Priority: 100000, EntryPoints: web, Service: svcController,
+	}
+	d.HTTP.Middlewares["syncloud-https"] = Middleware{RedirectScheme: &RedirectScheme{Scheme: "https", Port: p.HTTPSPort, Permanent: true}}
+	if p.Certificates != nil {
+		d.TLS.Certificates = p.Certificates()
+	}
+	if !sc.Platform {
+		// A project's own load balancer: its routes only.
+		d.TCP = tcpConfig(tcpIn)
+		d.UDP = udpConfig(udpIn)
+		return d
+	}
 	registryHost := "registry." + base
 	redirect := host(base) + " || " + host(registryHost)
 	if p.GitHost != nil {
@@ -422,11 +485,6 @@ func (p *Provider) Config() Dynamic {
 			redirect += " || " + host(gh)
 		}
 	}
-	// ACME HTTP-01 challenges must stay on plain HTTP, ahead of the redirects.
-	d.HTTP.Routers["syncloud-acme"] = Router{
-		Rule: "PathPrefix(`/.well-known/acme-challenge/`)", Priority: 100000, EntryPoints: web, Service: svcController,
-	}
-	d.HTTP.Middlewares["syncloud-https"] = Middleware{RedirectScheme: &RedirectScheme{Scheme: "https", Port: p.HTTPSPort, Permanent: true}}
 	d.HTTP.Routers["syncloud-https-redirect"] = Router{
 		Rule: redirect, EntryPoints: web, Middlewares: []string{"syncloud-https"}, Service: svcController,
 	}
@@ -454,21 +512,13 @@ func (p *Provider) Config() Dynamic {
 		}
 		d.HTTP.Routers["syncloud-registry"] = Router{Rule: host(registryHost), EntryPoints: eps, Service: svcRegistry, TLS: &RouterTLS{}}
 	}
-	if p.Certificates != nil {
-		d.TLS.Certificates = p.Certificates()
-	}
 	if p.DefaultCertificate != nil {
 		if c := p.DefaultCertificate(); c != nil {
 			d.TLS.Stores = map[string]TLSStore{"default": {DefaultCertificate: c}}
 		}
 	}
-	if p.TCPRoutes != nil {
-		tcpRoutes = append(tcpRoutes, p.TCPRoutes()...)
-	}
-	d.TCP = tcpConfig(tcpRoutes)
-	if p.UDPRoutes != nil {
-		d.UDP = udpConfig(p.UDPRoutes())
-	}
+	d.TCP = tcpConfig(append(tcpRoutes, tcpIn...))
+	d.UDP = udpConfig(udpIn)
 	return d
 }
 
@@ -574,18 +624,26 @@ func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	if r.URL.Query().Get("edge") != "" {
-		_ = json.NewEncoder(w).Encode(p.EdgeConfig())
+	if node := r.URL.Query().Get("edge"); node != "" {
+		_ = json.NewEncoder(w).Encode(p.EdgeConfig(node))
 		return
 	}
 	_ = json.NewEncoder(w).Encode(p.Merged())
 }
 
-// EdgeConfig is the configuration for an edge node's Traefik (§8.5): the
-// same routes and certificates, with the controller reached over the
-// private network; the registry stays on the controller's own Traefik.
-func (p *Provider) EdgeConfig() map[string]any {
-	out := p.Merged()
+// EdgeConfig is the configuration for a node's Traefik (§8.5): on an edge
+// pool node the controller's routes and certificates, on a project's own
+// load balancer only that project's routes (D22), with the controller
+// reached over the private network; the registry stays on the controller's
+// own Traefik.
+func (p *Provider) EdgeConfig(node string) map[string]any {
+	sc := Scope{Node: node, Platform: p.EdgePool != nil && p.EdgePool(node)}
+	var out map[string]any
+	b, _ := json.Marshal(p.ConfigFor(sc))
+	_ = json.Unmarshal(b, &out)
+	if sc.Platform && p.Custom != nil {
+		MergeCustom(out, p.Custom())
+	}
 	// Agents reach the controller's own Traefik: the gateway's PROXY port
 	// is loopback only (edges could only pass on their own address).
 	if t, ok := out["tcp"].(map[string]any); ok {

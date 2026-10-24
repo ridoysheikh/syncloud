@@ -216,6 +216,8 @@ export interface Project {
   /** Revisions whose images registry cleanup keeps for rollbacks. */
   rollbackWindow: number;
   createdAt: string;
+  /** Nodes serving its public traffic, in order; empty = the controller. */
+  ingressNodes?: string[];
 }
 
 export const taskTone = {

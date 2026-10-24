@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -112,6 +113,18 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	// A project's last load balancer: its traffic would go nowhere (its DNS
+	// points there), unless the caller insists.
+	name := ""
+	if v, ok := s.nodes.Get(id); ok {
+		name = v.Name
+	}
+	if s.ingress != nil && name != "" {
+		if _, last := s.ingress.Using(name); len(last) > 0 && r.URL.Query().Get("force") != "true" {
+			writeError(w, http.StatusConflict, CodeConflict, fmt.Sprintf("%s is the only load balancer of %s: choose other nodes for them first, or remove it with force (they go back to the controller)", name, strings.Join(last, ", ")))
+			return
+		}
+	}
 	if err := s.store.DeleteNode(r.Context(), id); errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such node")
 		return
@@ -120,6 +133,11 @@ func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.nodes.Removed(id)
+	if s.ingress != nil && name != "" {
+		if err := s.ingress.RemoveNode(r.Context(), name); err != nil {
+			s.log.Error("remove the node from project load balancers", "node", name, "err", err)
+		}
+	}
 	u, _ := currentUser(r.Context())
 	s.audit(r, u.ID, "node:Delete", "srn:syncloud:node/"+id, nil)
 	w.WriteHeader(http.StatusNoContent)

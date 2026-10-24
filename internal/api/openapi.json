@@ -440,10 +440,17 @@
         "tags": [
           "nodes"
         ],
-        "summary": "Remove a node. Its certificate stops working immediately.",
+        "summary": "Remove a node. Its certificate stops working immediately. Refused while it is a project's only load balancer, unless force is set (those projects go back to the controller).",
         "parameters": [
           {
             "$ref": "#/components/parameters/Id"
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -451,6 +458,9 @@
             "description": "Deleted"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -5546,6 +5556,14 @@
             "name": "host",
             "in": "query",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "description": "the project the domain belongs to (its load balancers are the targets)",
             "schema": {
               "type": "string"
             }
@@ -13604,7 +13622,7 @@
         "tags": [
           "nodepools"
         ],
-        "summary": "Edge nodes' Traefik replicas and their health; point public DNS at their addresses",
+        "summary": "Traefik replicas outside the controller (edge pool nodes and projects' load balancers) and their health; point public DNS at their addresses",
         "responses": {
           "200": {
             "description": "OK",
@@ -13642,6 +13660,17 @@
                           "checkedAt": {
                             "type": "string",
                             "format": "date-time"
+                          },
+                          "edgePool": {
+                            "type": "boolean",
+                            "description": "in an edge pool: serves the dashboard and projects on the default ingress"
+                          },
+                          "projects": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "projects that chose the node as their load balancer"
                           }
                         }
                       }
@@ -16043,6 +16072,131 @@
           }
         }
       }
+    },
+    "/api/v1/projects/{project}/ingress": {
+      "get": {
+        "operationId": "getProjectIngress",
+        "tags": [
+          "projects"
+        ],
+        "summary": "The nodes serving a project's public traffic (its load balancers), the DNS targets of its domains and any move in progress",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectIngress"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "setProjectIngress",
+        "tags": [
+          "projects"
+        ],
+        "summary": "Choose the nodes that serve a project's public traffic (empty = the controller and edge pools). The previous ingress keeps serving each custom domain until its DNS points at the new one",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "nodes"
+                ],
+                "properties": {
+                  "nodes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "node names, in order: the first gives the generated addresses"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectIngress"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/ingress/cut-over": {
+      "post": {
+        "operationId": "cutOverProjectIngress",
+        "tags": [
+          "projects"
+        ],
+        "summary": "End a project's ingress move now: the previous ingress stops serving it, whether or not DNS has moved",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectIngress"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -17158,6 +17312,16 @@
           },
           "deleting": {
             "type": "boolean"
+          },
+          "ingressNodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "nodes serving the project's public traffic, in order (the first gives the generated addresses); empty = the controller and edge pools"
+          },
+          "ingressMove": {
+            "$ref": "#/components/schemas/IngressMove"
           }
         }
       },
@@ -17726,11 +17890,31 @@
             }
           },
           "ready": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "resolves to every target"
           },
           "record": {
             "type": "string",
-            "example": "shop.example.com. A 203.0.113.10"
+            "example": "shop.example.com. A 203.0.113.10",
+            "description": "the DNS records to create, one per line"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "every IP the host must resolve to: the project's load balancers, or the controller"
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "targets the host does not resolve to yet"
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "resolves to some targets only"
           }
         }
       },
@@ -21428,6 +21612,86 @@
           },
           "fromName": {
             "type": "string"
+          }
+        }
+      },
+      "IngressMove": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "the previous ingress nodes; empty = the controller"
+          },
+          "fromController": {
+            "type": "boolean",
+            "description": "the controller was a previous ingress too"
+          },
+          "moved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "custom domains whose DNS has moved"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ProjectIngress": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "address": {
+                  "type": "string",
+                  "description": "public address; point DNS here"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "healthy",
+                    "unhealthy",
+                    "unknown"
+                  ]
+                }
+              }
+            },
+            "description": "empty = the controller and edge pools"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "the addresses the project's custom domains must resolve to"
+          },
+          "base": {
+            "type": "string",
+            "description": "base domain of the project's generated addresses"
+          },
+          "move": {
+            "$ref": "#/components/schemas/IngressMove"
+          },
+          "pending": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "custom domains the previous ingress still serves until their DNS moves"
           }
         }
       }

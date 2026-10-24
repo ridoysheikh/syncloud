@@ -21,8 +21,12 @@ import { Select } from "@/ui/select";
 interface DomainCheck {
   host: string;
   expected: string;
+  /** Every IP the host must resolve to (the project's load balancers). */
+  targets: string[];
+  missing: string[];
   addresses: string[];
   ready: boolean;
+  partial: boolean;
   record: string;
 }
 
@@ -236,10 +240,14 @@ export function DomainsPanel({
                 <StatusBadge tone="ok">points here</StatusBadge>
               ) : (
                 <div className="flex flex-col gap-0.5 py-1">
-                  <StatusBadge tone="warn">waiting for DNS</StatusBadge>
+                  <StatusBadge tone="warn">
+                    {d.dns.partial
+                      ? `missing ${d.dns.missing.join(", ")}`
+                      : "waiting for DNS"}
+                  </StatusBadge>
                   <span className="text-muted">
                     Create{" "}
-                    <code className="text-fg font-mono break-all">
+                    <code className="text-fg font-mono break-all whitespace-pre-line">
                       {d.dns.record || `A record → this server`}
                     </code>
                     {d.dns.addresses.length > 0 && (

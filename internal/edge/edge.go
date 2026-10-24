@@ -36,8 +36,13 @@ type Config struct {
 	TokenHeader  string
 	// ControllerURL is the controller's API on the private network.
 	ControllerURL func() string
-	// Edges lists the nodes of edge pools.
+	// Edges lists the nodes that run a replica: those of edge pools and the
+	// projects' own load balancers (D22).
 	Edges func() []nodes.View
+	// EdgePool reports nodes of edge pools (nil: all of Edges).
+	EdgePool func(nodeID string) bool
+	// Projects lists the projects a node is the load balancer of.
+	Projects func(nodeName string) []string
 	// Settings returns the global Traefik settings (§5.7).
 	Settings func() traefik.Settings
 	// DatabaseEntrypoints are the public database entrypoints (name -> address).
@@ -57,6 +62,10 @@ type Health struct {
 	Error     string    `json:"error,omitempty"`
 	Container string    `json:"container"` // the Traefik task state on the node
 	CheckedAt time.Time `json:"checkedAt"`
+	// EdgePool: the node is in an edge pool and serves the default
+	// ingress; Projects chose it as their load balancer.
+	EdgePool bool     `json:"edgePool"`
+	Projects []string `json:"projects"`
 }
 
 type Manager struct {
@@ -144,6 +153,18 @@ func (m *Manager) settings() traefik.Settings {
 	return m.cfg.Settings()
 }
 
+// Healthy reports whether a node's replica answered its last check.
+func (m *Manager) Healthy(node string) (healthy, known bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, h := range m.health {
+		if h.Node == node {
+			return h.State == "healthy", true
+		}
+	}
+	return false, false
+}
+
 // Refresh re-sends the replica to every edge node (after a settings change).
 func (m *Manager) Refresh(ctx context.Context) {
 	for _, v := range m.cfg.Edges() {
@@ -224,7 +245,13 @@ func (m *Manager) Run(ctx context.Context) {
 			now[v.ID] = true
 			m.apply(ctx, v.ID, v.Name)
 			ip := m.meshIP(ctx, v.ID)
-			h := &Health{NodeID: v.ID, Node: v.Name, MeshIP: ip, Address: addrs[v.ID], CheckedAt: time.Now().UTC(), State: "healthy"}
+			h := &Health{NodeID: v.ID, Node: v.Name, MeshIP: ip, Address: addrs[v.ID], CheckedAt: time.Now().UTC(), State: "healthy",
+				EdgePool: m.cfg.EdgePool == nil || m.cfg.EdgePool(v.ID), Projects: []string{}}
+			if m.cfg.Projects != nil {
+				if ps := m.cfg.Projects(v.Name); ps != nil {
+					h.Projects = ps
+				}
+			}
 			m.mu.Lock()
 			h.Container = m.state[v.ID]
 			m.mu.Unlock()

@@ -440,21 +440,39 @@ export function NodePoolPage() {
   );
 }
 
-/** Network › Edge nodes (§8.5): Traefik replicas on edge pools. */
+/** Network › Load balancers (§8.5, D22): Traefik replicas on edge pools and
+ * on the nodes projects chose as their load balancers. */
 export function EdgeNodesPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["edges"],
-    queryFn: async () => (await api<{ items: { nodeId: string; node: string; meshIp: string; address: string; state: string; error?: string; container: string; checkedAt: string }[] }>("GET", "/edges")).items,
+    queryFn: async () =>
+      (
+        await api<{
+          items: {
+            nodeId: string;
+            node: string;
+            meshIp: string;
+            address: string;
+            state: string;
+            error?: string;
+            container: string;
+            checkedAt: string;
+            edgePool: boolean;
+            projects: string[];
+          }[];
+        }>("GET", "/edges")
+      ).items,
     refetchInterval: 5000,
   });
   const edges = data ?? [];
   return (
     <div className={cn("flex flex-col", gap)}>
-      <PageHeader crumbs={["Network"]} title="Edge nodes" />
+      <PageHeader crumbs={["Network"]} title="Load balancers" />
       <Alert tone="info">
-        Nodes in an <span className="font-mono">edge</span> pool run a Traefik replica with the same routes and certificates as the controller, fetched over
-        the private network, and keep serving with the last configuration when the controller is down. Point your domain's A records at their addresses
-        (sslip.io names point at the controller only).
+        The controller serves every project's public traffic unless the project chose its own nodes (Project › Settings › Load balancer). Those nodes, and
+        nodes in an <span className="font-mono">edge</span> pool, run a Traefik replica fed by the controller over the private network, and keep serving with
+        the last configuration when the controller is down. Edge pools serve the same routes as the controller; a project's own nodes serve only that
+        project.
       </Alert>
       <Panel flush>
         <DataTable
@@ -462,14 +480,27 @@ export function EdgeNodesPage() {
           rowKey={(e) => e.nodeId}
           empty={
             !isLoading && (
-              <EmptyState icon={Globe} title="No edge nodes">
-                Create a pool with the edge role (Compute › Node pools) and add nodes to it.
+              <EmptyState icon={Globe} title="Only the controller">
+                Choose nodes for a project under its Settings › Load balancer, or create a pool with the edge role (Compute › Node pools).
               </EmptyState>
             )
           }
           columns={[
             { header: "Node", cell: (e) => <NodeLink id={e.nodeId} name={e.node} className="font-medium" /> },
             { header: "Health", cell: (e) => <StatusBadge tone={e.state === "healthy" ? "ok" : e.state === "starting" ? "info" : "bad"}>{e.state}</StatusBadge> },
+            {
+              header: "Serves",
+              cell: (e) => (
+                <span className="flex flex-wrap items-center gap-1">
+                  {e.edgePool && <StatusBadge tone="info">edge pool: like the controller</StatusBadge>}
+                  {(e.projects ?? []).map((p) => (
+                    <Link key={p} to={`/projects/${p}` as string} className="hover:text-accent font-mono">
+                      {p}
+                    </Link>
+                  ))}
+                </span>
+              ),
+            },
             { header: "Public address", cell: (e) => <span className="font-mono">{e.address || "—"}</span> },
             { header: "Mesh address", cell: (e) => <span className="text-muted font-mono">{e.meshIp}</span> },
             { header: "Replica", cell: (e) => <span className="text-muted">{e.container || "—"}</span> },

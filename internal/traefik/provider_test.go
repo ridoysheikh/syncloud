@@ -2,6 +2,7 @@ package traefik
 
 import (
 	"encoding/json"
+	"github.com/ridoysheikh/syncloud/internal/ingress"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -131,7 +132,8 @@ func TestAgentRoutePassthrough(t *testing.T) {
 			t.Errorf("missing %s in %s", want, b)
 		}
 	}
-	edge, _ := json.Marshal(p.EdgeConfig()["tcp"])
+	p.EdgePool = func(string) bool { return true }
+	edge, _ := json.Marshal(p.EdgeConfig("e1")["tcp"])
 	if strings.Contains(string(edge), AgentRouteName) {
 		t.Errorf("edge config has the agent route: %s", edge)
 	}
@@ -270,8 +272,70 @@ func TestRegistryEntrypoint(t *testing.T) {
 			t.Errorf("missing %s in %s", want, b)
 		}
 	}
-	edge, _ := json.Marshal(p.EdgeConfig())
+	p.EdgePool = func(string) bool { return true }
+	edge, _ := json.Marshal(p.EdgeConfig("e1"))
 	if strings.Contains(string(edge), RegistryRouteName) {
 		t.Errorf("edge config has the registry route: %s", edge)
+	}
+}
+
+// A project with its own load-balancer nodes is served only by them: the
+// controller and edge pools leave it out, and those nodes serve nothing else
+// but the ACME challenges (D22).
+func TestProjectIngressScopes(t *testing.T) {
+	own := &ingress.Target{Nodes: []string{"lb1"}}
+	both := &ingress.Target{Default: true, Nodes: []string{"lb1"}}
+	p := &Provider{ControllerURL: "http://127.0.0.1:7070", BaseDomain: func() string { return "example.com" },
+		MeshControllerURL: func() string { return "http://10.90.0.1:7070" },
+		EdgePool:          func(n string) bool { return n == "edge1" },
+		ServiceRoutes: func() []ServiceRoute {
+			return []ServiceRoute{
+				{Name: "svc-a-web", Host: "a.example.com", Servers: []string{"http://10.91.1.2:80"}},
+				{Name: "svc-b-web", Host: "b.1-2-3-4.sslip.io", Servers: []string{"http://10.91.1.3:80"}, Ingress: own},
+				{Name: "dom-c", Host: "shop.example.org", Servers: []string{"http://10.91.1.3:80"}, Ingress: both},
+			}
+		},
+		UDPRoutes: func() []UDPRoute {
+			return []UDPRoute{{Name: "pub-udp-20000", Entrypoint: "udp-20000", Servers: []string{"10.91.1.3:53"}, Ingress: own}}
+		}}
+	routers := func(c map[string]any) map[string]any { return c["http"].(map[string]any)["routers"].(map[string]any) }
+	ctl := p.Config()
+	if _, ok := ctl.HTTP.Routers["svc-b-web"]; ok {
+		t.Error("the controller serves a project with its own ingress")
+	}
+	if _, ok := ctl.HTTP.Routers["dom-c"]; !ok {
+		t.Error("the controller stopped serving a domain whose DNS has not moved")
+	}
+	if ctl.UDP != nil {
+		t.Errorf("the controller serves the project's UDP port: %+v", ctl.UDP)
+	}
+	edge := routers(p.EdgeConfig("edge1"))
+	if _, ok := edge["svc-b-web"]; ok {
+		t.Error("an edge pool node serves a project with its own ingress")
+	}
+	if _, ok := edge["syncloud-dashboard"]; !ok {
+		t.Error("an edge pool node lost the dashboard")
+	}
+	lb := p.EdgeConfig("lb1")
+	r := routers(lb)
+	for _, want := range []string{"svc-b-web", "dom-c", "syncloud-acme"} {
+		if _, ok := r[want]; !ok {
+			t.Errorf("lb1 lacks %s", want)
+		}
+	}
+	for _, not := range []string{"svc-a-web", "syncloud-dashboard", "syncloud-catchall", "syncloud-registry"} {
+		if _, ok := r[not]; ok {
+			t.Errorf("lb1 serves %s", not)
+		}
+	}
+	if lb["udp"] == nil {
+		t.Error("lb1 lacks the project's UDP port")
+	}
+	svcs := lb["http"].(map[string]any)["services"].(map[string]any)
+	if b, _ := json.Marshal(svcs["syncloud-controller"]); !strings.Contains(string(b), "10.90.0.1") {
+		t.Errorf("ACME challenges don't reach the controller over the mesh: %s", b)
+	}
+	if other := routers(p.EdgeConfig("w9")); len(other) != 1 {
+		t.Errorf("a node no project chose serves %v", other)
 	}
 }

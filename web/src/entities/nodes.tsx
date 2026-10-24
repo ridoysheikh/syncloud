@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { Cpu, Server, Trash2 } from "lucide-react";
 import {
@@ -478,14 +478,23 @@ export function NodePicker({
   value,
   onChange,
   limit,
+  exclude,
   counts,
+  ordered,
+  detail,
   label = "Nodes",
 }: {
   value: string[];
   onChange: (v: string[]) => void;
   limit?: string[];
+  /** Node names never offered. */
+  exclude?: string[];
   /** Tasks per node name to show; by default the node's active tasks. */
   counts?: Record<string, number>;
+  /** Keep the order nodes were picked in, and show it. */
+  ordered?: boolean;
+  /** An extra line under a node (e.g. its public address). */
+  detail?: (name: string) => ReactNode;
   label?: string;
 }) {
   const { data: nodes = [], isLoading } = useNodes();
@@ -495,11 +504,16 @@ export function NodePicker({
     for (const v of value) all.add(v);
     return [...all]
       .filter((n) => !limit?.length || limit.includes(n))
+      .filter((n) => !exclude?.includes(n))
       .sort(byRole);
-  }, [nodes, value, limit]);
+  }, [nodes, value, limit, exclude]);
   const toggle = (n: string) =>
     onChange(
-      value.includes(n) ? value.filter((x) => x !== n) : [...value, n].sort(),
+      value.includes(n)
+        ? value.filter((x) => x !== n)
+        : ordered
+          ? [...value, n]
+          : [...value, n].sort(),
     );
   if (!isLoading && names.length === 0)
     return (
@@ -529,6 +543,13 @@ export function NodePicker({
               <span className="flex items-center gap-1.5">
                 {name}
                 <ControllerTag name={name} />
+                {ordered && value.includes(name) && (
+                  <span className="border-line text-muted rounded border px-1 text-[10px] font-normal">
+                    {value.indexOf(name) === 0
+                      ? "1 · generated addresses"
+                      : value.indexOf(name) + 1}
+                  </span>
+                )}
               </span>
             }
             description={
@@ -552,6 +573,11 @@ export function NodePicker({
               )
             }
           >
+            {detail && (
+              <span className="text-faint block text-[11px]">
+                {detail(name)}
+              </span>
+            )}
             {n && <MiniUsage node={n} />}
           </ChoiceCard>
         );

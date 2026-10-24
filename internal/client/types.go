@@ -179,8 +179,14 @@ func (c *Client) ListNodes(ctx context.Context) ([]Node, error) {
 	return out.Items, c.Do(ctx, "GET", "/api/v1/nodes", nil, &out)
 }
 
-func (c *Client) DeleteNode(ctx context.Context, id string) error {
-	return c.Do(ctx, "DELETE", "/api/v1/nodes/"+id, nil, nil)
+// DeleteNode removes a node; force also removes a project's only load
+// balancer (that project goes back to the controller).
+func (c *Client) DeleteNode(ctx context.Context, id string, force bool) error {
+	q := ""
+	if force {
+		q = "?force=true"
+	}
+	return c.Do(ctx, "DELETE", "/api/v1/nodes/"+url.PathEscape(id)+q, nil, nil)
 }
 
 func (c *Client) ListJoinTokens(ctx context.Context) ([]JoinToken, error) {
@@ -500,6 +506,50 @@ type Project struct {
 	Environments   []string  `json:"environments"`
 	RollbackWindow int       `json:"rollbackWindow"`
 	CreatedAt      time.Time `json:"createdAt"`
+	// IngressNodes serve the project's public traffic (empty = the controller).
+	IngressNodes []string `json:"ingressNodes"`
+}
+
+// IngressMove is a project's ingress change in progress.
+type IngressMove struct {
+	From           []string  `json:"from"` // empty = the controller
+	FromController bool      `json:"fromController"`
+	Moved          []string  `json:"moved"`
+	StartedAt      time.Time `json:"startedAt"`
+}
+
+// ProjectIngress is who serves a project's public traffic.
+type ProjectIngress struct {
+	Project string `json:"project"`
+	Nodes   []struct {
+		Name    string `json:"name"`
+		Address string `json:"address"`
+		State   string `json:"state"`
+	} `json:"nodes"`
+	Targets []string     `json:"targets"`
+	Base    string       `json:"base"`
+	Move    *IngressMove `json:"move"`
+	Pending []string     `json:"pending"`
+}
+
+func (c *Client) GetProjectIngress(ctx context.Context, project string) (ProjectIngress, error) {
+	var out ProjectIngress
+	return out, c.Do(ctx, "GET", "/api/v1/projects/"+url.PathEscape(project)+"/ingress", nil, &out)
+}
+
+// SetProjectIngress chooses a project's load-balancer nodes (empty = the controller).
+func (c *Client) SetProjectIngress(ctx context.Context, project string, nodes []string) (ProjectIngress, error) {
+	if nodes == nil {
+		nodes = []string{}
+	}
+	var out ProjectIngress
+	return out, c.Do(ctx, "PUT", "/api/v1/projects/"+url.PathEscape(project)+"/ingress", map[string]any{"nodes": nodes}, &out)
+}
+
+// CutOverProjectIngress ends a project's ingress move now.
+func (c *Client) CutOverProjectIngress(ctx context.Context, project string) (ProjectIngress, error) {
+	var out ProjectIngress
+	return out, c.Do(ctx, "POST", "/api/v1/projects/"+url.PathEscape(project)+"/ingress/cut-over", nil, &out)
 }
 
 // SetProjectNodes limits the nodes a project's workloads run on (empty = any).

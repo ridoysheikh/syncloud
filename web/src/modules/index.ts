@@ -129,7 +129,7 @@ export const modules: DashboardModule[] = [
       { path: "/network/routing", label: "Routing", component: RoutingPage },
       { path: "/network/routing/middlewares/new", label: "New middleware", component: MiddlewarePage, hidden: true },
       { path: "/network/routing/middlewares/$project/$name", label: "Middleware", component: MiddlewarePage, hidden: true },
-      { path: "/network/edge", label: "Edge Nodes", component: EdgeNodesPage },
+      { path: "/network/edge", label: "Load balancers", component: EdgeNodesPage },
       { path: "/network/topology", label: "Topology", component: TopologyPage },
       { path: "/network/security-groups", label: "Security groups", component: SecurityGroupsPage },
       { path: "/network/security-groups/new", label: "New security group", component: SecurityGroupPage, hidden: true },

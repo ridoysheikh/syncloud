@@ -173,3 +173,78 @@ general workloads.`,
 	cmd.Flags().BoolVar(&anyNode, "any", false, "allow every node again")
 	return cmd
 }
+
+func (a *app) projectIngressCmd() *cobra.Command {
+	var nodes []string
+	var controller, cutOver bool
+	cmd := &cobra.Command{
+		Use:   "ingress PROJECT",
+		Short: "Show or choose the nodes that serve a project's public traffic (its load balancers)",
+		Long: `By default the controller (and any edge pool) serves a project's public
+traffic. With --nodes, those nodes run Traefik for the project and serve all
+of it; the controller stops serving it. The first node gives the generated
+addresses (<name>.<its IP>.sslip.io); point custom domains at every node.
+
+The previous ingress keeps serving each custom domain until its DNS points at
+the new one. --cut-over ends that now.`,
+		Example: `  synctl projects ingress shop
+  synctl projects ingress shop --nodes lb1,lb2
+  synctl projects ingress shop --controller
+  synctl projects ingress shop --cut-over`,
+		Args:        cobra.ExactArgs(1),
+		Annotations: op("getProjectIngress", "setProjectIngress", "cutOverProjectIngress"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			if controller && len(nodes) > 0 {
+				return fmt.Errorf("--nodes and --controller conflict")
+			}
+			var in client.ProjectIngress
+			switch {
+			case controller || len(nodes) > 0:
+				in, err = c.SetProjectIngress(ctx(cmd), args[0], nodes)
+			case cutOver:
+				in, err = c.CutOverProjectIngress(ctx(cmd), args[0])
+			default:
+				in, err = c.GetProjectIngress(ctx(cmd), args[0])
+			}
+			if err != nil {
+				return err
+			}
+			if cutOver && (controller || len(nodes) > 0) {
+				if in, err = c.CutOverProjectIngress(ctx(cmd), args[0]); err != nil {
+					return err
+				}
+			}
+			if a.output == "json" {
+				return a.printer().json(in)
+			}
+			if len(in.Nodes) == 0 {
+				fmt.Fprintf(a.out, "Project %s is served by the controller\n", in.Project)
+			} else {
+				fmt.Fprintf(a.out, "Project %s is served by its own load balancers:\n", in.Project)
+				for _, n := range in.Nodes {
+					fmt.Fprintf(a.out, "  %-20s %-16s %s\n", n.Name, n.Address, n.State)
+				}
+				fmt.Fprintf(a.out, "Generated addresses: *.%s\n", in.Base)
+			}
+			if len(in.Targets) > 0 {
+				fmt.Fprintf(a.out, "Point custom domains at: %s\n", strings.Join(in.Targets, ", "))
+			}
+			if in.Move != nil {
+				from := "the controller"
+				if len(in.Move.From) > 0 {
+					from = strings.Join(in.Move.From, ", ")
+				}
+				fmt.Fprintf(a.out, "Moving: %s still serves %s until their DNS moves (--cut-over to stop now)\n", from, strings.Join(in.Pending, ", "))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringSliceVar(&nodes, "nodes", nil, "the load-balancer nodes, in order (the first gives the generated addresses)")
+	cmd.Flags().BoolVar(&controller, "controller", false, "go back to the controller")
+	cmd.Flags().BoolVar(&cutOver, "cut-over", false, "stop the previous ingress serving the project now")
+	return cmd
+}

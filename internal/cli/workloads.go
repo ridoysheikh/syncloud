@@ -164,6 +164,7 @@ func (a *app) projectsCmd() *cobra.Command {
 		update,
 		deployments,
 		a.projectNodesCmd(),
+		a.projectIngressCmd(),
 		&cobra.Command{
 			Use: "list", Aliases: []string{"ls"}, Short: "List projects", Args: cobra.NoArgs,
 			Annotations: op("listProjects"),

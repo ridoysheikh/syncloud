@@ -2,6 +2,21 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [Unreleased]
+
+### Upgrading
+
+- A database migration adds each project's load-balancer setting. Nothing changes until a project chooses its own nodes.
+
+### Added
+
+- **Projects can have their own load balancers.** Under **Project → Settings → Load balancer** (or `synctl projects ingress PROJECT --nodes n1,n2`), choose any nodes to serve a project's public traffic. They run Traefik for that project only, so its traffic goes straight to them and never passes through the controller. It also keeps flowing while the controller is down. Generated addresses move to the first node's `sslip.io` name. Custom domains need an A record for each node, and their DNS check lists the missing ones. When you switch, the previous load balancer keeps serving each custom domain until its DNS has moved, so there is no downtime. **Cut over now** ends this at once. An alert fires when every load balancer of a project is down.
+- **Network → Load balancers** (formerly Edge nodes) lists every Traefik replica and the projects it serves.
+
+### Changed
+
+- Removing a node that is a project's only load balancer is refused unless forced (`synctl nodes delete ID --force`).
+
 ## [0.2.9]
 
 ### Added

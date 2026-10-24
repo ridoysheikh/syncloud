@@ -53,6 +53,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/gitserver"
 	"github.com/ridoysheikh/syncloud/internal/health"
 	"github.com/ridoysheikh/syncloud/internal/imageref"
+	"github.com/ridoysheikh/syncloud/internal/ingress"
 	"github.com/ridoysheikh/syncloud/internal/jobs"
 	"github.com/ridoysheikh/syncloud/internal/logs"
 	"github.com/ridoysheikh/syncloud/internal/mesh"
@@ -263,6 +264,19 @@ func serve(args []string) error {
 		return fmt.Errorf("load the built-in Git server settings: %w", err)
 	}
 	var workloads *workload.Manager // set below; routes need certificates too
+	var edgesRef atomic.Pointer[edge.Manager]
+	// Which Traefik replicas serve each project (D22): the controller and
+	// edge pools, or the project's own load-balancer nodes.
+	ingressMgr := ingress.New(st, log)
+	ingressMgr.ControllerAddr = func(ctx context.Context) string {
+		ip, _ := detector.PublicIP(ctx)
+		return ip
+	}
+	if err := ingressMgr.Load(ctx); err != nil {
+		return fmt.Errorf("load project ingress: %w", err)
+	}
+	workload.ProjectBase = ingressMgr.Base
+	isIngress := func(name string) bool { _, ok := ingressMgr.Assigned()[name]; return ok }
 	// The database manager is created further down, after loops that already
 	// read these lists; until then they leave databases out.
 	var dbRef atomic.Pointer[dbs.Manager]
@@ -340,12 +354,13 @@ func serve(args []string) error {
 		}
 		if workloads != nil {
 			for _, r := range workloads.PublicRoutes(context.Background()) {
-				out = append(out, mesh.PublicPort{Port: fmt.Sprint(r.Port), Protocol: r.Protocol, Sources: r.Allow, Kind: "service"})
+				t := ingressMgr.Ports(r.Project)
+				out = append(out, mesh.PublicPort{Port: fmt.Sprint(r.Port), Protocol: r.Protocol, Sources: r.Allow, Kind: "service", Ingress: &t})
 			}
 		}
 		return out
 	}
-	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts, IsEdge: isEdge, PublicPorts: publicPorts})
+	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts, IsEdge: isEdge, IsIngress: isIngress, PublicPorts: publicPorts})
 	gw.AddHooks(meshMgr.Hooks())
 	go meshMgr.Run(ctx)
 	certHosts := func(ep domain.Endpoints) []string {
@@ -357,7 +372,8 @@ func serve(args []string) error {
 			hosts = append(hosts, h)
 		}
 		if workloads != nil {
-			for _, r := range workloads.Routes(context.Background(), ep.BaseDomain) {
+			// With the old generated addresses of projects moving ingress.
+			for _, r := range ingressRoutes(workloads.Routes(context.Background(), ep.BaseDomain), ingressMgr, ep.BaseDomain, noChain) {
 				hosts = append(hosts, r.Host)
 			}
 		}
@@ -690,6 +706,9 @@ func serve(args []string) error {
 			for _, t := range sysMgr.List() {
 				out = append(out, alerts.ComponentState{ID: t.TaskID, Name: t.Name, State: t.State, Error: t.Error})
 			}
+			if e := edgesRef.Load(); e != nil {
+				out = append(out, ingressComponents(ingressMgr, e)...)
+			}
 			return out
 		}
 	}
@@ -722,7 +741,7 @@ func serve(args []string) error {
 		for _, r := range routing {
 			for _, p := range spec.Ports {
 				if p.Name == r.PortName && r.PublicPort > 0 && p.Protocol != "http" {
-					out = append(out, p.Protocol+"://"+workload.PublicAddress(base, r.PublicPort))
+					out = append(out, p.Protocol+"://"+workload.PublicAddress(ingressMgr.Base(sv.Project, base), r.PublicPort))
 				}
 			}
 		}
@@ -741,11 +760,33 @@ func serve(args []string) error {
 		httpsPort = ""
 	}
 	meshControllerURL := func() string { return "http://" + net.JoinHostPort(mesh.MeshAddr(1).String(), portOf(cfg.Listen)) }
+	// Replicas run on edge pool nodes and on the projects' load balancers.
+	edgePool := func(id string) bool { _, role := pools.PoolOf(id); return role == "edge" }
+	replicaNodes := func() []nodes.View {
+		out := pools.EdgeNodes()
+		assigned := ingressMgr.Assigned()
+		for _, v := range registry.List() {
+			if _, ok := assigned[v.Name]; ok && v.Name != mesh.ControllerNode && !edgePool(v.ID) {
+				out = append(out, v)
+			}
+		}
+		return out
+	}
 	edges := edge.New(st, gw, metricStore, serviceNames, edge.Config{Image: system.ImageTraefik, TraefikToken: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: meshControllerURL,
-		Edges: pools.EdgeNodes, Settings: traefikExtras.Settings, DatabaseEntrypoints: map[string]string{"valkey": ":6379", "postgres": ":5432"},
+		Edges: replicaNodes, EdgePool: edgePool, Projects: func(name string) []string { return ingressMgr.Assigned()[name] }, Settings: traefikExtras.Settings, DatabaseEntrypoints: map[string]string{"valkey": ":6379", "postgres": ":5432"},
 		ServiceEntrypoints: serviceEntrypoints}, log)
 	gw.AddHooks(edges.Hooks())
 	go edges.Run(ctx)
+	edgesRef.Store(edges)
+	// A project's ingress changed: new hosts and certificates, replicas on
+	// its nodes, firewalls opening 80/443 there.
+	ingressMgr.OnChange = func() {
+		workloads.InvalidateRoutes()
+		certMgr.SetHosts(certHosts(domains.Endpoints()))
+		edges.Refresh(ctx)
+		meshMgr.Changed(context.Background())
+	}
+	go ingressMgr.Run(ctx)
 	// The system specs were first rendered before the workload manager
 	// existed: render them again with the public ports' entrypoints before
 	// any agent connects, or Traefik would restart without them.
@@ -766,13 +807,16 @@ func serve(args []string) error {
 		Token: traefikToken, TokenHeader: system.TraefikTokenHeader, ControllerURL: controllerURL,
 		RegistryURL: "http://" + system.RegistryAddr, RegistryEntrypoint: system.RegistryEntrypointAddr, BaseDomain: domains.Base, HTTPSPort: httpsPort,
 		ServiceRoutes: func() []traefik.ServiceRoute {
-			var out []traefik.ServiceRoute
-			for _, r := range workloads.Routes(context.Background(), domains.Base()) {
-				chain, own := traefikExtras.Chain(r.ServiceID)
-				out = append(out, traefik.ServiceRoute{Name: r.Name, Host: r.Host, Servers: r.Servers, Middlewares: chain, OwnRetry: own, HealthPath: r.HealthPath,
-					Path: r.Path, StripPrefix: r.StripPrefix, RedirectTo: r.RedirectTo})
+			base := domains.Base()
+			return ingressRoutes(workloads.Routes(context.Background(), base), ingressMgr, base, traefikExtras.Chain)
+		},
+		EdgePool: func(name string) bool {
+			for _, v := range registry.List() {
+				if v.Name == name {
+					return edgePool(v.ID)
+				}
 			}
-			return out
+			return false
 		},
 		Middlewares:       traefikExtras.Definitions,
 		Settings:          traefikExtras.Settings,
@@ -788,7 +832,8 @@ func serve(args []string) error {
 			}
 			for _, r := range workloads.PublicRoutes(context.Background()) {
 				if r.Protocol == "tcp" {
-					out = append(out, traefik.TCPRoute{Name: r.Name, Entrypoint: r.Entrypoint(), Servers: r.Servers, Allow: r.Allow, Plain: true})
+					t := ingressMgr.Ports(r.Project)
+					out = append(out, traefik.TCPRoute{Name: r.Name, Entrypoint: r.Entrypoint(), Servers: r.Servers, Allow: r.Allow, Plain: true, Ingress: &t})
 				}
 			}
 			if host := agentHost(domains.Base()); host != "" && cfg.AgentProxyListen != "" {
@@ -802,7 +847,8 @@ func serve(args []string) error {
 			var out []traefik.UDPRoute
 			for _, r := range workloads.PublicRoutes(context.Background()) {
 				if r.Protocol == "udp" {
-					out = append(out, traefik.UDPRoute{Name: r.Name, Entrypoint: r.Entrypoint(), Servers: r.Servers})
+					t := ingressMgr.Ports(r.Project)
+					out = append(out, traefik.UDPRoute{Name: r.Name, Entrypoint: r.Entrypoint(), Servers: r.Servers, Ingress: &t})
 				}
 			}
 			return out
@@ -921,6 +967,7 @@ func serve(args []string) error {
 		Shell:            shells,
 		Pools:            pools,
 		Edges:            edges,
+		Ingress:          ingressMgr,
 		Upgrades:         upgrades,
 		S3:               s3Mgr,
 		AgentRollout:     agentRollout,

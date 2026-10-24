@@ -65,8 +65,21 @@ func portRouting(rs map[string]store.PortRouting, port string) store.PortRouting
 	return store.PortRouting{PortName: port, Generated: true}
 }
 
+// ProjectBase returns the base domain of a project's generated addresses
+// and public ports (nil: the cluster's). A project with its own ingress
+// nodes gets the first one's sslip.io name (Phase 23).
+var ProjectBase func(project, base string) string
+
+func projectBase(project, base string) string {
+	if ProjectBase == nil {
+		return base
+	}
+	return ProjectBase(project, base)
+}
+
 // generatedHost is an HTTP port's generated address ("" when it is off).
 func generatedHost(sv store.Service, p Port, first bool, base string, r store.PortRouting) string {
+	base = projectBase(sv.Project, base)
 	switch {
 	case !r.Generated:
 		return ""
@@ -115,7 +128,7 @@ func (m *Manager) Routing(ctx context.Context, serviceID, base string) ([]PortRo
 			pr.Host = generatedHost(sv, p, first, base, r)
 			first = false
 		} else if r.PublicPort > 0 {
-			pr.Public, pr.PublicPort, pr.Address = true, r.PublicPort, PublicAddress(base, r.PublicPort)
+			pr.Public, pr.PublicPort, pr.Address = true, r.PublicPort, PublicAddress(projectBase(sv.Project, base), r.PublicPort)
 		}
 		out = append(out, pr)
 	}
@@ -322,6 +335,7 @@ type PublicRoute struct {
 	Servers   []string
 	Allow     []string
 	ServiceID string
+	Project   string
 }
 
 // Entrypoint is the Traefik entrypoint of a public port.
@@ -359,7 +373,7 @@ func (m *Manager) PublicRoutes(ctx context.Context) []PublicRoute {
 			continue // the port is gone or became http: nothing to serve
 		}
 		pr := PublicRoute{Name: fmt.Sprintf("pub-%s-%d", port.Protocol, r.PublicPort), Protocol: port.Protocol, Port: r.PublicPort,
-			Allow: r.Allow, ServiceID: sv.ID}
+			Allow: r.Allow, ServiceID: sv.ID, Project: sv.Project}
 		for _, t := range tasks {
 			if t.ServiceID == sv.ID && t.IP != "" && m.serving(ctx, t) {
 				c := port.Container

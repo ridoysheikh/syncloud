@@ -27,6 +27,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/gitconn"
 	"github.com/ridoysheikh/syncloud/internal/gitserver"
 	"github.com/ridoysheikh/syncloud/internal/health"
+	"github.com/ridoysheikh/syncloud/internal/ingress"
 	"github.com/ridoysheikh/syncloud/internal/jobs"
 	"github.com/ridoysheikh/syncloud/internal/logs"
 	"github.com/ridoysheikh/syncloud/internal/mesh"
@@ -97,6 +98,7 @@ type Server struct {
 	shell                 *shell.Manager
 	pools                 *nodepool.Manager
 	edges                 *edge.Manager
+	ingress               *ingress.Manager
 	upgrades              *upgrade.Service
 	s3                    *s3.Manager
 	agentRollout          *rollout.Manager
@@ -193,6 +195,7 @@ type Options struct {
 	Shell            *shell.Manager
 	Pools            *nodepool.Manager
 	Edges            *edge.Manager
+	Ingress          *ingress.Manager
 	Upgrades         *upgrade.Service
 	S3               *s3.Manager
 	AgentRollout     *rollout.Manager
@@ -260,6 +263,7 @@ func New(o Options) *Server {
 		shell:                 o.Shell,
 		pools:                 o.Pools,
 		edges:                 o.Edges,
+		ingress:               o.Ingress,
 		upgrades:              o.Upgrades,
 		s3:                    o.S3,
 		startedAt:             time.Now(),
@@ -443,6 +447,9 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/projects", h: s.handleCreateProject},
 		{Method: "DELETE", Path: "/api/v1/projects/{project}", h: s.handleDeleteProject},
 		{Method: "PUT", Path: "/api/v1/projects/{project}/nodes", h: s.handleSetProjectNodes},
+		{Method: "GET", Path: "/api/v1/projects/{project}/ingress", h: s.handleGetProjectIngress},
+		{Method: "PUT", Path: "/api/v1/projects/{project}/ingress", h: s.handleSetProjectIngress},
+		{Method: "POST", Path: "/api/v1/projects/{project}/ingress/cut-over", h: s.handleCutOverProjectIngress},
 		{Method: "GET", Path: "/api/v1/databases", h: s.handleListAllDatabases},
 		{Method: "POST", Path: "/api/v1/databases", h: s.handleCreateDatabase},
 		{Method: "GET", Path: "/api/v1/databases/engines", h: s.handleListDatabaseEngines},
