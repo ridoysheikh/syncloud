@@ -2,6 +2,19 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.3.1]
+
+### Fixed
+
+- **Registry lifecycle policies now clean up builds.** Every build pushes a commit-id tag and a `latest-<branch>` tag to one image, and the next build moves the branch tag away, leaving the old image with its id alone. Rules judged each tag separately, so id-only images matched no rule and were kept forever, and every build counted twice towards "keep the newest N". Rules now judge whole images: an image matches a prefix through any of its tags or the branch it was built from (`latest-main`), and counts once. The builders' `buildcache` tag is left alone. Images kept so far are re-evaluated on the next cleanup; preview your policy first.
+- **"Expire after N days" counts from the last push**, not the image's build time, so pushing an old base image no longer makes it look expired at once.
+- **Deleting is no longer silent.** The dashboard shows why a delete failed (the registry's refusal, a missing permission, deletes switched off in the registry) and checks that the image is really gone. Deleting an image a service runs asks first (`synctl registry delete --force` skips it). A cleanup run now records every image it looked at: deleted, failed with the reason, or kept because a service uses it. Open a run under **Registry → Cleanup**.
+
+### Added
+
+- **Registry storage breakdown.** **Registry** shows where the space goes: tagged images, the build cache, and what no tag reaches (untagged images and orphaned layers a cleanup frees), per repository with the layers it alone holds and the ones it shares. Each image shows how much deleting it frees (`synctl registry usage`).
+- **Richer registry pages.** Images are listed once with all their tags, the build and commit they came from, search and in-use filters; **Details** shows layers with the Dockerfile step behind each, platforms and settings (`synctl registry inspect`); **Add a tag** names an existing image without copying it (`synctl registry tag`). The policy preview shows whole images, what would be freed, and suggests prefixes from real tags and branches.
+
 ## [0.3.0]
 
 ### Upgrading

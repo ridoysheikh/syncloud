@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -126,10 +127,11 @@ func (a *app) lifecycleCmd() *cobra.Command {
 				}
 				rules = p.Rules
 			}
-			ds, err := c.PreviewLifecyclePolicy(ctx(cmd), args[0], rules)
+			pv, err := c.PreviewLifecyclePolicy(ctx(cmd), args[0], rules)
 			if err != nil {
 				return err
 			}
+			ds := pv.Images
 			rows := make([][]string, 0, len(ds))
 			n := 0
 			for _, d := range ds {
@@ -141,13 +143,13 @@ func (a *app) lifecycleCmd() *cobra.Command {
 				if d.Created != nil {
 					created = age(*d.Created)
 				}
-				rows = append(rows, []string{d.Tag, action, created, d.Reason})
+				rows = append(rows, []string{strings.Join(d.Tags, ","), action, bytesIEC(uint64(d.SizeBytes)), created, d.Reason})
 			}
-			if err := a.printer().table(ds, []string{"TAG", "ACTION", "CREATED", "REASON"}, rows); err != nil {
+			if err := a.printer().table(pv, []string{"TAGS", "ACTION", "SIZE", "CREATED", "REASON"}, rows); err != nil {
 				return err
 			}
 			if a.output != "json" {
-				fmt.Fprintf(a.out, "\n%d of %d images would be deleted.\n", n, len(ds))
+				fmt.Fprintf(a.out, "\n%d of %d images would be deleted, freeing about %s.\n", n, len(ds), bytesIEC(uint64(pv.FreesBytes)))
 			}
 			return nil
 		},
@@ -238,6 +240,16 @@ func (a *app) gcCmd() *cobra.Command {
 					}
 					if err := a.printer().table(x, gcHeaders, gcRows([]client.GCRun{x})); err != nil {
 						return err
+					}
+					if a.output != "json" {
+						for _, d := range x.Details {
+							switch d.Outcome {
+							case "failed":
+								fmt.Fprintf(a.errOut, "NOT deleted %s:%s: %s\n", d.Repository, d.Tag, d.Error)
+							case "in-use":
+								fmt.Fprintf(a.errOut, "kept %s:%s: %s\n", d.Repository, d.Tag, d.Reason)
+							}
+						}
 					}
 					if x.Status != "succeeded" {
 						return fmt.Errorf("cleanup failed: %s", x.Message)

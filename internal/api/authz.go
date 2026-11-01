@@ -88,7 +88,7 @@ var listOps = map[string]bool{
 	"build:ListGitSources": true, "network:ListAllSecurityGroups": true, "traefik:ListAllMiddlewares": true,
 	"health:ListServiceHealth": true, "health:ListIncidents": true, "logs:QueryLogs": true, "logs:TailLogs": true,
 	"traffic:GetTraffic": true, "traffic:GetTrafficMap": true, "project:ListProjects": true, "project:CreateProject": true,
-	"registry:ListRepositories": true, "quota:ListQuotas": true, "usage:GetUsage": true,
+	"registry:ListRepositories": true, "registry:GetRegistryUsage": true, "quota:ListQuotas": true, "usage:GetUsage": true,
 	"usage:ExportUsage": true, "network:CheckReachability": true, "database:ListAllDatabases": true,
 	// The handler checks the exact resource (standalone or in a project).
 	"database:CreateDatabase": true,

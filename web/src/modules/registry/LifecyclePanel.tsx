@@ -8,7 +8,8 @@ import { DataTable } from "@/ui/DataTable";
 import { Alert, Button, IconButton, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
-import { Select } from "@/ui/select";
+import { Combobox, Select } from "@/ui/select";
+import { groupImages, isIdTag, shortRef, type Image } from "./images";
 
 export interface Rule {
   priority: number;
@@ -26,13 +27,24 @@ interface Policy {
 
 interface Decision {
   tag: string;
+  tags: string[];
+  names: string[];
   digest: string;
   sizeBytes: number;
   created: string | null;
+  pushedAt: string | null;
   expire: boolean;
   inUse: boolean;
+  wouldExpire: boolean;
+  cache: boolean;
   rule: number;
   reason: string;
+}
+
+interface Preview {
+  images: Decision[];
+  expire: number;
+  freesBytes: number;
 }
 
 interface Row {
@@ -96,14 +108,53 @@ export function LifecyclePanel({ repo }: { repo: string }) {
   }, [policy.data]);
 
   const rules = rows.map(toRule);
+  // Names the repository's images answer to, to complete the prefix field:
+  // their tags, and the latest-<branch> tag the builds behind them pushed.
+  const imgs = useQuery({
+    queryKey: ["registry", "images", repo],
+    queryFn: async () =>
+      (
+        await api<{ items: Image[] }>(
+          "GET",
+          `/registry/images?repository=${encodeURIComponent(repo)}`,
+        )
+      ).items,
+  });
+  const suggestions = [
+    ...new Set(
+      groupImages(imgs.data ?? []).flatMap((g) => [
+        ...g.tags.filter((t) => !isIdTag(t)),
+        ...(g.builtFrom
+          ? [
+              g.builtFrom.ref.startsWith("refs/tags/")
+                ? shortRef(g.builtFrom.ref)
+                : `latest-${shortRef(g.builtFrom.ref).replace(/[^A-Za-z0-9_.-]/g, "-")}`,
+            ]
+          : []),
+      ]),
+    ),
+  ];
   const preview = useMutation({
     mutationFn: () =>
-      api<{ images: Decision[]; expire: number }>(
-        "POST",
-        "/registry/lifecycle/preview",
-        { repository: repo, rules },
-      ),
+      api<Preview>("POST", "/registry/lifecycle/preview", {
+        repository: repo,
+        rules,
+      }),
   });
+  const addRule = (r: Partial<Row>) =>
+    setRows([
+      ...rows,
+      {
+        priority: String(
+          Math.max(0, ...rows.map((x) => Number(x.priority) || 0)) + 10,
+        ),
+        tagPrefix: "",
+        mode: "olderThanDays",
+        count: "30",
+        description: "",
+        ...r,
+      },
+    ]);
   const save = useMutation({
     mutationFn: () =>
       api("PUT", `/registry/lifecycle?repository=${encodeURIComponent(repo)}`, {
@@ -171,10 +222,14 @@ export function LifecyclePanel({ repo }: { repo: string }) {
       >
         <div className="flex flex-col gap-2">
           <p className="text-muted text-xs">
-            Rules run in priority order (lowest first); each image is decided by
-            the first rule whose tag prefix matches it. Images a service runs or
-            can roll back to are never deleted. Untagged images are always
-            removed by the cleanup that follows.
+            Rules run in priority order (lowest first). A rule judges whole
+            images: an image matches when <em>any</em> of its tags, or the
+            branch tag of the build it came from (<code>latest-main</code>),
+            starts with the prefix, and it counts once however many tags it
+            has. Age counts from the last push. Images a service runs or can
+            roll back to, and the builders' cache, are never deleted; an image
+            no rule matches is kept, so end with a catch-all rule (empty
+            prefix). Untagged images are removed by the cleanup that follows.
           </p>
           <div className="text-faint grid grid-cols-[4rem_minmax(0,1fr)_11rem_5rem_minmax(0,1.5fr)_auto] gap-1 text-xs">
             <span>Priority</span>
@@ -195,10 +250,11 @@ export function LifecyclePanel({ repo }: { repo: string }) {
                 className="h-7 font-mono text-xs"
                 inputMode="numeric"
               />
-              <Input
+              <Combobox
                 value={r.tagPrefix}
-                onChange={(e) => set(i, { tagPrefix: e.target.value })}
-                placeholder="(any tag)"
+                onChange={(v) => set(i, { tagPrefix: v })}
+                suggestions={suggestions}
+                placeholder="(every image)"
                 className="h-7 font-mono text-xs"
               />
               <Select
@@ -209,7 +265,7 @@ export function LifecyclePanel({ repo }: { repo: string }) {
                 size="sm"
               >
                 <option value="keepLast">keep the newest</option>
-                <option value="olderThanDays">expire after (days)</option>
+                <option value="olderThanDays">expire days after push</option>
               </Select>
               <Input
                 value={r.count}
@@ -231,26 +287,24 @@ export function LifecyclePanel({ repo }: { repo: string }) {
               </IconButton>
             </div>
           ))}
-          <div>
+          <div className="flex flex-wrap items-center gap-1">
+            <Button variant="ghost" onClick={() => addRule({})}>
+              <Plus className="size-3.5" /> Add rule
+            </Button>
+            <span className="text-faint text-xs">Quick rules:</span>
             <Button
-              variant="ghost"
               onClick={() =>
-                setRows([
-                  ...rows,
-                  {
-                    priority: String(
-                      Math.max(0, ...rows.map((r) => Number(r.priority) || 0)) +
-                        1,
-                    ),
-                    tagPrefix: "",
-                    mode: "olderThanDays",
-                    count: "30",
-                    description: "",
-                  },
-                ])
+                addRule({ mode: "keepLast", count: "10", description: "Keep the newest 10 images" })
               }
             >
-              <Plus className="size-3.5" /> Add rule
+              Keep newest 10
+            </Button>
+            <Button
+              onClick={() =>
+                addRule({ mode: "olderThanDays", count: "30", description: "Expire after 30 days" })
+              }
+            >
+              Expire after 30 days
             </Button>
           </div>
           {err && (
@@ -272,24 +326,42 @@ export function LifecyclePanel({ repo }: { repo: string }) {
       </Panel>
       {preview.data && (
         <Panel
-          title={`Preview · ${preview.data.expire} of ${preview.data.images.length} images would be deleted`}
+          title={`Preview · ${preview.data.expire} of ${preview.data.images.length} images would be deleted${
+            preview.data.freesBytes
+              ? `, freeing about ${bytes(preview.data.freesBytes)}`
+              : ""
+          }`}
           flush
         >
           <DataTable
             rows={preview.data.images}
-            rowKey={(d) => d.tag}
+            rowKey={(d) => d.digest || d.tag}
             columns={[
               {
-                header: "Tag",
-                cell: (d) => <span className="font-mono">{d.tag}</span>,
+                header: "Image",
+                cell: (d) => (
+                  <span
+                    className="flex items-center gap-1 font-mono"
+                    title={d.tags.join("\n")}
+                  >
+                    {d.tags.slice(0, 3).join(", ")}
+                    {d.tags.length > 3 && (
+                      <span className="text-faint">+{d.tags.length - 3}</span>
+                    )}
+                  </span>
+                ),
               },
               {
                 header: "Result",
                 cell: (d) =>
                   d.expire ? (
-                    <StatusBadge tone="bad">expire</StatusBadge>
-                  ) : d.inUse ? (
-                    <StatusBadge tone="info">in use</StatusBadge>
+                    <StatusBadge tone="bad">delete</StatusBadge>
+                  ) : d.wouldExpire || d.inUse ? (
+                    <StatusBadge tone="info">kept: in use</StatusBadge>
+                  ) : d.cache ? (
+                    <StatusBadge tone="neutral">build cache</StatusBadge>
+                  ) : d.rule === 0 ? (
+                    <StatusBadge tone="warn">no rule</StatusBadge>
                   ) : (
                     <StatusBadge tone="ok">keep</StatusBadge>
                   ),
@@ -302,10 +374,12 @@ export function LifecyclePanel({ repo }: { repo: string }) {
               },
               { header: "Size", cell: (d) => bytes(d.sizeBytes) },
               {
-                header: "Created",
+                header: "Pushed",
                 cell: (d) => (
                   <span className="text-muted">
-                    {d.created ? since(d.created) : "—"}
+                    {d.pushedAt || d.created
+                      ? since(d.pushedAt ?? d.created)
+                      : "—"}
                   </span>
                 ),
               },

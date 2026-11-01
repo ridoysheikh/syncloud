@@ -1219,6 +1219,9 @@ type Image struct {
 	SizeBytes    int64      `json:"sizeBytes"`
 	Platforms    []string   `json:"platforms"`
 	Created      *time.Time `json:"created"`
+	PushedAt     *time.Time `json:"pushedAt"`
+	UniqueBytes  int64      `json:"uniqueBytes"`
+	Cache        bool       `json:"cache"`
 	Pulls        int        `json:"pulls"`
 	LastPulledAt *time.Time `json:"lastPulledAt"`
 	InUseBy      []struct {
@@ -1226,6 +1229,11 @@ type Image struct {
 		Environment string `json:"environment"`
 		Service     string `json:"service"`
 	} `json:"inUseBy"`
+	BuiltFrom *struct {
+		ID  string `json:"id"`
+		Ref string `json:"ref"`
+		SHA string `json:"sha"`
+	} `json:"builtFrom"`
 }
 
 type RegistryEvent struct {
@@ -1272,8 +1280,76 @@ func (c *Client) ListImages(ctx context.Context, repo string) ([]Image, error) {
 	return out.Items, c.Do(ctx, "GET", "/api/v1/registry/images?repository="+url.QueryEscape(repo), nil, &out)
 }
 
-func (c *Client) DeleteImage(ctx context.Context, repo, tag string) error {
-	return c.Do(ctx, "DELETE", "/api/v1/registry/images?"+url.Values{"repository": {repo}, "tag": {tag}}.Encode(), nil, nil)
+func (c *Client) DeleteImage(ctx context.Context, repo, tag string, force bool) error {
+	q := url.Values{"repository": {repo}, "tag": {tag}}
+	if force {
+		q.Set("force", "1")
+	}
+	return c.Do(ctx, "DELETE", "/api/v1/registry/images?"+q.Encode(), nil, nil)
+}
+
+// RegistryRepoUsage is what one repository holds in the registry's storage.
+type RegistryRepoUsage struct {
+	Name        string `json:"name"`
+	System      bool   `json:"system"`
+	Images      int    `json:"images"`
+	Tags        int    `json:"tags"`
+	Bytes       int64  `json:"bytes"`
+	UniqueBytes int64  `json:"uniqueBytes"`
+	SharedBytes int64  `json:"sharedBytes"`
+	CacheBytes  int64  `json:"cacheBytes"`
+}
+
+// RegistryUsage is where the registry's storage goes.
+type RegistryUsage struct {
+	Repositories      []RegistryRepoUsage `json:"repositories"`
+	ReferencedBytes   int64               `json:"referencedBytes"`
+	CacheBytes        int64               `json:"cacheBytes"`
+	StorageBytes      *int64              `json:"storageBytes"`
+	UnreferencedBytes *int64              `json:"unreferencedBytes"`
+	MeasuredAt        time.Time           `json:"measuredAt"`
+}
+
+func (c *Client) RegistryUsage(ctx context.Context, refresh bool) (RegistryUsage, error) {
+	var out RegistryUsage
+	q := ""
+	if refresh {
+		q = "?refresh=1"
+	}
+	return out, c.Do(ctx, "GET", "/api/v1/registry/usage"+q, nil, &out)
+}
+
+// ImageDetails describes one tag in depth.
+type ImageDetails struct {
+	Tag        string     `json:"tag"`
+	Digest     string     `json:"digest"`
+	SizeBytes  int64      `json:"sizeBytes"`
+	TotalBytes int64      `json:"totalBytes"`
+	Platforms  []string   `json:"platforms"`
+	Platform   string     `json:"platform"`
+	Created    *time.Time `json:"created"`
+	Layers     []struct {
+		Digest  string `json:"digest"`
+		Size    int64  `json:"size"`
+		Command string `json:"command"`
+	} `json:"layers"`
+	Entrypoint []string          `json:"entrypoint"`
+	Cmd        []string          `json:"cmd"`
+	WorkingDir string            `json:"workingDir"`
+	User       string            `json:"user"`
+	Ports      []string          `json:"ports"`
+	EnvNames   []string          `json:"envNames"`
+	Labels     map[string]string `json:"labels"`
+}
+
+func (c *Client) ImageDetails(ctx context.Context, repo, tag string) (ImageDetails, error) {
+	var out ImageDetails
+	return out, c.Do(ctx, "GET", "/api/v1/registry/images/details?"+url.Values{"repository": {repo}, "tag": {tag}}.Encode(), nil, &out)
+}
+
+// TagImage gives the image from (a tag of repo) the tag tag.
+func (c *Client) TagImage(ctx context.Context, repo, from, tag string) error {
+	return c.Do(ctx, "POST", "/api/v1/registry/images/tag?"+url.Values{"repository": {repo}}.Encode(), map[string]string{"from": from, "tag": tag}, nil)
 }
 
 type GitSource struct {
@@ -1639,10 +1715,19 @@ type LifecyclePolicy struct {
 
 type LifecycleDecision struct {
 	Image
-	Expire bool   `json:"expire"`
-	InUse  bool   `json:"inUse"`
-	Rule   int    `json:"rule"`
-	Reason string `json:"reason"`
+	Tags   []string `json:"tags"`
+	Names  []string `json:"names"`
+	Expire bool     `json:"expire"`
+	InUse  bool     `json:"inUse"`
+	Rule   int      `json:"rule"`
+	Reason string   `json:"reason"`
+}
+
+// LifecyclePreview is a dry run of a policy.
+type LifecyclePreview struct {
+	Images     []LifecycleDecision `json:"images"`
+	Expire     int                 `json:"expire"`
+	FreesBytes int64               `json:"freesBytes"`
 }
 
 type GCRun struct {
@@ -1655,9 +1740,13 @@ type GCRun struct {
 	StartedAt      time.Time  `json:"startedAt"`
 	FinishedAt     *time.Time `json:"finishedAt"`
 	Details        []struct {
-		Repository string `json:"repository"`
-		Tag        string `json:"tag"`
-		Reason     string `json:"reason"`
+		Repository string   `json:"repository"`
+		Tag        string   `json:"tag"`
+		Tags       []string `json:"tags"`
+		SizeBytes  int64    `json:"sizeBytes"`
+		Reason     string   `json:"reason"`
+		Outcome    string   `json:"outcome"`
+		Error      string   `json:"error"`
 	} `json:"details"`
 }
 
@@ -1680,11 +1769,9 @@ func (c *Client) DeleteLifecyclePolicy(ctx context.Context, repo string) error {
 }
 
 // PreviewLifecyclePolicy is a dry run of rules against a repository.
-func (c *Client) PreviewLifecyclePolicy(ctx context.Context, repo string, rules []LifecycleRule) ([]LifecycleDecision, error) {
-	var out struct {
-		Images []LifecycleDecision `json:"images"`
-	}
-	return out.Images, c.Do(ctx, "POST", "/api/v1/registry/lifecycle/preview", map[string]any{"repository": repo, "rules": rules}, &out)
+func (c *Client) PreviewLifecyclePolicy(ctx context.Context, repo string, rules []LifecycleRule) (LifecyclePreview, error) {
+	var out LifecyclePreview
+	return out, c.Do(ctx, "POST", "/api/v1/registry/lifecycle/preview", map[string]any{"repository": repo, "rules": rules}, &out)
 }
 
 func (c *Client) RegistryCleanups(ctx context.Context) ([]GCRun, bool, error) {

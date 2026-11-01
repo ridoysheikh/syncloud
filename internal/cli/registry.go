@@ -7,8 +7,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// splitImageRef splits REPOSITORY:TAG.
+func splitImageRef(ref string) (repo, tag string, err error) {
+	i := strings.LastIndexByte(ref, ':')
+	if i <= 0 || i == len(ref)-1 {
+		return "", "", fmt.Errorf("use REPOSITORY:TAG")
+	}
+	return ref[:i], ref[i+1:], nil
+}
+
 func (a *app) registryCmd() *cobra.Command {
 	r := &cobra.Command{Use: "registry", Aliases: []string{"reg"}, Short: "Private image registry (§5.9)"}
+	var refresh bool
 	r.AddCommand(
 		&cobra.Command{
 			Use: "info", Short: "Registry host and how to push", Args: cobra.NoArgs,
@@ -103,7 +113,8 @@ func (a *app) registryCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := c.DeleteImage(ctx(cmd), args[0][:i], args[0][i+1:]); err != nil {
+				force, _ := cmd.Flags().GetBool("force")
+				if err := c.DeleteImage(ctx(cmd), args[0][:i], args[0][i+1:], force); err != nil {
 					return err
 				}
 				fmt.Fprintf(a.out, "Deleted %s\n", args[0])
@@ -111,6 +122,98 @@ func (a *app) registryCmd() *cobra.Command {
 			},
 		},
 	)
+	r.AddCommand(
+		&cobra.Command{
+			Use: "usage", Aliases: []string{"du"}, Short: "Where the registry's storage goes", Args: cobra.NoArgs,
+			Annotations: op("getRegistryUsage"),
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				c, err := a.client()
+				if err != nil {
+					return err
+				}
+				u, err := c.RegistryUsage(ctx(cmd), refresh)
+				if err != nil {
+					return err
+				}
+				rows := make([][]string, 0, len(u.Repositories))
+				for _, x := range u.Repositories {
+					rows = append(rows, []string{x.Name, fmt.Sprint(x.Images), bytesIEC(uint64(x.Bytes)), bytesIEC(uint64(x.UniqueBytes)), bytesIEC(uint64(x.SharedBytes)), bytesIEC(uint64(x.CacheBytes))})
+				}
+				if err := a.printer().table(u, []string{"REPOSITORY", "IMAGES", "SIZE", "UNIQUE", "SHARED", "BUILD CACHE"}, rows); err != nil {
+					return err
+				}
+				if a.output != "json" {
+					fmt.Fprintf(a.out, "\nTagged layers: %s (build cache %s)", bytesIEC(uint64(u.ReferencedBytes)), bytesIEC(uint64(u.CacheBytes)))
+					if u.StorageBytes != nil {
+						fmt.Fprintf(a.out, "; storage %s, %s of it reachable from no tag and freed by the next cleanup", bytesIEC(uint64(*u.StorageBytes)), bytesIEC(uint64(*u.UnreferencedBytes)))
+					}
+					fmt.Fprintln(a.out)
+				}
+				return nil
+			},
+		},
+		&cobra.Command{
+			Use: "inspect REPOSITORY:TAG", Short: "Layers, platforms and settings of an image", Args: cobra.ExactArgs(1),
+			Annotations: op("getImageDetails"),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				repo, tag, err := splitImageRef(args[0])
+				if err != nil {
+					return err
+				}
+				c, err := a.client()
+				if err != nil {
+					return err
+				}
+				d, err := c.ImageDetails(ctx(cmd), repo, tag)
+				if err != nil {
+					return err
+				}
+				if a.output == "json" {
+					return a.printer().json(d)
+				}
+				fmt.Fprintf(a.out, "%s:%s  %s\n%s, %s (%s across every platform)\n", repo, tag, d.Digest, d.Platform, bytesIEC(uint64(d.SizeBytes)), bytesIEC(uint64(d.TotalBytes)))
+				if len(d.Entrypoint)+len(d.Cmd) > 0 {
+					fmt.Fprintf(a.out, "entrypoint %v  cmd %v\n", d.Entrypoint, d.Cmd)
+				}
+				rows := make([][]string, 0, len(d.Layers))
+				for i, l := range d.Layers {
+					cmdline := l.Command
+					if len(cmdline) > 80 {
+						cmdline = cmdline[:77] + "..."
+					}
+					rows = append(rows, []string{fmt.Sprint(i + 1), bytesIEC(uint64(l.Size)), cmdline})
+				}
+				return a.printer().table(nil, []string{"LAYER", "SIZE", "STEP"}, rows)
+			},
+		},
+		&cobra.Command{
+			Use: "tag REPOSITORY:TAG NEWTAG", Short: "Give an image another tag (nothing is copied)", Args: cobra.ExactArgs(2),
+			Annotations: op("tagImage"),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				repo, tag, err := splitImageRef(args[0])
+				if err != nil {
+					return err
+				}
+				c, err := a.client()
+				if err != nil {
+					return err
+				}
+				if err := c.TagImage(ctx(cmd), repo, tag, args[1]); err != nil {
+					return err
+				}
+				fmt.Fprintf(a.out, "%s:%s now points at %s:%s\n", repo, args[1], repo, tag)
+				return nil
+			},
+		},
+	)
+	for _, c := range r.Commands() {
+		if c.Name() == "delete" {
+			c.Flags().Bool("force", false, "delete although a service runs the image")
+		}
+		if c.Name() == "usage" {
+			c.Flags().BoolVar(&refresh, "refresh", false, "measure again instead of using the result kept for a minute")
+		}
+	}
 	var limit int
 	evCmd := &cobra.Command{
 		Use: "events [REPOSITORY]", Aliases: []string{"activity"}, Short: "Recent pushes, pulls and deletes", Args: cobra.MaximumNArgs(1),

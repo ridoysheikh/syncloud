@@ -777,12 +777,7 @@ func (m *Manager) buildSpec(ctx context.Context, sv store.Service, g store.GitSo
 	if i := strings.LastIndexByte(b.Image, ':'); i > strings.LastIndexByte(b.Image, '/') {
 		tag = b.Image[i+1:] // a rebuild's own tag
 	}
-	names := image + ":" + tag
-	if name, ok := strings.CutPrefix(b.Ref, "refs/tags/"); ok {
-		names += "," + image + ":" + dockerTag(name)
-	} else {
-		names += "," + image + ":latest-" + dockerTag(gitremote.ShortRef(b.Ref))
-	}
+	names := image + ":" + tag + "," + image + ":" + RefTag(b.Ref)
 	// --output is CSV: the field holding two image names must be quoted.
 	output := `type=image,"name=` + names + `",push=true`
 	cache := "type=registry,ref=" + image + ":buildcache"
@@ -829,6 +824,16 @@ func (m *Manager) buildSpec(ctx context.Context, sv store.Service, g store.GitSo
 		return workload.Spec{}, err
 	}
 	return spec, nil
+}
+
+// RefTag is the tag a build of ref is also pushed under: the git tag's
+// name, or latest-<branch>. Images keep only their commit id once a newer
+// build moves it, so lifecycle rules map ids back to it.
+func RefTag(ref string) string {
+	if name, ok := strings.CutPrefix(ref, "refs/tags/"); ok {
+		return dockerTag(name)
+	}
+	return "latest-" + dockerTag(gitremote.ShortRef(ref))
 }
 
 var tagChars = regexp.MustCompile(`[^A-Za-z0-9_.-]`)

@@ -24,6 +24,8 @@ type imageView struct {
 	LastPushedAt *time.Time   `json:"lastPushedAt"`
 	LastPulledAt *time.Time   `json:"lastPulledAt"`
 	InUseBy      []serviceRef `json:"inUseBy"`
+	// BuiltFrom is the build that pushed the tag, when a build did.
+	BuiltFrom *store.ImageBuild `json:"builtFrom"`
 }
 
 // imageViews adds push and pull counters from registry events and the
@@ -41,10 +43,14 @@ func (s *Server) imageViews(ctx context.Context, repo string, imgs []registry.Im
 	if err != nil {
 		return nil, err
 	}
+	builds, _ := s.store.BuildRefs(ctx, repo)
 	out := make([]imageView, 0, len(imgs))
 	for _, img := range imgs {
 		st := byDigest[img.Digest]
 		v := imageView{Image: img, Pushes: st.Pushes, Pulls: st.Pulls, LastPushedAt: st.LastPushedAt, LastPulledAt: st.LastPulledAt}
+		if b, ok := builds[img.Tag]; ok {
+			v.BuiltFrom = &b
+		}
 		v.InUseBy = users[img.Digest]
 		if v.InUseBy == nil {
 			v.InUseBy = []serviceRef{}

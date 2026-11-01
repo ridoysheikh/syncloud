@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -241,6 +242,36 @@ func (s *Store) BuildCount(ctx context.Context, serviceID, sha string) (int, err
 	var n int
 	err := s.R.QueryRowContext(ctx, `SELECT count(*) FROM builds WHERE service_id = ? AND sha = ?`, serviceID, sha).Scan(&n)
 	return n, err
+}
+
+// ImageBuild is the build that pushed an image tag.
+type ImageBuild struct {
+	ID  string `json:"id"`
+	Ref string `json:"ref"`
+	SHA string `json:"sha"`
+}
+
+// BuildRefs maps the image tags builds pushed to repo to the build each
+// came from.
+func (s *Store) BuildRefs(ctx context.Context, repo string) (map[string]ImageBuild, error) {
+	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(repo)
+	rows, err := s.R.QueryContext(ctx, `SELECT image, id, ref, sha FROM builds WHERE image LIKE ? ESCAPE '\' ORDER BY created_at`, "@registry/"+esc+":%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]ImageBuild{}
+	for rows.Next() {
+		var image string
+		var b ImageBuild
+		if err := rows.Scan(&image, &b.ID, &b.Ref, &b.SHA); err != nil {
+			return nil, err
+		}
+		if i := strings.LastIndexByte(image, ':'); i >= 0 {
+			out[image[i+1:]] = b
+		}
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) UpdateBuild(ctx context.Context, b Build) error {

@@ -119,18 +119,32 @@ func (s *Server) handlePreviewLifecycle(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "repository must be a registry path like shop/api")
 		return
 	}
-	ds, err := s.regMaint.Preview(r.Context(), req.Repository, req.Rules)
+	p, err := s.regMaint.Preview(r.Context(), req.Repository, req.Rules)
 	if err != nil {
 		s.maintError(w, "preview lifecycle policy", err)
 		return
 	}
-	expire := 0
-	for _, d := range ds {
-		if d.Expire {
-			expire++
-		}
+	writeJSON(w, http.StatusOK, p)
+}
+
+// handleRegistryUsage shows where the registry's storage goes.
+func (s *Server) handleRegistryUsage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireMaint(w) {
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"images": ds, "expire": expire})
+	u, err := s.regMaint.Usage(r.Context(), r.URL.Query().Get("refresh") != "")
+	if err != nil {
+		s.maintError(w, "measure registry usage", err)
+		return
+	}
+	repos := s.filterItems(r, u.Repositories, itemRepo)
+	if u.Repositories == nil {
+		repos = []registry.RepoUsage{}
+	}
+	writeJSON(w, http.StatusOK, struct {
+		regmaint.Usage
+		Repositories any `json:"repositories"`
+	}{u, repos})
 }
 
 func (s *Server) handleGCRuns(w http.ResponseWriter, r *http.Request) {

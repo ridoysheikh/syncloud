@@ -144,3 +144,16 @@ func TestSameRepo(t *testing.T) {
 		}
 	}
 }
+
+func TestRefTag(t *testing.T) {
+	for ref, want := range map[string]string{
+		"refs/heads/main":       "latest-main",
+		"refs/heads/feat/login": "latest-feat-login",
+		"refs/tags/v1.2.0":      "v1.2.0",
+		"main":                  "latest-main",
+	} {
+		if got := RefTag(ref); got != want {
+			t.Errorf("RefTag(%q) = %q, want %q", ref, got, want)
+		}
+	}
+}

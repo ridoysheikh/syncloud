@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ridoysheikh/syncloud/internal/auth"
+	"github.com/ridoysheikh/syncloud/internal/builds"
 	"github.com/ridoysheikh/syncloud/internal/events"
 	"github.com/ridoysheikh/syncloud/internal/execrelay"
 	"github.com/ridoysheikh/syncloud/internal/registry"
@@ -68,6 +69,10 @@ type Manager struct {
 	mu        sync.Mutex
 	running   bool
 	switching bool // the lock is held by a storage switch
+
+	usageMu   sync.Mutex
+	usage     *Usage
+	usageDone time.Time
 }
 
 func New(st *store.Store, b *registry.Browser, sys *system.Manager, ex *execrelay.Relay, wl *workload.Manager, bus *events.Bus, log *slog.Logger) *Manager {
@@ -109,20 +114,68 @@ func (m *Manager) SetPolicy(ctx context.Context, repo string, rules []registry.R
 	return Policy{Repository: repo, Rules: rules, UpdatedAt: now}, nil
 }
 
+// Preview is a dry run of rules against a repository's images.
+type Preview struct {
+	Images []registry.Decision `json:"images"`
+	// Expire counts the images that would be deleted.
+	Expire int `json:"expire"`
+	// FreesBytes estimates what their deletion frees: layers no kept image
+	// shares.
+	FreesBytes int64 `json:"freesBytes"`
+}
+
 // Preview evaluates rules against a repository's images without deleting.
-func (m *Manager) Preview(ctx context.Context, repo string, rules []registry.Rule) ([]registry.Decision, error) {
+func (m *Manager) Preview(ctx context.Context, repo string, rules []registry.Rule) (Preview, error) {
 	if err := registry.ValidateRules(rules); err != nil {
-		return nil, ErrInvalid{err}
+		return Preview{}, ErrInvalid{err}
 	}
+	ds, err := m.evaluate(ctx, repo, rules, nil)
+	if err != nil {
+		return Preview{}, err
+	}
+	p := Preview{Images: ds, FreesBytes: registry.FreesBytes(ds)}
+	for _, d := range ds {
+		if d.Expire {
+			p.Expire++
+		}
+	}
+	return p, nil
+}
+
+// evaluate decides what rules do with repo's images, as the cleanup would
+// now. used is the set of images services depend on (nil = look it up).
+func (m *Manager) evaluate(ctx context.Context, repo string, rules []registry.Rule, used refs) ([]registry.Decision, error) {
 	images, err := m.browser.Images(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
-	used, err := m.inUse(ctx)
-	if err != nil {
-		return nil, err
+	if used == nil {
+		if used, err = m.inUse(ctx); err != nil {
+			return nil, err
+		}
 	}
-	return registry.Evaluate(images, rules, used.checker(repo, images), m.now()), nil
+	// Age counts from the last push, not from the image's build time.
+	if stats, err := m.st.ImageStatsFor(ctx, repo); err == nil {
+		pushed := map[string]*time.Time{}
+		for _, st := range stats {
+			pushed[st.Digest] = st.LastPushedAt
+		}
+		for i := range images {
+			images[i].PushedAt = pushed[images[i].Digest]
+		}
+	}
+	// An image keeps only its commit id once a newer build moves the branch
+	// tag; the builds table remembers which branch each id came from.
+	var lineage func(string) []string
+	if refs, err := m.st.BuildRefs(ctx, repo); err == nil {
+		lineage = func(tag string) []string {
+			if b, ok := refs[tag]; ok {
+				return []string{builds.RefTag(b.Ref)}
+			}
+			return nil
+		}
+	}
+	return registry.Evaluate(images, rules, registry.Options{InUse: used.checker(repo, images), Lineage: lineage}, m.now()), nil
 }
 
 // refs are the image references services depend on, per repository.
@@ -196,6 +249,55 @@ func (m *Manager) inUse(ctx context.Context) (refs, error) {
 			}
 		}
 	}
+	return out, nil
+}
+
+// Usage is what the registry's storage holds, split by repository.
+type Usage struct {
+	registry.Usage
+	// StorageBytes is the size of the registry's storage as the machine
+	// measures it; nil when it cannot be measured now.
+	StorageBytes *int64 `json:"storageBytes"`
+	// UnreferencedBytes is what no tag reaches (untagged manifests and
+	// orphaned layers) and the next cleanup frees; nil with StorageBytes.
+	UnreferencedBytes *int64    `json:"unreferencedBytes"`
+	MeasuredAt        time.Time `json:"measuredAt"`
+}
+
+const usageTTL = time.Minute
+
+// InvalidateUsage drops the kept measurement: images were deleted.
+func (m *Manager) InvalidateUsage() {
+	m.usageMu.Lock()
+	m.usage = nil
+	m.usageMu.Unlock()
+}
+
+// Usage walks the registry and measures its storage. Results are kept for a
+// minute, so several dashboards do not repeat the walk; refresh forces one.
+func (m *Manager) Usage(ctx context.Context, refresh bool) (Usage, error) {
+	m.usageMu.Lock()
+	defer m.usageMu.Unlock()
+	if m.usage != nil && !refresh && m.now().Sub(m.usageDone) < usageTTL {
+		return *m.usage, nil
+	}
+	u, err := m.browser.Usage(ctx)
+	if err != nil {
+		return Usage{}, err
+	}
+	out := Usage{Usage: u, MeasuredAt: m.now().UTC()}
+	// Measuring runs a command in the registry container; without the task
+	// (or while it restarts) only the walk is shown.
+	if t, ok := m.sys.Task(registryTask); ok && t.State == "running" && m.sys.NodeID() != "" {
+		mctx, cancel := context.WithTimeout(ctx, time.Minute)
+		defer cancel()
+		if n, err := m.storageSize(mctx); err == nil {
+			out.StorageBytes = &n
+			free := max(n-u.ReferencedBytes, 0)
+			out.UnreferencedBytes = &free
+		}
+	}
+	m.usage, m.usageDone = &out, m.now()
 	return out, nil
 }
 
@@ -284,11 +386,24 @@ func (m *Manager) Run(ctx context.Context) {
 
 // Expired is one image a run deleted.
 type Expired struct {
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
-	Digest     string `json:"digest"`
-	Reason     string `json:"reason"`
+	Repository string   `json:"repository"`
+	Tag        string   `json:"tag"`
+	Tags       []string `json:"tags"`
+	Digest     string   `json:"digest"`
+	SizeBytes  int64    `json:"sizeBytes"`
+	Reason     string   `json:"reason"`
+	// Outcome is deleted, failed (Error says why) or in-use (the rules
+	// selected the image but a service runs or can roll back to it).
+	Outcome string `json:"outcome"`
+	Error   string `json:"error,omitempty"`
 }
+
+// Outcomes of an expired image.
+const (
+	OutcomeDeleted = "deleted"
+	OutcomeFailed  = "failed"
+	OutcomeInUse   = "in-use"
+)
 
 func (m *Manager) run(run store.GCRun) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -298,7 +413,13 @@ func (m *Manager) run(run store.GCRun) {
 	reclaimed, gerr := m.collect(ctx)
 	now := m.now().UTC().Truncate(time.Second)
 	details, _ := json.Marshal(expired)
-	run.Status, run.Expired, run.ReclaimedBytes, run.Details, run.FinishedAt = "succeeded", len(expired), reclaimed, string(details), &now
+	deleted := 0
+	for _, e := range expired {
+		if e.Outcome == OutcomeDeleted {
+			deleted++
+		}
+	}
+	run.Status, run.Expired, run.ReclaimedBytes, run.Details, run.FinishedAt = "succeeded", deleted, reclaimed, string(details), &now
 	var msgs []string
 	for _, e := range []error{perr, gerr} {
 		if e != nil {
@@ -308,6 +429,7 @@ func (m *Manager) run(run store.GCRun) {
 	}
 	run.Message = strings.Join(msgs, "; ")
 	_ = m.st.FinishGCRun(context.Background(), run)
+	m.InvalidateUsage()
 	m.bus.Publish(TopicRun, run)
 	m.log.Info("registry cleanup finished", "status", run.Status, "expired", run.Expired, "reclaimed_bytes", run.ReclaimedBytes, "message", run.Message)
 }
@@ -329,24 +451,29 @@ func (m *Manager) applyPolicies(ctx context.Context) ([]Expired, error) {
 		if json.Unmarshal([]byte(p.Rules), &rules) != nil || registry.ValidateRules(rules) != nil {
 			continue
 		}
-		images, err := m.browser.Images(ctx, p.Repository)
+		decisions, err := m.evaluate(ctx, p.Repository, rules, used)
 		if err != nil {
 			errs = append(errs, p.Repository+": "+err.Error())
 			continue
 		}
-		deleted := map[string]bool{}
-		for _, d := range registry.Evaluate(images, rules, used.checker(p.Repository, images), m.now()) {
-			if !d.Expire {
+		for _, d := range decisions {
+			e := Expired{Repository: p.Repository, Tag: d.Tag, Tags: d.Tags, Digest: d.Digest, SizeBytes: d.SizeBytes, Reason: d.Reason}
+			switch {
+			case d.WouldExpire:
+				e.Outcome = OutcomeInUse
+			case d.Expire:
+				// One manifest delete removes every tag of the image.
+				if err := m.browser.DeleteTag(ctx, p.Repository, d.Tag); err != nil {
+					e.Outcome, e.Error = OutcomeFailed, err.Error()
+					errs = append(errs, fmt.Sprintf("%s:%s: %v", p.Repository, d.Tag, err))
+					m.log.Warn("registry cleanup: delete failed", "repository", p.Repository, "tag", d.Tag, "err", err)
+				} else {
+					e.Outcome = OutcomeDeleted
+				}
+			default:
 				continue
 			}
-			if !deleted[d.Digest] {
-				if err := m.browser.DeleteTag(ctx, p.Repository, d.Tag); err != nil {
-					errs = append(errs, fmt.Sprintf("%s:%s: %v", p.Repository, d.Tag, err))
-					continue
-				}
-				deleted[d.Digest] = true
-			}
-			expired = append(expired, Expired{Repository: p.Repository, Tag: d.Tag, Digest: d.Digest, Reason: d.Reason})
+			expired = append(expired, e)
 		}
 	}
 	if len(errs) > 0 {

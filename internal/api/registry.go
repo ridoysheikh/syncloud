@@ -281,11 +281,97 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "the platform's own images cannot be deleted")
 		return
 	}
+	// A running service would fail its next pull: say so, and let the caller
+	// insist.
+	if q.Get("force") == "" {
+		if imgs, err := s.registryBrowser.Images(r.Context(), repo); err == nil {
+			views, err := s.imageViews(r.Context(), repo, imgs)
+			if err != nil {
+				s.internalError(w, "registry image users", err)
+				return
+			}
+			for _, v := range views {
+				if v.Tag != tag || len(v.InUseBy) == 0 {
+					continue
+				}
+				var names []string
+				for _, u := range v.InUseBy {
+					names = append(names, u.Project+"/"+u.Environment+"/"+u.Service)
+				}
+				writeError(w, http.StatusConflict, CodeConflict, repo+":"+tag+" is run by "+strings.Join(names, ", ")+"; deleting it breaks their next pull or rollback (use force to delete anyway)")
+				return
+			}
+		}
+	}
 	if err := s.registryBrowser.DeleteTag(r.Context(), repo, tag); err != nil {
+		s.log.Warn("registry delete failed", "repository", repo, "tag", tag, "err", err)
 		s.registryErr(w, err)
 		return
+	}
+	if s.regMaint != nil {
+		s.regMaint.InvalidateUsage()
 	}
 	u, _ := currentUser(r.Context())
 	s.audit(r, u.ID, "registry:DeleteImage", "srn:syncloud:registry/"+repo+":"+tag, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// handleInspectImage describes one tag in depth: layers with the steps that
+// made them, platforms and the image's settings.
+func (s *Server) handleInspectImage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBrowser(w) {
+		return
+	}
+	repo, tag := r.URL.Query().Get("repository"), r.URL.Query().Get("tag")
+	if !repoNameRE.MatchString(repo) || tag == "" || strings.ContainsAny(tag, "/ ") {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "repository and tag are required")
+		return
+	}
+	in, err := s.registryBrowser.Inspect(r.Context(), repo, tag)
+	if err != nil {
+		s.registryErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, in)
+}
+
+// handleTagImage gives an existing image another tag, so a release can be
+// named without a rebuild.
+func (s *Server) handleTagImage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBrowser(w) {
+		return
+	}
+	var req struct {
+		Repository string `json:"-"`
+		From       string `json:"from"`
+		Tag        string `json:"tag"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	req.Repository = r.URL.Query().Get("repository")
+	if !repoNameRE.MatchString(req.Repository) || !tagRE.MatchString(req.Tag) || req.From == "" || strings.ContainsAny(req.From, "/ ") {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "repository, from and a valid tag are required")
+		return
+	}
+	if registry.IsSystemRepo(req.Repository) {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "the platform's own images cannot be retagged")
+		return
+	}
+	if registry.IsCacheTag(req.Tag) || registry.IsCacheTag(req.From) {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "the build cache tag belongs to the builders")
+		return
+	}
+	if err := s.registryBrowser.Retag(r.Context(), req.Repository, req.From, req.Tag); err != nil {
+		s.registryErr(w, err)
+		return
+	}
+	if s.regMaint != nil {
+		s.regMaint.InvalidateUsage()
+	}
+	u, _ := currentUser(r.Context())
+	s.audit(r, u.ID, "registry:TagImage", "srn:syncloud:registry/"+req.Repository+":"+req.Tag, map[string]any{"from": req.From})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+var tagRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)

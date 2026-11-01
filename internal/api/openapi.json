@@ -6442,7 +6442,7 @@
         "tags": [
           "registry"
         ],
-        "summary": "Delete a tag's manifest (tags sharing the digest go with it)",
+        "summary": "Delete a tag's manifest (tags sharing the digest go with it); refused with 409 while a service runs the image unless forced",
         "parameters": [
           {
             "name": "repository",
@@ -6459,6 +6459,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "delete although a service runs the image"
           }
         ],
         "responses": {
@@ -6469,6 +6478,12 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -7800,6 +7815,10 @@
                     },
                     "expire": {
                       "type": "integer"
+                    },
+                    "freesBytes": {
+                      "type": "integer",
+                      "description": "estimate of what deleting the expiring images frees: layers no kept image shares"
                     }
                   }
                 }
@@ -16683,6 +16702,149 @@
           }
         }
       }
+    },
+    "/api/v1/registry/images/details": {
+      "get": {
+        "operationId": "getImageDetails",
+        "tags": [
+          "registry"
+        ],
+        "summary": "One tag in depth: layers with the Dockerfile steps that made them, platforms and image settings",
+        "parameters": [
+          {
+            "name": "repository",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/registry/images/tag": {
+      "post": {
+        "operationId": "tagImage",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Give an existing image another tag (nothing is copied)",
+        "parameters": [
+          {
+            "name": "repository",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "from",
+                  "tag"
+                ],
+                "properties": {
+                  "from": {
+                    "type": "string",
+                    "description": "a tag of the repository"
+                  },
+                  "tag": {
+                    "type": "string",
+                    "description": "the new tag; an existing tag moves to the image"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Tagged"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/registry/usage": {
+      "get": {
+        "operationId": "getRegistryUsage",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Where the registry's storage goes: per repository, build cache and what a cleanup would free",
+        "parameters": [
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "measure again instead of using the last result (kept for a minute)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryUsage"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -18943,6 +19105,36 @@
                 }
               }
             }
+          },
+          "pushedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "when the registry last received this image (from push events)"
+          },
+          "uniqueBytes": {
+            "type": "integer",
+            "description": "what deleting the tag frees within the repository: layers no other image of it uses"
+          },
+          "cache": {
+            "type": "boolean",
+            "description": "the builders' layer cache (tag buildcache), not a runnable image"
+          },
+          "builtFrom": {
+            "type": "object",
+            "nullable": true,
+            "description": "the build that pushed this tag",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "ref": {
+                "type": "string"
+              },
+              "sha": {
+                "type": "string"
+              }
+            }
           }
         }
       },
@@ -19249,14 +19441,14 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 1000,
-            "description": "lower runs first; an image belongs to the first rule whose prefix matches"
+            "description": "lower runs first; an image belongs to the first rule whose prefix matches one of its names"
           },
           "description": {
             "type": "string"
           },
           "tagPrefix": {
             "type": "string",
-            "description": "\"\" matches every tag"
+            "description": "\"\" matches every image; otherwise any tag of the image, or the branch tag latest-<branch> of the build it came from, must start with it"
           },
           "keepLast": {
             "type": "integer",
@@ -19264,7 +19456,7 @@
           },
           "olderThanDays": {
             "type": "integer",
-            "description": "expire images created more than N days ago"
+            "description": "expire images last pushed (else built) more than N days ago"
           }
         }
       },
@@ -19306,6 +19498,28 @@
               },
               "reason": {
                 "type": "string"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "every tag of the image; the first is the primary one"
+              },
+              "names": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "names the image answers to besides its tags, such as latest-<branch> for a commit-id image"
+              },
+              "cache": {
+                "type": "boolean",
+                "description": "the builders' layer cache: rules leave it alone"
+              },
+              "wouldExpire": {
+                "type": "boolean",
+                "description": "the rules selected the image but it is in use"
               }
             }
           }
@@ -19357,6 +19571,28 @@
                 },
                 "reason": {
                   "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sizeBytes": {
+                  "type": "integer"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "deleted",
+                    "failed",
+                    "in-use"
+                  ],
+                  "description": "in-use: the rules selected the image but a service runs or can roll back to it"
+                },
+                "error": {
+                  "type": "string",
+                  "description": "why a delete failed"
                 }
               }
             }
@@ -22447,6 +22683,187 @@
           "secret": {
             "type": "string",
             "description": "the bypass secret, only right after generateSecret"
+          }
+        }
+      },
+      "RegistryRepoUsage": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "system": {
+            "type": "boolean",
+            "description": "the platform's own images"
+          },
+          "images": {
+            "type": "integer",
+            "description": "distinct manifests behind the tags"
+          },
+          "tags": {
+            "type": "integer"
+          },
+          "bytes": {
+            "type": "integer",
+            "description": "layers the repository holds, each counted once"
+          },
+          "uniqueBytes": {
+            "type": "integer",
+            "description": "layers no other repository uses"
+          },
+          "sharedBytes": {
+            "type": "integer",
+            "description": "layers other repositories use too"
+          },
+          "cacheBytes": {
+            "type": "integer",
+            "description": "the part of bytes only the builders' layer cache holds"
+          }
+        }
+      },
+      "RegistryUsage": {
+        "type": "object",
+        "properties": {
+          "repositories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRepoUsage"
+            }
+          },
+          "referencedBytes": {
+            "type": "integer",
+            "description": "every layer reachable from a tag, counted once (layers are shared across repositories)"
+          },
+          "cacheBytes": {
+            "type": "integer"
+          },
+          "storageBytes": {
+            "type": "integer",
+            "nullable": true,
+            "description": "the registry storage's size as measured; null when it cannot be measured now"
+          },
+          "unreferencedBytes": {
+            "type": "integer",
+            "nullable": true,
+            "description": "what no tag reaches (untagged manifests, orphaned layers); the next cleanup frees it"
+          },
+          "measuredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ImageDetails": {
+        "type": "object",
+        "properties": {
+          "tag": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer"
+          },
+          "totalBytes": {
+            "type": "integer",
+            "description": "every platform and attestation behind the tag"
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "platform": {
+            "type": "string",
+            "description": "the platform layers and settings describe"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "cache": {
+            "type": "boolean"
+          },
+          "layers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "digest": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer"
+                },
+                "mediaType": {
+                  "type": "string"
+                },
+                "command": {
+                  "type": "string",
+                  "description": "the Dockerfile step, when the image's history records it"
+                }
+              }
+            }
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "sizeBytes": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "entrypoint": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cmd": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "workingDir": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "envNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "names only: values may hold secrets"
+          },
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       }
