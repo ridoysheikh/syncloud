@@ -26,10 +26,11 @@ const DefaultSocket = "/var/run/docker.sock"
 type Client struct {
 	http   *http.Client
 	socket string
+	sizer  *sizer
 }
 
 func New(socket string) *Client {
-	return &Client{socket: socket, http: &http.Client{Transport: &http.Transport{
+	return &Client{socket: socket, sizer: newSizer(), http: &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", socket)
 		},

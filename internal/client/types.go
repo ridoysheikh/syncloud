@@ -2081,6 +2081,7 @@ type NodeDocker struct {
 	Node     string `json:"node"`
 	NodeName string `json:"nodeName"`
 	DiskPath string `json:"diskPath"`
+	Pending  int    `json:"pending"`
 	Totals   struct {
 		ImageBytes      int64 `json:"imageBytes"`
 		ContainerBytes  int64 `json:"containerBytes"`

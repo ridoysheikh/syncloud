@@ -39,6 +39,9 @@ func (a *app) nodeDockerCmd() *cobra.Command {
 				if a.output == "json" {
 					return nil
 				}
+				if u.Pending > 0 {
+					fmt.Fprintf(a.errOut, "%d volumes and containers are still being measured on the node; run this again in a minute for their sizes.\n", u.Pending)
+				}
 				t, r := u.Totals, u.Reclaimable
 				fmt.Fprintf(a.out, "\nDisk %s: %s used of %s. Docker holds %s: images %s, volumes %s, containers %s, logs %s, build cache %s; %s is not Docker's.\n",
 					u.DiskPath, bytesIEC(uint64(t.DiskUsedBytes)), bytesIEC(uint64(t.DiskTotalBytes)), bytesIEC(uint64(t.DockerBytes)),

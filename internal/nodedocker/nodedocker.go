@@ -93,7 +93,7 @@ func (r *Relay) Call(ctx context.Context, nodeID, op string, params, out any) er
 	case <-ctx.Done():
 		drop()
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return errors.New("the node did not answer in time (an agent older than this feature never will: upgrade it under Settings → Updates)")
+			return errors.New("the node did not answer in time: its agent may be busy, disconnected, or older than 0.3.2 (upgrade it under Settings → Updates)")
 		}
 		return ctx.Err()
 	}

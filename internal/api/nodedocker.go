@@ -87,6 +87,9 @@ type dockerView struct {
 	BuildCache      []dockerusage.CacheRecord `json:"buildCache"`
 	BuildCacheCount int                       `json:"buildCacheCount"`
 	MeasuredAt      time.Time                 `json:"measuredAt"`
+	// Pending counts volumes and container layers whose size is still being
+	// measured on the node; ask again in a few seconds for the rest.
+	Pending int `json:"pending"`
 }
 
 func (s *Server) nodeDockerError(w http.ResponseWriter, err error) {
@@ -149,7 +152,7 @@ func (s *Server) handleNodeDocker(w http.ResponseWriter, r *http.Request) {
 func (s *Server) dockerView(ctx context.Context, nodeID, nodeName string, u dockerusage.Usage) dockerView {
 	v := dockerView{Node: nodeID, NodeName: nodeName, DockerVersion: u.DockerVersion, DiskPath: u.Disk.Path, MeasuredAt: time.Now().UTC(),
 		Apps: []dockerApp{}, Containers: []dockerContainer{}, Images: []dockerImage{}, Volumes: []dockerVolume{},
-		BuildCache: u.BuildCache, BuildCacheCount: u.BuildCacheCount}
+		BuildCache: u.BuildCache, BuildCacheCount: u.BuildCacheCount, Pending: u.Pending}
 	cache := map[string]dockerApp{}
 	imgByID := map[string]dockerusage.Image{}
 	for _, im := range u.Images {

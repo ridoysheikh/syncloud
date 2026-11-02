@@ -23145,6 +23145,10 @@
                 },
                 "app": {
                   "$ref": "#/components/schemas/NodeDockerApp"
+                },
+                "measuring": {
+                  "type": "boolean",
+                  "description": "writableBytes is still being measured (0 until then)"
                 }
               }
             }
@@ -23221,6 +23225,10 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "measuring": {
+                  "type": "boolean",
+                  "description": "bytes is still being measured (0 until then)"
                 }
               }
             }
@@ -23257,6 +23265,10 @@
           },
           "buildCacheCount": {
             "type": "integer"
+          },
+          "pending": {
+            "type": "integer",
+            "description": "volumes and container layers whose size is still being measured on the node; ask again in a few seconds for the rest"
           }
         }
       },

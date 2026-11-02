@@ -46,6 +46,7 @@ interface DockerContainer {
   status: string;
   created: number;
   writableBytes: number;
+  measuring: boolean;
   logBytes: number;
   managed: boolean;
   system: boolean;
@@ -68,6 +69,7 @@ interface DockerVolume {
   bytes: number;
   refCount: number;
   anonymous: boolean;
+  measuring: boolean;
   created: number;
   usedBy: string[];
   apps: string[];
@@ -115,6 +117,8 @@ interface NodeDocker {
   volumes: DockerVolume[];
   buildCache: CacheRecord[];
   buildCacheCount: number;
+  /** Volumes and container layers still being measured on the node. */
+  pending: number;
 }
 
 interface CleanResult {
@@ -151,6 +155,8 @@ export function NodeDockerTab({ nodeId }: { nodeId: string }) {
     staleTime: 60_000,
     retry: false,
     refetchOnWindowFocus: false,
+    // Sizes of big volumes are worked out in the background on the node.
+    refetchInterval: (q) => (q.state.data?.pending ? 5000 : false),
   });
   const [section, setSection] = useState<Section>("apps");
   const [q, setQ] = useState("");
@@ -280,6 +286,16 @@ export function NodeDockerTab({ nodeId }: { nodeId: string }) {
 
   return (
     <div className={cn("flex flex-col", gap)}>
+      {data.pending > 0 && (
+        <Alert tone="info">
+          <span className="flex items-center gap-2">
+            <RefreshCw className="size-3.5 shrink-0 animate-spin" />
+            Measuring {data.pending} volumes and containers on the node. Big
+            ones take minutes; sizes fill in here as they finish, and totals
+            until then leave them out.
+          </span>
+        </Alert>
+      )}
       <div className={cn("grid grid-cols-2 md:grid-cols-5", gap)}>
         <StatTile
           label="Disk used"
@@ -615,7 +631,10 @@ function ContainersTable({
               </StatusBadge>
             ),
           },
-          { header: "Wrote", cell: (c) => bytes(c.writableBytes) },
+          {
+            header: "Wrote",
+            cell: (c) => (c.measuring ? <span className="text-faint">measuring…</span> : bytes(c.writableBytes)),
+          },
           {
             header: "Log",
             cell: (c) => (
@@ -764,7 +783,10 @@ function VolumesTable({
               </span>
             ),
           },
-          { header: "Size", cell: (v) => bytes(v.bytes) },
+          {
+            header: "Size",
+            cell: (v) => (v.measuring ? <span className="text-faint">measuring…</span> : bytes(v.bytes)),
+          },
           {
             header: "Used by",
             className: "w-full",

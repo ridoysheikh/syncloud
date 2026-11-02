@@ -46,10 +46,12 @@ type Container struct {
 	WritableBytes int64 `json:"writableBytes"`
 	LogBytes      int64 `json:"logBytes"`
 	// TaskID is the SynCloud task the container runs ("" outside SynCloud).
-	TaskID  string   `json:"taskId"`
-	Managed bool     `json:"managed"`
-	System  bool     `json:"system"`
-	Volumes []string `json:"volumes"` // named volumes mounted
+	// Measuring: the writable layer's size is still being measured (0 until then).
+	Measuring bool     `json:"measuring"`
+	TaskID    string   `json:"taskId"`
+	Managed   bool     `json:"managed"`
+	System    bool     `json:"system"`
+	Volumes   []string `json:"volumes"` // named volumes mounted
 }
 
 // Volume is a Docker volume.
@@ -58,6 +60,8 @@ type Volume struct {
 	Driver   string `json:"driver"`
 	Bytes    int64  `json:"bytes"`
 	RefCount int    `json:"refCount"` // containers using it
+	// Measuring: the size is still being worked out in the background.
+	Measuring bool `json:"measuring"`
 	// Anonymous volumes (a random 64-hex name) are the ones a plain
 	// docker run leaves behind.
 	Anonymous bool  `json:"anonymous"`
@@ -96,6 +100,10 @@ type Usage struct {
 	BuildCacheCount int           `json:"buildCacheCount"`
 	// LayersBytes is the space all image layers take, shared ones once.
 	LayersBytes int64 `json:"layersBytes"`
+	// Pending counts the volumes and containers whose size is still being
+	// measured: walking a big volume takes minutes, so Usage answers at once
+	// and sizes fill in on later calls.
+	Pending int `json:"pending"`
 }
 
 // CleanRequest asks for objects to be removed. With IDs it removes exactly

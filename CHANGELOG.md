@@ -2,6 +2,16 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.3.3]
+
+### Upgrading
+
+- **Upgrade the agents** (Settings → Updates): the node Docker tab times out on 0.3.2 agents when a node has a big volume.
+
+### Fixed
+
+- **The node Docker tab no longer times out.** Measuring a large volume (a registry's, with millions of files) took minutes inside one Docker call, longer than the controller waited. The agent now answers at once from quick Docker calls and measures volume and container-layer sizes in the background; the tab shows "measuring…" and fills the sizes in as they finish. The timeout message no longer blames the agent's version when the node was merely slow.
+
 ## [0.3.2]
 
 ### Upgrading

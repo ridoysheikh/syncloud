@@ -18,42 +18,126 @@ import (
 var anonymousVolume = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // Usage measures what Docker holds: images, containers (with their log
-// files), volumes and build cache, and the disk they live on.
+// files), volumes and build cache, and the disk they live on. It answers
+// from endpoints that return at once; the sizes of volumes and of container
+// layers, which take a directory walk, are measured in the background and
+// show up as they finish (Usage.Pending counts the ones still running).
 func (c *Client) Usage(ctx context.Context) (dockerusage.Usage, error) {
+	var info struct {
+		DockerRootDir string `json:"DockerRootDir"`
+		ServerVersion string `json:"ServerVersion"`
+	}
+	if err := c.json(ctx, "GET", "/info", nil, nil, &info); err != nil {
+		return dockerusage.Usage{}, err
+	}
+	var imgs []struct {
+		ID         string   `json:"Id"`
+		RepoTags   []string `json:"RepoTags"`
+		Created    int64    `json:"Created"`
+		Size       int64    `json:"Size"`
+		SharedSize int64    `json:"SharedSize"`
+		Containers int      `json:"Containers"`
+	}
+	if err := c.json(ctx, "GET", "/images/json", url.Values{"shared-size": {"1"}}, nil, &imgs); err != nil {
+		return dockerusage.Usage{}, err
+	}
+	var cts []struct {
+		ID      string   `json:"Id"`
+		Names   []string `json:"Names"`
+		Image   string   `json:"Image"`
+		ImageID string   `json:"ImageID"`
+		State   string   `json:"State"`
+		Status  string   `json:"Status"`
+		Created int64    `json:"Created"`
+		Labels  map[string]string
+		Mounts  []struct {
+			Type string `json:"Type"`
+			Name string `json:"Name"`
+		} `json:"Mounts"`
+	}
+	if err := c.json(ctx, "GET", "/containers/json", url.Values{"all": {"1"}}, nil, &cts); err != nil {
+		return dockerusage.Usage{}, err
+	}
+	var vols struct {
+		Volumes []struct {
+			Name       string `json:"Name"`
+			Driver     string `json:"Driver"`
+			Mountpoint string `json:"Mountpoint"`
+			CreatedAt  string `json:"CreatedAt"`
+		} `json:"Volumes"`
+	}
+	if err := c.json(ctx, "GET", "/volumes", nil, nil, &vols); err != nil {
+		return dockerusage.Usage{}, err
+	}
+
+	u := dockerusage.Usage{DockerVersion: info.ServerVersion,
+		Images: []dockerusage.Image{}, Containers: []dockerusage.Container{}, Volumes: []dockerusage.Volume{}, BuildCache: []dockerusage.CacheRecord{}}
+	var uniq, sharedMax int64
+	for _, im := range imgs {
+		tags := []string{}
+		for _, t := range im.RepoTags {
+			if t != "<none>:<none>" {
+				tags = append(tags, t)
+			}
+		}
+		x := dockerusage.Image{ID: im.ID, Tags: tags, Created: im.Created, Bytes: max(im.Size, 0), SharedBytes: max(im.SharedSize, 0),
+			Containers: max(im.Containers, 0), Dangling: len(tags) == 0}
+		u.Images = append(u.Images, x)
+		uniq += max(x.Bytes-x.SharedBytes, 0)
+		sharedMax = max(sharedMax, x.SharedBytes)
+	}
+	u.LayersBytes = uniq + sharedMax // replaced below when Docker reports it
+	live := map[string]bool{}
+	refs := map[string]int{}
+	for _, ct := range cts {
+		name := ""
+		if len(ct.Names) > 0 {
+			name = strings.TrimPrefix(ct.Names[0], "/")
+		}
+		x := dockerusage.Container{ID: ct.ID, Name: name, Image: ct.Image, ImageID: ct.ImageID, State: ct.State, Status: ct.Status,
+			Created: ct.Created, TaskID: ct.Labels["syncloud.task_id"],
+			Managed: ct.Labels["syncloud.managed"] == "true", System: ct.Labels["syncloud.system"] == "true", Volumes: []string{}}
+		for _, m := range ct.Mounts {
+			if m.Type == "volume" && m.Name != "" {
+				x.Volumes = append(x.Volumes, m.Name)
+				refs[m.Name]++
+			}
+		}
+		logPath, upper := c.layout(ctx, ct.ID)
+		x.LogBytes = fileSize(logPath)
+		if upper != "" {
+			live["c:"+ct.ID] = true
+			n, known := c.sizer.get("c:"+ct.ID, upper)
+			x.WritableBytes, x.Measuring = n, !known
+			if !known {
+				u.Pending++
+			}
+		}
+		u.Containers = append(u.Containers, x)
+	}
+	for _, v := range vols.Volumes {
+		x := dockerusage.Volume{Name: v.Name, Driver: v.Driver, RefCount: refs[v.Name], Anonymous: anonymousVolume.MatchString(v.Name)}
+		if t, err := time.Parse(time.RFC3339, v.CreatedAt); err == nil {
+			x.Created = t.Unix()
+		}
+		if v.Driver == "local" && v.Mountpoint != "" {
+			live["v:"+v.Name] = true
+			n, known := c.sizer.get("v:"+v.Name, v.Mountpoint)
+			x.Bytes, x.Measuring = n, !known
+			if !known {
+				u.Pending++
+			}
+		}
+		u.Volumes = append(u.Volumes, x)
+	}
+	c.sizer.forget(live)
+
+	// Build cache and the exact layer total come from df, restricted to the
+	// two kinds that are quick to compute; a slow answer is not waited for.
+	dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	var df struct {
 		LayersSize int64 `json:"LayersSize"`
-		Images     []struct {
-			ID         string   `json:"Id"`
-			RepoTags   []string `json:"RepoTags"`
-			Created    int64    `json:"Created"`
-			Size       int64    `json:"Size"`
-			SharedSize int64    `json:"SharedSize"`
-			Containers int      `json:"Containers"`
-		} `json:"Images"`
-		Containers []struct {
-			ID      string   `json:"Id"`
-			Names   []string `json:"Names"`
-			Image   string   `json:"Image"`
-			ImageID string   `json:"ImageID"`
-			State   string   `json:"State"`
-			Status  string   `json:"Status"`
-			Created int64    `json:"Created"`
-			SizeRw  int64    `json:"SizeRw"`
-			Labels  map[string]string
-			Mounts  []struct {
-				Type string `json:"Type"`
-				Name string `json:"Name"`
-			} `json:"Mounts"`
-		} `json:"Containers"`
-		Volumes []struct {
-			Name      string `json:"Name"`
-			Driver    string `json:"Driver"`
-			CreatedAt string `json:"CreatedAt"`
-			UsageData *struct {
-				Size     int64 `json:"Size"`
-				RefCount int   `json:"RefCount"`
-			} `json:"UsageData"`
-		} `json:"Volumes"`
 		BuildCache []struct {
 			ID          string `json:"ID"`
 			Type        string `json:"Type"`
@@ -64,60 +148,17 @@ func (c *Client) Usage(ctx context.Context) (dockerusage.Usage, error) {
 			LastUsedAt  string `json:"LastUsedAt"`
 		} `json:"BuildCache"`
 	}
-	// Measuring every container and volume can take a while on a big host.
-	if err := c.json(ctx, "GET", "/system/df", nil, nil, &df); err != nil {
-		return dockerusage.Usage{}, err
-	}
-	var info struct {
-		DockerRootDir string `json:"DockerRootDir"`
-		ServerVersion string `json:"ServerVersion"`
-	}
-	_ = c.json(ctx, "GET", "/info", nil, nil, &info)
-
-	u := dockerusage.Usage{DockerVersion: info.ServerVersion, LayersBytes: max(df.LayersSize, 0),
-		Images: []dockerusage.Image{}, Containers: []dockerusage.Container{}, Volumes: []dockerusage.Volume{}, BuildCache: []dockerusage.CacheRecord{}}
-	for _, im := range df.Images {
-		tags := []string{}
-		for _, t := range im.RepoTags {
-			if t != "<none>:<none>" {
-				tags = append(tags, t)
+	if c.json(dctx, "GET", "/system/df", url.Values{"type": {"image", "build-cache"}}, nil, &df) == nil {
+		if df.LayersSize > 0 {
+			u.LayersBytes = df.LayersSize
+		}
+		for _, b := range df.BuildCache {
+			x := dockerusage.CacheRecord{ID: b.ID, Type: b.Type, Description: b.Description, Bytes: max(b.Size, 0), InUse: b.InUse, Shared: b.Shared}
+			if t, err := time.Parse(time.RFC3339Nano, b.LastUsedAt); err == nil {
+				x.LastUsed = t.Unix()
 			}
+			u.BuildCache = append(u.BuildCache, x)
 		}
-		u.Images = append(u.Images, dockerusage.Image{ID: im.ID, Tags: tags, Created: im.Created, Bytes: max(im.Size, 0),
-			SharedBytes: max(im.SharedSize, 0), Containers: max(im.Containers, 0), Dangling: len(tags) == 0})
-	}
-	for _, ct := range df.Containers {
-		name := ""
-		if len(ct.Names) > 0 {
-			name = strings.TrimPrefix(ct.Names[0], "/")
-		}
-		x := dockerusage.Container{ID: ct.ID, Name: name, Image: ct.Image, ImageID: ct.ImageID, State: ct.State, Status: ct.Status,
-			Created: ct.Created, WritableBytes: max(ct.SizeRw, 0), TaskID: ct.Labels["syncloud.task_id"],
-			Managed: ct.Labels["syncloud.managed"] == "true", System: ct.Labels["syncloud.system"] == "true", Volumes: []string{}}
-		for _, m := range ct.Mounts {
-			if m.Type == "volume" && m.Name != "" {
-				x.Volumes = append(x.Volumes, m.Name)
-			}
-		}
-		x.LogBytes = c.logBytes(ctx, ct.ID)
-		u.Containers = append(u.Containers, x)
-	}
-	for _, v := range df.Volumes {
-		x := dockerusage.Volume{Name: v.Name, Driver: v.Driver, Anonymous: anonymousVolume.MatchString(v.Name)}
-		if v.UsageData != nil {
-			x.Bytes, x.RefCount = max(v.UsageData.Size, 0), max(v.UsageData.RefCount, 0)
-		}
-		if t, err := time.Parse(time.RFC3339, v.CreatedAt); err == nil {
-			x.Created = t.Unix()
-		}
-		u.Volumes = append(u.Volumes, x)
-	}
-	for _, b := range df.BuildCache {
-		x := dockerusage.CacheRecord{ID: b.ID, Type: b.Type, Description: b.Description, Bytes: max(b.Size, 0), InUse: b.InUse, Shared: b.Shared}
-		if t, err := time.Parse(time.RFC3339Nano, b.LastUsedAt); err == nil {
-			x.LastUsed = t.Unix()
-		}
-		u.BuildCache = append(u.BuildCache, x)
 	}
 	// Thousands of cache entries would not fit the stream's message limit:
 	// list the largest, total all.
@@ -133,15 +174,27 @@ func (c *Client) Usage(ctx context.Context) (dockerusage.Usage, error) {
 	return u, nil
 }
 
-// logBytes is the size of a container's json log file (0 when unknown).
-func (c *Client) logBytes(ctx context.Context, id string) int64 {
+// layout returns a container's log file and, on the overlay2 driver, the
+// directory its writable layer lives in.
+func (c *Client) layout(ctx context.Context, id string) (logPath, upper string) {
 	var in struct {
-		LogPath string `json:"LogPath"`
+		LogPath     string `json:"LogPath"`
+		GraphDriver struct {
+			Data map[string]string `json:"Data"`
+		} `json:"GraphDriver"`
 	}
-	if c.json(ctx, "GET", "/containers/"+id+"/json", nil, nil, &in) != nil || in.LogPath == "" {
+	if c.json(ctx, "GET", "/containers/"+id+"/json", nil, nil, &in) != nil {
+		return "", ""
+	}
+	return in.LogPath, in.GraphDriver.Data["UpperDir"]
+}
+
+// fileSize is a file's size (0 when it cannot be read).
+func fileSize(path string) int64 {
+	if path == "" {
 		return 0
 	}
-	fi, err := os.Stat(in.LogPath)
+	fi, err := os.Stat(path)
 	if err != nil {
 		return 0
 	}
