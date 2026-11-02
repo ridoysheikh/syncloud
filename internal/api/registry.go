@@ -12,6 +12,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/auth"
 	"github.com/ridoysheikh/syncloud/internal/domain"
 	"github.com/ridoysheikh/syncloud/internal/registry"
+	"github.com/ridoysheikh/syncloud/internal/regmaint"
 	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
@@ -222,15 +223,18 @@ func (s *Server) handleListRepositories(w http.ResponseWriter, r *http.Request) 
 	}
 	type repoView struct {
 		registry.Repository
-		Lifecycle    bool       `json:"lifecycle"`
-		Pulls        int        `json:"pulls"`
-		LastPushedAt *time.Time `json:"lastPushedAt"`
-		LastPulledAt *time.Time `json:"lastPulledAt"`
+		Lifecycle bool `json:"lifecycle"`
+		// LifecycleDefault: no policy of its own, the registry-wide default applies.
+		LifecycleDefault bool       `json:"lifecycleDefault"`
+		Pulls            int        `json:"pulls"`
+		LastPushedAt     *time.Time `json:"lastPushedAt"`
+		LastPulledAt     *time.Time `json:"lastPulledAt"`
 	}
 	byRepo := map[string]*repoView{}
 	out := make([]repoView, 0, len(repos))
 	for _, rp := range repos {
-		out = append(out, repoView{Repository: rp, Lifecycle: hasPolicy[rp.Name]})
+		own := hasPolicy[rp.Name]
+		out = append(out, repoView{Repository: rp, Lifecycle: own || hasPolicy[regmaint.DefaultRepo], LifecycleDefault: !own && hasPolicy[regmaint.DefaultRepo]})
 	}
 	for i := range out {
 		byRepo[out[i].Name] = &out[i]

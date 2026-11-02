@@ -2075,3 +2075,80 @@ func (c *Client) CreateProtectionValkey(ctx context.Context, project, env string
 	var out ProjectProtection
 	return out, c.Do(ctx, "POST", "/api/v1/projects/"+url.PathEscape(project)+"/protection/valkey", map[string]any{"environment": env}, &out)
 }
+
+// NodeDocker is what Docker holds on a node and who it belongs to.
+type NodeDocker struct {
+	Node     string `json:"node"`
+	NodeName string `json:"nodeName"`
+	DiskPath string `json:"diskPath"`
+	Totals   struct {
+		ImageBytes      int64 `json:"imageBytes"`
+		ContainerBytes  int64 `json:"containerBytes"`
+		LogBytes        int64 `json:"logBytes"`
+		VolumeBytes     int64 `json:"volumeBytes"`
+		BuildCacheBytes int64 `json:"buildCacheBytes"`
+		DockerBytes     int64 `json:"dockerBytes"`
+		DiskTotalBytes  int64 `json:"diskTotalBytes"`
+		DiskUsedBytes   int64 `json:"diskUsedBytes"`
+		DiskFreeBytes   int64 `json:"diskFreeBytes"`
+		OtherBytes      int64 `json:"otherBytes"`
+	} `json:"totals"`
+	Reclaimable struct {
+		DanglingImages   int64 `json:"danglingImages"`
+		UnusedImages     int64 `json:"unusedImages"`
+		Containers       int64 `json:"containers"`
+		StoppedManaged   int64 `json:"stoppedManaged"`
+		AnonymousVolumes int64 `json:"anonymousVolumes"`
+		UnusedVolumes    int64 `json:"unusedVolumes"`
+		BuildCache       int64 `json:"buildCache"`
+	} `json:"reclaimable"`
+	Apps []struct {
+		Kind           string `json:"kind"`
+		Name           string `json:"name"`
+		Containers     int    `json:"containers"`
+		Running        int    `json:"running"`
+		ContainerBytes int64  `json:"containerBytes"`
+		VolumeBytes    int64  `json:"volumeBytes"`
+		ImageBytes     int64  `json:"imageBytes"`
+		Bytes          int64  `json:"bytes"`
+	} `json:"apps"`
+	Containers []struct {
+		ID            string `json:"id"`
+		Name          string `json:"name"`
+		State         string `json:"state"`
+		WritableBytes int64  `json:"writableBytes"`
+		LogBytes      int64  `json:"logBytes"`
+		Managed       bool   `json:"managed"`
+	} `json:"containers"`
+	Images []struct {
+		ID         string   `json:"id"`
+		Tags       []string `json:"tags"`
+		Bytes      int64    `json:"bytes"`
+		Containers int      `json:"containers"`
+		Dangling   bool     `json:"dangling"`
+	} `json:"images"`
+	Volumes []struct {
+		Name     string   `json:"name"`
+		Bytes    int64    `json:"bytes"`
+		RefCount int      `json:"refCount"`
+		Apps     []string `json:"apps"`
+	} `json:"volumes"`
+}
+
+func (c *Client) NodeDocker(ctx context.Context, node string) (NodeDocker, error) {
+	var out NodeDocker
+	return out, c.Do(ctx, "GET", "/api/v1/nodes/"+url.PathEscape(node)+"/docker", nil, &out)
+}
+
+// NodeDockerCleanResult is what a clean did.
+type NodeDockerCleanResult struct {
+	ReclaimedBytes int64    `json:"reclaimedBytes"`
+	Removed        int      `json:"removed"`
+	Errors         []string `json:"errors"`
+}
+
+// CleanNodeDocker removes the named objects of kind, or prunes the kind.
+func (c *Client) CleanNodeDocker(ctx context.Context, node, kind string, ids []string, all bool) (NodeDockerCleanResult, error) {
+	var out NodeDockerCleanResult
+	return out, c.Do(ctx, "POST", "/api/v1/nodes/"+url.PathEscape(node)+"/docker/clean", map[string]any{"kind": kind, "ids": ids, "all": all}, &out)
+}

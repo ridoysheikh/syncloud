@@ -6361,7 +6361,7 @@
                           },
                           "lifecycle": {
                             "type": "boolean",
-                            "description": "has a lifecycle policy"
+                            "description": "a lifecycle policy applies: its own or the default"
                           },
                           "pulls": {
                             "type": "integer"
@@ -6375,6 +6375,10 @@
                             "type": "string",
                             "format": "date-time",
                             "nullable": true
+                          },
+                          "lifecycleDefault": {
+                            "type": "boolean",
+                            "description": "no policy of its own: the default policy (repository \"*\") applies"
                           }
                         }
                       }
@@ -7671,7 +7675,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "e.g. shop/api"
+            "description": "a repository, or * for the default policy applied to every repository without its own"
           }
         ],
         "responses": {
@@ -7707,7 +7711,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "e.g. shop/api"
+            "description": "a repository, or * for the default policy applied to every repository without its own"
           }
         ],
         "requestBody": {
@@ -7758,7 +7762,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "e.g. shop/api"
+            "description": "a repository, or * for the default policy applied to every repository without its own"
           }
         ],
         "responses": {
@@ -16845,6 +16849,99 @@
           }
         }
       }
+    },
+    "/api/v1/nodes/{id}/docker": {
+      "get": {
+        "operationId": "getNodeDocker",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "What Docker holds on a node: images, containers (with log files), volumes and build cache, the app each belongs to, the disk they live on and what each clean would free",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeDocker"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/docker/clean": {
+      "post": {
+        "operationId": "cleanNodeDocker",
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Remove Docker objects from a node: the ones named, or a whole kind pruned. Bulk prunes never touch SynCloud's own containers or named volumes.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeDockerClean"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeDockerCleanResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -19586,9 +19683,11 @@
                   "enum": [
                     "deleted",
                     "failed",
-                    "in-use"
+                    "in-use",
+                    "skipped",
+                    "summary"
                   ],
-                  "description": "in-use: the rules selected the image but a service runs or can roll back to it"
+                  "description": "in-use: the rules selected the image but a service runs or can roll back to it; skipped: the repository was left alone (reason says why); summary: what the rules did across one repository"
                 },
                 "error": {
                   "type": "string",
@@ -22864,6 +22963,346 @@
             "additionalProperties": {
               "type": "string"
             }
+          }
+        }
+      },
+      "NodeDockerApp": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "service",
+              "platform",
+              "managed",
+              "other"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "containers": {
+            "type": "integer"
+          },
+          "running": {
+            "type": "integer"
+          },
+          "containerBytes": {
+            "type": "integer"
+          },
+          "volumeBytes": {
+            "type": "integer"
+          },
+          "imageBytes": {
+            "type": "integer"
+          },
+          "bytes": {
+            "type": "integer"
+          }
+        }
+      },
+      "NodeDocker": {
+        "type": "object",
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "nodeName": {
+            "type": "string"
+          },
+          "dockerVersion": {
+            "type": "string"
+          },
+          "diskPath": {
+            "type": "string"
+          },
+          "measuredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "totals": {
+            "type": "object",
+            "description": "Docker's footprint by kind, and the disk it lives on (otherBytes: used space Docker does not hold)",
+            "properties": {
+              "imageBytes": {
+                "type": "integer"
+              },
+              "containerBytes": {
+                "type": "integer"
+              },
+              "logBytes": {
+                "type": "integer"
+              },
+              "volumeBytes": {
+                "type": "integer"
+              },
+              "buildCacheBytes": {
+                "type": "integer"
+              },
+              "dockerBytes": {
+                "type": "integer"
+              },
+              "diskTotalBytes": {
+                "type": "integer"
+              },
+              "diskUsedBytes": {
+                "type": "integer"
+              },
+              "diskFreeBytes": {
+                "type": "integer"
+              },
+              "otherBytes": {
+                "type": "integer"
+              }
+            }
+          },
+          "reclaimable": {
+            "type": "object",
+            "description": "what each bulk clean would free",
+            "properties": {
+              "danglingImages": {
+                "type": "integer"
+              },
+              "unusedImages": {
+                "type": "integer"
+              },
+              "containers": {
+                "type": "integer"
+              },
+              "stoppedManaged": {
+                "type": "integer"
+              },
+              "anonymousVolumes": {
+                "type": "integer"
+              },
+              "unusedVolumes": {
+                "type": "integer"
+              },
+              "buildCache": {
+                "type": "integer"
+              }
+            }
+          },
+          "apps": {
+            "type": "array",
+            "description": "consumers of the disk, largest first",
+            "items": {
+              "$ref": "#/components/schemas/NodeDockerApp"
+            }
+          },
+          "containers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "image": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "created": {
+                  "type": "integer"
+                },
+                "writableBytes": {
+                  "type": "integer"
+                },
+                "logBytes": {
+                  "type": "integer"
+                },
+                "taskId": {
+                  "type": "string"
+                },
+                "managed": {
+                  "type": "boolean"
+                },
+                "system": {
+                  "type": "boolean"
+                },
+                "volumes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "app": {
+                  "$ref": "#/components/schemas/NodeDockerApp"
+                }
+              }
+            }
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "created": {
+                  "type": "integer"
+                },
+                "bytes": {
+                  "type": "integer"
+                },
+                "sharedBytes": {
+                  "type": "integer"
+                },
+                "containers": {
+                  "type": "integer"
+                },
+                "dangling": {
+                  "type": "boolean"
+                },
+                "apps": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "volumes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "driver": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "type": "integer"
+                },
+                "refCount": {
+                  "type": "integer"
+                },
+                "anonymous": {
+                  "type": "boolean"
+                },
+                "created": {
+                  "type": "integer"
+                },
+                "usedBy": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "apps": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "buildCache": {
+            "type": "array",
+            "description": "the largest entries",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "type": "integer"
+                },
+                "inUse": {
+                  "type": "boolean"
+                },
+                "shared": {
+                  "type": "boolean"
+                },
+                "lastUsed": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "buildCacheCount": {
+            "type": "integer"
+          }
+        }
+      },
+      "NodeDockerClean": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "images",
+              "containers",
+              "volumes",
+              "buildcache"
+            ]
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "remove exactly these (Docker refuses anything in use); empty prunes the kind"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "widen a prune: images \u2014 every unused image, not only untagged ones; build cache \u2014 everything not in use. Volumes: bulk prunes only anonymous unused volumes; named ones go by name"
+          }
+        }
+      },
+      "NodeDockerCleanResult": {
+        "type": "object",
+        "properties": {
+          "reclaimedBytes": {
+            "type": "integer"
+          },
+          "removed": {
+            "type": "integer"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "objects Docker refused to remove, with why"
           }
         }
       }

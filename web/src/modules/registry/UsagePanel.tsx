@@ -45,7 +45,7 @@ const reposRoute: string = "/registry/repos";
 
 const segments = [
   { key: "images", label: "Images", color: "bg-accent" },
-  { key: "cache", label: "Build cache", color: "bg-info" },
+  { key: "cache", label: "Build cache", color: "bg-ok" },
   { key: "free", label: "Unreferenced", color: "bg-warn" },
 ] as const;
 
@@ -215,7 +215,7 @@ export function UsagePanel() {
                     }}
                   />
                   <div
-                    className="bg-info h-full"
+                    className="bg-ok h-full"
                     style={{ width: `${(r.cacheBytes / max) * 100}%` }}
                   />
                 </div>

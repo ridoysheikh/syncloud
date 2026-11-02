@@ -47,6 +47,8 @@ type Hooks struct {
 	OnExecOutput func(node store.Node, o *agentv1.ExecOutput)
 	// OnUpgradeResult runs when an agent reports a failed self-upgrade.
 	OnUpgradeResult func(node store.Node, r *agentv1.UpgradeResult)
+	// OnDockerReply runs for answers to Docker requests (node management).
+	OnDockerReply func(node store.Node, r *agentv1.DockerReply)
 }
 
 type Gateway struct {
@@ -282,6 +284,12 @@ func (g *Gateway) Connect(stream grpc.BidiStreamingServer[agentv1.ConnectRequest
 				for _, h := range g.hooks {
 					if h.OnExecOutput != nil {
 						h.OnExecOutput(node, m.ExecOutput)
+					}
+				}
+			case *agentv1.ConnectRequest_DockerReply:
+				for _, h := range g.hooks {
+					if h.OnDockerReply != nil {
+						h.OnDockerReply(node, m.DockerReply)
 					}
 				}
 			case *agentv1.ConnectRequest_UpgradeResult:

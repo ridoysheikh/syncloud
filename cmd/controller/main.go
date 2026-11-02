@@ -60,6 +60,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/logs"
 	"github.com/ridoysheikh/syncloud/internal/mesh"
 	"github.com/ridoysheikh/syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/nodedocker"
 	"github.com/ridoysheikh/syncloud/internal/nodepool"
 	"github.com/ridoysheikh/syncloud/internal/nodes"
 	"github.com/ridoysheikh/syncloud/internal/pki"
@@ -657,6 +658,8 @@ func serve(args []string) error {
 	}
 	go gitServer.Run(ctx)
 	gw.AddHooks(execs.Hooks())
+	nodeDocker := nodedocker.New(gw)
+	gw.AddHooks(nodeDocker.Hooks())
 	regBrowser := &dockerregistry.Browser{URL: "http://" + system.RegistryAddr, Issuer: regIssuer}
 	// What an image's tag points to now, for pinning revisions to a digest:
 	// the built-in registry directly, others with stored upstream credentials.
@@ -1006,7 +1009,7 @@ func serve(args []string) error {
 			"GET " + certs.ChallengePrefix:      certMgr,
 		},
 		Domains: domains, Detector: detector, Certs: certMgr, Backups: backups, Mesh: meshMgr,
-		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Databases: dbMgr, Logs: logStore, Exec: execs, Jobs: jobMgr, Health: healthMon,
+		DownloadsDir: cfg.DownloadsDir, Workloads: workloads, Databases: dbMgr, Logs: logStore, Exec: execs, NodeDocker: nodeDocker, Jobs: jobMgr, Health: healthMon,
 		RegistryBrowser:  regBrowser,
 		RegistryMaint:    regMaint,
 		RegistryStorage:  regStorageIfMaint(regMaint, regStorage),

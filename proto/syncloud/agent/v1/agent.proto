@@ -23,6 +23,7 @@ message ConnectRequest {
     ExecOutput exec_output = 7;
     UpgradeResult upgrade_result = 8;
     TaskEvent task_event = 9;
+    DockerReply docker_reply = 10;
   }
 }
 
@@ -38,7 +39,24 @@ message ConnectResponse {
     ExecInput exec_input = 8;
     PullImage pull_image = 9;
     UpgradeAgent upgrade_agent = 10;
+    DockerRequest docker_request = 11;
   }
+}
+
+// DockerRequest asks the agent to measure or clean the node's Docker host
+// (node management). The agent answers with one DockerReply carrying the
+// same request_id. Operations: "usage" (no params), "clean" (JSON params).
+message DockerRequest {
+  string request_id = 1;
+  string op = 2;
+  bytes params = 3; // JSON
+}
+
+// DockerReply answers a DockerRequest.
+message DockerReply {
+  string request_id = 1;
+  string error = 2;
+  bytes payload = 3; // JSON
 }
 
 // UpgradeAgent streams a new agent binary in chunks (§5.0.1, §6.2). After

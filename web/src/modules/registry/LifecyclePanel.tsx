@@ -71,10 +71,43 @@ const toRule = (r: Row): Rule => ({
 });
 
 
-/** A repository's lifecycle policy with a dry-run preview (§5.10). */
+/** The name of the default policy, applied to repositories without their own. */
+export const DEFAULT_POLICY = "*";
+
+/**
+ * A repository's lifecycle policy with a dry-run preview (§5.10). With repo
+ * "*" it edits the default policy, which applies to every repository that
+ * has none of its own; the preview then tries it on a repository you pick.
+ */
 export function LifecyclePanel({ repo }: { repo: string }) {
   const qc = useQueryClient();
+  const isDefault = repo === DEFAULT_POLICY;
   const key = ["registry", "lifecycle", repo];
+  const repos = useQuery({
+    queryKey: ["registry", "repos"],
+    queryFn: async () =>
+      (await api<{ items: { name: string }[] }>("GET", "/registry/repositories"))
+        .items,
+    enabled: isDefault,
+  });
+  const [tryOn, setTryOn] = useState("");
+  const target = isDefault ? tryOn || repos.data?.[0]?.name || "" : repo;
+  // Without its own policy a repository follows the default, if there is one.
+  const fallback = useQuery({
+    queryKey: ["registry", "lifecycle", DEFAULT_POLICY],
+    queryFn: async () => {
+      try {
+        return await api<Policy>(
+          "GET",
+          `/registry/lifecycle?repository=${encodeURIComponent(DEFAULT_POLICY)}`,
+        );
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+    enabled: !isDefault,
+  });
   const policy = useQuery({
     queryKey: key,
     queryFn: async () => {
@@ -111,14 +144,15 @@ export function LifecyclePanel({ repo }: { repo: string }) {
   // Names the repository's images answer to, to complete the prefix field:
   // their tags, and the latest-<branch> tag the builds behind them pushed.
   const imgs = useQuery({
-    queryKey: ["registry", "images", repo],
+    queryKey: ["registry", "images", target],
     queryFn: async () =>
       (
         await api<{ items: Image[] }>(
           "GET",
-          `/registry/images?repository=${encodeURIComponent(repo)}`,
+          `/registry/images?repository=${encodeURIComponent(target)}`,
         )
       ).items,
+    enabled: !!target,
   });
   const suggestions = [
     ...new Set(
@@ -137,7 +171,7 @@ export function LifecyclePanel({ repo }: { repo: string }) {
   const preview = useMutation({
     mutationFn: () =>
       api<Preview>("POST", "/registry/lifecycle/preview", {
-        repository: repo,
+        repository: target,
         rules,
       }),
   });
@@ -161,7 +195,7 @@ export function LifecyclePanel({ repo }: { repo: string }) {
         rules,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: key });
+      qc.invalidateQueries({ queryKey: ["registry", "lifecycle"] });
       qc.invalidateQueries({ queryKey: ["registry", "repos"] });
     },
   });
@@ -172,7 +206,7 @@ export function LifecyclePanel({ repo }: { repo: string }) {
         `/registry/lifecycle?repository=${encodeURIComponent(repo)}`,
       ),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: key });
+      qc.invalidateQueries({ queryKey: ["registry", "lifecycle"] });
       qc.invalidateQueries({ queryKey: ["registry", "repos"] });
       preview.reset();
     },
@@ -188,13 +222,14 @@ export function LifecyclePanel({ repo }: { repo: string }) {
     <div className={cn("flex flex-col", gap)}>
       <Panel
         title={
-          policy.data ? "Lifecycle policy · active" : "Lifecycle policy · none"
+          (isDefault ? "Default policy" : "Lifecycle policy") +
+          (policy.data ? " · active" : " · not saved")
         }
         actions={
           <>
             <Button
               onClick={() => preview.mutate()}
-              disabled={preview.isPending || rows.length === 0}
+              disabled={preview.isPending || rows.length === 0 || !target}
             >
               <Eye className="size-3.5" /> Preview
             </Button>
@@ -210,7 +245,9 @@ export function LifecyclePanel({ repo }: { repo: string }) {
                 variant="ghost"
                 onClick={async () =>
                   (await confirmAction(
-                    `Remove the lifecycle policy of ${repo}?`,
+                    isDefault
+                      ? "Remove the default policy? Repositories without a policy of their own are no longer cleaned."
+                      : `Remove the lifecycle policy of ${repo}?`,
                   )) && remove.mutate()
                 }
               >
@@ -221,6 +258,37 @@ export function LifecyclePanel({ repo }: { repo: string }) {
         }
       >
         <div className="flex flex-col gap-2">
+          {!policy.data && !isDefault && (
+            <Alert tone={fallback.data ? "info" : "warn"}>
+              {fallback.data
+                ? "This repository has no policy of its own, so the default policy applies (keeping the newest images as set there). Save a policy here to override it."
+                : "No policy is saved for this repository, so nothing is ever deleted from it. The rule below is only a suggestion: it takes effect when you Save policy."}
+            </Alert>
+          )}
+          {!policy.data && isDefault && (
+            <Alert tone="warn">
+              No default policy is saved. Repositories without a policy of
+              their own are never cleaned. The rule below is only a
+              suggestion: it takes effect when you Save policy.
+            </Alert>
+          )}
+          {isDefault && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted">Preview on</span>
+              <div className="w-64">
+                <Select value={target} onChange={setTryOn} size="sm">
+                  {(repos.data ?? []).map((r) => (
+                    <option key={r.name} value={r.name}>
+                      {r.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <span className="text-faint">
+                Applies to every repository without its own policy.
+              </span>
+            </div>
+          )}
           <p className="text-muted text-xs">
             Rules run in priority order (lowest first). A rule judges whole
             images: an image matches when <em>any</em> of its tags, or the

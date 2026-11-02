@@ -39,7 +39,7 @@ func (s *Server) maintError(w http.ResponseWriter, what string, err error) {
 // repoParam reads and checks ?repository=.
 func repoParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	repo := r.URL.Query().Get("repository")
-	if !repoNameRE.MatchString(repo) {
+	if !repoNameRE.MatchString(repo) && repo != regmaint.DefaultRepo {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "repository must be a registry path like shop/api")
 		return "", false
 	}

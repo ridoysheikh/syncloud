@@ -22,6 +22,7 @@ import { StatTile } from "@/ui/StatTile";
 import { RangePicker, refetchFor, type Range } from "@/ui/RangePicker";
 import { Tabs } from "@/ui/Tabs";
 import { NodeFirewallTab } from "@/modules/network/HostFirewall";
+import { NodeDockerTab } from "./NodeDocker";
 import { Terminal } from "@/ui/Terminal";
 import { Alert, Button } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
@@ -53,7 +54,7 @@ interface NodeMetricsHistory {
   >;
 }
 
-type Tab = "overview" | "tasks" | "firewall" | "shell";
+type Tab = "overview" | "tasks" | "docker" | "firewall" | "shell";
 
 function formatUptime(sec: number) {
   const d = Math.floor(sec / 86400);
@@ -111,13 +112,15 @@ export function NodePage() {
         actions={<ScheduleActions node={node} />}
       />
       <Tabs
-        tabs={["overview", "tasks", "firewall", "shell"] as Tab[]}
+        tabs={["overview", "tasks", "docker", "firewall", "shell"] as Tab[]}
         value={tab}
         onChange={setTab}
         label={(t) =>
           t === "tasks"
             ? `Tasks (${tasks.length})`
-            : t === "shell"
+            : t === "docker"
+              ? "Docker"
+              : t === "shell"
               ? "Shell"
               : t === "firewall"
                 ? "Firewall"
@@ -131,6 +134,7 @@ export function NodePage() {
             <TasksTable tasks={tasks} loading={tasksLoading} showNode={false} />
           </Panel>
         )}
+        {tab === "docker" && <NodeDockerTab nodeId={node.id} />}
         {tab === "firewall" && <NodeFirewallTab nodeId={node.id} />}
         {tab === "shell" && <NodeShell node={node} />}
       </ErrorBoundary>

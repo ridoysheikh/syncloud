@@ -34,6 +34,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/logs"
 	"github.com/ridoysheikh/syncloud/internal/mesh"
 	"github.com/ridoysheikh/syncloud/internal/metrics"
+	"github.com/ridoysheikh/syncloud/internal/nodedocker"
 	"github.com/ridoysheikh/syncloud/internal/nodepool"
 	"github.com/ridoysheikh/syncloud/internal/nodes"
 	"github.com/ridoysheikh/syncloud/internal/pki"
@@ -82,6 +83,7 @@ type Server struct {
 	databases             *dbs.Manager
 	logs                  *logs.Store
 	exec                  *execrelay.Relay
+	nodeDocker            *nodedocker.Relay
 	jobs                  *jobs.Manager
 	health                *health.Monitor
 	registryBrowser       *registry.Browser
@@ -168,6 +170,8 @@ type Options struct {
 	Logs *logs.Store
 	// Exec relays interactive commands to tasks; may be nil.
 	Exec *execrelay.Relay
+	// NodeDocker measures and cleans Docker on nodes; may be nil.
+	NodeDocker *nodedocker.Relay
 	// Jobs runs one-off, scheduled and hook jobs (§5.11); may be nil.
 	Jobs *jobs.Manager
 	// Health is the central health monitor (§5.6); may be nil.
@@ -251,6 +255,7 @@ func New(o Options) *Server {
 		databases:             o.Databases,
 		logs:                  o.Logs,
 		exec:                  o.Exec,
+		nodeDocker:            o.NodeDocker,
 		jobs:                  o.Jobs,
 		health:                o.Health,
 		registryBrowser:       o.RegistryBrowser,
@@ -436,6 +441,8 @@ func (s *Server) Routes() []Route {
 		{Method: "DELETE", Path: "/api/v1/nodes/{id}", h: s.handleDeleteNode},
 		{Method: "GET", Path: "/api/v1/nodes/{id}/metrics", h: s.handleNodeMetrics},
 		{Method: "GET", Path: "/api/v1/nodes/{id}/shell", h: s.handleNodeShell},
+		{Method: "GET", Path: "/api/v1/nodes/{id}/docker", h: s.handleNodeDocker},
+		{Method: "POST", Path: "/api/v1/nodes/{id}/docker/clean", h: s.handleCleanNodeDocker},
 		{Method: "GET", Path: "/api/v1/nodes/join-tokens", h: s.handleListJoinTokens},
 		{Method: "POST", Path: "/api/v1/nodes/join-tokens", h: s.handleCreateJoinToken},
 		{Method: "DELETE", Path: "/api/v1/nodes/join-tokens/{id}", h: s.handleDeleteJoinToken},

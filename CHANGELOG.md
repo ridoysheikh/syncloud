@@ -2,6 +2,22 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.3.2]
+
+### Upgrading
+
+- **Upgrade the agents** (Settings → Updates) to use the new node **Docker** tab: older agents cannot answer it.
+- Registry repositories **without a saved lifecycle policy were never cleaned**. The "keep the newest 10" row shown on an unsaved Lifecycle tab was only a suggestion. Set a **default policy** (Registry → Cleanup → Default policy) to cover every repository that has none; the next cleanup lists, per repository, what it did.
+
+### Added
+
+- **Default lifecycle policy.** One policy for every repository without its own (`synctl registry lifecycle set '*' …`). Repositories show whether their own or the default applies, and a repository with neither is marked as never cleaned.
+- **Docker on each node.** **Nodes → a node → Docker** (or `synctl nodes docker usage NODE`) shows where the node's disk goes (images, volumes, containers, container logs, build cache, and what is not Docker's) and what each app consumes: every container, image and volume is tied to its service, platform component or "outside SynCloud". Clean it with one click: untagged images, every unused image, stopped containers, anonymous volumes or the build cache (`synctl nodes docker prune NODE KIND`), each showing how much it frees. SynCloud's own containers and named volumes (databases, the registry, service data) are never removed in bulk; remove them one by one, with a typed confirmation for volumes.
+
+### Fixed
+
+- A cleanup run now records a line for every repository: how many images it looked at, how many it deleted, and why the rest were kept (in use, no rule matches, or no policy at all). Open a run under **Registry → Cleanup**.
+
 ## [0.3.1]
 
 ### Fixed

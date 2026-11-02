@@ -363,6 +363,8 @@ func (a *agentLink) session(ctx context.Context, gw agentv1.AgentGatewayServiceC
 				go runner.PrePull(ctx, m.PullImage.GetImage(), m.PullImage.GetRegistryAuth(), m.PullImage.GetRegistryCa())
 			case *agentv1.ConnectResponse_UpgradeAgent:
 				a.upgrade.chunk(m.UpgradeAgent)
+			case *agentv1.ConnectResponse_DockerRequest:
+				go a.dockerRequest(ctx, m.DockerRequest)
 			}
 		}
 	}()

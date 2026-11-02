@@ -30,7 +30,7 @@ import {
   Input,
   StatusBadge,
 } from "@/ui/controls";
-import { LifecyclePanel } from "./LifecyclePanel";
+import { DEFAULT_POLICY, LifecyclePanel } from "./LifecyclePanel";
 import { StoragePanel } from "./StoragePanel";
 import { UsagePanel, useUsage } from "./UsagePanel";
 import { ImageDetails } from "./ImageDetails";
@@ -53,6 +53,7 @@ interface Repository {
   name: string;
   tags: number;
   lifecycle: boolean;
+  lifecycleDefault: boolean;
   pulls: number;
   lastPushedAt: string | null;
   lastPulledAt: string | null;
@@ -77,7 +78,7 @@ interface GCDetail {
   sizeBytes?: number;
   reason: string;
   /** Runs before outcomes were recorded only list what they deleted. */
-  outcome?: "deleted" | "failed" | "in-use";
+  outcome?: "deleted" | "failed" | "in-use" | "skipped" | "summary";
   error?: string;
 }
 
@@ -320,7 +321,12 @@ const outcomeOf = (d: GCDetail) => d.outcome ?? "deleted";
 
 /** What a cleanup did to each image it looked at, and why it did not delete what it could not. */
 function RunDialog({ run, onClose }: { run: GCRun | null; onClose: () => void }) {
-  const rows = run?.details ?? [];
+  const all = run?.details ?? [];
+  // The per-repository notes come first, then what happened to each image.
+  const rows = [
+    ...all.filter((d) => ["summary", "skipped"].includes(outcomeOf(d))),
+    ...all.filter((d) => !["summary", "skipped"].includes(outcomeOf(d))),
+  ];
   const failed = rows.filter((d) => outcomeOf(d) === "failed").length;
   const kept = rows.filter((d) => outcomeOf(d) === "in-use").length;
   return (
@@ -341,7 +347,7 @@ function RunDialog({ run, onClose }: { run: GCRun | null; onClose: () => void })
         {run?.message && <Alert>{run.message}</Alert>}
         <DataTable
           rows={rows}
-          rowKey={(d) => `${d.repository}@${d.tag}`}
+          rowKey={(d) => `${d.repository}@${d.tag}@${outcomeOf(d)}`}
           empty={
             <EmptyState icon={Eraser} title="Nothing expired">
               No image matched a lifecycle rule. Images with no rule are kept;
@@ -355,9 +361,19 @@ function RunDialog({ run, onClose }: { run: GCRun | null; onClose: () => void })
                 const o = outcomeOf(d);
                 return (
                   <StatusBadge
-                    tone={o === "deleted" ? "ok" : o === "failed" ? "bad" : "info"}
+                    tone={
+                      o === "deleted"
+                        ? "ok"
+                        : o === "failed"
+                          ? "bad"
+                          : o === "skipped"
+                            ? "warn"
+                            : o === "summary"
+                              ? "neutral"
+                              : "info"
+                    }
                   >
-                    {o === "in-use" ? "kept: in use" : o}
+                    {o === "in-use" ? "kept: in use" : o === "summary" ? "repository" : o}
                   </StatusBadge>
                 );
               },
@@ -366,7 +382,8 @@ function RunDialog({ run, onClose }: { run: GCRun | null; onClose: () => void })
               header: "Image",
               cell: (d) => (
                 <span className="font-mono">
-                  {d.repository}:{(d.tags?.length ? d.tags : [d.tag]).join(", ")}
+                  {d.repository}
+                  {d.tag && `:${(d.tags?.length ? d.tags : [d.tag]).join(", ")}`}
                 </span>
               ),
             },
@@ -399,6 +416,7 @@ function RunDialog({ run, onClose }: { run: GCRun | null; onClose: () => void })
 function Cleanup() {
   const qc = useQueryClient();
   const [open, setOpen] = useState<GCRun | null>(null);
+  const [defaultOpen, setDefaultOpen] = useState(false);
   const { data, error } = useQuery({
     queryKey: ["registry", "gc"],
     queryFn: () =>
@@ -422,6 +440,8 @@ function Cleanup() {
       title="Cleanup"
       flush
       actions={
+        <>
+        <Button onClick={() => setDefaultOpen(true)}>Default policy</Button>
         <Button
           onClick={async () =>
             (await confirmAction(
@@ -433,14 +453,26 @@ function Cleanup() {
           <Eraser className="size-3.5" />
           {data?.running ? "Running…" : "Clean up now"}
         </Button>
+        </>
       }
     >
       <RunDialog run={open} onClose={() => setOpen(null)} />
+      <Dialog
+        open={defaultOpen}
+        onClose={() => setDefaultOpen(false)}
+        size="xl"
+        title="Default policy"
+        description="Applies to every repository without a policy of its own."
+        footer={<Button onClick={() => setDefaultOpen(false)}>Close</Button>}
+      >
+        {defaultOpen && <LifecyclePanel repo={DEFAULT_POLICY} />}
+      </Dialog>
       <p className="text-muted px-3 py-2 text-xs">
         Every {data?.everyHours ?? 24} hours: lifecycle policies delete expired
         images, then garbage collection frees their layers and untagged images.
-        Open a run to see what happened to each image, and why anything was
-        kept or could not be deleted.
+        Only repositories with a lifecycle policy (their own, or the default)
+        are cleaned. Open a run to see what happened to each repository and
+        image, and why anything was kept or could not be deleted.
       </p>
       {start.error && (
         <div className="px-3 pb-2">
@@ -793,10 +825,22 @@ export function RepositoriesPage() {
                             : "never pulled"
                         }
                       >
-                        {r.lifecycle && (
+                        {r.lifecycle ? (
                           <span
-                            title="lifecycle policy"
-                            className="bg-ok size-1.5 rounded-full"
+                            title={
+                              r.lifecycleDefault
+                                ? "the default lifecycle policy applies"
+                                : "lifecycle policy"
+                            }
+                            className={cn(
+                              "size-1.5 rounded-full",
+                              r.lifecycleDefault ? "bg-info" : "bg-ok",
+                            )}
+                          />
+                        ) : (
+                          <span
+                            title="no lifecycle policy: never cleaned"
+                            className="bg-warn size-1.5 rounded-full"
                           />
                         )}
                         {sizes.get(r.name) && (

@@ -398,12 +398,20 @@ type Expired struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// Outcomes of an expired image.
+// Outcomes of an expired image, plus the notes a run records per repository.
 const (
 	OutcomeDeleted = "deleted"
 	OutcomeFailed  = "failed"
 	OutcomeInUse   = "in-use"
+	// OutcomeSkipped: the repository was left alone (Reason says why).
+	OutcomeSkipped = "skipped"
+	// OutcomeSummary: what the rules did across one repository.
+	OutcomeSummary = "summary"
 )
+
+// DefaultRepo names the default policy, applied to every repository that has
+// no policy of its own.
+const DefaultRepo = "*"
 
 func (m *Manager) run(run store.GCRun) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -434,9 +442,19 @@ func (m *Manager) run(run store.GCRun) {
 	m.log.Info("registry cleanup finished", "status", run.Status, "expired", run.Expired, "reclaimed_bytes", run.ReclaimedBytes, "message", run.Message)
 }
 
-// applyPolicies deletes the images every policy expires.
+// applyPolicies deletes the images each repository's policy expires: its
+// own, else the default. Every repository gets a note in the result, so a
+// run never leaves the question why nothing was deleted.
 func (m *Manager) applyPolicies(ctx context.Context) ([]Expired, error) {
 	policies, err := m.st.ListLifecyclePolicies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	own := map[string]store.LifecyclePolicy{}
+	for _, p := range policies {
+		own[p.Repository] = p
+	}
+	repos, err := m.browser.Repositories(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -444,37 +462,96 @@ func (m *Manager) applyPolicies(ctx context.Context) ([]Expired, error) {
 	if err != nil {
 		return nil, err
 	}
+	parse := func(p store.LifecyclePolicy) ([]registry.Rule, error) {
+		var rules []registry.Rule
+		if err := json.Unmarshal([]byte(p.Rules), &rules); err != nil {
+			return nil, err
+		}
+		return rules, registry.ValidateRules(rules)
+	}
+	var defRules []registry.Rule
+	var defErr error
+	if p, ok := own[DefaultRepo]; ok {
+		defRules, defErr = parse(p)
+	}
 	expired := []Expired{}
 	var errs []string
-	for _, p := range policies {
+	for _, rp := range repos {
+		if registry.IsSystemRepo(rp.Name) {
+			continue
+		}
+		note := func(outcome, reason string) {
+			expired = append(expired, Expired{Repository: rp.Name, Outcome: outcome, Reason: reason})
+		}
 		var rules []registry.Rule
-		if json.Unmarshal([]byte(p.Rules), &rules) != nil || registry.ValidateRules(rules) != nil {
+		switch p, ok := own[rp.Name]; {
+		case ok:
+			if rules, err = parse(p); err != nil {
+				note(OutcomeSkipped, "its lifecycle policy is invalid ("+err.Error()+"): nothing was deleted")
+				errs = append(errs, rp.Name+": invalid lifecycle policy")
+				continue
+			}
+		case defErr != nil:
+			note(OutcomeSkipped, "the default policy is invalid ("+defErr.Error()+"): nothing was deleted")
+			continue
+		case defRules != nil:
+			rules = defRules
+		default:
+			note(OutcomeSkipped, "no lifecycle policy, and no default policy: nothing is ever deleted from this repository")
 			continue
 		}
-		decisions, err := m.evaluate(ctx, p.Repository, rules, used)
+		decisions, err := m.evaluate(ctx, rp.Name, rules, used)
 		if err != nil {
-			errs = append(errs, p.Repository+": "+err.Error())
+			errs = append(errs, rp.Name+": "+err.Error())
+			note(OutcomeSkipped, "could not read the repository: "+err.Error())
 			continue
 		}
+		var deleted, failed, inUse, unmatched, cache int
 		for _, d := range decisions {
-			e := Expired{Repository: p.Repository, Tag: d.Tag, Tags: d.Tags, Digest: d.Digest, SizeBytes: d.SizeBytes, Reason: d.Reason}
+			e := Expired{Repository: rp.Name, Tag: d.Tag, Tags: d.Tags, Digest: d.Digest, SizeBytes: d.SizeBytes, Reason: d.Reason}
 			switch {
 			case d.WouldExpire:
 				e.Outcome = OutcomeInUse
+				inUse++
 			case d.Expire:
 				// One manifest delete removes every tag of the image.
-				if err := m.browser.DeleteTag(ctx, p.Repository, d.Tag); err != nil {
+				if err := m.browser.DeleteTag(ctx, rp.Name, d.Tag); err != nil {
 					e.Outcome, e.Error = OutcomeFailed, err.Error()
-					errs = append(errs, fmt.Sprintf("%s:%s: %v", p.Repository, d.Tag, err))
-					m.log.Warn("registry cleanup: delete failed", "repository", p.Repository, "tag", d.Tag, "err", err)
+					failed++
+					errs = append(errs, fmt.Sprintf("%s:%s: %v", rp.Name, d.Tag, err))
+					m.log.Warn("registry cleanup: delete failed", "repository", rp.Name, "tag", d.Tag, "err", err)
 				} else {
 					e.Outcome = OutcomeDeleted
+					deleted++
 				}
+			case d.Cache:
+				cache++
+				continue
 			default:
+				if d.Rule == 0 {
+					unmatched++
+				}
 				continue
 			}
 			expired = append(expired, e)
 		}
+		src := "its own policy"
+		if _, ok := own[rp.Name]; !ok {
+			src = "the default policy"
+		}
+		sum := fmt.Sprintf("%d images under %s: %d deleted", len(decisions)-cache, src, deleted)
+		if failed > 0 {
+			sum += fmt.Sprintf(", %d failed", failed)
+		}
+		if inUse > 0 {
+			sum += fmt.Sprintf(", %d kept because a service runs or can roll back to them", inUse)
+		}
+		if unmatched > 0 {
+			sum += fmt.Sprintf(", %d kept because no rule matches them", unmatched)
+		}
+		kept := len(decisions) - cache - deleted - failed - inUse - unmatched
+		sum += fmt.Sprintf(", %d kept by the rules", kept)
+		expired = append(expired, Expired{Repository: rp.Name, Outcome: OutcomeSummary, Reason: sum})
 	}
 	if len(errs) > 0 {
 		return expired, errors.New(strings.Join(errs, "; "))
