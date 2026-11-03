@@ -122,6 +122,22 @@ func (a *app) registryCmd() *cobra.Command {
 			},
 		},
 	)
+	r.AddCommand(&cobra.Command{
+		Use: "delete-repo REPOSITORY", Aliases: []string{"rm-repo"}, Short: "Delete a repository with all its tags", Args: cobra.ExactArgs(1),
+		Annotations: op("deleteRepository"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			force, _ := cmd.Flags().GetBool("force")
+			if err := c.DeleteRepository(ctx(cmd), args[0], force); err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "Deleted repository %s\n", args[0])
+			return nil
+		},
+	})
 	r.AddCommand(
 		&cobra.Command{
 			Use: "usage", Aliases: []string{"du"}, Short: "Where the registry's storage goes", Args: cobra.NoArgs,
@@ -209,6 +225,9 @@ func (a *app) registryCmd() *cobra.Command {
 	for _, c := range r.Commands() {
 		if c.Name() == "delete" {
 			c.Flags().Bool("force", false, "delete although a service runs the image")
+		}
+		if c.Name() == "delete-repo" {
+			c.Flags().Bool("force", false, "delete although a service runs one of its images")
 		}
 		if c.Name() == "usage" {
 			c.Flags().BoolVar(&refresh, "refresh", false, "measure again instead of using the result kept for a minute")

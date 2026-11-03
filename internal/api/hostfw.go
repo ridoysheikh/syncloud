@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ridoysheikh/syncloud/internal/firewall"
 	"github.com/ridoysheikh/syncloud/internal/fwstats"
 	"github.com/ridoysheikh/syncloud/internal/hostfw"
 	"github.com/ridoysheikh/syncloud/internal/store"
@@ -213,6 +214,9 @@ func (s *Server) handleNodeFirewall(w http.ResponseWriter, r *http.Request) {
 	if fw != nil {
 		rules = append(rules, nodeFirewallRule{ID: "builtin:wireguard", Kind: "syncloud", Protocol: "udp", Ports: strconv.Itoa(int(cfg.GetListenPort())),
 			Sources: []string{"cluster"}, Description: "private network (WireGuard)", Packets: counters["builtin:wireguard"]})
+		rules = append(rules,
+			nodeFirewallRule{ID: firewall.RuleDHCP, Kind: "syncloud", Protocol: "udp", Ports: "68", Sources: []string{}, Description: "DHCP replies (IPv4)", Packets: counters[firewall.RuleDHCP]},
+			nodeFirewallRule{ID: firewall.RuleDHCPv6, Kind: "syncloud", Protocol: "udp", Ports: "546", Sources: []string{"fe80::/10"}, Description: "DHCP replies (IPv6)", Packets: counters[firewall.RuleDHCPv6]})
 		for _, x := range fw.GetRules() {
 			srcs := x.GetSources()
 			if srcs == nil {
@@ -256,4 +260,76 @@ func (s *Server) handleNodeFirewall(w http.ResponseWriter, r *http.Request) {
 	}
 	out["drops"] = drops
 	writeJSON(w, http.StatusOK, out)
+}
+
+// addressEntry is one address the dashboard's pickers offer.
+type addressEntry struct {
+	Value string `json:"value"`
+	// Kind: you, server, ssh, policy, attempt or blocked.
+	Kind   string `json:"kind"`
+	Detail string `json:"detail"`
+}
+
+// handleFirewallAddressBook lists the addresses the firewall pages offer in
+// place of typing: the caller's own, the controller's, those already trusted
+// in SSH settings and policies, recent unauthorized sources and blocks. The
+// first reason an address is known wins, so each appears once.
+func (s *Server) handleFirewallAddressBook(w http.ResponseWriter, r *http.Request) {
+	if !s.requireHostFW(w) {
+		return
+	}
+	ctx := r.Context()
+	seen := map[string]bool{}
+	items := []addressEntry{}
+	add := func(value, kind, detail string) {
+		value = strings.TrimSpace(value)
+		if value == "" || value == firewall.SourceCluster || seen[value] {
+			return
+		}
+		if _, err := netip.ParsePrefix(value); err != nil {
+			if _, err := netip.ParseAddr(value); err != nil {
+				return
+			}
+		}
+		seen[value] = true
+		items = append(items, addressEntry{Value: value, Kind: kind, Detail: detail})
+	}
+	yours := clientIP(r)
+	add(yours, "you", "your current address")
+	if s.detector != nil {
+		if ip, err := s.detector.PublicIP(ctx); err == nil {
+			add(ip, "server", "this controller's public address")
+		}
+	}
+	ssh := s.hostFW.SSH()
+	for _, a := range ssh.Sources {
+		add(a, "ssh", "allowed to SSH")
+	}
+	for _, a := range ssh.Exempt {
+		add(a, "ssh", "exempt from the SSH rate limit")
+	}
+	if policies, err := s.store.ListFirewallPolicies(ctx); err == nil {
+		for _, p := range policies {
+			for _, rule := range p.Rules {
+				for _, a := range rule.Sources {
+					add(a, "policy", "in policy "+p.Name)
+				}
+			}
+		}
+	}
+	if s.fwStats != nil {
+		since := 24 * time.Hour
+		f := fwstats.DropFilter{Direction: "host", Since: s.now().Add(-since)}
+		drops, err := s.fwStats.DropsFromLogs(ctx, f, since, 200)
+		if err != nil {
+			drops = s.fwStats.Drops(f, 200)
+		}
+		for _, d := range drops {
+			add(d.Src, "attempt", "blocked by the firewall in the last day")
+		}
+	}
+	for _, b := range s.hostFW.Blocks() {
+		add(b.Source, "blocked", "currently blocked")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"yours": yours, "items": items})
 }

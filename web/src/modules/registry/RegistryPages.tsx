@@ -34,6 +34,8 @@ import { DEFAULT_POLICY, LifecyclePanel } from "./LifecyclePanel";
 import { StoragePanel } from "./StoragePanel";
 import { UsagePanel, useUsage } from "./UsagePanel";
 import { ImageDetails } from "./ImageDetails";
+import { RepoOverview, deleteRepository, useRepos, useRepoUsers, type Repository } from "./RepoList";
+import { SearchSelect } from "@/ui/select";
 import {
   groupImages,
   isIdTag,
@@ -42,22 +44,11 @@ import {
   type ImageGroup,
 } from "./images";
 import { cn, gap } from "@/ui/cn";
-import { useLazyList } from "@/ui/paging";
 import { Tabs } from "@/ui/Tabs";
 import { Dialog } from "@/ui/Dialog";
 import { Segmented } from "@/ui/choice";
 import { alertDialog, confirmAction, confirmDialog } from "@/ui/dialogs";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
-
-interface Repository {
-  name: string;
-  tags: number;
-  lifecycle: boolean;
-  lifecycleDefault: boolean;
-  pulls: number;
-  lastPushedAt: string | null;
-  lastPulledAt: string | null;
-}
 
 interface RegistryEvent {
   id: number;
@@ -189,16 +180,6 @@ function ActivityPanel({ repo }: { repo?: string }) {
       />
     </Panel>
   );
-}
-
-function useRepos() {
-  return useQuery({
-    queryKey: ["registry", "repos"],
-    queryFn: async () =>
-      (await api<{ items: Repository[] }>("GET", "/registry/repositories"))
-        .items,
-    retry: false,
-  });
 }
 
 function PushCommands() {
@@ -728,8 +709,16 @@ export function RepositoriesPage() {
   const [details, setDetails] = useState<string | null>(null);
   const [tagging, setTagging] = useState<ImageGroup | null>(null);
   const [notice, setNotice] = useState("");
-  const [repoQ, setRepoQ] = useState("");
-  const current = repo || repos[0]?.name || "";
+  const users = useRepoUsers();
+  // No repository is chosen until one is opened: the overview comes first.
+  const current = isLoading || repos.some((r) => r.name === repo) ? repo : "";
+  const open = (name: string) => {
+    setRepo(name);
+    setNotice("");
+    setTab("images");
+    setQ("");
+    setFilter("all");
+  };
   const images = useQuery({
     queryKey: ["registry", "images", current],
     queryFn: async () =>
@@ -754,9 +743,6 @@ export function RepositoriesPage() {
     );
   });
   const sizes = new Map(usage?.repositories.map((r) => [r.name, r]));
-  const lazyRepos = useLazyList(
-    repos.filter((r) => r.name.includes(repoQ.trim().toLowerCase())),
-  );
   const cur = sizes.get(current);
 
   const remove = async (g: ImageGroup) => {
@@ -775,90 +761,86 @@ export function RepositoriesPage() {
     }
   };
 
+  const removeRepo = async (r: Repository) => {
+    const done = await deleteRepository(r.name, {
+      tags: r.tags,
+      bytes: sizes.get(r.name)?.bytes,
+      users: users.get(r.name) ?? [],
+    });
+    if (!done) return;
+    if (r.name === current) setRepo("");
+    setNotice(
+      `Deleted the repository ${r.name}. The layers stay on disk until the next cleanup collects them.`,
+    );
+    void qc.invalidateQueries({ queryKey: ["registry"] });
+  };
+
   return (
     <div className={cn("flex flex-col", gap)}>
-      <PageHeader crumbs={["Registry"]} title="Repositories" />
+      <PageHeader
+        crumbs={[
+          "Registry",
+          current ? (
+            <button
+              key="back"
+              onClick={() => open("")}
+              className="hover:text-accent"
+            >
+              Repositories
+            </button>
+          ) : (
+            "Repositories"
+          ),
+        ]}
+        title={current || "Repositories"}
+        actions={
+          current && (
+            <>
+              <SearchSelect
+                value={current}
+                onChange={open}
+                size="sm"
+                mono
+                aria-label="Switch repository"
+                className="max-w-64"
+                options={repos.map((r) => ({
+                  value: r.name,
+                  label: r.name,
+                  hint: `${r.tags} ${r.tags === 1 ? "tag" : "tags"}`,
+                }))}
+              />
+              {!sizes.get(current)?.system && (
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    const r = repos.find((x) => x.name === current);
+                    if (r) void removeRepo(r);
+                  }}
+                >
+                  <Trash2 className="size-3.5" /> Delete repository
+                </Button>
+              )}
+            </>
+          )
+        }
+      />
       {error && (
         <Alert tone="warn">
           {error instanceof ApiError ? error.message : "Registry unavailable"}
         </Alert>
       )}
-      <div className={cn("grid lg:grid-cols-[18rem_1fr]", gap)}>
-        <Panel title={`Repositories (${repos.length})`} flush>
-          {repos.length === 0 && !isLoading ? (
-            <EmptyState icon={Boxes} title="No images yet">
-              Push one with the commands on the Registry page.
-            </EmptyState>
-          ) : (
-            <>
-              {repos.length > 8 && (
-                <div className="border-line border-b p-1.5">
-                  <Input
-                    value={repoQ}
-                    onChange={(e) => setRepoQ(e.target.value)}
-                    placeholder="Filter"
-                    className="h-7 text-xs"
-                  />
-                </div>
-              )}
-              <ul className="text-xs">
-                {lazyRepos.shown.map((r) => (
-                  <li key={r.name}>
-                    <button
-                      onClick={() => {
-                        setRepo(r.name);
-                        setNotice("");
-                      }}
-                      className={cn(
-                        "hover:bg-hover flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left",
-                        r.name === current && "bg-hover text-accent",
-                      )}
-                    >
-                      <span className="min-w-0 truncate font-mono">
-                        {r.name}
-                      </span>
-                      <span
-                        className="text-faint flex shrink-0 items-center gap-1.5"
-                        title={
-                          r.lastPulledAt
-                            ? `last pulled ${since(r.lastPulledAt)}`
-                            : "never pulled"
-                        }
-                      >
-                        {r.lifecycle ? (
-                          <span
-                            title={
-                              r.lifecycleDefault
-                                ? "the default lifecycle policy applies"
-                                : "lifecycle policy"
-                            }
-                            className={cn(
-                              "size-1.5 rounded-full",
-                              r.lifecycleDefault ? "bg-info" : "bg-ok",
-                            )}
-                          />
-                        ) : (
-                          <span
-                            title="no lifecycle policy: never cleaned"
-                            className="bg-warn size-1.5 rounded-full"
-                          />
-                        )}
-                        {sizes.get(r.name) && (
-                          <span className="font-mono">
-                            {bytes(sizes.get(r.name)!.bytes)}
-                          </span>
-                        )}
-                        <span>{r.tags}</span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              {lazyRepos.more}
-            </>
-          )}
-        </Panel>
-        <div className={cn("flex min-w-0 flex-col", gap)}>
+      {!current && notice && <Alert tone="info">{notice}</Alert>}
+      {!current ? (
+        <RepoOverview
+          repos={repos}
+          loading={isLoading}
+          usage={usage?.repositories}
+          users={users}
+          onOpen={open}
+          onDelete={(r) => void removeRepo(r)}
+        />
+      ) : (
+      <div className={cn("flex min-w-0 flex-col", gap)}>
           {current && (
             <>
               <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -1079,7 +1061,7 @@ export function RepositoriesPage() {
             )}
           </ErrorBoundary>
         </div>
-      </div>
+      )}
       <ImageDetails
         repo={current}
         tag={details}

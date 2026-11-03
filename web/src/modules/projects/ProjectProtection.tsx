@@ -5,7 +5,8 @@ import { Cable, Database, Fingerprint, Network, Plus, Shield, ShieldOff, Waypoin
 import { api, ApiError } from "@/lib/api";
 import { Panel } from "@/ui/Panel";
 import { StatTile } from "@/ui/StatTile";
-import { SourceList } from "@/ui/SourceList";
+import { PickList } from "@/ui/PickList";
+import { useAddressOptions, validateSource } from "@/modules/network/addresses";
 import { CopyBox } from "@/ui/CopyBox";
 import { Alert, Button, Field, Input, StatusBadge, Toggle } from "@/ui/controls";
 import { ChoiceCards, Segmented } from "@/ui/choice";
@@ -111,6 +112,8 @@ export function ProtectionPanel({ project, environments }: { project: string; en
   const [s, setS] = useState<Spec | null>(null);
   const [secret, setSecret] = useState("");
   const [valkeyEnv, setValkeyEnv] = useState(environments[0] ?? "");
+  const { options: blockable } = useAddressOptions({ exclude: ["you", "server", "ssh", "blocked"] });
+  const { options: trusted } = useAddressOptions({ exclude: ["attempt", "blocked"] });
   useEffect(() => {
     if (q.data && !s) setS(q.data.spec);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -264,11 +267,11 @@ export function ProtectionPanel({ project, environments }: { project: string; en
             )}
           </Section>
           <Section title="Block list" icon={ShieldOff} hint="These clients get 403 on every route of the project, bypass or not.">
-            <SourceList label="Blocked clients" value={s.block} onChange={(block) => set({ block })} />
+            <PickList label="Blocked clients" value={s.block} onChange={(block) => set({ block })} options={blockable} validate={validateSource} customLabel="IP or CIDR to block" customPlaceholder="203.0.113.0/24" searchPlaceholder="Search known addresses…" />
           </Section>
           <Section title="Bypass" icon={Shield} hint="Requests that match any of these skip the rate and concurrency limits (the body limit and block list still apply).">
             <Field label="From these addresses" hint="Your office, monitoring, partners.">
-              <SourceList label="Bypass addresses" value={s.bypass.ips} onChange={(ips) => set({ bypass: { ...s.bypass, ips } })} />
+              <PickList label="Bypass addresses" value={s.bypass.ips} onChange={(ips) => set({ bypass: { ...s.bypass, ips } })} options={trusted} validate={validateSource} customLabel="IP or CIDR" customPlaceholder="203.0.113.0/24" searchPlaceholder="Search known addresses…" />
             </Field>
             <Field label="Under these paths" hint="Health checks, webhooks.">
               <PathsInput value={s.bypass.paths} onChange={(paths) => set({ bypass: { ...s.bypass, paths } })} />

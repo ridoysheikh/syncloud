@@ -20,6 +20,9 @@ const (
 	Bridge    = "syncloud0"
 	// SourceCluster matches the addresses of all cluster nodes.
 	SourceCluster = "cluster"
+	// Counter names of the DHCP client rules.
+	RuleDHCP   = "builtin:dhcp"
+	RuleDHCPv6 = "builtin:dhcpv6"
 )
 
 var (
@@ -128,6 +131,11 @@ func RenderWith(cfg *agentv1.NetworkConfig, fw *agentv1.Firewall, svcs []*agentv
 		port := cfg.GetListenPort()
 		fmt.Fprintf(&b, "\t\tudp dport %d ip saddr @cluster4 accept comment \"builtin:wireguard\"\n", port)
 		fmt.Fprintf(&b, "\t\tudp dport %d ip6 saddr @cluster6 accept comment \"builtin:wireguard\"\n", port)
+		// A DHCP offer or a rebind reply is a new flow to the client port, so
+		// conntrack does not match it; without these a node cannot get or
+		// renew its address.
+		fmt.Fprintf(&b, "\t\tudp sport 67 udp dport 68 counter accept comment %q\n", RuleDHCP)
+		fmt.Fprintf(&b, "\t\tip6 saddr fe80::/10 udp sport 547 udp dport 546 counter accept comment %q\n", RuleDHCPv6)
 		// Limits come before the accept rules: a source over them is dropped
 		// whatever rule would let it in.
 		if err := renderGuards(&b, &sets, fw.GetGuards()); err != nil {

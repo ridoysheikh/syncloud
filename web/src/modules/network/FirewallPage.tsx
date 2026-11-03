@@ -16,6 +16,8 @@ import { NodePicker } from "@/entities/nodes";
 import { ChoiceCards, ChoiceField } from "@/ui/choice";
 import { confirmAction } from "@/ui/dialogs";
 import { Select } from "@/ui/select";
+import { PickList, PickOne } from "@/ui/PickList";
+import { portOptions, useAddressOptions, validatePorts, validateRuleSource } from "./addresses";
 
 interface Rule {
   id?: string;
@@ -215,6 +217,7 @@ export function FirewallPolicyPage() {
     queryFn: async () => (await api<{ items: Policy[] }>("GET", "/firewall/policies")).items,
   });
   const nodes = useNodes().data ?? [];
+  const { options: sourceOptions } = useAddressOptions({ cluster: true, exclude: ["blocked", "attempt"] });
   const policy = policies?.find((p) => p.id === id);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -306,7 +309,7 @@ export function FirewallPolicyPage() {
       <Panel title="Allow inbound (on the nodes' public addresses)">
         <div className="flex flex-col gap-1.5">
           {rules.map((r, i) => (
-            <div key={i} className="grid grid-cols-1 items-center gap-1.5 md:grid-cols-[5.5rem_7rem_1fr_1fr_auto]">
+            <div key={i} className="grid grid-cols-1 items-center gap-1.5 md:grid-cols-[5.5rem_11rem_1fr_1fr_auto]">
               <Select
                 value={r.protocol}
                 onChange={(v) => setRule(i, { protocol: v as Rule["protocol"], ports: "" })}
@@ -317,18 +320,30 @@ export function FirewallPolicyPage() {
                 <option value="icmp">ICMP</option>
                 <option value="any">Any</option>
               </Select>
-              <Input
+              <PickOne
+                label="Port"
+                size="sm"
                 value={r.ports}
                 disabled={r.protocol === "icmp" || r.protocol === "any"}
-                onChange={(e) => setRule(i, { ports: e.target.value })}
-                placeholder="22 / 8000-8100"
-                className="h-7 font-mono"
+                onChange={(ports) => setRule(i, { ports })}
+                options={portOptions}
+                validate={validatePorts}
+                customLabel="Port or range"
+                customPlaceholder="8000-8100"
+                searchPlaceholder="Search ports or services…"
+                none={r.protocol === "tcp" || r.protocol === "udp" ? { label: "All ports", value: "" } : undefined}
+                placeholder={r.protocol === "tcp" || r.protocol === "udp" ? "All ports" : "all"}
               />
-              <Input
-                value={r.sources.join(", ")}
-                onChange={(e) => setRule(i, { sources: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
-                placeholder="anywhere, or 203.0.113.0/24, cluster"
-                className="h-7 font-mono"
+              <PickList
+                label="Allowed sources"
+                value={r.sources}
+                onChange={(sources) => setRule(i, { sources })}
+                options={sourceOptions}
+                validate={validateRuleSource}
+                customLabel="IP or CIDR"
+                customPlaceholder="203.0.113.0/24"
+                searchPlaceholder="Search known addresses…"
+                empty="anywhere"
               />
               <Input value={r.description} onChange={(e) => setRule(i, { description: e.target.value })} placeholder="description" className="h-7" />
               <IconButton label="Remove rule" onClick={() => setRules(rules.filter((_, j) => j !== i))}>

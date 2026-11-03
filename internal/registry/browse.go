@@ -376,6 +376,35 @@ func (b *Browser) DeleteTag(ctx context.Context, repo, tag string) error {
 	return nil
 }
 
+// DeleteRepository removes every tag of a repository, the build cache
+// included, and returns how many tags it removed. Tags sharing a digest go
+// with the first one deleted, so a tag already gone is not an error. Layers
+// stay on disk until registry garbage collection. A tag that cannot be
+// deleted stops the run: the repository is only reported empty when it is.
+func (b *Browser) DeleteRepository(ctx context.Context, repo string) (int, error) {
+	tags, err := b.tags(ctx, repo)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, tag := range tags {
+		err := b.DeleteTag(ctx, repo, tag)
+		switch {
+		case err == nil:
+			removed++
+		case errors.Is(err, ErrManifestNotFound):
+			// Deleted along with another tag of the same digest.
+			removed++
+		default:
+			return removed, fmt.Errorf("delete %s:%s: %w", repo, tag, err)
+		}
+	}
+	if left, err := b.tags(ctx, repo); err == nil && len(left) > 0 {
+		return removed, fmt.Errorf("the registry still lists %d tags of %s", len(left), repo)
+	}
+	return removed, nil
+}
+
 // Retag points tag at the manifest from (a tag or digest) names: the same
 // image under another name, nothing copied.
 func (b *Browser) Retag(ctx context.Context, repo, from, tag string) error {

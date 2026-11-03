@@ -99,6 +99,20 @@ func (f *fakeRegistry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if t, ok := f.tags[repo][ref]; ok {
 				d = t
 			}
+			if r.Method == http.MethodDelete {
+				if _, ok := f.manifests[repo][d]; !ok {
+					http.NotFound(w, r)
+					return
+				}
+				delete(f.manifests[repo], d)
+				for t, td := range f.tags[repo] {
+					if td == d {
+						delete(f.tags[repo], t)
+					}
+				}
+				w.WriteHeader(http.StatusAccepted)
+				return
+			}
 			raw, ok := f.manifests[repo][d]
 			if !ok {
 				http.NotFound(w, r)

@@ -1288,6 +1288,15 @@ func (c *Client) DeleteImage(ctx context.Context, repo, tag string, force bool) 
 	return c.Do(ctx, "DELETE", "/api/v1/registry/images?"+q.Encode(), nil, nil)
 }
 
+// DeleteRepository deletes every tag of a repository.
+func (c *Client) DeleteRepository(ctx context.Context, repo string, force bool) error {
+	q := url.Values{"repository": {repo}}
+	if force {
+		q.Set("force", "1")
+	}
+	return c.Do(ctx, "DELETE", "/api/v1/registry/repositories?"+q.Encode(), nil, nil)
+}
+
 // RegistryRepoUsage is what one repository holds in the registry's storage.
 type RegistryRepoUsage struct {
 	Name        string `json:"name"`

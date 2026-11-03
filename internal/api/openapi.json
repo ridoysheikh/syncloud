@@ -6392,6 +6392,49 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      },
+      "delete": {
+        "operationId": "deleteRepository",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Delete a whole repository: every tag and the build cache, and its lifecycle policy; refused with 409 while a service runs one of its images unless forced",
+        "parameters": [
+          {
+            "name": "repository",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "delete although a service runs one of the images"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/registry/images": {
@@ -16269,6 +16312,60 @@
             }
           },
           "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/firewall/address-book": {
+      "get": {
+        "operationId": "getFirewallAddressBook",
+        "tags": [
+          "firewall"
+        ],
+        "summary": "Addresses the firewall pages offer instead of typing: the caller's own, the controller's, trusted SSH and policy sources, recent unauthorized sources and blocks",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "yours": {
+                      "type": "string"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "you",
+                              "server",
+                              "ssh",
+                              "policy",
+                              "attempt",
+                              "blocked"
+                            ]
+                          },
+                          "detail": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
             "$ref": "#/components/responses/Error"
           }
         }

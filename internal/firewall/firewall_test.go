@@ -56,6 +56,8 @@ func TestRender(t *testing.T) {
 		`ip6 saddr { 2001:db8::/64 } tcp dport 22 counter accept comment "fwp_default:0"`,
 		`tcp dport 443 counter accept comment "builtin:https"`,
 		`ip saddr @cluster4 udp dport 53 counter accept`,
+		`udp sport 67 udp dport 68 counter accept comment "builtin:dhcp"`,
+		`ip6 saddr fe80::/10 udp sport 547 udp dport 546 counter accept comment "builtin:dhcpv6"`,
 		`counter drop comment "default deny"`,
 		`ip saddr 10.91.2.0/24 ip daddr != { 10.90.0.0/16, 10.91.0.0/16, 10.92.0.0/16 }`,
 	} {

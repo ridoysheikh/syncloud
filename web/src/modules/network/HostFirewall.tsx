@@ -8,7 +8,8 @@ import { DataTable } from "@/ui/DataTable";
 import { EmptyState } from "@/ui/EmptyState";
 import { Dialog } from "@/ui/Dialog";
 import { StatTile } from "@/ui/StatTile";
-import { SourceList } from "@/ui/SourceList";
+import { PickList, PickOne } from "@/ui/PickList";
+import { useAddressOptions, validateSource } from "./addresses";
 import { Alert, Button, Field, IconButton, Input, StatusBadge, Toggle } from "@/ui/controls";
 import { ChoiceCards, Segmented } from "@/ui/choice";
 import { confirmAction } from "@/ui/dialogs";
@@ -65,6 +66,7 @@ export function useBlocker() {
   const [minutes, setMinutes] = useState("60");
   const [reason, setReason] = useState("");
   const [own, setOwn] = useState(false);
+  const { options: known } = useAddressOptions({ exclude: ["you", "server", "ssh", "blocked"] });
   useEffect(() => {
     if (!target) return;
     setSource(target.source);
@@ -114,8 +116,18 @@ export function useBlocker() {
       }
     >
       <form id="block-source" onSubmit={submit} className="flex flex-col gap-3 text-xs">
-        <Field label="IP or CIDR">
-          <Input value={source} onChange={(e) => setSource(e.target.value)} className="font-mono" spellCheck={false} autoFocus />
+        <Field label="IP or CIDR" hint="Pick a source that was seen or is already known, or choose Custom value.">
+          <PickOne
+            label="Source to block"
+            value={source}
+            onChange={setSource}
+            options={known}
+            validate={validateSource}
+            customLabel="IP or CIDR to block"
+            customPlaceholder="203.0.113.0/24"
+            searchPlaceholder="Search known addresses…"
+            placeholder="Choose a source"
+          />
         </Field>
         {target?.node && (
           <Field label="Where">
@@ -150,6 +162,7 @@ export function SSHAccessPanel() {
   const [v, setV] = useState<SSHSettings | null>(null);
   const [ports, setPorts] = useState("");
   const [restricted, setRestricted] = useState(false);
+  const { options: sshKnown } = useAddressOptions({ exclude: ["blocked", "attempt"] });
   useEffect(() => {
     if (!q.data) return;
     setV(q.data);
@@ -187,7 +200,7 @@ export function SSHAccessPanel() {
         />
         {restricted && (
           <Field label="Allowed sources">
-            <SourceList label="Allowed SSH sources" value={v.sources} onChange={(sources) => setV({ ...v, sources })} empty="add at least one address" />
+            <PickList label="Allowed SSH sources" value={v.sources} onChange={(sources) => setV({ ...v, sources })} options={sshKnown} validate={validateSource} customLabel="IP or CIDR" customPlaceholder="203.0.113.0/24" searchPlaceholder="Search known addresses…" empty="add at least one address" />
           </Field>
         )}
         <div className={cn("grid grid-cols-1 sm:grid-cols-2", gap)}>
@@ -225,7 +238,7 @@ export function SSHAccessPanel() {
           </div>
         </div>
         <Field label="Never rate limited" hint="Cluster nodes always are exempt.">
-          <SourceList label="Exempt sources" value={v.exempt} onChange={(exempt) => setV({ ...v, exempt })} />
+          <PickList label="Exempt sources" value={v.exempt} onChange={(exempt) => setV({ ...v, exempt })} options={sshKnown} validate={validateSource} customLabel="IP or CIDR" customPlaceholder="203.0.113.0/24" searchPlaceholder="Search known addresses…" />
         </Field>
         <Field label="Extra SSH ports" hint="Besides 22 and the ports sshd is seen listening on.">
           <Input value={ports} onChange={(e) => setPorts(e.target.value)} placeholder="2222" className="w-48 font-mono" />

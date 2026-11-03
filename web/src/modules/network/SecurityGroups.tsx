@@ -13,7 +13,9 @@ import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/contr
 import { ChipSelect, ChoiceField, Segmented } from "@/ui/choice";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
-import { Combobox, Select } from "@/ui/select";
+import { Select } from "@/ui/select";
+import { PickList, PickOne, type PickOption } from "@/ui/PickList";
+import { portOptions, validatePorts } from "./addresses";
 import { useBlocker } from "./HostFirewall";
 
 export interface SGRule {
@@ -201,7 +203,13 @@ interface Verdict {
 export function ReachabilityPanel({ to: fixedTo }: { to?: string }) {
   const { data: services = [] } = useServices();
   const paths = useMemo(() => services.map((s) => `${s.project}/${s.environment}/${s.name}`).sort(), [services]);
-  const pathSuggestions = useMemo(() => [...paths, "platform"], [paths]);
+  const pathOptions = useMemo<PickOption[]>(
+    () => [
+      { value: "platform", label: "platform", hint: "SynCloud itself", group: "Platform" },
+      ...paths.map((p) => ({ value: p, group: "Services" })),
+    ],
+    [paths],
+  );
   const [from, setFrom] = useState("");
   const [to, setTo] = useState(fixedTo ?? "");
   const [protocol, setProtocol] = useState("tcp");
@@ -218,11 +226,33 @@ export function ReachabilityPanel({ to: fixedTo }: { to?: string }) {
     <Panel title="Reachability check">
       <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
         <Field label="From (a service, an IP address or platform)">
-          <Combobox suggestions={pathSuggestions} value={from} onChange={setFrom} placeholder="shop/production/web" className="w-64 font-mono" />
+          <PickOne
+            label="From"
+            value={from}
+            onChange={setFrom}
+            options={pathOptions}
+            validate={validateEndpoint}
+            customLabel="An IP address"
+            customPlaceholder="203.0.113.7"
+            searchPlaceholder="Search services…"
+            placeholder="Choose a service"
+            className="w-64"
+          />
         </Field>
         {!fixedTo && (
           <Field label="To">
-            <Combobox suggestions={pathSuggestions} value={to} onChange={setTo} placeholder="shop/production/db" className="w-64 font-mono" />
+            <PickOne
+              label="To"
+              value={to}
+              onChange={setTo}
+              options={pathOptions}
+              validate={validateEndpoint}
+              customLabel="An IP address"
+              customPlaceholder="203.0.113.7"
+              searchPlaceholder="Search services…"
+              placeholder="Choose a service"
+              className="w-64"
+            />
           </Field>
         )}
         <Field label="Protocol">
@@ -233,7 +263,19 @@ export function ReachabilityPanel({ to: fixedTo }: { to?: string }) {
           </Select>
         </Field>
         <Field label="Port">
-          <Input value={port} onChange={(e) => setPort(e.target.value)} disabled={protocol === "icmp"} placeholder="5432" className="w-24 font-mono" />
+          <PickOne
+            label="Port"
+            value={port}
+            onChange={setPort}
+            options={portOptions}
+            validate={(v) => (/^\d{1,5}$/.test(v) ? validatePorts(v) : "Use a single port")}
+            customLabel="Port"
+            customPlaceholder="5432"
+            searchPlaceholder="Search ports or services…"
+            placeholder="Choose a port"
+            disabled={protocol === "icmp"}
+            className="w-44"
+          />
         </Field>
         <Button type="submit" variant="primary" disabled={!from || !to || check.isPending}>
           <RouteIcon className="size-3.5" /> Check
@@ -277,45 +319,32 @@ export function ReachabilityPanel({ to: fixedTo }: { to?: string }) {
 
 const emptyRule = (): SGRule => ({ protocol: "tcp", ports: "", peers: [], description: "" });
 
-/** Adds peers one at a time, with suggestions. */
-function PeerPicker({ value, onChange, suggestions }: { value: string[]; onChange: (v: string[]) => void; suggestions: string[] }) {
-  const [draft, setDraft] = useState("");
-  const add = () => {
-    const v = draft.trim();
-    if (v && !value.includes(v)) onChange([...value, v]);
-    setDraft("");
-  };
-  return (
-    <div className="border-line-strong flex min-h-7 flex-wrap items-center gap-1 rounded-sm border px-1 py-0.5">
-      {value.map((p) => (
-        <span key={p} className="bg-hover flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[11px]">
-          {p}
-          <button type="button" onClick={() => onChange(value.filter((x) => x !== p))} className="text-faint hover:text-fg" aria-label={`Remove ${p}`}>
-            <X className="size-3" />
-          </button>
-        </span>
-      ))}
-      <Combobox
-        bare
-        suggestions={suggestions}
-        value={draft}
-        onChange={setDraft}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === ",") {
-            e.preventDefault();
-            add();
-          }
-        }}
-        onBlur={add}
-        placeholder={value.length ? "" : "add a peer…"}
-        className="min-w-32 flex-1 bg-transparent px-1 font-mono text-xs outline-none"
-      />
-    </div>
-  );
+const peerGroups: [RegExp, string][] = [
+  [/^(any|cluster|environment:self|project:self)$/, "Built in"],
+  [/^environment:/, "Environments"],
+  [/^service:/, "Services"],
+  [/^group:/, "Security groups"],
+  [/^project:/, "Projects"],
+];
+
+/** The peers a rule may name, grouped by kind. */
+function peerOptions(suggestions: string[]): PickOption[] {
+  const out: PickOption[] = [];
+  for (const [re, group] of peerGroups)
+    for (const v of suggestions)
+      if (re.test(v)) out.push({ value: v, label: v, hint: peerLabel(v) === v ? undefined : peerLabel(v), group });
+  return out;
 }
+
+/** A custom peer: a CIDR/IP, or any reference the server checks (kind:name). */
+const validatePeer = (v: string) => (/\s|,/.test(v) ? "A peer has no spaces or commas" : null);
+
+const validateEndpoint = (v: string) =>
+  /^[0-9a-fA-F:.]+$/.test(v) && (v.includes(".") || v.includes(":")) ? null : "Use an IP address, or pick a service";
 
 function RulesEditor({ title, dir, rules, onChange, suggestions }: { title: string; dir: "in" | "out"; rules: SGRule[]; onChange: (r: SGRule[]) => void; suggestions: string[] }) {
   const set = (i: number, patch: Partial<SGRule>) => onChange(rules.map((r, j) => (i === j ? { ...r, ...patch } : r)));
+  const options = useMemo(() => peerOptions(suggestions), [suggestions]);
   return (
     <Panel title={title}>
       <div className="flex flex-col gap-1.5">
@@ -323,21 +352,39 @@ function RulesEditor({ title, dir, rules, onChange, suggestions }: { title: stri
           <span className="text-faint text-xs">{dir === "in" ? "Nothing may connect to the members." : "The members may not open any connection."}</span>
         )}
         {rules.map((r, i) => (
-          <div key={i} className="grid grid-cols-1 items-start gap-1.5 md:grid-cols-[5.5rem_7rem_minmax(0,2fr)_minmax(0,1fr)_auto]">
+          <div key={i} className="grid grid-cols-1 items-start gap-1.5 md:grid-cols-[5.5rem_11rem_minmax(0,2fr)_minmax(0,1fr)_auto]">
             <Select value={r.protocol} onChange={(v) => set(i, { protocol: v as SGRule["protocol"], ports: "" })} size="sm">
               <option value="tcp">TCP</option>
               <option value="udp">UDP</option>
               <option value="icmp">ICMP</option>
               <option value="any">All</option>
             </Select>
-            <Input
+            <PickOne
+              label="Port"
+              size="sm"
               value={r.ports}
               disabled={r.protocol === "icmp" || r.protocol === "any"}
-              onChange={(e) => set(i, { ports: e.target.value })}
-              placeholder="all ports"
-              className="h-7 font-mono"
+              onChange={(ports) => set(i, { ports })}
+              options={portOptions}
+              validate={validatePorts}
+              customLabel="Port or range"
+              customPlaceholder="8000-8100"
+              searchPlaceholder="Search ports or services…"
+              placeholder="All ports"
+              none={r.protocol === "tcp" || r.protocol === "udp" ? { label: "All ports", value: "" } : undefined}
             />
-            <PeerPicker value={r.peers} onChange={(peers) => set(i, { peers })} suggestions={suggestions} />
+            <PickList
+              label="Peers"
+              value={r.peers}
+              onChange={(peers) => set(i, { peers })}
+              options={options}
+              validate={validatePeer}
+              customLabel="CIDR, IP or reference"
+              customPlaceholder="203.0.113.0/24"
+              searchPlaceholder="Search peers…"
+              empty="no peer"
+              addLabel="Add peer"
+            />
             <Input value={r.description} onChange={(e) => set(i, { description: e.target.value })} placeholder="description" className="h-7" />
             <IconButton label="Remove rule" onClick={() => onChange(rules.filter((_, j) => j !== i))}>
               <X className="size-3.5" />

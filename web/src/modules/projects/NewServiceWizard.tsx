@@ -40,6 +40,7 @@ import {
 import { Select } from "@/ui/select";
 import { CommandFields, commandError, commandForm, commandSpec, type CommandForm } from "@/modules/compute/CommandOverride";
 import { ResourceFields, resourceError, resourceForm, resourceSpec, type ResourceForm } from "./Resources";
+import { ImagePicker } from "@/modules/registry/ImagePicker";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 const steps = ["Source", "Service", "Variables", "Review"] as const;
@@ -412,18 +413,7 @@ function SourceStep({
         ]}
       />
       {f.source === "image" ? (
-        <Field
-          label="Image"
-          hint="e.g. nginx:1.27, ghcr.io/acme/api:v2 or @registry/shop/api:v1 (the private registry)."
-        >
-          <Input
-            value={f.image}
-            onChange={(e) => set("image", e.target.value)}
-            placeholder="nginx:1.27"
-            className="font-mono"
-            autoFocus
-          />
-        </Field>
+        <ImagePicker value={f.image} onChange={(image) => set("image", image)} />
       ) : (
         <div className="flex flex-col gap-2">
           <RepoPicker

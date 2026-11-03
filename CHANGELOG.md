@@ -2,6 +2,22 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.3.4]
+
+### Upgrading
+
+- **Upgrade the agents** (Settings → Updates) so nodes apply the new firewall rules: DHCP replies are accepted again.
+
+### Fixed
+
+- **Hosts that get their address by DHCP keep it.** The host firewall's default deny dropped DHCP replies (a lease at boot, after a link flap or a rebind could never complete). It now accepts DHCPv4 replies (UDP 67→68) and DHCPv6 replies from link-local servers (UDP 547→546). Nothing else is opened; both rules show in a node's firewall view as `builtin:dhcp` and `builtin:dhcpv6` with their hit counters.
+
+### Added
+
+- **Pick, don't type.** Firewall sources (SSH access and exemptions, policy rules, the block dialog, a project's block list and bypass addresses) are chosen from a searchable list of addresses the platform already knows: yours, the controller's, those trusted for SSH or in policies, recent unauthorized sources, and `cluster`. Ports offer common services. Security-group peers and the reachability check offer services and peers. A value of your own is still possible through **Custom value…**, never by accident. Behind it, `GET /api/v1/firewall/address-book`.
+- **Image picker.** A new service picks its image from what already runs, the private registry and common Docker Hub images, then a tag from the registry's tags; anything else goes through **Custom value…**.
+- **Registry repositories, in full.** Registry → Repositories opens on a table of every repository (images, tags, size and what only it holds, last push and pull, cleanup policy, the services that run it) with search, filters (in use, unused, no policy) and sorting. A repository can be **deleted whole**: every tag, the build cache and its lifecycle policy, after typing its name, and refused with 409 while a service runs it unless forced (`synctl registry delete-repo REPOSITORY [--force]`, `DELETE /api/v1/registry/repositories`). Layers stay on disk until the next cleanup.
+
 ## [0.3.3]
 
 ### Upgrading

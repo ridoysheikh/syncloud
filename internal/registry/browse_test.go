@@ -114,3 +114,41 @@ func TestUsageUniqueBytesAndRetag(t *testing.T) {
 		t.Errorf("inspect: %+v", in)
 	}
 }
+
+func TestDeleteRepository(t *testing.T) {
+	is, err := LoadOrCreateIssuer(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFake()
+	image := func(repo, tag, layer string) string {
+		cfg := f.putBlob(repo, []byte(`{"os":"linux","architecture":"amd64"}`+tag))
+		m := ociManifest{SchemaVersion: 2, MediaType: mediaManifest, Config: cfg, Layers: []Descriptor{f.putBlob(repo, []byte(layer))}}
+		raw, _ := json.Marshal(m)
+		return f.putManifest(repo, tag, mediaManifest, raw)
+	}
+	image("shop/api", "aaaaaaaaaaaa", "one")
+	d2 := image("shop/api", "bbbbbbbbbbbb", "two")
+	f.tags["shop/api"]["latest-main"] = d2 // two tags, one digest
+	image("shop/web", "latest", "web")
+
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	b := &Browser{URL: srv.URL, Issuer: is}
+	ctx := context.Background()
+
+	n, err := b.DeleteRepository(ctx, "shop/api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Errorf("removed %d tags, want 3", n)
+	}
+	repos, err := b.Repositories(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 1 || repos[0].Name != "shop/web" {
+		t.Errorf("repositories after delete: %+v", repos)
+	}
+}

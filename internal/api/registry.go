@@ -320,6 +320,66 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleDeleteRepository deletes a whole repository: every tag, the build
+// cache and its lifecycle policy. Like a single image it is refused while a
+// service runs one of the tags, unless forced.
+func (s *Server) handleDeleteRepository(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBrowser(w) {
+		return
+	}
+	repo := r.URL.Query().Get("repository")
+	if !repoNameRE.MatchString(repo) {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "repository must be a registry path like shop/api")
+		return
+	}
+	if registry.IsSystemRepo(repo) {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "the platform's own images cannot be deleted")
+		return
+	}
+	if r.URL.Query().Get("force") == "" {
+		imgs, err := s.registryBrowser.Images(r.Context(), repo)
+		if err != nil {
+			s.registryErr(w, err)
+			return
+		}
+		views, err := s.imageViews(r.Context(), repo, imgs)
+		if err != nil {
+			s.internalError(w, "registry image users", err)
+			return
+		}
+		users := map[string]bool{}
+		var names []string
+		for _, v := range views {
+			for _, u := range v.InUseBy {
+				if n := u.Project + "/" + u.Environment + "/" + u.Service; !users[n] {
+					users[n] = true
+					names = append(names, n)
+				}
+			}
+		}
+		if len(names) > 0 {
+			writeError(w, http.StatusConflict, CodeConflict, repo+" is run by "+strings.Join(names, ", ")+"; deleting it breaks their next pull or rollback (use force to delete anyway)")
+			return
+		}
+	}
+	removed, err := s.registryBrowser.DeleteRepository(r.Context(), repo)
+	if err != nil {
+		s.log.Warn("registry repository delete failed", "repository", repo, "removed", removed, "err", err)
+		s.registryErr(w, err)
+		return
+	}
+	// A repository pushed again later starts without the old rules.
+	if err := s.store.DeleteLifecyclePolicy(r.Context(), repo); err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.log.Warn("registry lifecycle policy delete failed", "repository", repo, "err", err)
+	}
+	if s.regMaint != nil {
+		s.regMaint.InvalidateUsage()
+	}
+	u, _ := currentUser(r.Context())
+	s.audit(r, u.ID, "registry:DeleteRepository", "srn:syncloud:registry/"+repo, map[string]any{"tags": removed})
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleInspectImage describes one tag in depth: layers with the steps that
 // made them, platforms and the image's settings.
 func (s *Server) handleInspectImage(w http.ResponseWriter, r *http.Request) {
