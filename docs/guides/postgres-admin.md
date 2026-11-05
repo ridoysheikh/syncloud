@@ -38,6 +38,7 @@ synctl db sessions orders
 - `SUPERUSER`, `REPLICATION`, `BYPASSRLS` and the file-access roles can't be granted.
 - `app` keeps its name, password and login, because the credentials and the console use them.
 - The console never runs as the superuser. It runs as `app`, or as a role `app` may become.
+- You don't need the superuser to install extensions: `app` can run `CREATE EXTENSION`, `ALTER EXTENSION … UPDATE` and `DROP EXTENSION` for the extensions the platform offers (the image marks them *trusted*). Others, such as `file_fdw`, stay refused.
 
 Passwords are hashed (SCRAM-SHA-256) in the browser or CLI before they reach the server. SynCloud doesn't store them, so a generated password is shown once.
 

@@ -48,6 +48,21 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     mkdir -p /data /etc/syncloud; chown -R postgres:postgres /data /etc/syncloud
 
+# `app` is not a superuser, so CREATE EXTENSION would fail for every extension
+# PostgreSQL doesn't mark "trusted" (vector, PostGIS, pg_cron, ...). Trusting
+# the platform's list lets the database's owner run CREATE EXTENSION in the
+# console or any client, as with a hosted database's master user. Anything not
+# on this list stays superuser-only. Keep in step with pgExtensionAllowList in
+# internal/dbs/pgprivs.go (a test checks it).
+ARG TRUSTED_EXTENSIONS="vector timescaledb pg_duckdb postgis postgis_topology postgis_raster postgis_tiger_geocoder pg_partman pg_cron hypopg pg_stat_statements pg_trgm pgcrypto hstore btree_gin btree_gist postgres_fdw uuid-ossp tablefunc citext ltree fuzzystrmatch unaccent intarray cube earthdistance pg_buffercache pgstattuple pg_prewarm amcheck dblink tsm_system_rows tsm_system_time isn seg bloom pg_visibility plpgsql"
+RUN set -eu; \
+    dir=/usr/share/postgresql/${PG_MAJOR}/extension; \
+    for e in ${TRUSTED_EXTENSIONS}; do \
+      f="$dir/$e.control"; \
+      [ -f "$f" ] || { echo "no control file for $e" >&2; exit 1; }; \
+      if grep -q '^trusted' "$f"; then sed -i 's/^trusted.*/trusted = true/' "$f"; else printf '\ntrusted = true\n' >> "$f"; fi; \
+    done
+
 COPY entrypoint.sh /usr/local/bin/syncloud-pg
 COPY walg-bootstrap walg-adopt walg-restore-env walg-restore-wal walg-replica /usr/local/bin/
 RUN chmod 0755 /usr/local/bin/syncloud-pg /usr/local/bin/walg-bootstrap /usr/local/bin/walg-adopt /usr/local/bin/walg-restore-wal /usr/local/bin/walg-replica

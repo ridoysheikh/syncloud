@@ -2,6 +2,16 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.3.5]
+
+### Upgrading
+
+- **Upgrade the PostgreSQL databases** to pick up the new images (`17-r4`, `18-r3`). Members move one at a time, replicas first, with a switchover before the primary. `CREATE EXTENSION` as `app` works once every member runs the new image.
+
+### Fixed
+
+- **`CREATE EXTENSION` works for `app`.** The platform's superuser is never exposed, so installing vector, PostGIS, pg_cron, pg_partman, hypopg, pg_stat_statements and the rest failed with "must be superuser" in the Console and in any client. The image now marks the extensions the platform offers as trusted, so the database's owner can create, update and drop them directly, as with a hosted database's master user. Extensions that aren't offered, such as `file_fdw`, still need the superuser. The **Install** button under Explorer → the database → Extensions keeps working.
+
 ## [0.3.4]
 
 ### Upgrading

@@ -77,7 +77,7 @@ synctl db replication set orders --mode sync --sync-replicas 1
 
 ## Add-ons
 
-A new database is plain PostgreSQL. Enable extensions when you need them, in the wizard, on the **Configuration** tab, or with `synctl db addon enable orders vector`. Then run `CREATE EXTENSION` in the databases that use them.
+A new database is plain PostgreSQL. Enable extensions when you need them, in the wizard, on the **Configuration** tab, or with `synctl db addon enable orders vector`. Then run `CREATE EXTENSION` in the databases that use them: as `app` in the **Console** or any client, or with the **Install** button under **Explorer** → the database → **Extensions** (`synctl db extension install`). `app` can create every extension in the table below and PostgreSQL's own contrib modules the platform offers; anything else needs the superuser, which the platform keeps.
 
 | Add-on | For |
 | --- | --- |

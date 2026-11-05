@@ -19,7 +19,7 @@ Architectures: linux/amd64 and linux/arm64 for servers; synctl also for macOS (a
 
 1. Make sure `main` is clean and green (`make vet test`). For changes to how things run on nodes, run the relevant [end-to-end tests](testing.md).
 2. Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` and commit it.
-3. If `images/postgres` changed, raise its tag in `internal/system/manifest.go` (`PostgresTag18 = "18-r2"`), so clusters pick up the new image.
+3. If `images/postgres` changed, raise its tag in `internal/system/manifest.go` (`PostgresTag18 = "18-r3"`), so clusters pick up the new image.
 4. Run the script:
 
    ```sh

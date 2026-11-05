@@ -28,7 +28,7 @@ wait_for() { # description, condition (shell)
   fail "timed out: $d"
 }
 q() { api "$PG/query" -d "$(python3 -c 'import json,sys; print(json.dumps({"sql": sys.argv[1], "role": sys.argv[2], "database": sys.argv[3]}))' "$1" "${2:-}" "${3:-}")"; }
-w() { api "$PG/execute" -d "$(python3 -c 'import json,sys; print(json.dumps({"sql": sys.argv[1], "role": sys.argv[2]}))' "$1" "${2:-}")"; }
+w() { api "$PG/execute" -d "$(python3 -c 'import json,sys; print(json.dumps({"sql": sys.argv[1], "role": sys.argv[2], "database": sys.argv[3]}))' "$1" "${2:-}" "${3:-}")"; }
 qerr() { py 'print((d.get("error") or {}).get("message", ""))'; }
 rows() { py 'print(d["results"][-1]["rows"])'; }
 
@@ -124,9 +124,13 @@ assert "warehouse" in x and x["warehouse"]["connLimit"] == 10 and x["warehouse"]
 [ "$(q "SELECT current_database()" "" warehouse | rows)" = "[['warehouse']]" ] || fail "console on another database"
 api "$PG/extensions?db=warehouse" -d '{"name":"vector","action":"install"}' >/dev/null
 api "$PG/extensions?db=warehouse" | py 'assert [e for e in d["items"] if e["name"] == "vector"][0].get("installedVersion"), d'
+w "CREATE EXTENSION hypopg" "" warehouse | py 'assert "error" not in d, d'
+[ "$(q "SELECT extname FROM pg_extension WHERE extname = 'hypopg'" "" warehouse | rows)" = "[['hypopg']]" ] || fail "app could not CREATE EXTENSION in the console"
+w "DROP EXTENSION hypopg" "" warehouse | py 'assert "error" not in d, d'
+w "CREATE EXTENSION file_fdw" "" warehouse | qerr | grep -q "permission denied" || fail "app created an extension that is not offered"
 api -X DELETE "$PG/databases/warehouse" >/dev/null
 api "$PG/databases" | py 'assert "warehouse" not in [d["name"] for d in d["items"]]'
-echo "  ✓ create, rename and limit, explore and install vector in another database, drop"
+echo "  ✓ create, rename and limit, explore and install vector in another database, CREATE EXTENSION as app (and not an unlisted one), drop"
 
 echo "== sessions"
 docker exec -d "$(nodec "$CNODE")" sh -c "docker exec \$(docker ps -q --filter label=syncloud.task_id=$CTASK) psql '$(api "$DB/credentials" | py 'print(d["url"])')' -c 'SELECT pg_sleep(60)'"
