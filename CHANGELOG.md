@@ -2,6 +2,12 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.3.6]
+
+### Fixed
+
+- **"no available server" on services with tasks on several nodes.** Traefik probed every task itself every 2 seconds and dropped it on one failed probe, with only 1 second to answer. A task on another node answers over WireGuard, so one slow answer pulled it out of rotation, and when a service's tasks missed together Traefik answered 503 with nothing in the logs. Traefik no longer probes tasks. It stops sending a task traffic only after 10 requests to it fail in a row (for 10 seconds), and the controller's own probes (three in a row) still remove a task that is down. The number is the new **Failed requests before a task is taken out** setting on **Network → Traefik** (`unhealthyAfter`).
+
 ## [0.3.5]
 
 ### Upgrading
@@ -9,8 +15,6 @@ All notable changes are listed here. Versions follow [semantic versioning](https
 - **Upgrade the PostgreSQL databases** to pick up the new images (`17-r4`, `18-r3`). Members move one at a time, replicas first, with a switchover before the primary. `CREATE EXTENSION` as `app` works once every member runs the new image.
 
 ### Fixed
-
-- **"no available server" on services with tasks on several nodes.** Traefik probed every task itself every 2 seconds and dropped it on one failed probe, with only 1 second to answer. A task on another node answers over WireGuard, so one slow answer pulled it out of rotation, and when a service's tasks missed together Traefik answered 503 with nothing in the logs. Traefik no longer probes tasks. It stops sending a task traffic only after 10 requests to it fail in a row (for 10 seconds), and the controller's own probes (three in a row) still remove a task that is down. The number is the new **Failed requests before a task is taken out** setting on **Network → Traefik** (`unhealthyAfter`).
 
 - **`CREATE EXTENSION` works for `app`.** The platform's superuser is never exposed, so installing vector, PostGIS, pg_cron, pg_partman, hypopg, pg_stat_statements and the rest failed with "must be superuser" in the Console and in any client. The image now marks the extensions the platform offers as trusted, so the database's owner can create, update and drop them directly, as with a hosted database's master user. Extensions that aren't offered, such as `file_fdw`, still need the superuser. The **Install** button under Explorer → the database → Extensions keeps working.
 
