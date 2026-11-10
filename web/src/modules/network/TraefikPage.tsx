@@ -25,6 +25,7 @@ export interface TraefikSettings {
   minTls: "1.2" | "1.3";
   sniStrict: boolean;
   retryAttempts: number;
+  unhealthyAfter: number;
   hstsSeconds: number;
   compress: boolean;
   maxBodyMb: number;
@@ -127,7 +128,7 @@ export function TraefikPage() {
     return <PageHeader crumbs={["Network"]} title="Traefik" />;
   }
   const set = <K extends keyof TraefikSettings>(k: K, v: TraefikSettings[K]) => setForm({ ...form, [k]: v });
-  const num = (k: "retryAttempts" | "hstsSeconds" | "maxBodyMb" | "maxIdleConnsPerHost", v: string) => set(k, Math.max(0, parseInt(v, 10) || 0));
+  const num = (k: "retryAttempts" | "unhealthyAfter" | "hstsSeconds" | "maxBodyMb" | "maxIdleConnsPerHost", v: string) => set(k, Math.max(0, parseInt(v, 10) || 0));
   const dur = (k: "readTimeout" | "writeTimeout" | "idleTimeout" | "dialTimeout" | "responseHeaderTimeout", label: string, hint: string) => (
     <Field label={label} hint={hint}>
       <Input value={form[k]} placeholder="Traefik default" onChange={(e) => set(k, e.target.value)} />
@@ -206,6 +207,12 @@ export function TraefikPage() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Retry attempts" hint="On another task, idempotent requests only. 0 turns retries off.">
                 <Input type="number" min={0} max={10} value={form.retryAttempts} onChange={(e) => num("retryAttempts", e.target.value)} />
+              </Field>
+              <Field
+                label="Failed requests before a task is taken out"
+                hint="Requests to one task that must fail in a row before Traefik stops sending it traffic for 10 seconds. Default 10."
+              >
+                <Input type="number" min={1} max={1000} value={form.unhealthyAfter} onChange={(e) => num("unhealthyAfter", e.target.value)} />
               </Field>
               <Field label="Request body limit (MiB)" hint="0 = unlimited. Larger uploads get 413.">
                 <Input type="number" min={0} value={form.maxBodyMb} onChange={(e) => num("maxBodyMb", e.target.value)} />

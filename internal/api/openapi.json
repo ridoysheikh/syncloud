@@ -21504,6 +21504,10 @@
           "retryAttempts": {
             "type": "integer"
           },
+          "unhealthyAfter": {
+            "type": "integer",
+            "description": "failed requests to one task in a row before Traefik stops sending it traffic for 10 seconds (default 10)"
+          },
           "hstsSeconds": {
             "type": "integer"
           },

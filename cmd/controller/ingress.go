@@ -19,7 +19,7 @@ func ingressRoutes(routes []workload.Route, ing *ingress.Manager, base string, c
 	out := make([]traefik.ServiceRoute, 0, len(routes))
 	for _, r := range routes {
 		mws, own := chain(r.ServiceID)
-		sr := traefik.ServiceRoute{Name: r.Name, Host: r.Host, Servers: r.Servers, Middlewares: mws, OwnRetry: own, HealthPath: r.HealthPath,
+		sr := traefik.ServiceRoute{Name: r.Name, Host: r.Host, Servers: r.Servers, Middlewares: mws, OwnRetry: own,
 			Path: r.Path, StripPrefix: r.StripPrefix, RedirectTo: r.RedirectTo}
 		if protect != nil {
 			sr.Protect = protect(r.Project)

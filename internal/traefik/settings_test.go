@@ -1,6 +1,7 @@
 package traefik
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +16,8 @@ func TestSettingsValidate(t *testing.T) {
 		{ProxyProtocol: true},
 		{MinTLS: "1.0"},
 		{RetryAttempts: 11},
+		{UnhealthyAfter: -1},
+		{UnhealthyAfter: 1001},
 		{MaxBodyMB: -1},
 	} {
 		if err := bad.Validate(); err == nil {
@@ -120,16 +123,21 @@ func TestGitServerRoute(t *testing.T) {
 	}
 }
 
-func TestRouteHealthCheck(t *testing.T) {
-	p := &Provider{ControllerURL: "http://c", BaseDomain: func() string { return "example.com" }, ServiceRoutes: func() []ServiceRoute {
-		return []ServiceRoute{{Name: "a", Host: "a.example.com", Servers: []string{"http://10.91.0.2:80"}, HealthPath: "/healthz"},
-			{Name: "b", Host: "b.example.com", Servers: []string{"http://10.91.0.3:80"}}}
-	}}
-	d := p.Config()
-	if h := d.HTTP.Services["a"].LoadBalancer.HealthCheck; h == nil || h.Path != "/healthz" || h.Interval != "2s" {
-		t.Fatalf("health check: %+v", h)
+func TestRoutePassiveHealth(t *testing.T) {
+	routes := func() []ServiceRoute {
+		return []ServiceRoute{{Name: "a", Host: "a.example.com", Servers: []string{"http://10.91.0.2:80", "http://10.91.1.2:80"}}}
 	}
-	if d.HTTP.Services["b"].LoadBalancer.HealthCheck != nil {
-		t.Fatal("a service without a health check is probed")
+	p := &Provider{ControllerURL: "http://c", BaseDomain: func() string { return "example.com" }, ServiceRoutes: routes}
+	lb := p.Config().HTTP.Services["a"].LoadBalancer
+	if h := lb.PassiveHealth; h == nil || h.MaxFailedAttempts != 10 || h.FailureWindow != "10s" {
+		t.Fatalf("default passive health: %+v", h)
+	}
+	p.Settings = func() Settings { s := DefaultSettings(); s.UnhealthyAfter = 25; return s }
+	if h := p.Config().HTTP.Services["a"].LoadBalancer.PassiveHealth; h == nil || h.MaxFailedAttempts != 25 {
+		t.Fatalf("setting not used: %+v", h)
+	}
+	out, _ := json.Marshal(p.Config().HTTP.Services["a"])
+	if strings.Contains(string(out), `"healthCheck"`) {
+		t.Fatalf("an active probe is configured: %s", out)
 	}
 }

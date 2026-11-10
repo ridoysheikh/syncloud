@@ -13,6 +13,7 @@ These are part of the configuration Traefik polls, so they apply within about tw
 | Strict SNI | off | Refuses TLS clients that don't name a known domain. |
 | HSTS max-age | 0 (off) | |
 | Retry attempts | 2 | On another task, idempotent requests only. 0 turns retries off. A service's retry middleware replaces it. |
+| Failed requests before a task is taken out | 10 | Requests to one task that must fail in a row before Traefik stops sending it traffic for 10 seconds. Traefik judges tasks by the requests it sends, not by probing them, so one slow answer from a task on another node never removes it. The controller's own probes (three in a row, every 10 seconds) still remove a task nobody is sending requests to. |
 | Compress responses | off | |
 | Request body limit | unlimited | Larger requests get 413. |
 

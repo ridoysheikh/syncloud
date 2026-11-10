@@ -135,17 +135,22 @@ type Service struct {
 }
 
 type LoadBalancer struct {
-	Servers        []Server     `json:"servers"`
-	PassHostHeader bool         `json:"passHostHeader"`
-	HealthCheck    *HealthCheck `json:"healthCheck,omitempty"`
+	Servers        []Server       `json:"servers"`
+	PassHostHeader bool           `json:"passHostHeader"`
+	PassiveHealth  *PassiveHealth `json:"passiveHealthCheck,omitempty"`
 }
 
-// HealthCheck is Traefik's active check of each server.
-type HealthCheck struct {
-	Path     string `json:"path"`
-	Interval string `json:"interval"`
-	Timeout  string `json:"timeout"`
+// PassiveHealth is Traefik's judgement of each server by the requests it
+// sends it: MaxFailedAttempts failures in a row within FailureWindow take
+// the server out of rotation for that long.
+type PassiveHealth struct {
+	FailureWindow     string `json:"failureWindow"`
+	MaxFailedAttempts int    `json:"maxFailedAttempts"`
 }
+
+// FailureWindow is how long Traefik keeps a task it gave up on out of
+// rotation (and the span its failures must fall in).
+const FailureWindow = "10s"
 
 type Server struct {
 	URL string `json:"url"`
@@ -184,8 +189,6 @@ type ServiceRoute struct {
 	// OwnRetry set, one of them replaces the default retry.
 	Middlewares []string
 	OwnRetry    bool
-	// HealthPath makes Traefik probe each task too ("" = no check).
-	HealthPath string
 	// Path limits the route to a prefix ("" = the whole host); StripPrefix
 	// removes it before forwarding. RedirectTo answers with a permanent
 	// redirect to that host instead of forwarding (Phase 15c).
@@ -414,25 +417,20 @@ func (p *Provider) ConfigFor(sc Scope) Dynamic {
 		for _, u := range r.Servers {
 			servers = append(servers, Server{URL: u})
 		}
-		lb := LoadBalancer{Servers: servers, PassHostHeader: true}
-		if r.HealthPath != "" {
-			// Probed by every Traefik replica: a task whose node crashed is
-			// out of rotation within seconds, before the controller notices.
-			lb.HealthCheck = &HealthCheck{Path: r.HealthPath, Interval: "2s", Timeout: "1s"}
-		}
+		// No active probe: Traefik drops a task on a single failed probe,
+		// and a task on another node (reached over WireGuard) fails one now
+		// and then without being unhealthy; when a service's tasks all miss
+		// at once, every request gets 503 "no available server". It judges
+		// by real requests instead, after UnhealthyAfter failures in a row.
+		// The controller's own probes (three in a row) cover idle tasks.
+		lb := LoadBalancer{Servers: servers, PassHostHeader: true,
+			PassiveHealth: &PassiveHealth{FailureWindow: FailureWindow, MaxFailedAttempts: set.unhealthyAfter()}}
 		d.HTTP.Services[r.Name] = Service{LoadBalancer: lb}
 		if p.ProbeToken != "" && r.RedirectTo == "" {
 			// The probe twin: the same chain and tasks, its own metrics. Its
-			// longer rule outranks the route's. A slower health check is
-			// enough: it only keeps probes off tasks that just died.
-			plb := lb
-			if lb.HealthCheck != nil {
-				hc := *lb.HealthCheck
-				hc.Interval = "10s"
-				plb.HealthCheck = &hc
-			}
+			// longer rule outranks the route's.
 			name := r.Name + ProbeSuffix
-			d.HTTP.Services[name] = Service{LoadBalancer: plb}
+			d.HTTP.Services[name] = Service{LoadBalancer: lb}
 			pr := Router{Rule: "(" + rule + ") && Header(`" + ProbeHeader + "`, `" + p.ProbeToken + "`)",
 				EntryPoints: web, Middlewares: free, Service: name}
 			pr.Priority = len(pr.Rule) * 10

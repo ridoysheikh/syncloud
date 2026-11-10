@@ -224,7 +224,7 @@ func TestProbeTwins(t *testing.T) {
 	p := &Provider{ControllerURL: "http://127.0.0.1:7070", BaseDomain: func() string { return domain }, ProbeToken: "TOK",
 		ServiceRoutes: func() []ServiceRoute {
 			return []ServiceRoute{
-				{Name: "svc-svc_ab12-http", Host: "web.example.com", HealthPath: "/healthz", Servers: []string{"http://10.91.1.2:8080"}},
+				{Name: "svc-svc_ab12-http", Host: "web.example.com", Servers: []string{"http://10.91.1.2:8080"}},
 				{Name: "dom-c", Host: "www.shop.example.com", RedirectTo: "shop.example.com", Servers: []string{"http://10.91.1.3:80"}},
 			}
 		},
@@ -236,7 +236,7 @@ func TestProbeTwins(t *testing.T) {
 		t.Fatalf("dev probe router: %+v", pr)
 	}
 	ps := d.HTTP.Services["svc-svc_ab12-http_probe"].LoadBalancer
-	if len(ps.Servers) != 1 || ps.HealthCheck == nil || ps.HealthCheck.Interval != "10s" || d.HTTP.Services["svc-svc_ab12-http"].LoadBalancer.HealthCheck.Interval != "2s" {
+	if len(ps.Servers) != 1 || ps.PassiveHealth == nil || ps.PassiveHealth.MaxFailedAttempts != 10 {
 		t.Errorf("probe service: %+v", ps)
 	}
 	if _, ok := d.HTTP.Routers["dom-c_probe"]; ok {

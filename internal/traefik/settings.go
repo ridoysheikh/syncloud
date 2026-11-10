@@ -44,9 +44,23 @@ type Settings struct {
 	MinTLS        string `json:"minTls"`        // "1.2" | "1.3"
 	SNIStrict     bool   `json:"sniStrict"`     // refuse TLS clients without a known server name
 	RetryAttempts int    `json:"retryAttempts"` // 0 disables the default retry
-	HSTSSeconds   int    `json:"hstsSeconds"`   // 0 sends no Strict-Transport-Security
-	Compress      bool   `json:"compress"`      // gzip/brotli/zstd responses
-	MaxBodyMB     int    `json:"maxBodyMb"`     // request body limit, 0 = unlimited
+	// UnhealthyAfter is how many requests to a task must fail in a row
+	// before Traefik stops sending it any (for FailureWindow).
+	UnhealthyAfter int  `json:"unhealthyAfter"`
+	HSTSSeconds    int  `json:"hstsSeconds"` // 0 sends no Strict-Transport-Security
+	Compress       bool `json:"compress"`    // gzip/brotli/zstd responses
+	MaxBodyMB      int  `json:"maxBodyMb"`   // request body limit, 0 = unlimited
+}
+
+// DefaultUnhealthyAfter is the failed requests in a row after which Traefik
+// takes a task out of rotation.
+const DefaultUnhealthyAfter = 10
+
+func (s Settings) unhealthyAfter() int {
+	if s.UnhealthyAfter <= 0 {
+		return DefaultUnhealthyAfter
+	}
+	return s.UnhealthyAfter
 }
 
 // DefaultDialTimeout bounds connecting to a task (over the private network).
@@ -63,7 +77,7 @@ const RegistryReadTimeout = "30m"
 
 // DefaultSettings are what a fresh install uses.
 func DefaultSettings() Settings {
-	return Settings{LogLevel: "INFO", TrustedIPs: []string{}, RedirectHTTPS: true, MinTLS: "1.2", RetryAttempts: 2}
+	return Settings{LogLevel: "INFO", TrustedIPs: []string{}, RedirectHTTPS: true, MinTLS: "1.2", RetryAttempts: 2, UnhealthyAfter: DefaultUnhealthyAfter}
 }
 
 // ParseSettings reads stored settings; missing fields keep their defaults.
@@ -129,6 +143,12 @@ func (s *Settings) Validate() error {
 	}
 	if s.RetryAttempts < 0 || s.RetryAttempts > 10 {
 		return fmt.Errorf("retryAttempts must be between 0 and 10")
+	}
+	if s.UnhealthyAfter == 0 {
+		s.UnhealthyAfter = DefaultUnhealthyAfter
+	}
+	if s.UnhealthyAfter < 1 || s.UnhealthyAfter > 1000 {
+		return fmt.Errorf("unhealthyAfter must be between 1 and 1000")
 	}
 	if s.HSTSSeconds < 0 || s.HSTSSeconds > 2*365*24*3600 {
 		return fmt.Errorf("hstsSeconds must be between 0 and two years")

@@ -20,10 +20,6 @@ type Route struct {
 	Project   string
 	// Generated: the port's generated address (not a custom domain).
 	Generated bool
-	// HealthPath is the HTTP health check of this port ("" = none): Traefik
-	// probes it too, so a task on a crashed node leaves the route within
-	// seconds (§5.6).
-	HealthPath string
 	// Path limits a custom domain's route to a prefix; StripPrefix removes
 	// it before forwarding; RedirectTo answers with a 301 to that host.
 	Path        string
@@ -124,12 +120,6 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 		for i, p := range spec.HTTPPorts() {
 			r := Route{Name: fmt.Sprintf("svc-%s-%s", sv.ID, p.Name), Host: generatedHost(sv, p, i == 0, base, portRouting(routing[sv.ID], p.Name)), ServiceID: sv.ID,
 				Project: sv.Project, Generated: true}
-			if h := spec.Health; h != nil && h.Type == "http" && (h.Port == "" && i == 0 || h.Port == p.Name) {
-				r.HealthPath = h.Path
-				if r.HealthPath == "" {
-					r.HealthPath = "/"
-				}
-			}
 			for _, t := range running[sv.ID] {
 				// Tasks of older revisions may expose the port differently.
 				port := p.Container
@@ -147,7 +137,7 @@ func (m *Manager) Routes(ctx context.Context, base string) []Route {
 			for _, d := range byService[sv.ID] {
 				if d.PortName == p.Name {
 					out = append(out, Route{Name: DomainRouteName(d.ID), Host: d.Host, Servers: r.Servers, ServiceID: sv.ID, Project: sv.Project,
-						HealthPath: r.HealthPath, Path: d.Path, StripPrefix: d.StripPrefix, RedirectTo: d.RedirectTo})
+						Path: d.Path, StripPrefix: d.StripPrefix, RedirectTo: d.RedirectTo})
 				}
 			}
 		}
