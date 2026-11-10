@@ -2,6 +2,16 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.3.7]
+
+### Upgrading
+
+- Traefik restarts once after the upgrade to pick up the new connect timeout.
+
+### Fixed
+
+- **Connecting to a task no longer gives up after 2 seconds.** Over the private network a slow handshake or a lost packet can take longer, and each timed-out connect counted as a failure against the task. The connect timeout now defaults to 5 seconds. A value you set yourself on **Network → Traefik** is kept.
+
 ## [0.3.6]
 
 ### Fixed

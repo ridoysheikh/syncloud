@@ -29,7 +29,7 @@ These become Traefik command-line flags. Saving a change restarts every replica,
 | Trusted proxies | none | IPs or CIDRs whose `X-Forwarded-*` headers are kept. **Use Cloudflare ranges** fills in Cloudflare's published list. |
 | PROXY protocol | off | From trusted proxies only. |
 | HTTP/3 | off | Over UDP on the HTTPS port. |
-| Connect timeout | 2s | So a request to a crashed node's task is retried on another one quickly. |
+| Connect timeout | 5s | Long enough for a slow handshake over the private network; a request to a crashed node's task is retried on another one after this. A connect that times out counts as a failure toward the unhealthy-task threshold. |
 | Response header timeout and idle connections per task | Traefik's | For connections to tasks. |
 | Log level | INFO | |
 

@@ -64,7 +64,7 @@ func (s Settings) unhealthyAfter() int {
 }
 
 // DefaultDialTimeout bounds connecting to a task (over the private network).
-const DefaultDialTimeout = "2s"
+const DefaultDialTimeout = "5s"
 
 // DefaultReadTimeout bounds reading a whole request on the public
 // entrypoints (Traefik's own is 60s).

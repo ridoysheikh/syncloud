@@ -284,7 +284,7 @@ export function TraefikPage() {
 
         <Panel title="Connections to tasks · restarts Traefik">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {dur("dialTimeout", "Connect timeout", "Default 2s, so a request to a crashed node's task is retried elsewhere quickly.")}
+            {dur("dialTimeout", "Connect timeout", "Default 5s: long enough for a slow handshake over the private network, short enough that a request to a crashed node's task is retried elsewhere.")}
             {dur("responseHeaderTimeout", "Response header timeout", "Wait for the app's first byte. Default none.")}
             <Field label="Idle connections per task" hint="0 = Traefik default (200).">
               <Input type="number" min={0} value={form.maxIdleConnsPerHost} onChange={(e) => num("maxIdleConnsPerHost", e.target.value)} />
