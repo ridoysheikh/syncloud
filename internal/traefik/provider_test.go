@@ -385,3 +385,34 @@ func TestProtectedRoutes(t *testing.T) {
 		t.Error("the bypass secret is not redacted")
 	}
 }
+
+// A public TCP port with TLS at the load balancer and PROXY protocol v2
+// (Phase 26); the default stays raw bytes without PROXY.
+func TestPublicTCPPortTLSAndProxyProtocol(t *testing.T) {
+	p := &Provider{
+		BaseDomain: func() string { return "example.com" },
+		TCPRoutes: func() []TCPRoute {
+			return []TCPRoute{
+				{Name: "pub-tcp-25", Entrypoint: "tcp-25", Servers: []string{"10.91.1.4:25"}, Plain: true, ProxyProtocol: true, ProxyVersion: 2},
+				{Name: "pub-tcp-465", Entrypoint: "tcp-465", Servers: []string{"10.91.1.4:465"}, ProxyProtocol: true, ProxyVersion: 2},
+				{Name: "pub-tcp-1883", Entrypoint: "tcp-1883", Servers: []string{"10.91.1.5:1883"}, Plain: true},
+			}
+		},
+	}
+	d := p.Config()
+	smtp := d.TCP.Routers["pub-tcp-25"]
+	if smtp.TLS != nil || smtp.Rule != "HostSNI(`*`)" || d.TCP.Services["pub-tcp-25"].LoadBalancer.ServersTransport != "pub-tcp-25" ||
+		d.TCP.ServersTransports["pub-tcp-25"].ProxyProtocol.Version != 2 {
+		t.Errorf("smtp: %+v %+v", smtp, d.TCP.ServersTransports)
+	}
+	smtps := d.TCP.Routers["pub-tcp-465"]
+	if smtps.TLS == nil || smtps.TLS.Passthrough || smtps.Rule != "HostSNI(`*`)" {
+		t.Errorf("TLS at the load balancer: %+v", smtps)
+	}
+	if mqtt := d.TCP.Services["pub-tcp-1883"]; mqtt.LoadBalancer.ServersTransport != "" || d.TCP.Routers["pub-tcp-1883"].TLS != nil {
+		t.Errorf("raw port changed: %+v", mqtt)
+	}
+	if _, ok := d.TCP.ServersTransports["pub-tcp-1883"]; ok {
+		t.Error("a raw port got a PROXY transport")
+	}
+}

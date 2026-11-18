@@ -15,8 +15,8 @@ The installer writes `/etc/syncloud/controller.env`. Every flag of `syncloud-con
 | `--base-domain` | `<public-ip>.sslip.io` | the platform's domain. `off` means none. |
 | `--acme`, `--acme-email`, `--acme-directory`, `--acme-ca-file` | Let's Encrypt | certificate issuing |
 | `--public-http`, `--public-https` | `:80`, `:443` | Traefik's entrypoints |
-| `--public-ports` | `20000-20999` | the range of public TCP/UDP service ports |
-| `--public-db-ports` | `21000-21999` | the range of public database ports (two per public database); must not overlap `--public-ports` |
+| `--public-ports` | `20000-20999` | the range of automatic public TCP/UDP service ports (kept for automatic ports: a chosen port can't be in it) |
+| `--public-db-ports` | `21000-21999` | the range of automatic public database ports (two per public database); must not overlap `--public-ports` |
 | `--public-postgres`, `--public-valkey` | `:5432`, `:6379` | the shared public database ports (TLS with SNI) |
 | `--controller-schedulable` | `0` | whether general services may run on the controller node |
 | `--build-node` | any node | run Git builds on this node |

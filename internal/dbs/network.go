@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/ridoysheikh/syncloud/internal/ports"
 	"github.com/ridoysheikh/syncloud/internal/secgroup"
 	"github.com/ridoysheikh/syncloud/internal/store"
 )
@@ -232,59 +233,178 @@ func (m *Manager) publicPortRange() (int, int) {
 	return DefaultPublicPorts[0], DefaultPublicPorts[1]
 }
 
-// assignPorts gives every public database its two dedicated ports and frees
-// those of databases no longer public. It reports whether anything changed.
+// assignPorts gives every public database its two dedicated ports, frees
+// those of databases no longer public, and keeps their claims in the port
+// table. It reports whether any port changed.
 func (m *Manager) assignPorts(ctx context.Context) (bool, error) {
+	led := m.ledger()
+	led.Lock()
+	defer led.Unlock()
+	return m.assignPortsLocked(ctx, led)
+}
+
+func (m *Manager) assignPortsLocked(ctx context.Context, led *ports.Ledger) (bool, error) {
 	m.portMu.Lock()
 	defer m.portMu.Unlock()
 	dbs, err := m.st.ListDatabases(ctx)
 	if err != nil {
 		return false, err
 	}
+	table, err := led.Table(ctx)
+	if err != nil {
+		return false, err
+	}
+	held := map[string][]store.PortClaim{} // database ID -> its claims
+	for _, c := range table {
+		if c.OwnerKind == store.PortOwnerDatabase {
+			held[c.OwnerID] = append(held[c.OwnerID], c)
+		}
+	}
+	lo, hi := m.publicPortRange()
+	changed := false
+	// Automatic ports stay unique across the cluster, as they always were:
+	// every number a public database holds is skipped.
 	used := map[int]bool{}
 	for _, d := range dbs {
 		if n := d.ParseNetwork(); n.Public.Enabled && !d.Deleting {
 			used[n.Public.Port], used[n.Public.ReadPort] = true, true
 		}
 	}
-	lo, hi := m.publicPortRange()
-	next := lo
-	free := func() int {
-		for ; next <= hi; next++ {
-			if !used[next] {
-				used[next] = true
-				return next
-			}
-		}
-		return 0
-	}
-	changed := false
-	for _, d := range dbs {
-		n := d.ParseNetwork()
-		want := n
-		if n.Public.Enabled && !d.Deleting {
-			if want.Public.Port == 0 {
-				want.Public.Port = free()
-			}
-			if want.Public.ReadPort == 0 {
-				want.Public.ReadPort = free()
-			}
-			if want.Public.Port == 0 || want.Public.ReadPort == 0 {
-				m.log.Warn("no free public database port", "database", d.Name, "range", fmt.Sprintf("%d-%d", lo, hi))
-			}
-		} else {
-			want.Public.Port, want.Public.ReadPort = 0, 0
-		}
-		if want.Public.Port == n.Public.Port && want.Public.ReadPort == n.Public.ReadPort {
-			continue
+	write := func(d store.Database, n, want Network, claims []store.PortClaim) error {
+		samePorts := want.Public.Port == n.Public.Port && want.Public.ReadPort == n.Public.ReadPort
+		if samePorts && sameClaims(held[d.ID], claims) {
+			return nil
 		}
 		b, _ := json.Marshal(want)
-		if err := m.st.SetDatabaseNetwork(ctx, d.ID, string(b), m.now().UTC()); err != nil {
+		if err := m.st.SetDatabaseNetworkClaims(ctx, d.ID, string(b), m.now().UTC(), claims); errors.Is(err, store.ErrPortTaken) {
+			m.log.Warn("public database port taken on a load balancer", "database", d.Name, "port", want.Public.Port, "readPort", want.Public.ReadPort)
+			return nil
+		} else if err != nil {
+			return err
+		}
+		if !samePorts {
+			changed = true
+		}
+		return nil
+	}
+	// Free first, so a port given up here can go to a database waiting
+	// for one in the same pass.
+	for _, d := range dbs {
+		if n := d.ParseNetwork(); !n.Public.Enabled || d.Deleting {
+			want := n
+			want.Public.Port, want.Public.ReadPort = 0, 0
+			want.Public.PortMode, want.Public.ReadPortMode = "", ""
+			if err := write(d, n, want, nil); err != nil {
+				return changed, err
+			}
+		}
+	}
+	for _, d := range dbs {
+		n := d.ParseNetwork()
+		if !n.Public.Enabled || d.Deleting {
+			continue
+		}
+		want := n
+		owner := dbOwner(d)
+		for _, f := range []struct {
+			port *int
+			mode *string
+		}{{&want.Public.Port, &want.Public.PortMode}, {&want.Public.ReadPort, &want.Public.ReadPortMode}} {
+			if *f.port != 0 {
+				continue
+			}
+			p, err := led.Pick(ctx, owner, "tcp", lo, hi, used)
+			if err != nil {
+				return changed, err
+			}
+			*f.port, *f.mode, used[p] = p, "", true
+		}
+		if want.Public.Port == 0 || want.Public.ReadPort == 0 {
+			m.log.Warn("no free public database port", "database", d.Name, "range", fmt.Sprintf("%d-%d", lo, hi))
+		}
+		if err := write(d, n, want, led.Claims(owner, dbWants(want))); err != nil {
 			return changed, err
 		}
-		changed = true
 	}
 	return changed, nil
+}
+
+// ledger is the port table (one of its own when none was set).
+func (m *Manager) ledger() *ports.Ledger {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.Ports == nil {
+		m.Ports = ports.New(m.st, m.log)
+	}
+	return m.Ports
+}
+
+// dbOwner is a database as a port holder: always on the shared load
+// balancer (the controller and edge pools), as before.
+func dbOwner(d store.Database) ports.Owner {
+	return ports.Owner{Kind: store.PortOwnerDatabase, ID: d.ID, Project: d.Project, Shared: true}
+}
+
+func portMode(m string) string {
+	if m == store.PortChosen {
+		return store.PortChosen
+	}
+	return store.PortAuto
+}
+
+// dbWants are a database's two public ports.
+func dbWants(n Network) []ports.Want {
+	if !n.Public.Enabled {
+		return nil
+	}
+	return []ports.Want{
+		{PortName: "rw", Protocol: "tcp", Port: n.Public.Port, Mode: portMode(n.Public.PortMode)},
+		{PortName: "ro", Protocol: "tcp", Port: n.Public.ReadPort, Mode: portMode(n.Public.ReadPortMode)},
+	}
+}
+
+func sameClaims(a, b []store.PortClaim) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	key := func(c store.PortClaim) string {
+		return fmt.Sprintf("%s/%s/%d/%s/%s", c.Node, c.Protocol, c.Port, c.PortName, c.Mode)
+	}
+	seen := map[string]bool{}
+	for _, c := range a {
+		seen[key(c)] = true
+	}
+	for _, c := range b {
+		if !seen[key(c)] {
+			return false
+		}
+	}
+	return true
+}
+
+// PortWants are every public database's ports, for the port table's resync.
+func (m *Manager) PortWants(ctx context.Context) map[ports.Owner][]ports.Want {
+	out := map[ports.Owner][]ports.Want{}
+	dbs, err := m.st.ListDatabases(ctx)
+	if err != nil {
+		return out
+	}
+	for _, d := range dbs {
+		n := d.ParseNetwork()
+		if !n.Public.Enabled {
+			continue
+		}
+		var ws []ports.Want
+		for _, w := range dbWants(n) {
+			if w.Port > 0 {
+				ws = append(ws, w)
+			}
+		}
+		if len(ws) > 0 {
+			out[dbOwner(d)] = ws
+		}
+	}
+	return out
 }
 
 // PublicHosts are the names that need certificates.
@@ -348,9 +468,11 @@ func (m *Manager) SetNetwork(ctx context.Context, id string, n Network, exists f
 		return View{}, ErrInvalid{err}
 	}
 	old := d.ParseNetwork()
-	n.Public.Port, n.Public.ReadPort = 0, 0 // the controller assigns them
-	if n.Public.Enabled {
-		n.Public.Port, n.Public.ReadPort = old.Public.Port, old.Public.ReadPort
+	led := m.ledger()
+	led.Lock()
+	defer led.Unlock()
+	if err := m.choosePorts(ctx, d, old, &n, led); err != nil {
+		return View{}, err
 	}
 	b, _ := json.Marshal(n)
 	if err := m.st.SetDatabaseNetwork(ctx, id, string(b), m.now().UTC()); err != nil {
@@ -365,7 +487,10 @@ func (m *Manager) SetNetwork(ctx context.Context, id string, n Network, exists f
 	if old.Public.RequireTLS != n.Public.RequireTLS {
 		m.event(ctx, id, "network", tlsMode(old.Public.RequireTLS), tlsMode(n.Public.RequireTLS), "public connections", actor)
 	}
-	if _, err := m.assignPorts(ctx); err != nil {
+	if old.Public.Port != n.Public.Port || old.Public.ReadPort != n.Public.ReadPort {
+		m.event(ctx, id, "network", portsText(old), portsText(n), "public ports", actor)
+	}
+	if _, err := m.assignPortsLocked(ctx, led); err != nil {
 		return View{}, err
 	}
 	m.publish(ctx, id)
@@ -373,6 +498,74 @@ func (m *Manager) SetNetwork(ctx context.Context, id string, n Network, exists f
 	m.networkChanged()
 	d, _ = m.st.DatabaseByID(ctx, id)
 	return m.View(ctx, d), nil
+}
+
+// choosePorts settles the public ports of a network change. A port left
+// out (0) keeps the one the database has; a number chooses it (checked in
+// the port table); mode "auto" asks for an automatic one again. Turning the
+// endpoint off frees both.
+func (m *Manager) choosePorts(ctx context.Context, d store.Database, old Network, n *Network, led *ports.Ledger) error {
+	if !n.Public.Enabled {
+		n.Public.Port, n.Public.ReadPort, n.Public.PortMode, n.Public.ReadPortMode = 0, 0, "", ""
+		return nil
+	}
+	fields := []struct {
+		name          string
+		port          *int
+		mode          *string
+		oldPort       int
+		oldMode, auto string
+	}{
+		{"port", &n.Public.Port, &n.Public.PortMode, old.Public.Port, old.Public.PortMode, n.Public.PortMode},
+		{"readPort", &n.Public.ReadPort, &n.Public.ReadPortMode, old.Public.ReadPort, old.Public.ReadPortMode, n.Public.ReadPortMode},
+	}
+	for _, f := range fields {
+		switch {
+		case f.auto == store.PortAuto && *f.port == 0:
+			// Back to automatic: a chosen port is given up, an automatic one stays.
+			if f.oldMode == store.PortChosen {
+				*f.port, *f.mode = 0, ""
+			} else {
+				*f.port, *f.mode = f.oldPort, ""
+			}
+		case *f.port == 0 || *f.port == f.oldPort:
+			*f.port, *f.mode = f.oldPort, f.oldMode
+		default:
+			*f.mode = store.PortChosen
+		}
+	}
+	if n.Public.Port != 0 && n.Public.Port == n.Public.ReadPort {
+		return ErrInvalid{errors.New("the read-write and read-only ports must differ")}
+	}
+	owner := dbOwner(d)
+	for _, f := range fields {
+		if *f.port == 0 || *f.port == f.oldPort {
+			continue
+		}
+		if *f.port > 65535 || *f.port < 1 {
+			return ErrInvalid{fmt.Errorf("%s %d is not a port (1–65535)", f.name, *f.port)}
+		}
+		states, err := led.Check(ctx, owner, "tcp", *f.port, false)
+		if err != nil {
+			return err
+		}
+		if err := ports.Free(states, "tcp", *f.port, func(kind, id string) string {
+			if kind == store.PortOwnerDatabase {
+				return "another database"
+			}
+			return "a service"
+		}); err != nil {
+			return ErrInvalid{err}
+		}
+	}
+	return nil
+}
+
+func portsText(n Network) string {
+	if !n.Public.Enabled || n.Public.Port == 0 {
+		return "none"
+	}
+	return fmt.Sprintf("%d/%d", n.Public.Port, n.Public.ReadPort)
 }
 
 func tlsMode(requireTLS bool) string {

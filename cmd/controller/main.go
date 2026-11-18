@@ -64,6 +64,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/nodepool"
 	"github.com/ridoysheikh/syncloud/internal/nodes"
 	"github.com/ridoysheikh/syncloud/internal/pki"
+	"github.com/ridoysheikh/syncloud/internal/ports"
 	"github.com/ridoysheikh/syncloud/internal/quota"
 	dockerregistry "github.com/ridoysheikh/syncloud/internal/registry"
 	"github.com/ridoysheikh/syncloud/internal/regmaint"
@@ -430,6 +431,17 @@ func serve(args []string) error {
 		if dbMgr := dbRef.Load(); dbMgr != nil {
 			hosts = append(hosts, dbMgr.PublicHosts(context.Background(), ep.BaseDomain)...)
 		}
+		if workloads != nil {
+			// TLS at the load balancer on a public TCP port: a certificate
+			// for the address's host (the project's base).
+			for _, r := range workloads.PublicRoutes(context.Background()) {
+				if r.TLS == workload.TLSTerminate {
+					if h := ingressMgr.Base(r.Project, ep.BaseDomain); h != "" && !slices.Contains(hosts, h) {
+						hosts = append(hosts, h)
+					}
+				}
+			}
+		}
 		return hosts
 	}
 	workloads = workload.NewManager(st, gw, registry, meshMgr.NetworkReady, bus, log)
@@ -444,6 +456,36 @@ func serve(args []string) error {
 	}
 	if r := workloads.PublicPortRange; dbLo <= r[1] && r[0] <= dbHi {
 		return fmt.Errorf("--public-db-ports %s overlaps --public-ports %s", cfg.PublicDBPorts, cfg.PublicPorts)
+	}
+	// The port table (Phase 26): every public port on every node of the
+	// load balancer that serves it, so a port is never given out twice on
+	// one node. A project's ports open on its own load balancer, the
+	// shared one is the controller plus the edge pools.
+	var poolsRef atomic.Pointer[nodepool.Manager]
+	portTable := ports.New(st, log)
+	portTable.Target = ingressMgr.Ports
+	portTable.Shared = func() []string {
+		out := []string{mesh.ControllerNode}
+		if p := poolsRef.Load(); p != nil {
+			for _, v := range p.EdgeNodes() {
+				out = append(out, v.Name)
+			}
+		}
+		return out
+	}
+	portTable.Holders = hostFW.Holders
+	portTable.Ranges = [][2]int{workloads.PublicPortRange, {dbLo, dbHi}}
+	portTable.Sources = []ports.Source{workloads.PortWants}
+	workloads.Ports = portTable
+	ingressMgr.CheckPorts = func(ctx context.Context, project string, t ingress.Target) error {
+		clashes, err := portTable.CheckTarget(ctx, project, t)
+		if err != nil {
+			return err
+		}
+		if len(clashes) > 0 {
+			return ports.ErrClash{Clashes: clashes}
+		}
+		return nil
 	}
 	workloads.OnChange = func() { certMgr.SetHosts(certHosts(domains.Endpoints())) }
 	certMgr.SetHosts(certHosts(domains.Endpoints()))
@@ -526,6 +568,8 @@ func serve(args []string) error {
 	dbMgr.Metrics = metricStore
 	dbMgr.BaseDomain = domains.Base
 	dbMgr.PublicPortRange = [2]int{dbLo, dbHi}
+	dbMgr.Ports = portTable
+	portTable.Sources = append(portTable.Sources, dbMgr.PortWants)
 	dbMgr.PostgresImages, err = postgresImages(cfg.PostgresImage)
 	if err != nil {
 		return err
@@ -595,6 +639,14 @@ func serve(args []string) error {
 	if err := pools.Reload(ctx); err != nil {
 		return fmt.Errorf("load node pools: %w", err)
 	}
+	poolsRef.Store(pools)
+	// Fill the port table from the existing ports, now that the edge pools
+	// are known, before the API can claim one (the first start after the
+	// upgrade finds it empty).
+	if err := portTable.Sync(ctx); err != nil {
+		return fmt.Errorf("port table: %w", err)
+	}
+	go portTable.Run(ctx)
 	pools.ControllerURL = func() string { return domains.Endpoints().DashboardURL }
 	pools.Pin = func() string { return certMgr.Pin(domains.Endpoints().BaseDomain) }
 	workloads.NodePool = pools.PoolOf
@@ -836,6 +888,9 @@ func serve(args []string) error {
 	// A project's ingress changed: new hosts and certificates, replicas on
 	// its nodes, firewalls opening 80/443 there.
 	ingressMgr.OnChange = func() {
+		if err := portTable.Sync(ctx); err != nil {
+			log.Error("port table", "err", err)
+		}
 		workloads.InvalidateRoutes()
 		certMgr.SetHosts(certHosts(domains.Endpoints()))
 		edges.Refresh(ctx)
@@ -894,7 +949,10 @@ func serve(args []string) error {
 			for _, r := range workloads.PublicRoutes(context.Background()) {
 				if r.Protocol == "tcp" {
 					t := ingressMgr.Ports(r.Project)
-					out = append(out, traefik.TCPRoute{Name: r.Name, Entrypoint: r.Entrypoint(), Servers: r.Servers, Allow: r.Allow, Plain: true, Ingress: &t})
+					// Raw bytes by default; TLS at the load balancer and
+					// PROXY protocol (v2) when the port asks for them.
+					out = append(out, traefik.TCPRoute{Name: r.Name, Entrypoint: r.Entrypoint(), Servers: r.Servers, Allow: r.Allow,
+						Plain: r.TLS != workload.TLSTerminate, ProxyProtocol: r.ProxyProtocol, ProxyVersion: 2, Ingress: &t})
 				}
 			}
 			if host := agentHost(domains.Base()); host != "" && cfg.AgentProxyListen != "" {
@@ -1030,6 +1088,7 @@ func serve(args []string) error {
 		Edges:            edges,
 		Ingress:          ingressMgr,
 		HostFirewall:     hostFW,
+		Ports:            portTable,
 		Protection:       protect,
 		Upgrades:         upgrades,
 		S3:               s3Mgr,

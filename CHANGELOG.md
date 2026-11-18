@@ -2,6 +2,30 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [Unreleased]
+
+### Upgrading
+
+- Nothing to do. At its first start the controller fills the new port table from the public ports that exist. No port, URL, Traefik route or firewall rule changes, and Traefik doesn't restart.
+- `PUT /api/v1/databases/{name}/network` now honours `public.port` and `public.readPort` when they differ from the current ones. A value left out, `0`, or the current number keeps the port, so the dashboard and synctl keep working as before.
+
+### Added
+
+- **Public TCP/UDP services.** The new-service wizard has a fourth choice next to Public HTTP, Internal only and Worker, for apps clients reach on their own port: mail, MQTT, game servers. Each port has its protocol, container port and public port: the same as the container port, a number of your choice, or an automatic one. The port is checked live while you type. Presets fill in a mail server (25, 587, 465, 993), an MQTT broker (1883, 8883) and Minecraft Java and Bedrock. Websites and APIs stay on Public HTTP: they share 80/443 through Traefik and need no port of their own.
+- **Choose a public port.** A service's TCP or UDP port, and a public database's read-write and read-only ports, can take a number of your choice instead of one from the automatic range, ports below 1024 included. The automatic ranges stay the default. Use Service → Networking, Database → Connectivity → Public ports, `synctl services expose SERVICE PORT --public-port 25` (`0` goes back to automatic), or `synctl db network NAME --port 15432 --read-port 15433` (`--auto-ports`).
+- **The port table.**
+  - **No duplicates:** every public port is recorded on every load-balancer node that serves it, and a port has one holder per node, so it can never be given out twice there. Two projects with their own load balancers can both use 25.
+  - **Reserved ports:** Traefik's 80, 443 and 443/udp, SSH, WireGuard, the agent's DNS and gateway ports, Traefik's admin port, 5432/6379 (databases by name) and the automatic ranges can never be chosen. Nor can a port another program already listens on, on one of those nodes.
+  - **Where to see it:** **Network → Ports** shows the table and the reserved list; `GET /api/v1/ports` and `synctl ports list [--reserved]` return the same. `GET /api/v1/projects/{project}/ports/check` and `synctl ports check 25 -p shop` say whether a port is free for a project.
+  - **Load balancer changes:** a project's load-balancer change is refused (409) when one of its ports is taken on a new node.
+- **Real client IP for TCP ports (PROXY protocol).** Optional per port and off by default. Traefik then sends the client's address first (PROXY protocol v2), so mail servers and other apps see who connects. The app must support it. Turn it on with `--proxy-protocol on`.
+- **TLS at the load balancer for TCP ports.** Optional per port and off by default. Traefik handles TLS with the platform's certificate and sends plain TCP to the app, for ports such as 465, 993 or 8883. Turn it on with `--tls terminate`. It needs the platform's base domain, for the certificate.
+- **Project → Load balancer** lists the project's public ports.
+
+### Changed
+
+- Automatic public ports are picked exactly as before: unique across the cluster, from the same ranges. Only a chosen number can repeat, and only on a different load balancer.
+
 ## [0.3.7]
 
 ### Upgrading

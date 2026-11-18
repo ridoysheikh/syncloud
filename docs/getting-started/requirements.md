@@ -21,7 +21,8 @@ The platform itself uses about 650 MB on the controller and about 300 MB on a wo
 | 80/tcp, 443/tcp | the internet | the dashboard and your apps (Traefik) |
 | 7443/tcp | your nodes, optional | nodes connect to the controller (mutual TLS). With a base domain they connect through 443 (`agent.<domain>`) first, so 7443 is only a fallback. |
 | 51820/udp | between all nodes | the private network (WireGuard) |
-| 20000–20999 tcp/udp | the internet, optional | public TCP/UDP ports you open for services |
+| 20000–20999 tcp/udp | the internet, optional | public TCP/UDP ports you open for services (automatic) |
+| ports you choose | the internet, optional | public ports you choose for services or databases, such as 25 or 1883 |
 | 21000–21999 tcp | the internet, optional | public database endpoints you turn on |
 | 5432, 6379 tcp | the internet, optional | the same, on shared ports (TLS clients that send SNI) |
 

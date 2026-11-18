@@ -1028,6 +1028,11 @@ type PortRoute struct {
 	PublicPort int      `json:"publicPort"`
 	Address    string   `json:"address"`
 	Allow      []string `json:"allow"`
+	// PortMode is auto (from the range) or chosen; ProxyProtocol and TLS
+	// are a tcp port's options (Phase 26).
+	PortMode      string `json:"portMode"`
+	ProxyProtocol bool   `json:"proxyProtocol"`
+	TLS           string `json:"tls"`
 }
 
 // RoutingInput changes one port's routing; nil fields keep their value.
@@ -1036,6 +1041,10 @@ type RoutingInput struct {
 	Label     *string  `json:"label,omitempty"`
 	Public    *bool    `json:"public,omitempty"`
 	Allow     []string `json:"allow,omitempty"`
+	// PublicPort chooses the public port (0: an automatic one).
+	PublicPort    *int    `json:"publicPort,omitempty"`
+	ProxyProtocol *bool   `json:"proxyProtocol,omitempty"`
+	TLS           *string `json:"tls,omitempty"` // none | terminate
 }
 
 func (c *Client) GetRouting(ctx context.Context, project, env, name string) ([]PortRoute, error) {

@@ -647,8 +647,21 @@ func (a *app) servicesCmd() *cobra.Command {
 				reach = "generated address off"
 			case r.Public:
 				reach = r.Address
+				var notes []string
+				if r.PortMode == "chosen" {
+					notes = append(notes, "chosen")
+				}
+				if r.TLS == "terminate" {
+					notes = append(notes, "TLS at the load balancer")
+				}
+				if r.ProxyProtocol {
+					notes = append(notes, "PROXY protocol")
+				}
 				if len(r.Allow) > 0 {
-					reach += " (from " + strings.Join(r.Allow, ", ") + ")"
+					notes = append(notes, "from "+strings.Join(r.Allow, ", "))
+				}
+				if len(notes) > 0 {
+					reach += " (" + strings.Join(notes, "; ") + ")"
 				}
 			default:
 				reach = "private"
@@ -658,14 +671,43 @@ func (a *app) servicesCmd() *cobra.Command {
 		return a.printer().table(rs, []string{"PORT", "CONTAINER", "PROTOCOL", "REACHED AT"}, rows)
 	}
 	var exPublic, exPrivate, exNoGenerated, exGenerated bool
-	var exLabel string
+	var exLabel, exProxy, exTLS string
 	var exAllow []string
+	var exPort int
 	expose := &cobra.Command{
-		Use: "expose SERVICE PORT", Short: "Set how a port is reached: --public/--private (tcp, udp), --label or --no-generated (http)", Args: cobra.ExactArgs(2),
+		Use: "expose SERVICE PORT", Short: "Set how a port is reached: --public/--private and --public-port (tcp, udp), --label or --no-generated (http)", Args: cobra.ExactArgs(2),
+		Example: `  synctl services expose mail smtp --public-port 25 --proxy-protocol on
+  synctl services expose mail smtps --public-port 465 --tls terminate --proxy-protocol on
+  synctl services expose game play --public            # an automatic port (20000-20999)
+  synctl services expose mail smtp --public-port 0     # back to an automatic port`,
 		Annotations: op("setServiceRouting"),
 		RunE: withClient(func(cmd *cobra.Command, c *client.Client, args []string) error {
 			in := client.RoutingInput{}
 			f := cmd.Flags()
+			if f.Changed("public-port") {
+				if exPort < 0 || exPort > 65535 {
+					return errors.New("--public-port is 1-65535, or 0 for an automatic port")
+				}
+				in.PublicPort = &exPort
+			}
+			switch exProxy {
+			case "":
+			case "on", "true", "yes":
+				v := true
+				in.ProxyProtocol = &v
+			case "off", "false", "no":
+				v := false
+				in.ProxyProtocol = &v
+			default:
+				return errors.New("--proxy-protocol is on or off")
+			}
+			switch exTLS {
+			case "":
+			case "none", "terminate":
+				in.TLS = &exTLS
+			default:
+				return errors.New("--tls is none or terminate")
+			}
 			if exPublic || exPrivate {
 				v := exPublic
 				in.Public = &v
@@ -687,8 +729,11 @@ func (a *app) servicesCmd() *cobra.Command {
 			return printRouting(rs)
 		}),
 	}
-	expose.Flags().BoolVar(&exPublic, "public", false, "tcp/udp: open a public port on the controller and edge nodes")
+	expose.Flags().BoolVar(&exPublic, "public", false, "tcp/udp: open a public port on the project's load balancer")
 	expose.Flags().BoolVar(&exPrivate, "private", false, "tcp/udp: close its public port")
+	expose.Flags().IntVar(&exPort, "public-port", 0, "tcp/udp: the public port to use, e.g. 25 (not reserved or taken on the project's load balancer); 0 for an automatic one")
+	expose.Flags().StringVar(&exProxy, "proxy-protocol", "", "tcp: on sends the client's address first (PROXY protocol v2; the app must support it), off stops")
+	expose.Flags().StringVar(&exTLS, "tls", "", "tcp: terminate (TLS at the load balancer, plain TCP to the app) or none (raw bytes)")
 	expose.Flags().StringSliceVar(&exAllow, "allow", nil, "tcp/udp: only these client addresses or CIDRs")
 	expose.Flags().StringVar(&exLabel, "label", "", "http: serve LABEL.<base domain> instead of the generated name (empty: the generated name)")
 	expose.Flags().BoolVar(&exNoGenerated, "no-generated", false, "http: stop serving the generated address (custom domains only)")

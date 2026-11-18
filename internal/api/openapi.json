@@ -15335,7 +15335,7 @@
         "tags": [
           "services"
         ],
-        "summary": "Change how ports are reached; does not redeploy. Making a tcp/udp port public assigns a port and restarts the Traefik replicas with a new entrypoint.",
+        "summary": "Change how ports are reached; does not redeploy. Making a tcp/udp port public assigns a port (or the one chosen, checked in the port table) and restarts the Traefik replicas with a new entrypoint.",
         "parameters": [
           {
             "name": "project",
@@ -16177,7 +16177,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Choose the nodes that serve a project's public traffic (empty = the controller and edge pools). The previous ingress keeps serving each custom domain until its DNS points at the new one",
+        "summary": "Choose the nodes that serve a project's public traffic (empty = the controller and edge pools). The previous ingress keeps serving each custom domain until its DNS points at the new one. Refused with 409 when one of the project's public ports is taken on a new node.",
         "parameters": [
           {
             "name": "project",
@@ -16225,6 +16225,9 @@
             "$ref": "#/components/responses/Error"
           },
           "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -17035,6 +17038,163 @@
             "$ref": "#/components/responses/Error"
           },
           "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project}/ports/check": {
+      "get": {
+        "operationId": "checkProjectPublicPort",
+        "tags": [
+          "projects"
+        ],
+        "summary": "Whether a port can be a public TCP/UDP port of the project's services: free, reserved (Traefik and the platform, or an automatic range), held by another process (host) or taken, on every node of the project's load balancer",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "protocol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tcp",
+                "udp"
+              ]
+            },
+            "description": "default tcp"
+          },
+          {
+            "name": "port",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "service",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "a service of the project (in environment) whose own ports count as free"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "protocol": {
+                      "type": "string"
+                    },
+                    "port": {
+                      "type": "integer"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "free",
+                        "reserved",
+                        "host",
+                        "taken"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "what it is reserved for, the process holding it, or the service holding it (another project's are not named)"
+                    },
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PortState"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/ports": {
+      "get": {
+        "operationId": "listPublicPorts",
+        "tags": [
+          "network"
+        ],
+        "summary": "The port table: every public port of services and databases on every load-balancer node, the reserved ports, and ports a resync could not claim on a node",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PortClaim"
+                      }
+                    },
+                    "reserved": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "protocol": {
+                            "type": "string"
+                          },
+                          "ports": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "conflicts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PortClaim"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -21987,6 +22147,29 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "port": {
+                "type": "integer",
+                "description": "choose the read-write public port; left out or 0 keeps the current one"
+              },
+              "readPort": {
+                "type": "integer",
+                "description": "choose the read-only public port; left out or 0 keeps the current one"
+              },
+              "portMode": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "chosen"
+                ],
+                "description": "auto (with port 0) gives up a chosen port for an automatic one"
+              },
+              "readPortMode": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "chosen"
+                ]
               }
             }
           }
@@ -22164,7 +22347,7 @@
           },
           "public": {
             "type": "boolean",
-            "description": "tcp/udp: has a public port on the controller and edge nodes"
+            "description": "tcp/udp: has a public port on the project's load balancer"
           },
           "publicPort": {
             "type": "integer"
@@ -22179,6 +22362,23 @@
               "type": "string"
             },
             "description": "tcp/udp: client CIDRs (empty: anyone)"
+          },
+          "portMode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "chosen"
+            ]
+          },
+          "proxyProtocol": {
+            "type": "boolean"
+          },
+          "tls": {
+            "type": "string",
+            "enum": [
+              "",
+              "terminate"
+            ]
           }
         }
       },
@@ -22199,6 +22399,22 @@
             "items": {
               "type": "string"
             }
+          },
+          "publicPort": {
+            "type": "integer",
+            "description": "tcp/udp: choose the public port (1\u201365535, not reserved or in an automatic range); makes the port public. 0 goes back to an automatic port"
+          },
+          "proxyProtocol": {
+            "type": "boolean",
+            "description": "tcp: send the client's address first (PROXY protocol v2); the app must support it"
+          },
+          "tls": {
+            "type": "string",
+            "enum": [
+              "none",
+              "terminate"
+            ],
+            "description": "tcp: terminate TLS at the load balancer and send plain TCP to the app"
           }
         },
         "description": "fields left out keep their value"
@@ -23416,6 +23632,82 @@
               "type": "string"
             },
             "description": "objects Docker refused to remove, with why"
+          }
+        }
+      },
+      "PortClaim": {
+        "type": "object",
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "tcp",
+              "udp"
+            ]
+          },
+          "port": {
+            "type": "integer"
+          },
+          "ownerKind": {
+            "type": "string",
+            "enum": [
+              "service",
+              "database"
+            ]
+          },
+          "ownerId": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "description": "project/environment/service, or the database's name"
+          },
+          "project": {
+            "type": "string"
+          },
+          "portName": {
+            "type": "string",
+            "description": "the service's port, or rw/ro"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "chosen"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PortState": {
+        "type": "object",
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "free",
+              "reserved",
+              "host",
+              "taken"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "ownerKind": {
+            "type": "string"
+          },
+          "portName": {
+            "type": "string"
           }
         }
       }

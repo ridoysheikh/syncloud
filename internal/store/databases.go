@@ -50,6 +50,11 @@ type DatabasePublic struct {
 	// assigned by the controller while the endpoint is on (Phase 18).
 	Port     int `json:"port,omitempty"`
 	ReadPort int `json:"readPort,omitempty"`
+	// PortMode and ReadPortMode say how each was picked: "" or auto (from
+	// the range) or chosen (given by the user, Phase 26). On a change,
+	// "auto" asks for an automatic port again.
+	PortMode     string `json:"portMode,omitempty"`
+	ReadPortMode string `json:"readPortMode,omitempty"`
 }
 
 // ParseNetwork returns the database's network settings with defaults.
@@ -194,6 +199,28 @@ func (s *Store) SetDatabaseNetwork(ctx context.Context, id, network string, now 
 	return s.execOne(ctx, `UPDATE databases SET network = ?, updated_at = ? WHERE id = ?`, network, now.Unix(), id)
 }
 
+// SetDatabaseNetworkClaims changes a database's network settings and
+// replaces its public port claims in one transaction (ErrPortTaken: a
+// port is held on one of its nodes).
+func (s *Store) SetDatabaseNetworkClaims(ctx context.Context, id, network string, now time.Time, claims []PortClaim) error {
+	tx, err := s.W.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `UPDATE databases SET network = ?, updated_at = ? WHERE id = ?`, network, now.Unix(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	if err := replaceClaims(ctx, tx, PortOwnerDatabase, id, claims); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) SetDatabaseState(ctx context.Context, id, state string) error {
 	return s.execOne(ctx, `UPDATE databases SET state = ? WHERE id = ?`, state, id)
 }
@@ -228,6 +255,9 @@ func (s *Store) DeleteDatabase(ctx context.Context, id string, now time.Time) er
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM databases WHERE id = ?`, id); err != nil {
+		return err
+	}
+	if err := replaceClaims(ctx, tx, PortOwnerDatabase, id, nil); err != nil {
 		return err
 	}
 	return tx.Commit()

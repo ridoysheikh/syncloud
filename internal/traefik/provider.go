@@ -98,8 +98,10 @@ type TCPRoute struct {
 	Allow                  []string // client CIDRs (empty: anyone)
 	Plain                  bool     // no TLS: any plain connection on the entrypoint
 	// Passthrough forwards the TLS connection undecrypted (the server
-	// terminates it); ProxyProtocol sends the client's address first.
+	// terminates it); ProxyProtocol sends the client's address first, in
+	// ProxyVersion of the PROXY protocol (0: version 1).
 	Passthrough, ProxyProtocol bool
+	ProxyVersion               int
 	// Ingress is who serves the route (nil: the controller and edge pools).
 	Ingress *ingress.Target
 }
@@ -580,7 +582,11 @@ func tcpConfig(routes []TCPRoute) *TCPConfig {
 			lb.Servers = append(lb.Servers, TCPServer{Address: a})
 		}
 		if r.ProxyProtocol {
-			c.ServersTransports[r.Name] = TCPServersTransport{ProxyProtocol: &ProxyProtocol{Version: 1}}
+			v := r.ProxyVersion
+			if v != 2 {
+				v = 1
+			}
+			c.ServersTransports[r.Name] = TCPServersTransport{ProxyProtocol: &ProxyProtocol{Version: v}}
 			lb.ServersTransport = r.Name
 		}
 		c.Services[r.Name] = TCPService{LoadBalancer: lb}

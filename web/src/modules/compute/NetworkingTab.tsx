@@ -17,6 +17,9 @@ import { confirmDialog } from "@/ui/dialogs";
 import { cn, gap } from "@/ui/cn";
 import { DomainsPanel } from "./DomainsPanel";
 import { Select } from "@/ui/select";
+import { ChoiceField, Segmented } from "@/ui/choice";
+import { PortCheckHint, portUsable, usePortCheck } from "./publicPorts";
+import { useBaseDomain } from "@/modules/databases/Network";
 
 /* Service › Networking (Phase 15c): ports, addresses and custom domains. */
 
@@ -31,7 +34,18 @@ export interface PortRoute {
   publicPort?: number;
   address?: string;
   allow: string[];
+  /** How the public port was picked (Phase 26). */
+  portMode?: "auto" | "chosen";
+  /** TCP: PROXY protocol to the app, TLS at the load balancer. */
+  proxyProtocol?: boolean;
+  tls?: "" | "terminate";
 }
+
+/** project, environment and service of a service's API path. */
+const ownerOf = (path: string) => {
+  const m = /^\/projects\/([^/]+)\/environments\/([^/]+)\/services\/([^/]+)/.exec(path);
+  return m ? { project: m[1] ?? "", environment: m[2] ?? "", service: m[3] ?? "" } : undefined;
+};
 
 const errText = (e: unknown, fallback: string) =>
   e instanceof ApiError ? e.message : fallback;
@@ -348,8 +362,9 @@ function AddressesPanel({ path }: { path: string }) {
             />
           ) : (
             <PublicPort
-              key={r.port}
+              key={`${r.port}:${r.publicPort ?? 0}:${r.proxyProtocol}:${r.tls}`}
               r={r}
+              path={path}
               pending={save.isPending}
               onSave={(x) => save.mutate({ [r.port]: x })}
             />
@@ -429,33 +444,70 @@ function HttpAddress({
   );
 }
 
+interface PublicPortInput {
+  public?: boolean;
+  allow?: string[];
+  publicPort?: number;
+  proxyProtocol?: boolean;
+  tls?: "none" | "terminate";
+}
+
 function PublicPort({
   r,
+  path,
   pending,
   onSave,
 }: {
   r: PortRoute;
+  path: string;
   pending: boolean;
-  onSave: (x: { public?: boolean; allow?: string[] }) => void;
+  onSave: (x: PublicPortInput) => void;
 }) {
+  const owner = ownerOf(path);
+  const base = useBaseDomain();
+  const proto = r.protocol === "udp" ? "udp" : "tcp";
   const [allow, setAllow] = useState(r.allow.join(", "));
+  const [mode, setMode] = useState<"auto" | "chosen">(r.portMode ?? "auto");
+  const [port, setPort] = useState(
+    String(r.portMode === "chosen" ? r.publicPort : r.container),
+  );
+  const num = Number(port);
+  const check = usePortCheck(owner?.project ?? "", proto, num, owner && {
+    environment: owner.environment,
+    service: owner.service,
+  });
   const list = allow
     .split(/[\s,]+/)
     .map((x) => x.trim())
     .filter(Boolean);
   const changed = list.join(",") !== r.allow.join(",");
+  const portChanged =
+    mode === "chosen" ? num !== r.publicPort || r.portMode !== "chosen" : r.portMode === "chosen";
+  const restartNote =
+    "The Traefik replicas of the project's load balancer restart to listen on it, so HTTP traffic there pauses for a moment.";
   const toggle = async (on: boolean) => {
     const ok = await confirmDialog({
       title: on
         ? `Open a public ${r.protocol.toUpperCase()} port for ${r.port}?`
         : `Close the public port ${r.publicPort}?`,
       message: on
-        ? "A port from the public range is assigned on the controller and edge nodes, and the host firewalls open it. The Traefik replicas restart to listen on it, so HTTP traffic pauses for a moment."
+        ? `A port from the public range is assigned on the project's load balancer, and the host firewalls open it. ${restartNote}`
         : "Clients can no longer reach the port from outside. The Traefik replicas restart, so HTTP traffic pauses for a moment.",
       confirmLabel: on ? "Open port" : "Close port",
       tone: on ? "default" : "danger",
     });
     if (ok) onSave({ public: on });
+  };
+  const savePort = async () => {
+    const ok = await confirmDialog({
+      title:
+        mode === "chosen"
+          ? `Use public port ${num} for ${r.port}?`
+          : `Go back to an automatic port for ${r.port}?`,
+      message: `Clients then connect on the new port; the old one closes. ${restartNote}`,
+      confirmLabel: "Change port",
+    });
+    if (ok) onSave({ publicPort: mode === "chosen" ? num : 0 });
   };
   return (
     <div className="flex flex-col gap-2 p-3">
@@ -470,7 +522,8 @@ function PublicPort({
             <span>
               Clients connect to{" "}
               <span className="text-fg font-mono break-all">{r.address}</span>
-              {r.protocol === "udp" && " (UDP)"}.
+              {r.protocol === "udp" && " (UDP)"}
+              {r.portMode === "chosen" ? " (chosen)" : " (automatic)"}.
             </span>
           ) : (
             "Off: reached only by other services, at the service's private address."
@@ -478,26 +531,86 @@ function PublicPort({
         }
       />
       {r.public && (
-        <div className="flex flex-wrap items-end gap-1.5">
-          <Field
-            label="Allowed clients"
-            hint="Addresses or CIDRs, comma separated. Empty: anyone. Enforced by the host firewall."
-          >
-            <Input
-              value={allow}
-              onChange={(e) => setAllow(e.target.value)}
-              placeholder="203.0.113.0/24, 198.51.100.7"
-              className="w-80 max-w-full font-mono"
-              spellCheck={false}
-            />
-          </Field>
-          <Button
-            disabled={!changed || pending}
-            onClick={() => onSave({ allow: list })}
-          >
-            Save
-          </Button>
-        </div>
+        <>
+          <div className="flex flex-wrap items-end gap-1.5">
+            <ChoiceField label="Port number">
+              <Segmented
+                label="Port number"
+                value={mode}
+                onChange={setMode}
+                options={[
+                  { value: "auto", label: "Automatic" },
+                  { value: "chosen", label: "Choose" },
+                ]}
+              />
+            </ChoiceField>
+            {mode === "chosen" && (
+              <Field
+                label="Public port"
+                hint={<PortCheckHint check={check} port={num} />}
+              >
+                <Input
+                  value={port}
+                  onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))}
+                  inputMode="numeric"
+                  className="w-28 font-mono"
+                />
+              </Field>
+            )}
+            <Button
+              disabled={
+                !portChanged ||
+                pending ||
+                (mode === "chosen" && !portUsable(check.data, num))
+              }
+              onClick={() => void savePort()}
+            >
+              Save port
+            </Button>
+          </div>
+          {r.protocol === "tcp" && (
+            <div className="flex flex-col gap-1.5">
+              <Toggle
+                checked={!!r.proxyProtocol}
+                disabled={pending}
+                onChange={(v) => onSave({ proxyProtocol: v })}
+                label="Real client IP (PROXY protocol)"
+                hint="The load balancer sends the client's address first, so the app sees it instead of the load balancer's. The app must support PROXY protocol (Postfix, Dovecot, nginx, HAProxy…), or every connection fails."
+              />
+              <Toggle
+                checked={r.tls === "terminate"}
+                disabled={pending || (!base && r.tls !== "terminate")}
+                onChange={(v) => onSave({ tls: v ? "terminate" : "none" })}
+                label="TLS at the load balancer"
+                hint={
+                  base
+                    ? "The load balancer handles TLS with the platform's certificate and sends plain TCP to the app, for ports like 465, 993 or 8883. Only TLS connections are accepted then. Leave it off for STARTTLS ports (25, 587, 143)."
+                    : "Needs the platform's base domain for its certificate (Settings → Domain)."
+                }
+              />
+            </div>
+          )}
+          <div className="flex flex-wrap items-end gap-1.5">
+            <Field
+              label="Allowed clients"
+              hint="Addresses or CIDRs, comma separated. Empty: anyone. Enforced by the host firewall."
+            >
+              <Input
+                value={allow}
+                onChange={(e) => setAllow(e.target.value)}
+                placeholder="203.0.113.0/24, 198.51.100.7"
+                className="w-80 max-w-full font-mono"
+                spellCheck={false}
+              />
+            </Field>
+            <Button
+              disabled={!changed || pending}
+              onClick={() => onSave({ allow: list })}
+            >
+              Save
+            </Button>
+          </div>
+        </>
       )}
     </div>
   );

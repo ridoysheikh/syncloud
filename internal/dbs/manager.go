@@ -20,6 +20,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/events"
 	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 	"github.com/ridoysheikh/syncloud/internal/nodes"
+	"github.com/ridoysheikh/syncloud/internal/ports"
 	"github.com/ridoysheikh/syncloud/internal/secgroup"
 	"github.com/ridoysheikh/syncloud/internal/secrets"
 	"github.com/ridoysheikh/syncloud/internal/store"
@@ -79,6 +80,9 @@ type Manager struct {
 	// PublicPortRange is where dedicated public ports come from (zero:
 	// DefaultPublicPorts).
 	PublicPortRange [2]int
+	// Ports is the port table (Phase 26): public ports are checked and
+	// claimed there, on the shared load balancer (nil: a table of its own).
+	Ports *ports.Ledger
 	// Metrics stores member samples (nil = none).
 	Metrics Recorder
 	// S3 resolves a registered S3 endpoint (by name or ID) for WAL-G.

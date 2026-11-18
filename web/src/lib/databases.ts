@@ -123,6 +123,9 @@ export interface PublicEndpoint {
   /** Own read-write and read-only ports: TLS, and plain unless requireTls (0 until assigned). */
   port: number;
   readPort: number;
+  /** How each was picked: from the automatic range, or chosen (Phase 26). */
+  portMode?: "auto" | "chosen";
+  readPortMode?: "auto" | "chosen";
   /** The engine's shared port: TLS only, the host name (SNI) picks the database. */
   sniPort: number;
   tls: boolean;

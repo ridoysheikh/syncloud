@@ -28,6 +28,7 @@ Each page answers one question and stays short. Find what you want to do below, 
 | build and deploy from GitHub, GitLab or Gitea | [Git builds](guides/git-builds.md) |
 | put my app on my own domain | [Domains and ports](guides/domains-and-ports.md) |
 | expose a TCP or UDP port (game server, MQTT…) | [Domains and ports › Public ports](guides/domains-and-ports.md#public-tcp-and-udp-ports) |
+| use a port of your choice (25, 1883…), see which ports are free | [Domains and ports › Which ports can be chosen](guides/domains-and-ports.md#which-ports-can-be-chosen) |
 | scale on CPU or traffic, or pin to some nodes | [Scaling and placement](guides/scaling.md) |
 
 ### Store data

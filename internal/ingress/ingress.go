@@ -79,6 +79,10 @@ type Manager struct {
 	// NodeAddrs returns each node's public address by name (nil: their
 	// WireGuard endpoints).
 	NodeAddrs func(ctx context.Context) (map[string]string, error)
+	// CheckPorts refuses a change that would put one of the project's
+	// public ports on a node where another owner holds the same port
+	// (Phase 26); ports is who would open them. Nil allows everything.
+	CheckPorts func(ctx context.Context, project string, ports Target) error
 
 	mu       sync.RWMutex
 	projects map[string]store.Project // by name
@@ -300,6 +304,15 @@ func (m *Manager) Set(ctx context.Context, projectID string, nodes []string) (st
 	}
 	if move != nil && !m.hasDomains(ctx, p.Name) {
 		move = nil // nothing whose DNS has to move
+	}
+	if m.CheckPorts != nil {
+		t := targetOf(nodes)
+		if move != nil {
+			t = t.Union(prevTarget(move))
+		}
+		if err := m.CheckPorts(ctx, p.Name, t); err != nil {
+			return p, err
+		}
 	}
 	if err := m.st.SetProjectIngress(ctx, p.ID, nodes, move); err != nil {
 		return p, err

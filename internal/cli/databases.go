@@ -33,18 +33,25 @@ type dbView struct {
 			Enabled    bool     `json:"enabled"`
 			Allow      []string `json:"allow"`
 			RequireTLS bool     `json:"requireTls"`
+			// Sent back unchanged they keep the ports (Phase 26).
+			Port         int    `json:"port,omitempty"`
+			ReadPort     int    `json:"readPort,omitempty"`
+			PortMode     string `json:"portMode,omitempty"`
+			ReadPortMode string `json:"readPortMode,omitempty"`
 		} `json:"public"`
 	} `json:"network"`
 	Public struct {
-		Enabled    bool   `json:"enabled"`
-		Available  bool   `json:"available"`
-		Reason     string `json:"reason"`
-		Host       string `json:"host"`
-		ReadHost   string `json:"readHost"`
-		Port       int    `json:"port"`
-		ReadPort   int    `json:"readPort"`
-		SNIPort    int    `json:"sniPort"`
-		RequireTLS bool   `json:"requireTls"`
+		Enabled      bool   `json:"enabled"`
+		Available    bool   `json:"available"`
+		Reason       string `json:"reason"`
+		Host         string `json:"host"`
+		ReadHost     string `json:"readHost"`
+		Port         int    `json:"port"`
+		ReadPort     int    `json:"readPort"`
+		PortMode     string `json:"portMode"`
+		ReadPortMode string `json:"readPortMode"`
+		SNIPort      int    `json:"sniPort"`
+		RequireTLS   bool   `json:"requireTls"`
 	} `json:"public"`
 	Spec struct {
 		Memory         struct{ Min, Max int } `json:"memory"`
@@ -244,11 +251,15 @@ func (a *app) databasesCmd() *cobra.Command {
 
 	var netPublic, netRequireTLS string
 	var netAllow, netAccess, addAccess, removeAccess []string
+	var netPort, netReadPort int
+	var netAutoPorts bool
 	network := &cobra.Command{
 		Use: "network NAME", Short: "Show or change who may connect: the internal access list and the public endpoint", Args: cobra.ExactArgs(1),
 		Example: `  synctl db network sessions --public on --allow 203.0.113.0/24
   synctl db network sessions --add-access environment:billing/production
   synctl db network sessions --require-tls on
+  synctl db network sessions --port 15432 --read-port 15433
+  synctl db network sessions --auto-ports
   synctl db network sessions --public off`,
 		Annotations: op("setDatabaseNetwork"),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -257,8 +268,19 @@ func (a *app) databasesCmd() *cobra.Command {
 				return err
 			}
 			ch := cmd.Flags().Changed
-			if ch("public") || ch("allow") || ch("access") || ch("add-access") || ch("remove-access") || ch("require-tls") {
+			if ch("public") || ch("allow") || ch("access") || ch("add-access") || ch("remove-access") || ch("require-tls") ||
+				ch("port") || ch("read-port") || ch("auto-ports") {
 				n := v.Network
+				if netAutoPorts {
+					n.Public.Port, n.Public.ReadPort = 0, 0
+					n.Public.PortMode, n.Public.ReadPortMode = "auto", "auto"
+				}
+				if ch("port") {
+					n.Public.Port, n.Public.PortMode = netPort, ""
+				}
+				if ch("read-port") {
+					n.Public.ReadPort, n.Public.ReadPortMode = netReadPort, ""
+				}
 				switch netPublic {
 				case "":
 				case "on", "true", "yes":
@@ -319,6 +341,9 @@ func (a *app) databasesCmd() *cobra.Command {
 	}
 	network.Flags().StringVar(&netPublic, "public", "", "on or off")
 	network.Flags().StringVar(&netRequireTLS, "require-tls", "", "on: refuse plain connections on the public ports; off: take TLS and plain")
+	network.Flags().IntVar(&netPort, "port", 0, "choose the read-write public port (not reserved, taken or in the automatic range)")
+	network.Flags().IntVar(&netReadPort, "read-port", 0, "choose the read-only public port")
+	network.Flags().BoolVar(&netAutoPorts, "auto-ports", false, "give up chosen ports for automatic ones")
 	network.Flags().StringSliceVar(&netAllow, "allow", nil, "replace the public allow-list (IP or CIDR)")
 	network.Flags().StringSliceVar(&netAccess, "access", nil, "replace the internal access list")
 	network.Flags().StringSliceVar(&addAccess, "add-access", nil, "add internal peers")
@@ -894,6 +919,9 @@ func (v dbView) publicLine() string {
 	conn := "TLS or plain"
 	if p.RequireTLS {
 		conn = "TLS only"
+	}
+	if p.PortMode == "chosen" || p.ReadPortMode == "chosen" {
+		conn += ", chosen ports"
 	}
 	return fmt.Sprintf("%s:%d, read-only %s:%d (%s); TLS with SNI also on %d", p.Host, p.Port, p.ReadHost, p.ReadPort, conn, p.SNIPort)
 }

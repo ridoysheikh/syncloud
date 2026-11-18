@@ -21,7 +21,8 @@ import { StatTile } from "@/ui/StatTile";
 import { DataTable, type Column } from "@/ui/DataTable";
 import { RangePicker, refetchFor, type Range } from "@/ui/RangePicker";
 import { Tabs } from "@/ui/Tabs";
-import { Alert, Button, IconButton, StatusBadge } from "@/ui/controls";
+import { Alert, Button, Field, IconButton, Input, StatusBadge } from "@/ui/controls";
+import { ChoiceField, Segmented } from "@/ui/choice";
 import { NodeLink } from "@/entities/nodes";
 import { TaskState } from "@/entities/tasks";
 import { cn, gap } from "@/ui/cn";
@@ -523,8 +524,14 @@ function Connectivity({ d, path }: { d: Database; path: string }) {
         .filter((a) => a !== "0.0.0.0/0" && a !== "::/0")
         .join("\n"),
       requireTls: !!d.network.public.requireTls,
+      // Phase 26: the public ports, automatic or chosen.
+      portMode: (d.public.portMode === "chosen" || d.public.readPortMode === "chosen"
+        ? "chosen"
+        : "auto") as "auto" | "chosen",
+      port: String(d.public.port || ""),
+      readPort: String(d.public.readPort || ""),
     }),
-    [d.network],
+    [d.network, d.public],
   );
   const [f, setF] = useState(init);
   useEffect(() => setF(init), [init]);
@@ -536,6 +543,13 @@ function Connectivity({ d, path }: { d: Database; path: string }) {
           enabled: f.public,
           allow: allowList(f.allow),
           requireTls: f.requireTls,
+          // Ports left out keep theirs; chosen ones are checked by the
+          // controller; automatic again gives chosen ones up.
+          ...(f.portMode === "chosen"
+            ? { port: Number(f.port), readPort: Number(f.readPort) }
+            : init.portMode === "chosen"
+              ? { portMode: "auto", readPortMode: "auto" }
+              : {}),
         },
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["databases"] }),
@@ -607,6 +621,14 @@ function Connectivity({ d, path }: { d: Database; path: string }) {
               onAllow={(v) => setF((x) => ({ ...x, allow: v }))}
               onRequireTls={(v) => setF((x) => ({ ...x, requireTls: v }))}
             />
+            {f.public && (
+              <PublicPortsField
+                mode={f.portMode}
+                port={f.port}
+                readPort={f.readPort}
+                onChange={(p) => setF((x) => ({ ...x, ...p }))}
+              />
+            )}
           </div>
           {save.error && <Alert>{errText(save.error)}</Alert>}
           <div className="flex items-center gap-2">
@@ -625,6 +647,65 @@ function Connectivity({ d, path }: { d: Database; path: string }) {
           </div>
         </div>
       </Panel>
+    </div>
+  );
+}
+
+/** The public ports: from the automatic range, or chosen (Phase 26). */
+function PublicPortsField({
+  mode,
+  port,
+  readPort,
+  onChange,
+}: {
+  mode: "auto" | "chosen";
+  port: string;
+  readPort: string;
+  onChange: (p: { portMode?: "auto" | "chosen"; port?: string; readPort?: string }) => void;
+}) {
+  const digits = (v: string) => v.replace(/\D/g, "");
+  return (
+    <div className="flex flex-wrap items-end gap-1.5">
+      <ChoiceField
+        label="Public ports"
+        hint={
+          mode === "chosen"
+            ? "Any free port outside the automatic range and the ports Traefik and the platform use (80, 443, 5432, 6379…). Changing them restarts Traefik for a moment."
+            : "Assigned from the automatic range."
+        }
+      >
+        <Segmented
+          label="Public ports"
+          value={mode}
+          onChange={(v) => onChange({ portMode: v })}
+          options={[
+            { value: "auto", label: "Automatic" },
+            { value: "chosen", label: "Choose" },
+          ]}
+        />
+      </ChoiceField>
+      {mode === "chosen" && (
+        <>
+          <Field label="Read-write">
+            <Input
+              value={port}
+              onChange={(e) => onChange({ port: digits(e.target.value) })}
+              inputMode="numeric"
+              placeholder="15432"
+              className="w-24 font-mono"
+            />
+          </Field>
+          <Field label="Read-only">
+            <Input
+              value={readPort}
+              onChange={(e) => onChange({ readPort: digits(e.target.value) })}
+              inputMode="numeric"
+              placeholder="15433"
+              className="w-24 font-mono"
+            />
+          </Field>
+        </>
+      )}
     </div>
   );
 }

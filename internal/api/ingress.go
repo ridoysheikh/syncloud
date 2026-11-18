@@ -9,6 +9,7 @@ import (
 
 	"github.com/ridoysheikh/syncloud/internal/ingress"
 	"github.com/ridoysheikh/syncloud/internal/mesh"
+	"github.com/ridoysheikh/syncloud/internal/ports"
 	"github.com/ridoysheikh/syncloud/internal/store"
 	"github.com/ridoysheikh/syncloud/internal/workload"
 )
@@ -116,6 +117,11 @@ func (s *Server) handleSetProjectIngress(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	p, err := s.ingress.Set(r.Context(), p.ID, nodes)
+	var clash ports.ErrClash
+	if errors.As(err, &clash) {
+		writeError(w, http.StatusConflict, CodeConflict, clash.Error())
+		return
+	}
 	if err != nil && !errors.Is(err, ingress.ErrNoChange) {
 		s.internalError(w, "set project ingress", err)
 		return

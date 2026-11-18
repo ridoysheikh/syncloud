@@ -585,8 +585,18 @@ func (s *Store) MarkServiceDeleting(ctx context.Context, id string, now time.Tim
 }
 
 func (s *Store) DeleteService(ctx context.Context, id string) error {
-	_, err := s.W.ExecContext(ctx, `DELETE FROM services WHERE id = ?`, id)
-	return err
+	tx, err := s.W.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM services WHERE id = ?`, id); err != nil {
+		return err
+	}
+	if err := replaceClaims(ctx, tx, PortOwnerService, id, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) TaskDefinition(ctx context.Context, serviceID string, revision int) (TaskDefinition, error) {
@@ -841,11 +851,19 @@ type PortRouting struct {
 	Label      string   // http: replaces the generated name ("" = none)
 	PublicPort int      // tcp/udp: the public port (0 = not public)
 	Allow      []string // tcp/udp: client CIDRs (none = anyone)
+	// PortMode is how the public port was picked: "auto" (from the range)
+	// or "chosen" (given by the user, Phase 26).
+	PortMode string
+	// ProxyProtocol (tcp) sends the client's address to the app first.
+	ProxyProtocol bool
+	// TLS (tcp) is "" (raw bytes) or "terminate" (TLS at the load balancer).
+	TLS string
 }
 
 // ListRouting returns the routing rows of one service ("" = all).
 func (s *Store) ListRouting(ctx context.Context, serviceID string) ([]PortRouting, error) {
-	rows, err := s.R.QueryContext(ctx, `SELECT service_id, port_name, generated, coalesce(label, ''), coalesce(public_port, 0), allow
+	rows, err := s.R.QueryContext(ctx, `SELECT service_id, port_name, generated, coalesce(label, ''), coalesce(public_port, 0), allow,
+		port_mode, proxy_protocol, tls
 		FROM service_routing WHERE ? = '' OR service_id = ? ORDER BY service_id, port_name`, serviceID, serviceID)
 	if err != nil {
 		return nil, err
@@ -855,7 +873,7 @@ func (s *Store) ListRouting(ctx context.Context, serviceID string) ([]PortRoutin
 	for rows.Next() {
 		var r PortRouting
 		var allow string
-		if err := rows.Scan(&r.ServiceID, &r.PortName, &r.Generated, &r.Label, &r.PublicPort, &allow); err != nil {
+		if err := rows.Scan(&r.ServiceID, &r.PortName, &r.Generated, &r.Label, &r.PublicPort, &allow, &r.PortMode, &r.ProxyProtocol, &r.TLS); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(allow), &r.Allow)
@@ -864,9 +882,10 @@ func (s *Store) ListRouting(ctx context.Context, serviceID string) ([]PortRoutin
 	return out, rows.Err()
 }
 
-// SetRouting replaces a service's routing rows in one transaction.
-// ErrNameTaken means a label or public port belongs to another service.
-func (s *Store) SetRouting(ctx context.Context, serviceID string, rs []PortRouting) error {
+// SetRouting replaces a service's routing rows and its public port claims
+// in one transaction. ErrNameTaken means a label belongs to another
+// service; ErrPortTaken that a claimed port is held on one of its nodes.
+func (s *Store) SetRouting(ctx context.Context, serviceID string, rs []PortRouting, claims []PortClaim) error {
 	tx, err := s.W.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -886,13 +905,20 @@ func (s *Store) SetRouting(ctx context.Context, serviceID string, rs []PortRouti
 		if r.Allow == nil {
 			r.Allow = []string{}
 		}
+		if r.PortMode == "" {
+			r.PortMode = PortAuto
+		}
 		allow, _ := json.Marshal(r.Allow)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO service_routing (service_id, port_name, generated, label, public_port, allow) VALUES (?, ?, ?, ?, ?, ?)`,
-			serviceID, r.PortName, r.Generated, label, port, string(allow)); isUnique(err) {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO service_routing (service_id, port_name, generated, label, public_port, allow, port_mode, proxy_protocol, tls)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			serviceID, r.PortName, r.Generated, label, port, string(allow), r.PortMode, r.ProxyProtocol, r.TLS); isUnique(err) {
 			return ErrNameTaken
 		} else if err != nil {
 			return err
 		}
+	}
+	if err := replaceClaims(ctx, tx, PortOwnerService, serviceID, claims); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

@@ -55,11 +55,14 @@ type PublicEndpoint struct {
 	// Port and ReadPort take TLS and, unless RequireTLS, plain connections
 	// (zero until assigned). SNIPort is the engine's shared TLS port, where
 	// the host name picks the database.
-	Port       int  `json:"port"`
-	ReadPort   int  `json:"readPort"`
-	SNIPort    int  `json:"sniPort"`
-	TLS        bool `json:"tls"`
-	RequireTLS bool `json:"requireTls"`
+	Port     int `json:"port"`
+	ReadPort int `json:"readPort"`
+	// PortMode and ReadPortMode: auto (from the range) or chosen.
+	PortMode     string `json:"portMode,omitempty"`
+	ReadPortMode string `json:"readPortMode,omitempty"`
+	SNIPort      int    `json:"sniPort"`
+	TLS          bool   `json:"tls"`
+	RequireTLS   bool   `json:"requireTls"`
 }
 
 // Member is one container of a database.
@@ -214,6 +217,12 @@ func (m *Manager) public(d store.Database) PublicEndpoint {
 	eng, _ := EngineByName(d.Engine)
 	n := d.ParseNetwork()
 	p := PublicEndpoint{Enabled: n.Public.Enabled, Port: n.Public.Port, ReadPort: n.Public.ReadPort, SNIPort: eng.Port, TLS: true, RequireTLS: n.Public.RequireTLS}
+	if p.Port > 0 {
+		p.PortMode = portMode(n.Public.PortMode)
+	}
+	if p.ReadPort > 0 {
+		p.ReadPortMode = portMode(n.Public.ReadPortMode)
+	}
 	base := m.baseDomain()
 	if base == "" {
 		p.Reason = "the platform has no base domain yet; public endpoints need one for their certificates"

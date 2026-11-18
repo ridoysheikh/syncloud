@@ -44,6 +44,8 @@ The public endpoint gives the database two ports of its own, from 21000–21999:
 
 The older shared address `orders.db.<base-domain>:5432` still works for TLS clients that send SNI (libpq 14 or later). Turning the endpoint on or off restarts Traefik for a moment. If a cloud firewall sits in front of your servers, allow 21000–21999/tcp.
 
+To use ports of your own choice instead, set them under **Connectivity → Public ports**, or run `synctl db network orders --port 15432 --read-port 15433`. Any free port outside the automatic ranges works, apart from the [reserved ones](domains-and-ports.md#which-ports-can-be-chosen). `--auto-ports` goes back to automatic ones.
+
 ## Size and replicas
 
 | Setting | Notes |

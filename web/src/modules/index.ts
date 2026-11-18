@@ -66,6 +66,7 @@ import { SecurityGroupPage, SecurityGroupsPage } from "./network/SecurityGroups"
 import { IpamPage } from "./network/IpamPage";
 import { MiddlewarePage, RoutingPage } from "./network/RoutingPage";
 import { TraefikPage } from "./network/TraefikPage";
+import { PortsPage } from "./network/PortsPage";
 import { LogsPage } from "./logs/LogsPage";
 import { TrafficPage } from "./traffic/Traffic";
 import { AlertsPage } from "./monitoring/AlertsPage";
@@ -130,6 +131,7 @@ export const modules: DashboardModule[] = [
       { path: "/network/routing/middlewares/new", label: "New middleware", component: MiddlewarePage, hidden: true },
       { path: "/network/routing/middlewares/$project/$name", label: "Middleware", component: MiddlewarePage, hidden: true },
       { path: "/network/edge", label: "Load balancers", component: EdgeNodesPage },
+      { path: "/network/ports", label: "Ports", component: PortsPage },
       { path: "/network/topology", label: "Topology", component: TopologyPage },
       { path: "/network/security-groups", label: "Security groups", component: SecurityGroupsPage },
       { path: "/network/security-groups/new", label: "New security group", component: SecurityGroupPage, hidden: true },

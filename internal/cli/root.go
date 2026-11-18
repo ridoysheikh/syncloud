@@ -87,6 +87,7 @@ func NewRoot(in io.Reader, out, errOut io.Writer) *cobra.Command {
 		a.settingsCmd(),
 		a.networkCmd(),
 		a.firewallCmd(),
+		a.portsCmd(),
 		a.securityGroupsCmd(),
 		a.stsCmd(),
 		a.nodePoolsCmd(),

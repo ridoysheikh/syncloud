@@ -461,6 +461,27 @@ func (m *Manager) Listeners(node string, fw *agentv1.Firewall, wireguardPort uin
 	return out, nl.at
 }
 
+// Holders are the ports something other than Traefik listens on, on one
+// node ("tcp/25" -> process), from its last listener report. A port held
+// there can't become a public port: Traefik could not bind it.
+func (m *Manager) Holders(node string) map[string]string {
+	m.mu.RLock()
+	nl := m.listeners[node]
+	m.mu.RUnlock()
+	out := map[string]string{}
+	for _, l := range nl.all {
+		proc := l.GetProcess()
+		if proc == "traefik" {
+			continue
+		}
+		if proc == "" {
+			proc = "another process"
+		}
+		out[fmt.Sprintf("%s/%d", l.GetProtocol(), l.GetPort())] = proc
+	}
+	return out
+}
+
 // private are the mesh, container and service networks (§8).
 var private = []netip.Prefix{netip.MustParsePrefix("10.90.0.0/16"), netip.MustParsePrefix("10.91.0.0/16"), netip.MustParsePrefix("10.92.0.0/16")}
 

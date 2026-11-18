@@ -3,12 +3,16 @@ package dbs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ridoysheikh/syncloud/internal/events"
+	"github.com/ridoysheikh/syncloud/internal/ports"
 	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
@@ -106,5 +110,84 @@ func TestPublicPortsAssignedAndFreed(t *testing.T) {
 	}
 	if got := len(m.PublicPorts(ctx)); got != 4 {
 		t.Errorf("open ports: %d", got)
+	}
+}
+
+// Chosen database ports (Phase 26): kept when sent back, checked in the
+// port table, refused in the automatic range, back to automatic on ask.
+func TestChosenDatabasePorts(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	led := ports.New(st, log)
+	led.Ranges = [][2]int{{20000, 20999}, {21000, 21004}}
+	m := &Manager{st: st, log: log, bus: events.NewBus(), now: time.Now, PublicPortRange: [2]int{21000, 21004}, Ports: led}
+	public := Network{Public: store.DatabasePublic{Enabled: true, Allow: []string{"0.0.0.0/0"}}}
+	for _, id := range []string{"db_a", "db_b"} {
+		b, _ := json.Marshal(public)
+		if err := st.CreateDatabase(ctx, store.Database{ID: id, Name: strings.TrimPrefix(id, "db_"), Engine: EngineValkey, Network: string(b), Secrets: []byte("x"), Spec: "{}", State: "{}", CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := m.assignPorts(ctx); err != nil {
+		t.Fatal(err)
+	}
+	get := func(id string) store.DatabasePublic {
+		d, _ := st.DatabaseByID(ctx, id)
+		return d.ParseNetwork().Public
+	}
+	set := func(id string, pub store.DatabasePublic) error {
+		n := public
+		n.Public.Port, n.Public.ReadPort, n.Public.PortMode, n.Public.ReadPortMode = pub.Port, pub.ReadPort, pub.PortMode, pub.ReadPortMode
+		_, err := m.SetNetwork(ctx, id, n, nil, "test")
+		return err
+	}
+	if a := get("db_a"); a.Port != 21000 || a.ReadPort != 21001 {
+		t.Fatalf("automatic %+v", a)
+	}
+	// Sending the same numbers back changes nothing.
+	if err := set("db_a", store.DatabasePublic{Port: 21000, ReadPort: 21001}); err != nil {
+		t.Fatal(err)
+	}
+	if a := get("db_a"); a.PortMode == store.PortChosen {
+		t.Errorf("unchanged ports became chosen: %+v", a)
+	}
+	// Leaving them out keeps them too (older clients).
+	if err := set("db_a", store.DatabasePublic{}); err != nil {
+		t.Fatal(err)
+	}
+	if a := get("db_a"); a.Port != 21000 || a.ReadPort != 21001 {
+		t.Errorf("left-out ports changed: %+v", a)
+	}
+	if err := set("db_a", store.DatabasePublic{Port: 15432, ReadPort: 15433}); err != nil {
+		t.Fatal(err)
+	}
+	if a := get("db_a"); a.Port != 15432 || a.PortMode != store.PortChosen || a.ReadPort != 15433 {
+		t.Errorf("chosen %+v", a)
+	}
+	for name, pub := range map[string]store.DatabasePublic{
+		"taken":          {Port: 15432},
+		"automatic":      {Port: 21003},
+		"reserved":       {Port: 6379},
+		"the same twice": {Port: 16000, ReadPort: 16000},
+	} {
+		if err := set("db_b", pub); !errors.As(err, new(ErrInvalid)) {
+			t.Errorf("%s accepted: %v", name, err)
+		}
+	}
+	claims, _ := st.ListPortClaims(ctx)
+	if len(claims) != 4 { // two databases × two ports on the controller
+		t.Errorf("claims %+v", claims)
+	}
+	// Back to automatic: the chosen port is given up.
+	if err := set("db_a", store.DatabasePublic{PortMode: store.PortAuto, ReadPort: 15433}); err != nil {
+		t.Fatal(err)
+	}
+	if a := get("db_a"); a.Port != 21000 || a.PortMode != "" || a.ReadPort != 15433 {
+		t.Errorf("back to automatic %+v", a)
 	}
 }

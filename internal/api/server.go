@@ -38,6 +38,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/nodepool"
 	"github.com/ridoysheikh/syncloud/internal/nodes"
 	"github.com/ridoysheikh/syncloud/internal/pki"
+	"github.com/ridoysheikh/syncloud/internal/ports"
 	"github.com/ridoysheikh/syncloud/internal/quota"
 	"github.com/ridoysheikh/syncloud/internal/registry"
 	"github.com/ridoysheikh/syncloud/internal/regmaint"
@@ -104,6 +105,7 @@ type Server struct {
 	edges                 *edge.Manager
 	ingress               *ingress.Manager
 	hostFW                *hostfw.Manager
+	ports                 *ports.Ledger
 	protection            *lbprotect.Manager
 	upgrades              *upgrade.Service
 	s3                    *s3.Manager
@@ -205,6 +207,7 @@ type Options struct {
 	Edges            *edge.Manager
 	Ingress          *ingress.Manager
 	HostFirewall     *hostfw.Manager
+	Ports            *ports.Ledger
 	Protection       *lbprotect.Manager
 	Upgrades         *upgrade.Service
 	S3               *s3.Manager
@@ -276,6 +279,7 @@ func New(o Options) *Server {
 		edges:                 o.Edges,
 		ingress:               o.Ingress,
 		hostFW:                o.HostFirewall,
+		ports:                 o.Ports,
 		protection:            o.Protection,
 		upgrades:              o.Upgrades,
 		s3:                    o.S3,
@@ -549,6 +553,8 @@ func (s *Server) Routes() []Route {
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/routing", h: s.handleGetRouting},
 		{Method: "PUT", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/routing", h: s.handleSetRouting},
 		{Method: "GET", Path: "/api/v1/projects/{project}/addresses", h: s.handleProjectAddresses},
+		{Method: "GET", Path: "/api/v1/projects/{project}/ports/check", h: s.handleCheckProjectPublicPort},
+		{Method: "GET", Path: "/api/v1/ports", h: s.handleListPublicPorts},
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/domains", h: s.handleAddServiceDomain},
 		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/domains/{host}", h: s.handleRemoveServiceDomain},
 		{Method: "GET", Path: "/api/v1/domains/check", h: s.handleCheckDomain},

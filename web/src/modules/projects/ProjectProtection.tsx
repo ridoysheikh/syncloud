@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { Cable, Database, Fingerprint, Network, Plus, Shield, ShieldOff, Waypoints } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { Panel } from "@/ui/Panel";
+import { DataTable } from "@/ui/DataTable";
 import { StatTile } from "@/ui/StatTile";
 import { PickList } from "@/ui/PickList";
 import { useAddressOptions, validateSource } from "@/modules/network/addresses";
@@ -351,7 +352,77 @@ export function LoadBalancerTab({ project, environments }: { project: string; en
   return (
     <div className={cn("flex flex-col", gap)}>
       <ProjectIngressPanel project={project} />
+      <PublicPortsPanel project={project} environments={environments} />
       <ProtectionPanel project={project} environments={environments} />
     </div>
+  );
+}
+
+interface PublicAddress {
+  kind: "generated" | "domain" | "public";
+  service: string;
+  environment: string;
+  port: string;
+  protocol: string;
+  address: string;
+  allow?: string[];
+}
+
+/** The project's public TCP/UDP ports on its load balancer (Phase 26). */
+function PublicPortsPanel({ project, environments }: { project: string; environments: string[] }) {
+  const q = useQuery({
+    queryKey: ["project-public-ports", project, environments],
+    queryFn: async () => {
+      const all = await Promise.all(
+        environments.map((env) =>
+          api<{ items: PublicAddress[] }>(
+            "GET",
+            `/projects/${encodeURIComponent(project)}/addresses?environment=${encodeURIComponent(env)}`,
+          ).then((r) => r.items.filter((a) => a.kind === "public")),
+        ),
+      );
+      return all.flat();
+    },
+  });
+  const rows = q.data ?? [];
+  return (
+    <Panel title="Public ports" flush>
+      <DataTable
+        rows={rows}
+        rowKey={(a) => `${a.environment}/${a.service}/${a.port}`}
+        empty={
+          !q.isLoading && (
+            <p className="text-muted p-3 text-xs">
+              No public TCP/UDP ports. Websites and APIs need none: they share 80 and 443. Give a service its own port
+              on its Networking tab, or create it as Public TCP/UDP.
+            </p>
+          )
+        }
+        columns={[
+          { header: "Address", cell: (a) => <span className="font-mono">{a.address}</span> },
+          { header: "Protocol", cell: (a) => a.protocol.toUpperCase() },
+          {
+            header: "Service",
+            cell: (a) => (
+              <Link
+                to={`/projects/${project}/${a.environment}/services/${a.service}` as string}
+                className="hover:text-accent font-mono"
+              >
+                {a.environment}/{a.service}
+              </Link>
+            ),
+          },
+          { header: "Port", cell: (a) => <span className="font-mono">{a.port}</span> },
+          {
+            header: "Allowed clients",
+            cell: (a) => <span className="text-muted">{a.allow?.length ? a.allow.join(", ") : "anyone"}</span>,
+          },
+        ]}
+      />
+      <p className="text-faint border-line border-t px-2 py-1.5 text-xs md:px-3">
+        A port has one holder per load-balancer node. With its own load balancer, the project can use any free number
+        (25, 1883…) even when another project uses it on the shared one.
+      </p>
+    </Panel>
   );
 }

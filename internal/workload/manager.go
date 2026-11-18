@@ -15,6 +15,7 @@ import (
 	agentv1 "github.com/ridoysheikh/syncloud/internal/gen/syncloud/agent/v1"
 	"github.com/ridoysheikh/syncloud/internal/mesh"
 	"github.com/ridoysheikh/syncloud/internal/nodes"
+	"github.com/ridoysheikh/syncloud/internal/ports"
 	"github.com/ridoysheikh/syncloud/internal/store"
 )
 
@@ -100,6 +101,9 @@ type Manager struct {
 	// changes (Traefik entrypoints and firewall rules follow it).
 	PublicPortRange [2]int
 	OnPublicPorts   func()
+	// Ports is the port table (Phase 26): public ports are checked and
+	// claimed there (nil: a table of its own, every port on one node).
+	Ports *ports.Ledger
 
 	queue    chan string
 	mu       sync.Mutex

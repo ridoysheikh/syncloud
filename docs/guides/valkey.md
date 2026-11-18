@@ -56,6 +56,7 @@ Each port takes **TLS and plain** connections. The dashboard's **Connect** panel
 - **Plain:** a plain connection sends the password and your data unencrypted. Use it only from networks you trust, and limit the allowed addresses. To refuse plain connections, turn on **Require TLS** under **Connectivity**, or run `synctl db network sessions --require-tls on`.
 - **Shared port:** the older address `<db>.db.<base-domain>:6379` still works for TLS clients that send SNI.
 - **Traefik restart:** turning the endpoint on or off restarts Traefik for a moment, because the ports are added or removed.
+- **Choose the ports:** under **Connectivity → Public ports**, or `synctl db network sessions --port 16379 --read-port 16380`. Any free port outside the automatic ranges works, apart from the [reserved ones](domains-and-ports.md#which-ports-can-be-chosen). `--auto-ports` goes back to automatic ones.
 
 If a cloud firewall sits in front of your servers, allow 21000–21999/tcp from the client addresses. With your own base domain, point `*.db.<your-domain>` at the controller or the edge nodes.
 

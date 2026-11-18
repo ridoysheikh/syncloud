@@ -2,7 +2,8 @@
 # End-to-end test of ports and domains (Phase 15c): labels and the
 # generated address, custom domains shared by path with prefix stripping,
 # redirects, public TCP and UDP ports through Traefik with firewall rules,
-# and the synctl commands.
+# chosen ports with PROXY protocol and TLS options and the port table
+# (Phase 26), and the synctl commands.
 #
 #   test/e2e/ports.sh                         # run and clean up
 #   E2E_PREFIX=sc-prt KEEP=1 test/e2e/ports.sh # beside a kept cluster
@@ -19,6 +20,7 @@ TOK=$(x "$E2E-ctl" cat /data/traefik.token)
 x "$E2E-ctl" docker run -d --name traefik --network host traefik:v3.7.13 \
   --entrypoints.web.address=:8080 --entrypoints.websecure.address=:8443 \
   --entrypoints.tcp-20000.address=:20000 --entrypoints.udp-20001.address=:20001/udp \
+  --entrypoints.tcp-2525.address=:2525 \
   --providers.http.endpoint=http://127.0.0.1:7070/internal/traefik/config --providers.http.pollInterval=1s \
   "--providers.http.headers.X-Syncloud-Token=$TOK" >/dev/null
 wait_mesh
@@ -104,6 +106,32 @@ for _ in $(seq 1 30); do case "$(fw_rules)" in *service-tcp-20000*) sleep 1 ;; *
 case "$(fw_rules)" in *service-tcp-20000*) fail "a deleted service's port is still open" ;; esac
 echo "  ✓ closing a port and deleting a service release it (route and firewall rule gone); a released port is reused"
 
+echo "== chosen ports and the port table (Phase 26)"
+# docs keeps its port until its tasks have stopped and it is gone.
+for _ in $(seq 1 60); do api "$ENV/services/docs" >/dev/null 2>&1 || break; sleep 1; done
+api "$ENV/services/docs" >/dev/null 2>&1 && fail "docs was not deleted"
+rs=$(api -X PUT "$ENV/services/web/routing" -d '{"ports":{"raw":{"publicPort":2525}}}')
+[ "$(echo "$rs" | json "d['items'][1]['address'] + ' ' + d['items'][1]['portMode']")" = "localhost:2525 chosen" ] || fail "chosen port: $rs"
+for _ in $(seq 1 30); do out=$(x "$E2E-ctl" curl -s -m 3 http://127.0.0.1:2525/hostname | tr -d '\n' || true); [ "$out" = web ] && break; sleep 1; done
+[ "$out" = web ] || fail "chosen public port: '$out'"
+for bad in 443 22 20001 70000; do
+  api -X PUT "$ENV/services/web/routing" -d "{\"ports\":{\"raw\":{\"publicPort\":$bad}}}" >/dev/null 2>&1 && fail "public port $bad was accepted"
+done
+api localhost:7070/api/v1/ports | json "' '.join('%s/%d/%s/%s' % (c['protocol'], c['port'], c['node'], c['mode']) for c in d['items'])" | grep -q "tcp/2525/ctl-0/chosen" || fail "the port table lacks 2525"
+[ "$(api "$P/ports/check?protocol=tcp&port=2525" | json "d['state']")" = taken ] || fail "2525 is not taken"
+[ "$(api "$P/ports/check?protocol=tcp&port=2525&environment=production&service=web" | json "d['state']")" = free ] || fail "the service's own port is not free for it"
+[ "$(api "$P/ports/check?protocol=tcp&port=443" | json "d['state']")" = reserved ] || fail "443 is not reserved"
+[ "$(api "$P/ports/check?protocol=tcp&port=2600" | json "d['state']")" = free ] || fail "2600 is not free"
+api -X PUT "$ENV/services/web/routing" -d '{"ports":{"raw":{"proxyProtocol":true}}}' >/dev/null
+for _ in $(seq 1 10); do traefik_config | grep -q '"version":2' && break; sleep 1; done
+traefik_config | json "d['tcp']['serversTransports']['pub-tcp-2525']['proxyProtocol']['version']" | grep -qx 2 || fail "no PROXY protocol v2 transport"
+# Without a base domain there is no certificate: TLS at the load balancer is refused.
+api -X PUT "$ENV/services/web/routing" -d '{"ports":{"raw":{"tls":"terminate"}}}' >/dev/null 2>&1 && fail "TLS at the load balancer without a base domain was accepted"
+api -X PUT "$ENV/services/web/routing" -d '{"ports":{"raw":{"proxyProtocol":false}}}' >/dev/null
+for _ in $(seq 1 10); do traefik_config | json "'pub-tcp-2525' in (d['tcp'].get('serversTransports') or {})" | grep -qx False && break; sleep 1; done
+traefik_config | json "'pub-tcp-2525' in (d['tcp'].get('serversTransports') or {})" | grep -qx False || fail "PROXY protocol still on"
+echo "  ✓ a chosen port is served and listed in the port table; reserved, automatic-range and invalid ports are refused; PROXY protocol v2 switches on and off; TLS at the load balancer needs a base domain"
+
 echo "== project addresses and synctl"
 key=$(api localhost:7070/api/v1/iam/access-keys -d '{"description":"e2e"}')
 KID=$(echo "$key" | json "d['id']"); KSEC=$(echo "$key" | json "d['secretAccessKey']")
@@ -114,5 +142,8 @@ synctl projects addresses shop | grep -q "front.localhost" || fail "synctl proje
 synctl services domains add web api.example.com -p shop --path /v1 --strip-prefix | grep -q "Routing api.example.com/v1" || fail "synctl domains add --path"
 kinds=$(api "$P/addresses?environment=production" | json "' '.join(sorted(set(a['kind'] for a in d['items'])))")
 [ "$kinds" = "domain generated public" ] || fail "address kinds: $kinds"
-echo "  ✓ project addresses list every kind; synctl routing, expose, projects addresses and domains add --path"
+synctl ports list | grep -q "2525" || fail "synctl ports list"
+synctl ports check 443 -p shop | grep -q "reserved" || fail "synctl ports check"
+synctl services expose web raw -p shop --public-port 0 | grep -q "localhost:2000[01]" || fail "synctl services expose --public-port 0"
+echo "  ✓ project addresses list every kind; synctl routing, expose (--public-port), ports list/check, projects addresses and domains add --path"
 echo "PASS"
