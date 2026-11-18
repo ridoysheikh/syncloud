@@ -27,6 +27,8 @@ Run one script with `test/e2e/<name>.sh`. Add `KEEP=1` to leave the nodes runnin
 | `registry.sh`, `builds.sh` | Private registry, Git builds |
 | `traffic.sh`, `metrics.sh`, `autoscale.sh`, `alerts.sh` | Traefik routing, metrics, autoscaling, alerts |
 | `secgroups.sh`, `routing.sh` | Security groups, IPAM/DNS, middlewares |
+| `ports.sh` | Public TCP and UDP ports through Traefik with firewall rules; chosen ports, the port table, PROXY protocol, and the synctl commands |
+| `databases.sh` | Managed Valkey: Sentinel failover, the public endpoint (its own ports, chosen ports, SNI), explorer, autoscaling |
 | `iam.sh` | IAM, quotas, Cloud Shell |
 | `pools.sh` | Node pools with a fake cloud (`test/e2e/cloudsim`), cluster autoscaling, edge nodes |
 | `integrations.sh` | A real Gitea connected with a token: repositories and branches listed, the push webhook created automatically, builds reported as commit statuses, pushes delivered through Traefik with the global Traefik settings |
@@ -35,6 +37,17 @@ Run one script with `test/e2e/<name>.sh`. Add `KEEP=1` to leave the nodes runnin
 | `upgrade.sh` | Controller upgrade and rollback, agent rollout and rollback, uninstall |
 | `restore.sh` | Restore drill on a new host with a different IP |
 | `chaos.sh` | A worker freezes and returns, the controller is killed, the mesh is partitioned |
+
+## Real-user tests
+
+Two scripts use SynCloud the way a person does, not through test fixtures:
+
+| Script | Who | What |
+| --- | --- | --- |
+| `ui.sh` | A person in a real browser | Signs in (a wrong password is refused first), creates a project, starts a web service and a public TCP service with the new-service wizard, sees a port that is taken refused before the service is made, finds the port on **Network → Ports**, and deletes the service. A teammate with the developer role gets the same live port check. The services really run on the lab's nodes and answer through Traefik. Screenshots of each step go to `/tmp/syncloud-ui-shots` (`UI_SHOTS` changes it). |
+| `upgrade-ports.sh` | An operator upgrading | Builds the previous release's tag in a git worktree, runs a cluster on it with public TCP and UDP ports, then replaces the controller with this build while the old agents keep running. Nothing may change: the same containers, the same routes handed to Traefik, the same ports, addresses and firewall rules. Then the new abilities (a chosen port) work on the old data. `OLD_REF=v0.3.7` picks the release to upgrade from. |
+
+`ui.sh` needs Node and Chrome (`CHROME_PATH` if it is not in the usual place). Its browser code is in `test/e2e/ui/` (Playwright's core library, driving the installed Chrome); `UI_LAB=0 node journey.mjs` runs it against a dev controller, where no tasks run, for quick iterations on the wizard.
 
 ## Load test
 

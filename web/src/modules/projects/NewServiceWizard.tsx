@@ -29,7 +29,6 @@ import { ChoiceCards, ChoiceField } from "@/ui/choice";
 import {
   AddressesPreview,
   healthSummary,
-  networkError,
   networkForm,
   networkRouting,
   networkSpec,
@@ -37,6 +36,7 @@ import {
   placementForm,
   placementSummary,
   resourcesError,
+  useNetworkProblem,
   ResourcesStep,
   scaleMetrics,
   scalingForm,
@@ -145,6 +145,7 @@ export function NewServiceWizard() {
 
   const projectNodes = projects.find((p) => p.name === project)?.nodes ?? [];
   const metrics = scaleMetrics(f.network, f.resources);
+  const networkProblem = useNetworkProblem(f.network, project);
   // Problems per step; Next is disabled while a step has one.
   const problems: Record<Step, string> = {
     Source:
@@ -172,7 +173,7 @@ export function NewServiceWizard() {
           : !(Number(f.tasks) >= 0 && Number(f.tasks) <= 100)
             ? "Tasks must be 0–100"
             : "",
-    Network: networkError(f.network),
+    Network: networkProblem,
     Resources: resourcesError(f.resources, f.scaling, f.placement, metrics),
     Variables: varsError(vars) || commandError(f.run) || "",
     Review: "",

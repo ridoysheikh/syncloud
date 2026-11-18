@@ -75,7 +75,20 @@ echo "== public endpoint (TLS through Traefik, routed by SNI)"
 api -X PUT "$DB/network" -d '{"access":["environment:shop/production"],"public":{"enabled":true}}' | py '
 p=d["public"]; assert p["enabled"] and p["available"] and p["host"]=="cache.db.e2e.test" and p["readHost"]=="cache-ro.db.e2e.test", p
 assert d["network"]["public"]["allow"]==["0.0.0.0/0","::/0"], d["network"]'
-api "$DB/credentials" | py 'assert d["publicUrl"].startswith("rediss://default:") and d["publicUrl"].endswith("@cache.db.e2e.test:6379"), d'
+# Its own ports (Phase 18): the first two of the automatic range.
+api "$DB/credentials" | py 'assert d["publicUrl"].startswith("rediss://default:") and d["publicUrl"].endswith("@cache.db.e2e.test:21000") and d["publicReadUrl"].endswith("@cache-ro.db.e2e.test:21001"), d'
+# Ports of the user's choice (Phase 26): kept in the port table, refused when
+# reserved, taken or in the automatic range, and back to automatic on ask.
+NET_='"access":["environment:shop/production"]'
+api -X PUT "$DB/network" -d "{$NET_,\"public\":{\"enabled\":true,\"port\":16379,\"readPort\":16380}}" | py 'p=d["public"]; assert p["port"]==16379 and p["readPort"]==16380 and p["portMode"]=="chosen" and p["readPortMode"]=="chosen", p'
+api "$DB/credentials" | py 'assert d["publicUrl"].endswith("@cache.db.e2e.test:16379") and d["publicReadUrl"].endswith("@cache-ro.db.e2e.test:16380"), d'
+api localhost:7070/api/v1/ports | py 'rows={(c["port"],c["node"],c["ownerKind"],c["mode"]) for c in d["items"]}; assert {(16379,"ctl-0","database","chosen"),(16380,"ctl-0","database","chosen")} <= rows and not any(r[0] in (21000,21001) for r in rows), rows'
+apie -X PUT "$DB/network" -d "{$NET_,\"public\":{\"enabled\":true,\"port\":6379}}" | grep -q 'reserved' || fail "the shared database port was accepted as a public port"
+apie -X PUT "$DB/network" -d "{$NET_,\"public\":{\"enabled\":true,\"port\":21500}}" | grep -q 'automatic' || fail "a port in the automatic range was accepted"
+apie -X PUT "$DB/network" -d "{$NET_,\"public\":{\"enabled\":true,\"port\":16380,\"readPort\":16380}}" | grep -q 'differ' || fail "one port for read-write and read-only was accepted"
+api -X PUT "$DB/network" -d "{$NET_,\"public\":{\"enabled\":true,\"port\":0,\"readPort\":0,\"portMode\":\"auto\",\"readPortMode\":\"auto\"}}" | py 'p=d["public"]; assert p["port"]==21000 and p["readPort"]==21001 and p["portMode"]=="auto", p'
+api localhost:7070/api/v1/ports | py 'assert not any(c["port"] in (16379,16380) for c in d["items"]), d["items"]'
+echo "  ✓ own ports 21000/21001; 16379/16380 chosen, listed in the port table, 6379 and the automatic range refused, back to automatic frees them"
 OUT=sc-e2e-w1 # another machine than the controller; not over the private network
 x $OUT docker image inspect valkey/valkey:8.1-alpine >/dev/null 2>&1 || x $OUT docker pull -q valkey/valkey:8.1-alpine >/dev/null
 OUTIP=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" $OUT)
@@ -91,7 +104,7 @@ api -X PUT "$DB/network" -d '{"access":["environment:shop/production"],"public":
 wait_for "a client outside the allow-list is refused" '[ "$(pub cache.db.e2e.test PING)" != PONG ]'
 api -X PUT "$DB/network" -d "{\"access\":[\"environment:shop/production\"],\"public\":{\"enabled\":true,\"allow\":[\"$OUTIP\"]}}" >/dev/null
 wait_for "the allowed client connects" '[ "$(pub cache.db.e2e.test PING)" = PONG ]'
-echo "  ✓ rediss://…@cache.db.e2e.test:6379 reads and writes, cache-ro is read-only, plain TCP refused, allow-list enforced"
+echo "  ✓ rediss://…@cache.db.e2e.test (SNI on 6379) reads and writes, cache-ro is read-only, plain TCP refused, allow-list enforced"
 
 echo "== explorer and console"
 api -X PUT "$DB/key?key=user:1" -d '{"type":"hash","hash":{"name":"Ada","role":"admin"},"ttlSeconds":600}' | py 'assert d["type"]=="hash" and d["hash"]["name"]=="Ada" and d["ttlMs"]>0, d'
@@ -142,12 +155,14 @@ S="x -e SYNCLOUD_TOKEN=$PAT sc-e2e-ctl /opt/sc/synctl --endpoint http://127.0.0.
 $S db list | grep 'cache' | grep -q 'shop/production' || fail "synctl db list"
 $S db list | grep 'sessions' | grep -q 'standalone' || fail "synctl db list (standalone)"
 $S db get cache | grep -q 'read-write: cache.production.shop' || fail "synctl db get"
-$S db get cache | grep -q 'public:     cache.db.e2e.test:6379' || fail "synctl db get (public)"
+$S db get cache | grep -q 'public:     cache.db.e2e.test:21000, read-only cache-ro.db.e2e.test:21001' || fail "synctl db get (public): $($S db get cache | grep public)"
 [ "$($S db cmd cache GET greeting)" = '"hello"' ] || fail "synctl db cmd"
 $S db network sessions --remove-access environment:shop/production --add-access project:shop | grep -q 'access:     project:shop' || fail "synctl db network"
-$S db engines | grep -q 'postgres.*planned' || fail "synctl db engines"
-out=$($S db create later --engine postgres 2>&1) && fail "a planned engine was accepted"
-echo "$out" | grep -q 'not available' || fail "planned engine: $out"
+eng=$($S db engines)
+echo "$eng" | grep -q 'valkey' && echo "$eng" | grep -q 'postgres' || fail "synctl db engines: $eng"
+echo "$eng" | grep -q 'planned' && fail "an engine is still planned: $eng"
+out=$($S db create later --engine nosuchengine 2>&1) && fail "an unknown engine was accepted"
+echo "$out" | grep -qi 'engine' || fail "unknown engine: $out"
 echo "  ✓ history charts; synctl db list, get, cmd, network, engines"
 
 echo "== delete"

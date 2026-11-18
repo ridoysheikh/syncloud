@@ -2,11 +2,11 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
-## [Unreleased]
+## [0.4.0]
 
 ### Upgrading
 
-- Nothing to do. At its first start the controller fills the new port table from the public ports that exist. No port, URL, Traefik route or firewall rule changes, and Traefik doesn't restart.
+- Nothing to do. At its first start the controller migrates its database and fills the new port table from the public ports that exist. No port, URL, address, Traefik route or host firewall rule changes, and tasks aren't rescheduled. Agents can be upgraded afterwards as usual: the controller works with 0.3.x agents (checked by upgrading a running 0.3.7 cluster).
 - Services made before keep their resources: their CPU weight, the memory placement keeps free for each task, and their memory limit (twice `memory` unless set) don't change until you save the resources. The dashboard shows an old shared amount as a note with a **Reset** button.
 - `PUT /api/v1/databases/{name}/network` now honours `public.port` and `public.readPort` when they differ from the current ones. A value left out, `0`, or the current number keeps the port, so the dashboard and synctl keep working as before.
 
@@ -22,9 +22,8 @@ All notable changes are listed here. Versions follow [semantic versioning](https
 - **Real client IP for TCP ports (PROXY protocol).** Optional per port and off by default. Traefik then sends the client's address first (PROXY protocol v2), so mail servers and other apps see who connects. The app must support it. Turn it on with `--proxy-protocol on`.
 - **TLS at the load balancer for TCP ports.** Optional per port and off by default. Traefik handles TLS with the platform's certificate and sends plain TCP to the app, for ports such as 465, 993 or 8883. Turn it on with `--tls terminate`. It needs the platform's base domain, for the certificate.
 - **Project → Load balancer** lists the project's public ports.
-
 - **A richer new-service wizard.** Six steps (Source, Basics, Network, Resources, Variables, Review) instead of four.
-  - **Network:** ports are rows, so one service can have an HTTP page and raw TCP/UDP ports together, and the health check (HTTP, TCP connect, a command or none) is chosen with them.
+  - **Network:** ports are rows, so one service can have an HTTP page and raw TCP/UDP ports together, and the health check (HTTP, TCP connect, a command or none) is chosen with them. A public port that is taken or reserved is shown as soon as you type it, and the wizard won't go on until you change it.
   - **Resources:** autoscaling and placement can be set at creation. Autoscaling on CPU or memory is offered only for a reserved resource, and requests or latency only with an HTTP port.
   - **Review:** it lists every address the service will have, the ports to be opened and on which load balancer, and the resources in words.
   - **No half-made service:** if a step after creation is refused, the service is removed again.
@@ -33,6 +32,11 @@ All notable changes are listed here. Versions follow [semantic versioning](https
 ### Changed
 
 - Automatic public ports are picked exactly as before: unique across the cluster, from the same ranges. Only a chosen number can repeat, and only on a different load balancer.
+
+### Tests
+
+- **Real-user tests.** `test/e2e/ui.sh` drives the dashboard in a real browser on a lab cluster: sign-in, a project, a web service and a public TCP service made with the wizard (they run and answer), a taken port refused, **Network → Ports**, deleting a service, and a developer's live port check. `test/e2e/upgrade-ports.sh` upgrades a running v0.3.7 cluster to this build and checks that nothing that exists changes. Both are described in `docs/development/testing.md`.
+- `test/e2e/databases.sh` expected the shared port and a "planned" PostgreSQL engine from before Phase 13 and 18; it now checks the database's own ports, chosen ports and both engines.
 
 ## [0.3.7]
 

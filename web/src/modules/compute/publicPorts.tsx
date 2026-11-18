@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
 /* Public TCP/UDP ports (Phase 26): the live check against the port table
@@ -13,13 +13,37 @@ export interface PortCheck {
 }
 
 /** Waits until the value stops changing for a moment. */
-function useDebounced<T>(value: T, ms = 300): T {
+export function useDebounced<T>(value: T, ms = 300): T {
   const [v, setV] = useState(value);
   useEffect(() => {
     const t = setTimeout(() => setV(value), ms);
     return () => clearTimeout(t);
   }, [value, ms]);
   return v;
+}
+
+const validNumber = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535;
+
+/** The query that checks one port on a project's load balancer. */
+export function portCheckQuery(
+  project: string,
+  protocol: "tcp" | "udp",
+  port: number,
+  own?: { environment: string; service: string },
+) {
+  const q = new URLSearchParams({ protocol, port: String(port) });
+  if (own) {
+    q.set("environment", own.environment);
+    q.set("service", own.service);
+  }
+  return {
+    queryKey: ["port-check", project, protocol, port, own?.environment, own?.service],
+    queryFn: () =>
+      api<PortCheck>("GET", `/projects/${encodeURIComponent(project)}/ports/check?${q}`),
+    enabled: validNumber(port) && !!project,
+    staleTime: 5_000,
+    retry: false,
+  };
 }
 
 /** Checks a port on the project's load balancer as the user types. */
@@ -29,24 +53,41 @@ export function usePortCheck(
   port: number,
   own?: { environment: string; service: string },
 ) {
-  const p = useDebounced(port);
-  const valid = Number.isInteger(p) && p >= 1 && p <= 65535 && !!project;
-  const q = new URLSearchParams({ protocol, port: String(p) });
-  if (own) {
-    q.set("environment", own.environment);
-    q.set("service", own.service);
-  }
-  return useQuery({
-    queryKey: ["port-check", project, protocol, p, own?.environment, own?.service],
-    queryFn: () =>
-      api<PortCheck>(
-        "GET",
-        `/projects/${encodeURIComponent(project)}/ports/check?${q}`,
-      ),
-    enabled: valid,
-    staleTime: 5_000,
-    retry: false,
+  const settled = useDebounced(port);
+  return useQuery(portCheckQuery(project, protocol, settled, own));
+}
+
+/**
+ * Checks several ports at once and says why the first unusable one can't be
+ * used ("" when they all can, or when the checks can't be made, for example
+ * without permission: the controller refuses then, and says why).
+ */
+export function usePortsProblem(
+  project: string,
+  ports: { name: string; protocol: "tcp" | "udp"; port: number }[],
+): string {
+  const wanted = ports.filter((p) => validNumber(p.port));
+  const key = JSON.stringify(wanted);
+  const settled = useDebounced(key);
+  const list: typeof wanted = JSON.parse(settled);
+  const results = useQueries({
+    queries: list.map((p) => portCheckQuery(project, p.protocol, p.port)),
   });
+  if (settled !== key || results.some((r) => r.isPending && r.fetchStatus !== "idle")) {
+    return wanted.length ? "Checking the public ports…" : "";
+  }
+  for (const [i, r] of results.entries()) {
+    const c = r.data;
+    if (!c || c.state === "free") continue;
+    const p = list[i]!;
+    const where = `${p.name}: ${p.protocol.toUpperCase()} ${p.port}`;
+    return c.state === "reserved"
+      ? `${where} is not available: ${c.reason}`
+      : c.state === "host"
+        ? `${where} is in use on the node by ${c.reason}`
+        : `${where} is taken by ${c.reason}; choose another port or give the project its own load balancer`;
+  }
+  return "";
 }
 
 /** One line under a port field: free, or why not. */

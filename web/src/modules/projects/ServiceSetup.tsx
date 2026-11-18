@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { Field, IconButton, Input, Toggle, Button } from "@/ui/controls";
 import { ChoiceCards, ChoiceField, Segmented } from "@/ui/choice";
 import { Select } from "@/ui/select";
-import { PortCheckHint, presets, usePortCheck } from "@/modules/compute/publicPorts";
+import { PortCheckHint, presets, usePortCheck, usePortsProblem } from "@/modules/compute/publicPorts";
 import { useBaseDomain } from "@/modules/databases/Network";
 import { NodeLimitEditor } from "./NodeLimits";
 import { ResourceFields, resourceError, resourceSummary, type ResourceForm } from "./Resources";
@@ -132,6 +132,15 @@ export function networkRouting(n: NetworkForm): Record<string, unknown> {
     };
   }
   return out;
+}
+
+/** The Network step's problem: the form's own, else a public port that is taken or reserved. */
+export function useNetworkProblem(n: NetworkForm, project: string): string {
+  const portProblem = usePortsProblem(
+    project,
+    n.ports.filter((r) => r.kind === "public").map((r) => ({ name: r.name, protocol: r.protocol, port: publicOf(r) })),
+  );
+  return networkError(n) || portProblem;
 }
 
 export function NetworkStep({

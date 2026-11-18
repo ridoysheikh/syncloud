@@ -1,0 +1,9 @@
+{
+  "name": "syncloud-ui-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser tests that use the dashboard the way a person does (test/e2e/ui.sh)",
+  "dependencies": {
+    "playwright-core": "1.56.1"
+  }
+}
