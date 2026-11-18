@@ -18476,7 +18476,7 @@
               },
               "memoryLimit": {
                 "type": "integer",
-                "description": "MiB (default 2 \u00d7 memory)"
+                "description": "MiB (default 2 \u00d7 memory); -1 for no limit"
               }
             }
           },

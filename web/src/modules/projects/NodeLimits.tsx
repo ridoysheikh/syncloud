@@ -11,7 +11,7 @@ import { Alert, Button } from "@/ui/controls";
 import { cn } from "@/ui/cn";
 
 /** "Any node" or "only these nodes", with the checklist for the latter. */
-function NodeLimitEditor({
+export function NodeLimitEditor({
   value,
   onChange,
   limit,

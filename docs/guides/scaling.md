@@ -32,17 +32,23 @@ To add **servers** automatically when tasks don't fit, see [node pool autoscalin
 
 ## Size
 
-Each task has CPU and memory (`resources.cpu` and `resources.memory`, defaults 0.1 CPU and 128 MiB). Each one is **shared** (the default) or **reserved**. Set this under the service's **Placement › Resources**, with `"cpuMode": "reserved"` / `"memoryMode": "reserved"` in the spec, or with `synctl services run … --reserve-cpu --reserve-memory`.
+Each task's CPU and memory is **shared** (the default) or **reserved**. Set this in the new-service wizard (**Resources** step), under an existing service's **Placement › Resources**, with `"cpuMode": "reserved"` / `"memoryMode": "reserved"` in the spec, or with `synctl services run … --reserve-cpu --reserve-memory`.
 
 | | Shared (default) | Reserved |
 | --- | --- | --- |
-| **CPU** | What the task is expected to use. It never stops a task from being placed: a busy node is slower, not full. When a node is busy, tasks get CPU in proportion to their `cpu`. | Set aside on the node. A task goes only where that many cores are not reserved by others, and keeps them when the node is busy. |
-| **Memory** | What the task is expected to use. A task goes to a node with that much memory really free. Memory it doesn't use stays free for others. | Set aside on the node whether used or not, and kept for the task when memory runs low. |
+| **CPU** | No amount to give. The task shares the node's cores with the other shared tasks, and it never stops a task from being placed: a busy node is slower, not full. | You give the cores. They are set aside on the node: a task goes only where that many cores are not reserved by others, and keeps them when the node is busy. |
+| **Memory** | No amount to give. A task goes to a node with memory really free, and memory it doesn't use stays free for others. | You give the MiB. They are set aside on the node whether used or not, and kept for the task when memory runs low. |
 
 A node's free memory is its memory minus whichever is larger: what's reserved on it, or what it really uses. Database members reserve their memory; their CPU is shared. During a rollout, the old revision's reservations don't count against the new one, so a deploy never waits for room it is about to free.
 
-- `resources.memoryLimit` is the hard limit (default twice `memory`). A task above it is killed and replaced.
-- `resources.cpuLimit` is an optional CPU cap.
+Each resource also has an optional **limit**, for shared and reserved alike:
+
+- **Memory limit** (`resources.memoryLimit`, MiB): the most a task may use. A task above it is killed and replaced. `-1` means no limit, which is what the new-service wizard sets by default, and `synctl services run … --memory-limit none` does the same. When it is left out of a spec, it is twice `memory`, as it always was.
+- **CPU limit** (`resources.cpuLimit`, cores): an optional cap on the cores a task may use (`--cpu-limit`).
+
+For a shared resource the spec still stores `cpu` and `memory` (0.1 and 128 by default), only as the amount placement and quotas count. You don't need to set them. A service made before this keeps what it had, and the dashboard shows it as a note with a **Reset** button.
+
+Autoscaling on CPU or memory is a percentage of the **reserved** amount, so the wizard offers those two only for a reserved resource. Requests per task and latency need an HTTP port.
 
 A task's real use is on the **Metrics** tab. Shared suits most services. Reserve for latency-sensitive work that must keep its CPU or memory when a node is busy.
 

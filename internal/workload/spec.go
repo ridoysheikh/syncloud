@@ -102,8 +102,12 @@ type Resources struct {
 	CPUMode     string  `json:"cpuMode,omitempty"`     // "" (shared) | "reserved"
 	MemoryMode  string  `json:"memoryMode,omitempty"`  // "" (shared) | "reserved"
 	CPULimit    float64 `json:"cpuLimit,omitempty"`    // cores, hard limit (0 = none)
-	MemoryLimit int     `json:"memoryLimit,omitempty"` // MiB, hard limit (default = 2 × memory)
+	MemoryLimit int     `json:"memoryLimit,omitempty"` // MiB, hard limit (default = 2 × memory; NoMemoryLimit = none)
 }
+
+// NoMemoryLimit as memoryLimit lets a task use whatever memory is free
+// (Phase 27); left out, the limit is twice memory, as it always was.
+const NoMemoryLimit = -1
 
 // Resource modes.
 const (
@@ -268,8 +272,8 @@ func (s *Spec) Normalize() error {
 	if r.CPU < 0.01 || r.CPU > 256 || r.CPULimit < 0 || r.CPULimit > 256 {
 		return errors.New("cpu must be between 0.01 and 256 cores")
 	}
-	if r.Memory < 4 || r.Memory > 4<<20 || r.MemoryLimit < r.Memory {
-		return errors.New("memory must be 4 MiB–4 TiB, and memoryLimit at least memory")
+	if r.Memory < 4 || r.Memory > 4<<20 || (r.MemoryLimit != NoMemoryLimit && r.MemoryLimit < r.Memory) {
+		return errors.New("memory must be 4 MiB–4 TiB, and memoryLimit at least memory (or -1 for no limit)")
 	}
 	for _, m := range []*string{&r.CPUMode, &r.MemoryMode} {
 		switch *m {

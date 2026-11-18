@@ -7,6 +7,7 @@ All notable changes are listed here. Versions follow [semantic versioning](https
 ### Upgrading
 
 - Nothing to do. At its first start the controller fills the new port table from the public ports that exist. No port, URL, Traefik route or firewall rule changes, and Traefik doesn't restart.
+- Services made before keep their resources: their CPU weight, the memory placement keeps free for each task, and their memory limit (twice `memory` unless set) don't change until you save the resources. The dashboard shows an old shared amount as a note with a **Reset** button.
 - `PUT /api/v1/databases/{name}/network` now honours `public.port` and `public.readPort` when they differ from the current ones. A value left out, `0`, or the current number keeps the port, so the dashboard and synctl keep working as before.
 
 ### Added
@@ -21,6 +22,13 @@ All notable changes are listed here. Versions follow [semantic versioning](https
 - **Real client IP for TCP ports (PROXY protocol).** Optional per port and off by default. Traefik then sends the client's address first (PROXY protocol v2), so mail servers and other apps see who connects. The app must support it. Turn it on with `--proxy-protocol on`.
 - **TLS at the load balancer for TCP ports.** Optional per port and off by default. Traefik handles TLS with the platform's certificate and sends plain TCP to the app, for ports such as 465, 993 or 8883. Turn it on with `--tls terminate`. It needs the platform's base domain, for the certificate.
 - **Project → Load balancer** lists the project's public ports.
+
+- **A richer new-service wizard.** Six steps (Source, Basics, Network, Resources, Variables, Review) instead of four.
+  - **Network:** ports are rows, so one service can have an HTTP page and raw TCP/UDP ports together, and the health check (HTTP, TCP connect, a command or none) is chosen with them.
+  - **Resources:** autoscaling and placement can be set at creation. Autoscaling on CPU or memory is offered only for a reserved resource, and requests or latency only with an HTTP port.
+  - **Review:** it lists every address the service will have, the ports to be opened and on which load balancer, and the resources in words.
+  - **No half-made service:** if a step after creation is refused, the service is removed again.
+- **Shared CPU and memory ask for no amount.** A shared resource shares the node, so only an optional **limit** is asked for. A reserved one asks for the amount to set aside, plus the optional limit. New services have **no memory limit** by default. `resources.memoryLimit: -1` means no limit, `synctl services run` gained `--cpu-limit` and `--memory-limit` (a number of MiB, or `none`), and the service page says "Shared CPU, shared memory, no limit" instead of amounts.
 
 ### Changed
 

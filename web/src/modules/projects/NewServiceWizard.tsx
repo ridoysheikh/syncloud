@@ -6,16 +6,10 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Cog,
   FileCode2,
   FileText,
   GitBranch,
-  Globe,
-  Network,
   Package,
-  Plug,
-  Plus,
-  Trash2,
   Wand2,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
@@ -30,10 +24,28 @@ import {
 } from "@/lib/workloads";
 import { PageHeader } from "@/ui/PageHeader";
 import { Panel } from "@/ui/Panel";
-import { Alert, Button, Field, IconButton, Input, Toggle } from "@/ui/controls";
-import { ChoiceCards, ChoiceField, Segmented } from "@/ui/choice";
-import { PortCheckHint, presets, usePortCheck } from "@/modules/compute/publicPorts";
-import { useBaseDomain } from "@/modules/databases/Network";
+import { Alert, Button, Field, Input, Toggle } from "@/ui/controls";
+import { ChoiceCards, ChoiceField } from "@/ui/choice";
+import {
+  AddressesPreview,
+  healthSummary,
+  networkError,
+  networkForm,
+  networkRouting,
+  networkSpec,
+  NetworkStep,
+  placementForm,
+  placementSummary,
+  resourcesError,
+  ResourcesStep,
+  scaleMetrics,
+  scalingForm,
+  scalingPolicy,
+  scalingSummary,
+  type NetworkForm,
+  type PlacementForm,
+  type ScalingForm,
+} from "./ServiceSetup";
 import { cn, gap } from "@/ui/cn";
 import { toVars, VarsEditor, varsError, type VarRow } from "./VarsEditor";
 import {
@@ -44,11 +56,11 @@ import {
 } from "@/modules/integrations/RepoPicker";
 import { Select } from "@/ui/select";
 import { CommandFields, commandError, commandForm, commandSpec, type CommandForm } from "@/modules/compute/CommandOverride";
-import { ResourceFields, resourceError, resourceForm, resourceSpec, type ResourceForm } from "./Resources";
+import { resourceForm, resourceSpec, resourceSummary, type ResourceForm } from "./Resources";
 import { ImagePicker } from "@/modules/registry/ImagePicker";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
-const steps = ["Source", "Service", "Variables", "Review"] as const;
+const steps = ["Source", "Basics", "Network", "Resources", "Variables", "Review"] as const;
 type Step = (typeof steps)[number];
 
 
@@ -69,66 +81,20 @@ interface Form {
   project: string;
   env: string;
   name: string;
-  port: string;
-  exposure: "public" | "tcpudp" | "internal" | "none";
-  /** Public TCP/UDP: the ports clients reach (Phase 26). */
-  raw: RawPort[];
+  /** Ports (HTTP, public TCP/UDP, internal) and the health check. */
+  network: NetworkForm;
   tasks: string;
   resources: ResourceForm;
-  healthPath: string;
+  /** Optional autoscaling and where tasks run (Phase 27). */
+  scaling: ScalingForm;
+  placement: PlacementForm;
   /** A pre-deploy command such as database migrations (optional). */
   release: string;
   /** What the containers run (the image's own by default). */
   run: CommandForm;
 }
 
-/** One port of a Public TCP/UDP service. */
-interface RawPort {
-  name: string;
-  protocol: "tcp" | "udp";
-  container: string;
-  /** same: the container port; chosen: another number; auto: from the range. */
-  publicMode: "same" | "chosen" | "auto";
-  publicPort: string;
-  tls: boolean;
-  proxyProtocol: boolean;
-}
-
-const rawPort = (n: number): RawPort => ({
-  name: n === 0 ? "tcp" : `port${n + 1}`,
-  protocol: "tcp",
-  container: "",
-  publicMode: "same",
-  publicPort: "",
-  tls: false,
-  proxyProtocol: false,
-});
-
-/** The public port a row asks for (0: an automatic one). */
-const publicOf = (r: RawPort) =>
-  r.publicMode === "auto"
-    ? 0
-    : Number(r.publicMode === "same" ? r.container : r.publicPort);
-
-const validPort = (v: string) => Number(v) >= 1 && Number(v) <= 65535;
-
-function rawError(rows: RawPort[]): string {
-  if (rows.length === 0) return "Add a port";
-  const names = rows.map((r) => r.name);
-  if (rows.some((r) => !nameRE.test(r.name)))
-    return "Port names: lowercase letters, digits and dashes";
-  if (new Set(names).size !== names.length) return "Each port needs its own name";
-  if (rows.some((r) => !validPort(r.container))) return "Container ports are 1–65535";
-  if (rows.some((r) => r.publicMode === "chosen" && !validPort(r.publicPort)))
-    return "Public ports are 1–65535";
-  const pub = rows
-    .filter((r) => r.publicMode !== "auto")
-    .map((r) => `${r.protocol}/${publicOf(r)}`);
-  if (new Set(pub).size !== pub.length) return "Two ports ask for the same public port";
-  return "";
-}
-
-/** Full-page wizard: source → service settings → variables → review (§4). */
+/** Full-page wizard: source → basics → network → resources → variables → review (§4). */
 export function NewServiceWizard() {
   const params = useParams({ strict: false }) as {
     project?: string;
@@ -156,12 +122,11 @@ export function NewServiceWizard() {
     project: params.project ?? "",
     env: params.env ?? "",
     name: "",
-    port: "8080",
-    exposure: "public",
-    raw: [rawPort(0)],
+    network: networkForm(),
     tasks: "1",
     resources: resourceForm(),
-    healthPath: "",
+    scaling: scalingForm(),
+    placement: placementForm(),
     release: "",
     run: commandForm(),
   });
@@ -178,6 +143,8 @@ export function NewServiceWizard() {
     (s) => s.project === project && s.environment === env && s.name === f.name,
   );
 
+  const projectNodes = projects.find((p) => p.name === project)?.nodes ?? [];
+  const metrics = scaleMetrics(f.network, f.resources);
   // Problems per step; Next is disabled while a step has one.
   const problems: Record<Step, string> = {
     Source:
@@ -196,24 +163,17 @@ export function NewServiceWizard() {
             : !f.branch.trim()
               ? "Enter a branch"
               : "",
-    Service: !project
+    Basics: !project
       ? "Create a project first"
       : !nameRE.test(f.name)
         ? "Name: lowercase letters, digits and dashes (max 32)"
         : taken
           ? `${f.name} already exists in ${project}/${env}`
-          : f.exposure === "tcpudp" && rawError(f.raw)
-            ? rawError(f.raw)
-          : f.exposure !== "none" && f.exposure !== "tcpudp" &&
-              !(Number(f.port) >= 1 && Number(f.port) <= 65535)
-            ? "Port must be 1–65535"
-            : !(Number(f.tasks) >= 0 && Number(f.tasks) <= 100)
-              ? "Tasks must be 0–100"
-              : resourceError(f.resources)
-                ? resourceError(f.resources)!
-                : f.healthPath && !f.healthPath.startsWith("/")
-                  ? "The health check path must start with /"
-                  : "",
+          : !(Number(f.tasks) >= 0 && Number(f.tasks) <= 100)
+            ? "Tasks must be 0–100"
+            : "",
+    Network: networkError(f.network),
+    Resources: resourcesError(f.resources, f.scaling, f.placement, metrics),
     Variables: varsError(vars) || commandError(f.run) || "",
     Review: "",
   };
@@ -225,28 +185,14 @@ export function NewServiceWizard() {
     releaseCommands?: { preDeploy: { command: string }[] };
   } => ({
     image: f.source === "image" ? f.image.trim() : AWAITING_BUILD,
-    ports:
-      f.exposure === "none"
-        ? []
-        : f.exposure === "tcpudp"
-          ? f.raw.map((r) => ({
-              name: r.name,
-              container: Number(r.container),
-              protocol: r.protocol,
-            }))
-          : [
-              {
-                container: Number(f.port),
-                protocol: f.exposure === "public" ? "http" : "tcp",
-              },
-            ],
+    ...networkSpec(f.network),
     env: toVars(vars),
     ...commandSpec(f.run),
     resources: resourceSpec(f.resources),
-    health:
-      f.healthPath && f.exposure !== "none" && f.exposure !== "tcpudp"
-        ? { type: "http", path: f.healthPath }
-        : undefined,
+    placement: {
+      strategy: f.placement.strategy,
+      ...(f.placement.nodes ? { nodes: f.placement.nodes } : {}),
+    },
     desiredCount: Number(f.tasks),
     releaseCommands: f.release.trim()
       ? { preDeploy: [{ command: f.release.trim() }] }
@@ -257,26 +203,18 @@ export function NewServiceWizard() {
     mutationFn: async () => {
       const path = servicePath({ project, environment: env, name: f.name });
       await api("PUT", path, spec());
-      if (f.exposure === "tcpudp") {
-        // Open the public ports; a refused one (taken meanwhile) leaves no
-        // half-made service behind.
-        const ports: Record<string, unknown> = {};
-        for (const r of f.raw) {
-          const n = publicOf(r);
-          ports[r.name] = {
-            public: true,
-            ...(n ? { publicPort: n } : {}),
-            ...(r.protocol === "tcp"
-              ? { proxyProtocol: r.proxyProtocol, tls: r.tls ? "terminate" : "none" }
-              : {}),
-          };
+      // Public ports and autoscaling; a refused one (a port taken meanwhile)
+      // leaves no half-made service behind.
+      const routing = networkRouting(f.network);
+      const policy = scalingPolicy(f.scaling);
+      try {
+        if (Object.keys(routing).length > 0) {
+          await api("PUT", `${path}/routing`, { ports: routing });
         }
-        try {
-          await api("PUT", `${path}/routing`, { ports });
-        } catch (e) {
-          await api("DELETE", path).catch(() => {});
-          throw e;
-        }
+        if (policy) await api("PUT", `${path}/autoscaling`, policy);
+      } catch (e) {
+        await api("DELETE", path).catch(() => {});
+        throw e;
       }
       if (f.source === "git") {
         try {
@@ -364,14 +302,29 @@ export function NewServiceWizard() {
                 connection={connection}
               />
             )}
-            {step === "Service" && (
-              <ServiceStep
+            {step === "Basics" && (
+              <BasicsStep
                 f={f}
                 set={set}
                 projects={projects.map((p) => p.name)}
                 envs={envs}
                 project={project}
                 env={env}
+              />
+            )}
+            {step === "Network" && (
+              <NetworkStep value={f.network} onChange={(v) => set("network", v)} project={project} />
+            )}
+            {step === "Resources" && (
+              <ResourcesStep
+                resources={f.resources}
+                scaling={f.scaling}
+                placement={f.placement}
+                metrics={metrics}
+                projectNodes={projectNodes}
+                onResources={(v) => set("resources", v)}
+                onScaling={(v) => set("scaling", v)}
+                onPlacement={(v) => set("placement", v)}
               />
             )}
             {step === "Variables" && (
@@ -558,7 +511,14 @@ function SourceStep({
             <ChoiceCards
               label="Builder"
               value={f.builder}
-              onChange={(v) => set("builder", v)}
+              onChange={(v) => {
+                set("builder", v);
+                // A static site is served on port 80.
+                const first = f.network.ports[0];
+                if (v === "static" && first?.kind === "http" && first.container === "8080") {
+                  set("network", { ...f.network, ports: [{ ...first, container: "80" }, ...f.network.ports.slice(1)] });
+                }
+              }}
               columns={4}
               options={[
                 {
@@ -640,7 +600,7 @@ function SourceStep({
   );
 }
 
-function ServiceStep({
+function BasicsStep({
   f,
   set,
   projects,
@@ -706,75 +666,6 @@ function ServiceStep({
           />
         </Field>
       </div>
-      <ChoiceField label="Network">
-        <ChoiceCards
-          label="Network"
-          value={f.exposure}
-          onChange={(v) => set("exposure", v)}
-          columns={4}
-          options={[
-            {
-              value: "public",
-              title: "Public HTTP",
-              description:
-                "Websites and APIs: a public HTTPS address through the load balancer on 80/443, no port of its own.",
-              icon: Globe,
-            },
-            {
-              value: "tcpudp",
-              title: "Public TCP/UDP",
-              description:
-                "Clients reach the app on its own port: mail, MQTT, game servers.",
-              icon: Plug,
-            },
-            {
-              value: "internal",
-              title: "Internal only",
-              description:
-                "Reachable by the project's services over the private network (TCP).",
-              icon: Network,
-            },
-            {
-              value: "none",
-              title: "Worker",
-              description: "No port: background jobs, queues, consumers.",
-              icon: Cog,
-            },
-          ]}
-        />
-      </ChoiceField>
-      {f.exposure === "tcpudp" && (
-        <RawPortsEditor
-          rows={f.raw}
-          onChange={(v) => set("raw", v)}
-          project={project}
-        />
-      )}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        {f.exposure !== "none" && f.exposure !== "tcpudp" && (
-          <Field label="Container port">
-            <Input
-              value={f.port}
-              onChange={(e) => set("port", e.target.value)}
-              className="font-mono"
-              inputMode="numeric"
-            />
-          </Field>
-        )}
-        {f.exposure !== "none" && f.exposure !== "tcpudp" && (
-          <Field
-            label="Health check path"
-            hint="Optional. Tasks that fail it are replaced."
-          >
-            <Input
-              value={f.healthPath}
-              onChange={(e) => set("healthPath", e.target.value)}
-              placeholder="/healthz"
-              className="font-mono"
-            />
-          </Field>
-        )}
-      </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <Field
           label="Tasks"
@@ -789,194 +680,6 @@ function ServiceStep({
           />
         </Field>
       </div>
-      <ResourceFields
-        value={f.resources}
-        onChange={(r) => set("resources", r)}
-      />
-    </div>
-  );
-}
-
-/** The ports of a Public TCP/UDP service, with presets and live checks. */
-function RawPortsEditor({
-  rows,
-  onChange,
-  project,
-}: {
-  rows: RawPort[];
-  onChange: (rows: RawPort[]) => void;
-  project: string;
-}) {
-  const [preset, setPreset] = useState("");
-  const update = (i: number, p: Partial<RawPort>) =>
-    onChange(rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
-  const choose = (id: string) => {
-    setPreset(id);
-    const ps = presets.find((x) => x.id === id);
-    if (!ps) return;
-    onChange(
-      ps.ports.map((p) => ({
-        name: p.name,
-        protocol: p.protocol,
-        container: String(p.port),
-        publicMode: "same",
-        publicPort: "",
-        tls: !!p.tls,
-        proxyProtocol: !!p.proxyProtocol,
-      })),
-    );
-  };
-  return (
-    <div className="flex flex-col gap-2">
-      <Field
-        label="Preset (optional)"
-        hint={presets.find((x) => x.id === preset)?.hint ?? "Fills in the usual ports of a common server; change them as needed."}
-      >
-        <Select
-          value={preset}
-          onChange={choose}
-          placeholder="None"
-          options={presets.map((x) => ({ value: x.id, label: x.label }))}
-          className="w-full sm:w-72"
-        />
-      </Field>
-      {rows.map((r, i) => (
-        <RawPortRow
-          key={i}
-          r={r}
-          project={project}
-          onChange={(p) => update(i, p)}
-          onRemove={
-            rows.length > 1
-              ? () => onChange(rows.filter((_, j) => j !== i))
-              : undefined
-          }
-        />
-      ))}
-      <div>
-        <Button onClick={() => onChange([...rows, rawPort(rows.length)])}>
-          <Plus className="size-3.5" /> Add port
-        </Button>
-      </div>
-      <p className="text-faint text-xs">
-        Clients connect to the project's load-balancer address on the public
-        port. Ports used by Traefik (80, 443) and the platform, and the
-        automatic range, can't be chosen.
-      </p>
-    </div>
-  );
-}
-
-function RawPortRow({
-  r,
-  project,
-  onChange,
-  onRemove,
-}: {
-  r: RawPort;
-  project: string;
-  onChange: (p: Partial<RawPort>) => void;
-  onRemove?: () => void;
-}) {
-  const n = publicOf(r);
-  const check = usePortCheck(project, r.protocol, n);
-  const base = useBaseDomain();
-  return (
-    <div className="border-line flex flex-col gap-2 rounded-md border p-2">
-      <div className="flex flex-wrap items-end gap-1.5">
-        <Field label="Name">
-          <Input
-            value={r.name}
-            onChange={(e) => onChange({ name: e.target.value.toLowerCase() })}
-            className="w-32 font-mono"
-            spellCheck={false}
-          />
-        </Field>
-        <ChoiceField label="Protocol">
-          <Segmented
-            label="Protocol"
-            value={r.protocol}
-            onChange={(v) =>
-              onChange(
-                v === "udp"
-                  ? { protocol: v, tls: false, proxyProtocol: false }
-                  : { protocol: v },
-              )
-            }
-            options={[
-              { value: "tcp", label: "TCP" },
-              { value: "udp", label: "UDP" },
-            ]}
-          />
-        </ChoiceField>
-        <Field label="Container port">
-          <Input
-            value={r.container}
-            onChange={(e) => onChange({ container: e.target.value.replace(/\D/g, "") })}
-            inputMode="numeric"
-            placeholder="25"
-            className="w-24 font-mono"
-          />
-        </Field>
-        <ChoiceField label="Public port">
-          <Segmented
-            label="Public port"
-            value={r.publicMode}
-            onChange={(v) => onChange({ publicMode: v })}
-            options={[
-              { value: "same", label: "Same" },
-              { value: "chosen", label: "Choose" },
-              { value: "auto", label: "Automatic" },
-            ]}
-          />
-        </ChoiceField>
-        {r.publicMode === "chosen" && (
-          <Field label="Number">
-            <Input
-              value={r.publicPort}
-              onChange={(e) => onChange({ publicPort: e.target.value.replace(/\D/g, "") })}
-              inputMode="numeric"
-              className="w-24 font-mono"
-            />
-          </Field>
-        )}
-        {onRemove && (
-          <IconButton label="Remove port" onClick={onRemove}>
-            <Trash2 className="size-3.5" />
-          </IconButton>
-        )}
-      </div>
-      {r.publicMode !== "auto" && (r.publicMode === "chosen" ? r.publicPort : r.container) && (
-        <span className="text-faint text-xs">
-          <PortCheckHint check={check} port={n} />
-        </span>
-      )}
-      {r.publicMode === "auto" && (
-        <span className="text-faint text-xs">
-          A free port from 20000–20999 is assigned.
-        </span>
-      )}
-      {r.protocol === "tcp" && (
-        <div className="flex flex-col gap-1.5 sm:flex-row sm:gap-4">
-          <Toggle
-            checked={r.proxyProtocol}
-            onChange={(v) => onChange({ proxyProtocol: v })}
-            label="Real client IP (PROXY protocol)"
-            hint="The app must support it (Postfix, Dovecot, nginx…)."
-          />
-          <Toggle
-            checked={r.tls}
-            disabled={!base && !r.tls}
-            onChange={(v) => onChange({ tls: v })}
-            label="TLS at the load balancer"
-            hint={
-              base
-                ? "For implicit-TLS ports (465, 993, 8883); not for STARTTLS."
-                : "Needs the platform's base domain for its certificate (Settings → Domain)."
-            }
-          />
-        </div>
-      )}
     </div>
   );
 }
@@ -1048,32 +751,14 @@ function Review({
           </Row>
         </>
       )}
-      <Row k="Network">
-        {f.exposure === "none" ? (
-          "no port"
-        ) : f.exposure === "tcpudp" ? (
-          <span className="flex flex-col gap-0.5">
-            {f.raw.map((r) => (
-              <span key={r.name} className="font-mono">
-                {r.name}: {r.protocol.toUpperCase()} {r.container} → public{" "}
-                {publicOf(r) || "automatic port"}
-                {r.tls && ", TLS at the load balancer"}
-                {r.proxyProtocol && ", PROXY protocol"}
-              </span>
-            ))}
-            <span className="text-faint">
-              The project's load balancer restarts its Traefik to open the
-              ports.
-            </span>
-          </span>
-        ) : (
-          `${f.exposure === "public" ? "HTTP with a public URL" : "internal TCP"} on port ${f.port}${f.healthPath ? `, health check ${f.healthPath}` : ""}`
-        )}
+      <Row k="Addresses">
+        <AddressesPreview n={f.network} project={project} env={env} name={f.name} />
       </Row>
-      <Row k="Tasks">
-        {f.tasks} × {f.resources.cpu} CPU ({f.resources.cpuMode}),{" "}
-        {f.resources.memory} MiB ({f.resources.memoryMode})
-      </Row>
+      <Row k="Health check">{healthSummary(f.network)}</Row>
+      <Row k="Tasks">{f.tasks}</Row>
+      <Row k="Resources">{resourceSummary(f.resources)}</Row>
+      <Row k="Autoscaling">{scalingSummary(f.scaling)}</Row>
+      <Row k="Placement">{placementSummary(f.placement)}</Row>
       <Row k="Command">
         {f.run.mode === "image" ? (
           <span className="text-faint">the image's own</span>

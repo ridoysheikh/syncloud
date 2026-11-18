@@ -977,8 +977,8 @@ func TaskSpec(sv store.Service, spec Spec, t store.Task) *agentv1.TaskSpec {
 			"syncloud.service_id": sv.ID, "syncloud.revision": fmt.Sprint(t.Revision),
 		},
 		NetworkMode:      Network,
-		Restart:          agentv1.RestartPolicy_RESTART_POLICY_NO, // the reconciler replaces failed tasks
-		MemoryLimitBytes: int64(spec.Resources.MemoryLimit) << 20,
+		Restart:          agentv1.RestartPolicy_RESTART_POLICY_NO,         // the reconciler replaces failed tasks
+		MemoryLimitBytes: int64(max(spec.Resources.MemoryLimit, 0)) << 20, // NoMemoryLimit: none
 	}
 	if spec.Resources.CPULimit > 0 {
 		ts.NanoCpus = int64(spec.Resources.CPULimit * 1e9)

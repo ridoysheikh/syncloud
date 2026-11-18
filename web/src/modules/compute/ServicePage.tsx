@@ -238,8 +238,8 @@ export function ServicePage() {
         />
         <StatTile
           label="Per task"
-          value={`${svc.spec.resources.cpu ?? 0.1} CPU ${svc.spec.resources.cpuMode === "reserved" ? "reserved" : "shared"}`}
-          hint={`${svc.spec.resources.memory ?? 128} MiB memory ${svc.spec.resources.memoryMode === "reserved" ? "reserved" : "shared"}`}
+          value={perTaskCPU(svc.spec.resources)}
+          hint={perTaskMemory(svc.spec.resources)}
         />
         <StatTile
           label="Placement"
@@ -317,7 +317,7 @@ export function ServicePage() {
             path={path}
             by="task"
             shorten={shortTask}
-            memoryLimit={(svc.spec.resources.memoryLimit ?? 0) * 1024 * 1024}
+            memoryLimit={Math.max(svc.spec.resources.memoryLimit ?? 0, 0) * 1024 * 1024}
           />
         )}
         {tab === "traffic" && (
@@ -670,3 +670,16 @@ function ServiceVariables({
 }
 
 const shortTask = (id: string) => id.replace(/^(task|run)_/, "").slice(0, 8);
+
+/** A task's CPU in words: shared needs no amount (Phase 27). */
+function perTaskCPU(r: Spec["resources"]) {
+  const base = r.cpuMode === "reserved" ? `${r.cpu ?? 0.1} CPU reserved` : "Shared CPU";
+  return r.cpuLimit ? `${base}, at most ${r.cpuLimit}` : base;
+}
+
+/** A task's memory in words; -1 is no limit. */
+function perTaskMemory(r: Spec["resources"]) {
+  const base = r.memoryMode === "reserved" ? `${r.memory ?? 128} MiB memory reserved` : "shared memory";
+  const limit = r.memoryLimit === -1 ? "no limit" : `limit ${r.memoryLimit ?? 2 * (r.memory ?? 128)} MiB`;
+  return `${base}, ${limit}`;
+}

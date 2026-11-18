@@ -546,8 +546,9 @@ func (a *app) servicesCmd() *cobra.Command {
 	var image string
 	var replicas int
 	var ports, envs []string
-	var cpu float64
+	var cpu, cpuLimit float64
 	var mem int
+	var memLimit string
 	var reserveCPU, reserveMem bool
 	run := &cobra.Command{
 		Use: "run NAME --image IMAGE", Short: "Create or update a service from flags", Args: cobra.ExactArgs(1),
@@ -582,6 +583,18 @@ func (a *app) servicesCmd() *cobra.Command {
 			if reserveMem {
 				spec.Resources.MemoryMode = "reserved"
 			}
+			spec.Resources.CPULimit = cpuLimit
+			switch memLimit {
+			case "":
+			case "none":
+				spec.Resources.MemoryLimit = -1 // no limit
+			default:
+				n, err := strconv.Atoi(memLimit)
+				if err != nil || n < 4 {
+					return fmt.Errorf("--memory-limit %q: MiB (at least 4) or none", memLimit)
+				}
+				spec.Resources.MemoryLimit = n
+			}
 			if cmd.Flags().Changed("replicas") {
 				spec.DesiredCount = &replicas
 			}
@@ -600,6 +613,8 @@ func (a *app) servicesCmd() *cobra.Command {
 	run.Flags().IntVar(&mem, "memory", 0, "memory per task in MiB, shared unless --reserve-memory (default 128)")
 	run.Flags().BoolVar(&reserveCPU, "reserve-cpu", false, "set the CPU aside on the node instead of sharing it")
 	run.Flags().BoolVar(&reserveMem, "reserve-memory", false, "set the memory aside on the node instead of sharing it")
+	run.Flags().Float64Var(&cpuLimit, "cpu-limit", 0, "the most CPU cores a task may use (default: no limit)")
+	run.Flags().StringVar(&memLimit, "memory-limit", "", "the most memory a task may use in MiB, or none (default: twice --memory)")
 
 	var file string
 	apply := &cobra.Command{

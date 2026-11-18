@@ -12,6 +12,21 @@
 
 Services only exist inside a project environment. Create them with **New service** in the project, or `synctl services run` / `synctl services apply`.
 
+## The new-service wizard
+
+**New service** in a project walks through six steps:
+
+| Step | What you set |
+| --- | --- |
+| **Source** | A container image, or a Git repository to build. |
+| **Basics** | Project, environment, name and the number of tasks to start with. |
+| **Network** | How each port is reached. Pick **Public HTTP**, **Public TCP/UDP** (presets for a mail server, MQTT and Minecraft), **Internal only** or **Worker**, then edit the port rows: a service can mix an HTTP page with raw ports. Public ports show a live free/taken check. The health check is chosen here too (HTTP, TCP connect, a command, or none). |
+| **Resources** | CPU and memory (shared or reserved, with optional limits), optional [autoscaling](scaling.md) and where tasks may run ([placement](scaling.md#placement)). |
+| **Variables** | Environment variables, the command, and a release command. |
+| **Review** | Every address the service will have, the ports it will open and on which load balancer, and the resources in words. |
+
+If a step after creation is refused (a public port taken in the meantime, for example), the service is removed again rather than left half-made. Labels, custom domains and allowed clients are set afterwards on the service's **Networking** tab.
+
 ## Settings
 
 | Setting | Notes |
@@ -20,7 +35,7 @@ Services only exist inside a project environment. Create them with **New service
 | **Command / entrypoint** | Override the image's. |
 | **Ports** | Each has a name, a container port and a protocol: `http` (gets an HTTPS address), `tcp` or `udp`. No ports makes a worker. |
 | **Health check** | `http` (a path), `tcp` (the port accepts connections) or `cmd` (exit 0). Only healthy tasks get traffic, and unhealthy ones are replaced. |
-| **Resources** | CPU and memory per task, each **shared** (the default: placement goes by real usage) or **reserved** (set aside on the node). Optional hard limits; the memory limit defaults to twice the memory. See [Size](scaling.md#size). |
+| **Resources** | CPU and memory per task, each **shared** (the default: no amount to give, placement goes by real usage) or **reserved** (set aside on the node). Optional limits; a new service has no memory limit. See [Size](scaling.md#size). |
 | **Desired count** | How many tasks. Scale with the **±** buttons, `synctl services scale`, or [autoscaling](scaling.md). |
 | **Placement** | Spread across nodes (default) or pack, and optionally only some nodes ([Scaling and placement](scaling.md)). |
 

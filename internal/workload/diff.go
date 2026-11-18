@@ -35,7 +35,7 @@ func Diff(a, b Spec) []Change {
 	add("cpu", fmtNum(a.Resources.CPU), fmtNum(b.Resources.CPU))
 	add("memory", fmtMiB(a.Resources.Memory), fmtMiB(b.Resources.Memory))
 	add("cpu limit", fmtNum(a.Resources.CPULimit), fmtNum(b.Resources.CPULimit))
-	add("memory limit", fmtMiB(a.Resources.MemoryLimit), fmtMiB(b.Resources.MemoryLimit))
+	add("memory limit", fmtLimit(a.Resources.MemoryLimit), fmtLimit(b.Resources.MemoryLimit))
 	out = append(out, fieldsDiff("placement", a.Placement, b.Placement)...)
 	out = append(out, fieldsDiff("health check", a.Health, b.Health)...)
 	out = append(out, fieldsDiff("rollout", a.Deployment, b.Deployment)...)
@@ -103,6 +103,13 @@ func fmtMiB(n int) string {
 		return ""
 	}
 	return fmt.Sprintf("%d MiB", n)
+}
+
+func fmtLimit(n int) string {
+	if n == NoMemoryLimit {
+		return "none"
+	}
+	return fmtMiB(n)
 }
 
 // fieldsDiff compares two settings objects key by key ("health check path:
