@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -212,10 +213,27 @@ func (m *Manager) observeCertificates(ctx context.Context, r Rule) ([]observatio
 	now := m.now()
 	var out []observation
 	for _, c := range certs {
-		if c.Issuer != "acme" { // self-signed certificates renew themselves
+		if c.Issuer != "acme" || c.Status == "revoked" { // self-signed certificates renew themselves
 			continue
 		}
 		days := c.NotAfter.Sub(now).Hours() / 24
+		name := c.Host
+		if c.Managed {
+			if ns := certNames(c); len(ns) > 0 {
+				name = ns[0]
+			}
+		}
+		// A certificate somebody asked for has its own alert days; one that does
+		// not renew by itself (imported, auto-renew off) alerts at the first of them.
+		threshold := r.Threshold
+		noRenew := false
+		if c.Managed {
+			threshold = 0
+			for _, d := range certAlertDays(c.AlertDays) {
+				threshold = max(threshold, float64(d))
+			}
+			noRenew = !c.AutoRenew || c.Source == "imported"
+		}
 		switch {
 		case c.Status == "failed" || c.Status == "rate_limited":
 			msg := "renewal " + c.Status
@@ -225,10 +243,19 @@ func (m *Manager) observeCertificates(ctx context.Context, r Rule) ([]observatio
 			if !c.NotAfter.IsZero() {
 				msg += fmt.Sprintf(" (expires in %s days)", fmtNum(max(days, 0)))
 			}
-			out = append(out, observation{key: c.Host, label: c.Host, message: msg})
-		case !c.NotAfter.IsZero() && days < r.Threshold:
+			out = append(out, observation{key: c.Host, label: name, message: msg})
+		case !c.NotAfter.IsZero() && c.CertPEM != "" && days < threshold && (!c.Managed || noRenew || c.Status == "awaiting_dns"):
 			d := days
-			out = append(out, observation{key: c.Host, label: c.Host, value: &d,
+			msg := fmt.Sprintf("the certificate expires in %s days (%s)", fmtNum(max(days, 0)), c.NotAfter.UTC().Format("2006-01-02"))
+			if noRenew {
+				msg += ": it does not renew by itself, replace it or renew it"
+			} else if c.Status == "awaiting_dns" {
+				msg += ": its renewal waits for the TXT records of its DNS challenge"
+			}
+			out = append(out, observation{key: c.Host, label: name, value: &d, message: msg})
+		case !c.NotAfter.IsZero() && c.CertPEM != "" && !c.Managed && days < threshold:
+			d := days
+			out = append(out, observation{key: c.Host, label: name, value: &d,
 				message: fmt.Sprintf("the certificate expires in %s days (%s)", fmtNum(max(days, 0)), c.NotAfter.UTC().Format("2006-01-02"))})
 		}
 	}
@@ -362,4 +389,25 @@ func (m *Manager) RestoreDefaults(ctx context.Context, email string) (int, error
 		added++
 	}
 	return added, nil
+}
+
+// certNames reads the names a managed certificate was asked for.
+func certNames(c store.Certificate) []string {
+	var out []string
+	if c.Names != "" {
+		_ = json.Unmarshal([]byte(c.Names), &out)
+	}
+	return out
+}
+
+// certAlertDays reads a certificate's alert days (default 30, 14, 7, 1).
+func certAlertDays(raw string) []int {
+	out := []int{30, 14, 7, 1}
+	if raw != "" {
+		var d []int
+		if json.Unmarshal([]byte(raw), &d) == nil && len(d) > 0 {
+			return d
+		}
+	}
+	return out
 }

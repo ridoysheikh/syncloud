@@ -19,6 +19,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/certs"
 	"github.com/ridoysheikh/syncloud/internal/dbs"
 	"github.com/ridoysheikh/syncloud/internal/discovery"
+	"github.com/ridoysheikh/syncloud/internal/dns"
 	"github.com/ridoysheikh/syncloud/internal/domain"
 	"github.com/ridoysheikh/syncloud/internal/edge"
 	"github.com/ridoysheikh/syncloud/internal/events"
@@ -106,6 +107,8 @@ type Server struct {
 	ingress               *ingress.Manager
 	hostFW                *hostfw.Manager
 	ports                 *ports.Ledger
+	dns                   *dns.Service
+	exports               exportLimiter
 	protection            *lbprotect.Manager
 	upgrades              *upgrade.Service
 	s3                    *s3.Manager
@@ -208,15 +211,17 @@ type Options struct {
 	Ingress          *ingress.Manager
 	HostFirewall     *hostfw.Manager
 	Ports            *ports.Ledger
-	Protection       *lbprotect.Manager
-	Upgrades         *upgrade.Service
-	S3               *s3.Manager
-	AgentRollout     *rollout.Manager
-	Discovery        *discovery.Manager
-	Traefik          *traefik.Provider
-	TraefikExtras    *traefik.Extras
-	GitConnections   *gitconn.Manager
-	GitServer        *gitserver.Manager
+	// DNS manages domains, DNS providers and records (Phase 28); may be nil.
+	DNS            *dns.Service
+	Protection     *lbprotect.Manager
+	Upgrades       *upgrade.Service
+	S3             *s3.Manager
+	AgentRollout   *rollout.Manager
+	Discovery      *discovery.Manager
+	Traefik        *traefik.Provider
+	TraefikExtras  *traefik.Extras
+	GitConnections *gitconn.Manager
+	GitServer      *gitserver.Manager
 	// OnTraefikSettings re-renders the Traefik replicas after the static
 	// settings changed.
 	OnTraefikSettings func()
@@ -280,6 +285,7 @@ func New(o Options) *Server {
 		ingress:               o.Ingress,
 		hostFW:                o.HostFirewall,
 		ports:                 o.Ports,
+		dns:                   o.DNS,
 		protection:            o.Protection,
 		upgrades:              o.Upgrades,
 		s3:                    o.S3,
@@ -558,6 +564,52 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/domains", h: s.handleAddServiceDomain},
 		{Method: "DELETE", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/domains/{host}", h: s.handleRemoveServiceDomain},
 		{Method: "GET", Path: "/api/v1/domains/check", h: s.handleCheckDomain},
+		{Method: "POST", Path: "/api/v1/certificates", h: s.handleRequestCertificate},
+		{Method: "POST", Path: "/api/v1/certificates/import", h: s.handleImportCertificate},
+		{Method: "GET", Path: "/api/v1/certificates/{id}", h: s.handleGetCertificate},
+		{Method: "PUT", Path: "/api/v1/certificates/{id}", h: s.handleUpdateCertificate},
+		{Method: "DELETE", Path: "/api/v1/certificates/{id}", h: s.handleDeleteCertificate},
+		{Method: "POST", Path: "/api/v1/certificates/{id}/verify", h: s.handleVerifyCertificate},
+		{Method: "POST", Path: "/api/v1/certificates/{id}/reissue", h: s.handleReissueCertificate},
+		{Method: "POST", Path: "/api/v1/certificates/{id}/revoke", h: s.handleRevokeCertificate},
+		{Method: "GET", Path: "/api/v1/certificates/{id}/chain", h: s.handleGetCertificateChain},
+		{Method: "GET", Path: "/api/v1/certificates/{id}/events", h: s.handleListCertificateEvents},
+		{Method: "GET", Path: "/api/v1/certificates/{id}/bundle", h: s.handleExportCertificate},
+		{Method: "GET", Path: "/api/v1/certificate-requests", h: s.handleListCertificateRequests},
+		{Method: "POST", Path: "/api/v1/certificate-requests", h: s.handleCreateCertificateRequest},
+		{Method: "POST", Path: "/api/v1/certificate-requests/{id}/complete", h: s.handleCompleteCertificateRequest},
+		{Method: "DELETE", Path: "/api/v1/certificate-requests/{id}", h: s.handleDeleteCertificateRequest},
+		{Method: "GET", Path: "/api/v1/certificate-authorities", h: s.handleListCertificateAuthorities},
+		{Method: "POST", Path: "/api/v1/certificate-authorities", h: s.handleCreateCertificateAuthority},
+		{Method: "GET", Path: "/api/v1/certificate-authorities/{id}", h: s.handleGetCertificateAuthority},
+		{Method: "PUT", Path: "/api/v1/certificate-authorities/{id}", h: s.handleUpdateCertificateAuthority},
+		{Method: "DELETE", Path: "/api/v1/certificate-authorities/{id}", h: s.handleDeleteCertificateAuthority},
+		{Method: "POST", Path: "/api/v1/certificate-authorities/{id}/test", h: s.handleTestCertificateAuthority},
+		{Method: "GET", Path: "/api/v1/dns/providers", h: s.handleListDnsProviders},
+		{Method: "POST", Path: "/api/v1/dns/providers", h: s.handleCreateDnsProvider},
+		{Method: "GET", Path: "/api/v1/dns/providers/{id}", h: s.handleGetDnsProvider},
+		{Method: "PUT", Path: "/api/v1/dns/providers/{id}", h: s.handleUpdateDnsProvider},
+		{Method: "DELETE", Path: "/api/v1/dns/providers/{id}", h: s.handleDeleteDnsProvider},
+		{Method: "POST", Path: "/api/v1/dns/providers/{id}/sync", h: s.handleSyncDnsProvider},
+		{Method: "GET", Path: "/api/v1/dns/providers/{id}/zones", h: s.handleListDnsProviderZones},
+		{Method: "GET", Path: "/api/v1/dns/lookup", h: s.handleQueryDns},
+		{Method: "GET", Path: "/api/v1/domains", h: s.handleListDomains},
+		{Method: "POST", Path: "/api/v1/domains", h: s.handleAddDomain},
+		{Method: "GET", Path: "/api/v1/domains/{zone}", h: s.handleGetDomain2},
+		{Method: "PUT", Path: "/api/v1/domains/{zone}", h: s.handleUpdateDomain},
+		{Method: "DELETE", Path: "/api/v1/domains/{zone}", h: s.handleRemoveDomain},
+		{Method: "GET", Path: "/api/v1/domains/{zone}/records", h: s.handleListDomainRecords},
+		{Method: "POST", Path: "/api/v1/domains/{zone}/records", h: s.handleCreateDomainRecord},
+		{Method: "PUT", Path: "/api/v1/domains/{zone}/records/{id}", h: s.handleUpdateDomainRecord},
+		{Method: "DELETE", Path: "/api/v1/domains/{zone}/records/{id}", h: s.handleDeleteDomainRecord},
+		{Method: "POST", Path: "/api/v1/domains/{zone}/records/point", h: s.handlePointDomain},
+		{Method: "POST", Path: "/api/v1/domains/{zone}/records/cleanup", h: s.handleCleanupDomainRecords},
+		{Method: "GET", Path: "/api/v1/domains/challenge-server", h: s.handleGetChallengeServer},
+		{Method: "PUT", Path: "/api/v1/domains/challenge-server", h: s.handleUpdateChallengeServer},
+		{Method: "POST", Path: "/api/v1/domains/challenge-server/records", h: s.handleCreateChallengeServerRecords},
+		{Method: "POST", Path: "/api/v1/domains/challenge-server/check", h: s.handleCheckChallengeServer},
+		{Method: "GET", Path: "/api/v1/domains/{zone}/challenge", h: s.handleGetDomainChallenge},
+		{Method: "POST", Path: "/api/v1/domains/{zone}/challenge/delegation", h: s.handleDelegateDomainChallenge},
 		{Method: "POST", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/run", h: s.handleRunService},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/git", h: s.handleGetGitSource},
 		{Method: "GET", Path: "/api/v1/projects/{project}/environments/{env}/services/{service}/auto-deploy", h: s.handleGetAutoDeploy},

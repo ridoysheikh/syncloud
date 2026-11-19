@@ -67,13 +67,16 @@ export function IntegrationsPage() {
   const s3 = useCount("s3", "/s3/endpoints");
   const upstreams = useCount("upstreams", "/registry/upstreams");
   const clouds = useCount("clouds", "/cloud-providers");
+  const dnsProviders = useCount("dns", "/dns/providers");
   const others: { title: string; icon: typeof Bell; to: string; n?: number; what: [string, string] | null; children: ReactNode }[] = [
     { title: "Notifications", icon: Bell, to: "/monitoring/alerts?tab=channels", n: channels, what: ["channel", "channels"], children: "Slack, Discord, Telegram, email and webhooks for alerts." },
     { title: "S3 storage", icon: HardDrive, to: "/storage", n: s3, what: ["endpoint", "endpoints"], children: "AWS S3, Cloudflare R2, B2, Wasabi, MinIO: buckets for services and backups." },
     { title: "Container registries", icon: Package, to: "/registry/upstreams", n: upstreams, what: ["registry", "registries"], children: "Docker Hub, GHCR, Quay and private registries for pulls." },
     { title: "Cloud providers", icon: Cloud, to: "/compute/node-pools", n: clouds, what: ["provider", "providers"], children: "Hetzner, DigitalOcean or a webhook to add and remove nodes." },
     { title: "Backups", icon: DatabaseBackup, to: "/settings/backups", children: "Encrypted platform backups to any S3 endpoint.", what: null },
-    { title: "Domains and DNS", icon: Globe, to: "/settings/domains", children: "Your own domain, certificates and DNS checks.", what: null },
+    { title: "DNS providers", icon: Globe, to: "/domains/providers", n: dnsProviders, what: ["provider", "providers"], children: "Cloudflare: SynCloud writes DNS records, removes duplicates and renews wildcard certificates by itself." },
+    { title: "Domains and certificates", icon: Globe, to: "/domains", children: "Registered domains, wildcards, every SSL certificate and its authority.", what: null },
+    { title: "Base domain", icon: Globe, to: "/settings/domains", children: "The platform's own domain: dashboard, registry and generated addresses.", what: null },
   ];
   return (
     <div className={cn("flex flex-col", gap)}>

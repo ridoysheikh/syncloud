@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 )
 
@@ -65,5 +66,28 @@ func TestDetectorFallsBackToEchoService(t *testing.T) {
 	}
 	if NewDetector("198.51.100.1").Override == "" {
 		t.Fatal("override ignored")
+	}
+}
+
+func TestNormalizeHostWildcards(t *testing.T) {
+	for in, want := range map[string]string{
+		"Shop.Example.com.":    "shop.example.com",
+		"*.example.com":        "*.example.com",
+		"*.Sub.Example.com.":   "*.sub.example.com",
+		"  *.a.b.example.com ": "*.a.b.example.com",
+	} {
+		got, wild, err := NormalizeHost(in)
+		if err != nil || got != want || wild != strings.HasPrefix(want, "*.") {
+			t.Errorf("%q: %q %v %v", in, got, wild, err)
+		}
+	}
+	for _, bad := range []string{"*", "*.", "*.com", "a.*.example.com", "*.*.example.com", "*a.example.com", "**.example.com", "*.localhost", "*.a.localhost", "*.exa_mple.com", "https://*.example.com"} {
+		if got, _, err := NormalizeHost(bad); err == nil {
+			t.Errorf("%q was accepted as %q", bad, got)
+		}
+	}
+	// The old function still refuses wildcards: the base domain is never one.
+	if _, err := Normalize("*.example.com"); err == nil {
+		t.Error("Normalize accepted a wildcard")
 	}
 }

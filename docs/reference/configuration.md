@@ -14,6 +14,8 @@ The installer writes `/etc/syncloud/controller.env`. Every flag of `syncloud-con
 | `--public-ip` | detected | public IPv4 address |
 | `--base-domain` | `<public-ip>.sslip.io` | the platform's domain. `off` means none. |
 | `--acme`, `--acme-email`, `--acme-directory`, `--acme-ca-file` | Let's Encrypt | certificate issuing |
+| `--acme-dns-listen` | `:53` | where SynCloud's own ACME challenge DNS server listens (UDP and TCP). It starts only after a challenge zone is set under Domains → Challenge server; a busy port is shown there, never fatal. Env `SYNCLOUD_ACME_DNS_LISTEN` |
+| `--cloudflare-api`, `--dns-resolvers` | Cloudflare's API, public resolvers | tests and labs: point domains at a fake Cloudflare and resolvers (`host:port`, comma-separated) |
 | `--public-http`, `--public-https` | `:80`, `:443` | Traefik's entrypoints |
 | `--public-ports` | `20000-20999` | the range of automatic public TCP/UDP service ports (kept for automatic ports: a chosen port can't be in it) |
 | `--public-db-ports` | `21000-21999` | the range of automatic public database ports (two per public database); must not overlap `--public-ports` |

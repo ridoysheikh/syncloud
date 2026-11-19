@@ -843,6 +843,87 @@
             }
           }
         }
+      },
+      "post": {
+        "operationId": "requestCertificate",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Ask for a certificate: several names, wildcards (*.example.com, *.sub.example.com), another authority, DNS validation. Issued by the loop; a manual DNS order shows the TXT records to create",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "names": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "authority": {
+                    "type": "string",
+                    "description": "default: the domain's, else the cluster's"
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "http-01",
+                      "dns-01",
+                      "self-signed"
+                    ],
+                    "description": "default: dns-01 for wildcards, else http-01. self-signed is for private or internal names: browsers do not trust it"
+                  },
+                  "keyType": {
+                    "type": "string",
+                    "enum": [
+                      "ecdsa-p256",
+                      "rsa-2048",
+                      "rsa-3072",
+                      "rsa-4096"
+                    ]
+                  },
+                  "fallback": {
+                    "type": "string"
+                  },
+                  "autoRenew": {
+                    "type": "boolean"
+                  },
+                  "days": {
+                    "type": "integer",
+                    "description": "origin certificates: validity in days"
+                  }
+                },
+                "required": [
+                  "names"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Certificate"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/certificates/{host}/renew": {
@@ -5389,7 +5470,25 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/ServiceDomain"
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/ServiceDomain"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "dns": {
+                                "$ref": "#/components/schemas/DomainCheck"
+                              },
+                              "wildcard": {
+                                "type": "boolean"
+                              },
+                              "certificate": {
+                                "$ref": "#/components/schemas/CertificatePlan"
+                              }
+                            }
+                          }
+                        ]
                       }
                     }
                   }
@@ -5404,7 +5503,7 @@
         "tags": [
           "services"
         ],
-        "summary": "Route a custom domain to the service (HTTPS certificate requested automatically once DNS points here)",
+        "summary": "Route a domain to the service: a host, or a wildcard (*.example.com, *.sub.example.com: one label). HTTPS certificate requested automatically once DNS points here; a wildcard needs a wildcard certificate (DNS validation)",
         "parameters": [
           {
             "name": "project",
@@ -5442,7 +5541,8 @@
                 ],
                 "properties": {
                   "host": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "a host, or *.name for a wildcard that matches one label (not the name itself, not a.b.name). An exact host beats a wildcard. Names under a registered domain need a grant for the project"
                   },
                   "port": {
                     "type": "string",
@@ -5478,6 +5578,9 @@
                     },
                     "dns": {
                       "$ref": "#/components/schemas/DomainCheck"
+                    },
+                    "certificate": {
+                      "$ref": "#/components/schemas/CertificatePlan"
                     }
                   }
                 }
@@ -5488,6 +5591,9 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -17199,6 +17305,2179 @@
           }
         }
       }
+    },
+    "/api/v1/dns/providers": {
+      "get": {
+        "operationId": "listDnsProviders",
+        "tags": [
+          "dns"
+        ],
+        "summary": "DNS providers (Cloudflare) connected for managing domains; the tokens are never returned",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DnsProvider"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createDnsProvider",
+        "tags": [
+          "dns"
+        ],
+        "summary": "Connect a DNS provider with an API token (checked before saving; sealed, write-only)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "cloudflare"
+                    ],
+                    "default": "cloudflare"
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "Cloudflare API token with Zone:Zone:Read and Zone:DNS:Edit"
+                  }
+                },
+                "required": [
+                  "name",
+                  "token"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsProvider"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/dns/providers/{id}": {
+      "get": {
+        "operationId": "getDnsProvider",
+        "tags": [
+          "dns"
+        ],
+        "summary": "A DNS provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsProvider"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateDnsProvider",
+        "tags": [
+          "dns"
+        ],
+        "summary": "Replace a provider's token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsProvider"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDnsProvider",
+        "tags": [
+          "dns"
+        ],
+        "summary": "Disconnect a provider: its domains stay, as manual ones, and certificates are kept",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/dns/providers/{id}/sync": {
+      "post": {
+        "operationId": "syncDnsProvider",
+        "tags": [
+          "dns"
+        ],
+        "summary": "Check the provider's token again",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsProvider"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/dns/providers/{id}/zones": {
+      "get": {
+        "operationId": "listDnsProviderZones",
+        "tags": [
+          "dns"
+        ],
+        "summary": "The zones a provider's token can manage, and which are registered as domains",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RemoteZone"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/dns/lookup": {
+      "get": {
+        "operationId": "queryDns",
+        "tags": [
+          "dns"
+        ],
+        "summary": "Ask public resolvers and the zone's authoritative servers for a name",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "the name to look up",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "record type (default A)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "via",
+            "in": "query",
+            "required": false,
+            "description": "public or authoritative (default both)",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "public",
+                "authoritative"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "answers": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DnsAnswer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/domains": {
+      "get": {
+        "operationId": "listDomains",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Registered domains",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "name contains",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "description": "only this provider's domains",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Domain"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "addDomain",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Register a domain, with a provider (managed) or without (manual: SynCloud shows the records to create). All projects may use it unless grants are given",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "description": "DNS provider id; omit for a manual domain"
+                  },
+                  "grants": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ZoneGrant"
+                    }
+                  },
+                  "wildcardPolicy": {
+                    "type": "string",
+                    "enum": [
+                      "on",
+                      "off"
+                    ]
+                  },
+                  "authority": {
+                    "type": "string"
+                  },
+                  "challengeZone": {
+                    "type": "string",
+                    "description": "delegate _acme-challenge to this registered domain (it needs a provider)"
+                  },
+                  "challengeBuiltin": {
+                    "type": "boolean",
+                    "description": "use SynCloud's own challenge server for _acme-challenge"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Domain"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/domains/{zone}": {
+      "get": {
+        "operationId": "getDomain",
+        "tags": [
+          "domains"
+        ],
+        "summary": "A registered domain with its name servers, grants and what uses it",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Domain"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateDomain",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Change a domain's provider, wildcard policy, default authority or grants",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "description": "'' unlinks the provider"
+                  },
+                  "wildcardPolicy": {
+                    "type": "string",
+                    "enum": [
+                      "on",
+                      "off"
+                    ]
+                  },
+                  "authority": {
+                    "type": "string"
+                  },
+                  "grants": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ZoneGrant"
+                    }
+                  },
+                  "challengeZone": {
+                    "type": "string",
+                    "description": "delegate _acme-challenge to this registered domain; '' stops delegating"
+                  },
+                  "challengeBuiltin": {
+                    "type": "boolean",
+                    "description": "use SynCloud's own challenge server for _acme-challenge (the server must be set up)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Domain"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeDomain",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Stop managing a domain (nothing is deleted at the provider). Refused while services or certificates use it, unless force=true",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "description": "confirm removing a domain that is in use",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/domains/{zone}/records": {
+      "get": {
+        "operationId": "listDomainRecords",
+        "tags": [
+          "domains"
+        ],
+        "summary": "A domain's DNS records at its provider",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "record type",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "exact name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "name or content contains",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DnsRecord"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createDomainRecord",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Create a record. An exact duplicate, or a CNAME beside other records, is refused with the record in the way",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DnsRecordInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/domains/{zone}/records/{id}": {
+      "put": {
+        "operationId": "updateDomainRecord",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Change a record",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DnsRecordInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDomainRecord",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Delete a record. The address of a service domain needs force=true",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "description": "remove a record a service address depends on",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/domains/{zone}/records/point": {
+      "post": {
+        "operationId": "pointDomain",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Make a name reach the cluster: reconcile its A/AAAA records to the targets, with no duplicates. plan=true previews; replace=conflicts also removes records SynCloud did not create",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "plan",
+            "in": "query",
+            "required": false,
+            "description": "only show what would change",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "replace",
+            "in": "query",
+            "required": false,
+            "description": "'conflicts' removes other records that are in the way",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "conflicts"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "targets": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "IP addresses (default: the project's load balancers, else this controller)"
+                  },
+                  "project": {
+                    "type": "string"
+                  },
+                  "proxied": {
+                    "type": "boolean"
+                  },
+                  "ttl": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PointResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/domains/{zone}/records/cleanup": {
+      "post": {
+        "operationId": "cleanupDomainRecords",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Find exact duplicate records and leftover _acme-challenge records; apply=true removes the duplicates and the challenge records SynCloud created (other tools' are only listed)",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "apply",
+            "in": "query",
+            "required": false,
+            "description": "remove what was found",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "duplicates": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DnsRecord"
+                      }
+                    },
+                    "challenges": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DnsRecord"
+                      }
+                    },
+                    "removed": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificates/{id}": {
+      "get": {
+        "operationId": "getCertificate",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "A certificate with its names, issuer, expiry, the hosts it serves and the order in progress (the TXT records to create)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Certificate"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateCertificate",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Change auto-renew, the authority or key type (from the next issuance), the fallback authority, alert days and pinned hosts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "autoRenew": {
+                    "type": "boolean"
+                  },
+                  "authority": {
+                    "type": "string"
+                  },
+                  "keyType": {
+                    "type": "string"
+                  },
+                  "fallback": {
+                    "type": "string"
+                  },
+                  "alertDays": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "pinnedHosts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Certificate"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteCertificate",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Delete a certificate asked for. A wildcard host served only by it needs force=true",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "description": "delete although a wildcard host loses its certificate",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificates/{id}/verify": {
+      "post": {
+        "operationId": "verifyCertificate",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Check the order's TXT records now and go on when they are all visible",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Certificate"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificates/{id}/reissue": {
+      "post": {
+        "operationId": "reissueCertificate",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Change the names and order again; the old certificate serves until the new one is valid",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "names": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "names"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificates/{id}/revoke": {
+      "post": {
+        "operationId": "revokeCertificate",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Revoke at the authority (ACME), or stop serving an imported certificate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Certificate"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificates/{id}/chain": {
+      "get": {
+        "operationId": "getCertificateChain",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "The certificate chain as PEM (public: no key)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificates/{id}/events": {
+      "get": {
+        "operationId": "listCertificateEvents",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "A certificate's history: ordered, challenge, issued, renewed, failed, revoked, imported, replaced, exported",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CertificateEvent"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificates/{id}/bundle": {
+      "get": {
+        "operationId": "exportCertificate",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "The chain and the PRIVATE KEY, for an app that terminates TLS itself. Allowed only with certificate:ExportCertificate; audited; 10 an hour",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "certificate": {
+                      "type": "string"
+                    },
+                    "privateKey": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificates/import": {
+      "post": {
+        "operationId": "importCertificate",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Bring in a certificate from a provider: the chain and the private key (PEM, or a PKCS#12 file). The key must match; an expired one is refused; replace keeps the place of an earlier one",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chain": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "passphrase": {
+                    "type": "string"
+                  },
+                  "pkcs12": {
+                    "type": "string",
+                    "description": "base64 of a .p12/.pfx"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "replace": {
+                    "type": "string",
+                    "description": "the id of the certificate this replaces"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificate-requests": {
+      "get": {
+        "operationId": "listCertificateRequests",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Requests (CSR) waiting for the provider's signed certificate",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CertificateRequest"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCertificateRequest",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Make a key and a CSR for names: give the CSR to the provider; the key never leaves",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "names": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "keyType": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "names"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificate-requests/{id}/complete": {
+      "post": {
+        "operationId": "completeCertificateRequest",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Upload what the provider signed for a request",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chain": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "chain"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificate-requests/{id}": {
+      "delete": {
+        "operationId": "deleteCertificateRequest",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Discard a request and its key",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificate-authorities": {
+      "get": {
+        "operationId": "listCertificateAuthorities",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Certificate authorities: Let's Encrypt (default), staging, the ones added, and the presets that can be added",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CertificateAuthority"
+                      }
+                    },
+                    "presets": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CertificateAuthorityPreset"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCertificateAuthority",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Add an authority: a preset or any ACME directory, with its external account binding (key id and HMAC key, sealed), or a Cloudflare origin CA",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "preset": {
+                    "type": "string"
+                  },
+                  "directoryUrl": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "eabKid": {
+                    "type": "string"
+                  },
+                  "eabHmac": {
+                    "type": "string",
+                    "description": "base64 or base64url, as the provider shows it"
+                  },
+                  "keyType": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "acme",
+                      "cloudflare-origin"
+                    ]
+                  },
+                  "provider": {
+                    "type": "string",
+                    "description": "cloudflare-origin: the DNS provider id"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateAuthority"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificate-authorities/{id}": {
+      "get": {
+        "operationId": "getCertificateAuthority",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "One authority (its binding key is never returned)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateAuthority"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateCertificateAuthority",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Change an authority, or make it the default or the fallback",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "directoryUrl": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "eabKid": {
+                    "type": "string"
+                  },
+                  "eabHmac": {
+                    "type": "string"
+                  },
+                  "keyType": {
+                    "type": "string"
+                  },
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "fallback": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateAuthority"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteCertificateAuthority",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Remove an authority nobody uses",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/certificate-authorities/{id}/test": {
+      "post": {
+        "operationId": "testCertificateAuthority",
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Register the account at the authority (with its binding) and show the result",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateAuthority"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/domains/{zone}/challenge": {
+      "get": {
+        "operationId": "getDomainChallenge",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Where the _acme-challenge TXT record of a name goes (direct, delegated by a CNAME, or by hand), and whether the delegating CNAME is in place",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "a name under the domain, or *.name (default: the domain)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChallengeRoute"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/domains/{zone}/challenge/delegation": {
+      "post": {
+        "operationId": "delegateDomainChallenge",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Create the CNAME that delegates a name's _acme-challenge to the domain's validation domain (needs a provider on the domain; otherwise the response shows the CNAME to create by hand). replace=conflicts removes other records on that name",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "a name under the domain, or *.name (default: the domain)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "replace",
+            "in": "query",
+            "required": false,
+            "description": "'conflicts' also removes records SynCloud did not create that are in the way",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "conflicts"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChallengeRoute"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/domains/challenge-server": {
+      "get": {
+        "operationId": "getChallengeServer",
+        "tags": [
+          "domains"
+        ],
+        "summary": "SynCloud's own ACME challenge DNS server: its zone, whether it listens, the records to create so the internet reaches it, and the domains it answers for",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChallengeServer"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateChallengeServer",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Set the challenge zone (a name below a domain you own, like acme.example.com); '' switches the server off. It answers TXT for that zone only: it is not a general name server",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "zone": {
+                    "type": "string"
+                  },
+                  "ns": {
+                    "type": "string",
+                    "description": "default: <first label>-ns.<rest of the zone>"
+                  },
+                  "ip": {
+                    "type": "string",
+                    "description": "default: this controller's public address"
+                  }
+                },
+                "required": [
+                  "zone"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChallengeServer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/domains/challenge-server/records": {
+      "post": {
+        "operationId": "createChallengeServerRecords",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Create the A and NS records that point the internet at the challenge server, in the domains that have a provider (the others are listed under needed). replace=conflicts also removes records that are in the way",
+        "parameters": [
+          {
+            "name": "replace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "conflicts"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "created": {
+                      "type": "integer"
+                    },
+                    "server": {
+                      "$ref": "#/components/schemas/ChallengeServer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/domains/challenge-server/check": {
+      "post": {
+        "operationId": "checkChallengeServer",
+        "tags": [
+          "domains"
+        ],
+        "summary": "Test the challenge server from the outside: it listens, the NS record and its address are visible, and a probe value comes back through public resolvers (port 53 is open)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChallengeServerCheck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -17903,7 +20182,10 @@
               "pending",
               "failed",
               "rate_limited",
-              "self_signed"
+              "self_signed",
+              "awaiting_dns",
+              "verifying",
+              "revoked"
             ]
           },
           "notAfter": {
@@ -17924,6 +20206,119 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "description": "the key: the host of an automatic certificate, cert_\u2026 for one asked for"
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "wildcard": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "acme",
+              "imported",
+              "origin-ca",
+              "self-signed"
+            ]
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "http-01",
+              "dns-01",
+              "import",
+              "origin-ca",
+              "self-signed"
+            ]
+          },
+          "managed": {
+            "type": "boolean",
+            "description": "asked for by a person (not made for a route)"
+          },
+          "zone": {
+            "type": "string"
+          },
+          "authorityId": {
+            "type": "string"
+          },
+          "authority": {
+            "type": "string"
+          },
+          "fallbackId": {
+            "type": "string"
+          },
+          "issuerName": {
+            "type": "string"
+          },
+          "keyType": {
+            "type": "string",
+            "enum": [
+              "ecdsa-p256",
+              "rsa-2048",
+              "rsa-3072",
+              "rsa-4096"
+            ]
+          },
+          "autoRenew": {
+            "type": "boolean"
+          },
+          "notBefore": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "serial": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "revokedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "alertDays": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "pinnedHosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "trusted": {
+            "type": "boolean",
+            "description": "browsers trust it"
+          },
+          "usedBy": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "the hosts it serves"
+          },
+          "daysLeft": {
+            "type": "integer"
+          },
+          "order": {
+            "$ref": "#/components/schemas/CertificateOrder"
           }
         }
       },
@@ -23708,6 +26103,775 @@
           },
           "portName": {
             "type": "string"
+          }
+        }
+      },
+      "DnsProvider": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "cloudflare"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "error"
+            ]
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "domains": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ZoneGrant": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "a project name, or * for all projects"
+          },
+          "suffix": {
+            "type": "string",
+            "description": "the domain, or a name under it (default: the whole domain)"
+          },
+          "wildcards": {
+            "type": "boolean",
+            "description": "may use *.name hosts"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      },
+      "Domain": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "managed",
+              "manual"
+            ]
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "nameServers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "wildcardPolicy": {
+            "type": "string",
+            "enum": [
+              "on",
+              "off"
+            ],
+            "description": "on: one wildcard certificate (the domain and *.domain) covers the names under it"
+          },
+          "authorityId": {
+            "type": "string",
+            "description": "the domain's default certificate authority ('' = the cluster's)"
+          },
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZoneGrant"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "use": {
+            "type": "object",
+            "properties": {
+              "services": {
+                "type": "integer"
+              },
+              "certificates": {
+                "type": "integer"
+              }
+            }
+          },
+          "challengeZone": {
+            "type": "string",
+            "description": "the domain whose provider holds this domain's _acme-challenge records: _acme-challenge.<name> is a CNAME to a name there"
+          },
+          "challengeBuiltin": {
+            "type": "boolean",
+            "description": "answer _acme-challenge with SynCloud's own challenge server even though the domain has a provider (a domain without one uses it anyway while it is on)"
+          }
+        }
+      },
+      "RemoteZone": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "nameServers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "registered": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DnsRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME",
+              "TXT",
+              "MX",
+              "SRV",
+              "CAA",
+              "NS"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "ttl": {
+            "type": "integer",
+            "description": "seconds; 1 = automatic"
+          },
+          "proxied": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "managed": {
+            "type": "boolean",
+            "description": "created by SynCloud"
+          }
+        }
+      },
+      "DnsRecordInput": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME",
+              "TXT",
+              "MX",
+              "SRV",
+              "CAA",
+              "NS"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "the full name, a label under the domain, or @ for the domain itself"
+          },
+          "content": {
+            "type": "string"
+          },
+          "ttl": {
+            "type": "integer"
+          },
+          "proxied": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "name",
+          "content"
+        ]
+      },
+      "DnsPlanStep": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "keep",
+              "update",
+              "delete"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "missing",
+              "ok",
+              "duplicate",
+              "stale",
+              "conflict",
+              "settings"
+            ]
+          },
+          "record": {
+            "$ref": "#/components/schemas/DnsRecord"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "needsConfirm": {
+            "type": "boolean",
+            "description": "removes a record SynCloud did not create: applied only with replace=conflicts"
+          }
+        }
+      },
+      "PointResult": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DnsPlanStep"
+                }
+              }
+            }
+          },
+          "applied": {
+            "type": "object",
+            "properties": {
+              "Created": {
+                "type": "integer"
+              },
+              "Updated": {
+                "type": "integer"
+              },
+              "Deleted": {
+                "type": "integer"
+              },
+              "Skipped": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DnsPlanStep"
+                }
+              }
+            }
+          },
+          "manual": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsRecord"
+            },
+            "description": "a domain without a provider: the records to create by hand"
+          }
+        }
+      },
+      "DnsAnswer": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "public",
+              "authoritative"
+            ]
+          },
+          "rcode": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ttl": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "CertificateChallenge": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "the TXT record's full name, e.g. _acme-challenge.sub.example.com for *.sub.example.com"
+          },
+          "value": {
+            "type": "string"
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "wildcard": {
+            "type": "boolean"
+          },
+          "auto": {
+            "type": "boolean",
+            "description": "SynCloud writes and removes it"
+          },
+          "present": {
+            "type": "boolean",
+            "description": "public resolvers show it"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "delegated",
+              "builtin",
+              "manual"
+            ],
+            "description": "delegated: the name is a CNAME to target; SynCloud writes the TXT there"
+          },
+          "target": {
+            "type": "string",
+            "description": "delegated: where the CNAME points"
+          },
+          "cnameOk": {
+            "type": "boolean",
+            "description": "delegated: public resolvers show the CNAME"
+          },
+          "cnameManaged": {
+            "type": "boolean",
+            "description": "delegated: SynCloud creates the CNAME itself"
+          }
+        }
+      },
+      "CertificateOrder": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "awaiting_dns",
+              "verifying",
+              "issuing"
+            ]
+          },
+          "manual": {
+            "type": "boolean"
+          },
+          "challenges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CertificateChallenge"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lastCheckedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lastError": {
+            "type": "string"
+          }
+        }
+      },
+      "CertificateEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "certificate": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          }
+        }
+      },
+      "CertificateAuthority": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "acme",
+              "cloudflare-origin"
+            ]
+          },
+          "preset": {
+            "type": "string"
+          },
+          "directoryUrl": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "eabKid": {
+            "type": "string"
+          },
+          "hasEab": {
+            "type": "boolean"
+          },
+          "keyType": {
+            "type": "string"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "new",
+              "error"
+            ]
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "builtin": {
+            "type": "boolean"
+          },
+          "trusted": {
+            "type": "boolean"
+          },
+          "default": {
+            "type": "boolean"
+          },
+          "fallback": {
+            "type": "boolean"
+          },
+          "certificates": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CertificateAuthorityPreset": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "directoryUrl": {
+            "type": "string"
+          },
+          "needsEab": {
+            "type": "boolean"
+          },
+          "hint": {
+            "type": "string"
+          }
+        }
+      },
+      "CertificateRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "keyType": {
+            "type": "string"
+          },
+          "csr": {
+            "type": "string",
+            "description": "PEM: give it to the provider"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CertificateImport": {
+        "type": "object",
+        "properties": {
+          "certificate": {
+            "$ref": "#/components/schemas/Certificate"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CertificatePlan": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "covered",
+              "issuing",
+              "automatic",
+              "needs_certificate"
+            ]
+          },
+          "certificateId": {
+            "type": "string"
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "validUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "ChallengeCNAME": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "present": {
+            "type": "boolean",
+            "description": "public resolvers answer with the target"
+          },
+          "seen": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "what they answer instead"
+          },
+          "managed": {
+            "type": "boolean",
+            "description": "SynCloud creates and keeps the CNAME (the domain has a provider)"
+          }
+        }
+      },
+      "ChallengeRoute": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "_acme-challenge.<host>: the name the certificate authority looks up"
+          },
+          "host": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "delegated",
+              "builtin",
+              "manual"
+            ],
+            "description": "direct: the TXT is written at the name; delegated: the name is a CNAME to a validation domain with a provider; builtin: the name is a CNAME to SynCloud's own challenge server; manual: you add the TXT"
+          },
+          "auto": {
+            "type": "boolean",
+            "description": "SynCloud writes and removes the TXT record"
+          },
+          "target": {
+            "type": "string"
+          },
+          "targetZone": {
+            "type": "string"
+          },
+          "cname": {
+            "$ref": "#/components/schemas/ChallengeCNAME"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "NeededRecord": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string",
+            "description": "the registered domain the record belongs in"
+          },
+          "managed": {
+            "type": "boolean",
+            "description": "that domain has a provider: SynCloud can create the record"
+          }
+        }
+      },
+      "ChallengeServer": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "zone": {
+            "type": "string",
+            "description": "the challenge zone, like acme.example.com ('' = off)"
+          },
+          "ns": {
+            "type": "string",
+            "description": "the name server host the zone's NS record names"
+          },
+          "ip": {
+            "type": "string",
+            "description": "this controller's public address"
+          },
+          "listen": {
+            "type": "string"
+          },
+          "listening": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "records": {
+            "type": "integer",
+            "description": "challenge values it holds right now"
+          },
+          "needed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NeededRecord"
+            }
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "registered domains whose challenges it answers"
+          }
+        }
+      },
+      "ChallengeServerCheck": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }

@@ -257,6 +257,10 @@ type Certificate struct {
 	Failures      int        `json:"failures"`
 	NextAttemptAt *time.Time `json:"nextAttemptAt"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
+	// Phase 28 (additive): the key, what it covers and whether somebody asked for it.
+	ID      string   `json:"id"`
+	Names   []string `json:"names"`
+	Managed bool     `json:"managed"`
 }
 
 func (c *Client) ListCertificates(ctx context.Context) ([]Certificate, error) {

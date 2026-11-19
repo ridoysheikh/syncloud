@@ -416,3 +416,58 @@ func TestPublicTCPPortTLSAndProxyProtocol(t *testing.T) {
 		t.Error("a raw port got a PROXY transport")
 	}
 }
+
+// Wildcard hosts (Phase 28): one label only, below every exact host.
+func TestWildcardHostRoutes(t *testing.T) {
+	p := &Provider{ControllerURL: "http://127.0.0.1:7070", BaseDomain: func() string { return "cloud.example.net" }, ProbeToken: "probe-secret",
+		ServiceRoutes: func() []ServiceRoute {
+			return []ServiceRoute{
+				{Name: "w-all", Host: "*.example.com", Servers: []string{"http://10.91.1.2:8080"}},
+				{Name: "w-api", Host: "*.api.example.com", Servers: []string{"http://10.91.1.3:8080"}},
+				{Name: "w-path", Host: "*.example.com", Path: "/app", Servers: []string{"http://10.91.1.4:8080"}},
+				{Name: "exact", Host: "a.example.com", Servers: []string{"http://10.91.1.5:8080"}},
+				{Name: "exact-short", Host: "a.io", Servers: []string{"http://10.91.1.6:8080"}},
+				{Name: "w-redirect", Host: "*.old.example.com", RedirectTo: "new.example.com", Servers: []string{"http://10.91.1.7:8080"}},
+			}
+		},
+	}
+	d := p.Config()
+	if r := d.HTTP.Routers["w-all"]; r.Rule != "HostRegexp(`^[^.]+\\.example\\.com$`)" || r.TLS == nil {
+		t.Fatalf("wildcard rule: %+v", r)
+	}
+	if r := d.HTTP.Routers["w-api"]; r.Rule != "HostRegexp(`^[^.]+\\.api\\.example\\.com$`)" {
+		t.Fatalf("nested wildcard rule: %+v", r)
+	}
+	if r := d.HTTP.Routers["w-path"]; r.Rule != "HostRegexp(`^[^.]+\\.example\\.com$`) && PathPrefix(`/app`)" {
+		t.Fatalf("wildcard with a path: %+v", r)
+	}
+	// Every exact route outranks every wildcard route, whatever their lengths; the longer wildcard outranks the shorter.
+	maxWild, minExact := 0, 1<<30
+	for _, n := range []string{"w-all", "w-api", "w-path", "w-redirect"} {
+		maxWild = max(maxWild, d.HTTP.Routers[n].Priority)
+		maxWild = max(maxWild, d.HTTP.Routers[n+ProbeSuffix].Priority)
+	}
+	for _, n := range []string{"exact", "exact-short"} {
+		minExact = min(minExact, d.HTTP.Routers[n].Priority)
+	}
+	if maxWild >= minExact {
+		t.Fatalf("a wildcard (%d) must rank below every exact host (%d)", maxWild, minExact)
+	}
+	if d.HTTP.Routers["w-path"].Priority <= d.HTTP.Routers["w-all"].Priority || d.HTTP.Routers["w-api"].Priority <= d.HTTP.Routers["w-all"].Priority {
+		t.Fatalf("a more specific wildcard ranks higher: all=%d api=%d path=%d", d.HTTP.Routers["w-all"].Priority, d.HTTP.Routers["w-api"].Priority, d.HTTP.Routers["w-path"].Priority)
+	}
+	if tw := d.HTTP.Routers["w-all"+ProbeSuffix]; tw.Priority <= d.HTTP.Routers["w-all"].Priority {
+		t.Fatalf("the probe twin ranks right above its route: %+v", tw)
+	}
+	// A wildcard redirect keeps the path.
+	if mw := d.HTTP.Middlewares["w-redirect-redirect"]; mw.RedirectRegex == nil || mw.RedirectRegex.Replacement != "https://new.example.com${1}" {
+		t.Fatalf("redirect: %+v", mw)
+	}
+	// Unsafe wildcard-looking hosts never become rules.
+	if got := hostRule("*.exa`mple.com"); strings.Contains(got, "`mple") {
+		t.Fatalf("rule injection: %s", got)
+	}
+	if got := hostRule("*"); got != "Host(`invalid.invalid`)" {
+		t.Fatalf("bare star: %s", got)
+	}
+}

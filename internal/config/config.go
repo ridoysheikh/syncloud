@@ -59,6 +59,11 @@ type Controller struct {
 	ACMEEmail     string
 	// ACMECAFile is an extra CA bundle trusted for the ACME server (e.g. Pebble in tests).
 	ACMECAFile string
+	// CloudflareAPI and DNSResolvers override Cloudflare's API and the resolvers used to check DNS (tests, labs).
+	CloudflareAPI string
+	DNSResolvers  string
+	// AcmeDNSListen is where SynCloud's own challenge server listens (UDP and TCP); it only listens once a challenge zone is set.
+	AcmeDNSListen string
 	// ControllerSchedulable lets the controller node run services (D3).
 	ControllerSchedulable bool
 	// RegistryPullHost overrides the registry host nodes pull "@registry/…"
@@ -120,6 +125,9 @@ func LoadController(args []string) (Controller, error) {
 	fs.StringVar(&c.ACMEDirectory, "acme-directory", env("SYNCLOUD_ACME_DIRECTORY", "https://acme-v02.api.letsencrypt.org/directory"), "ACME directory URL")
 	fs.StringVar(&c.ACMEEmail, "acme-email", env("SYNCLOUD_ACME_EMAIL", ""), "ACME account contact email (optional)")
 	fs.StringVar(&c.ACMECAFile, "acme-ca-file", env("SYNCLOUD_ACME_CA_FILE", ""), "extra CA bundle to trust for the ACME server")
+	fs.StringVar(&c.CloudflareAPI, "cloudflare-api", env("SYNCLOUD_CLOUDFLARE_API", ""), "Cloudflare API address (tests and labs; default: Cloudflare)")
+	fs.StringVar(&c.DNSResolvers, "dns-resolvers", env("SYNCLOUD_DNS_RESOLVERS", ""), "comma-separated resolvers (host:port) for DNS lookups and checks (default: public resolvers)")
+	fs.StringVar(&c.AcmeDNSListen, "acme-dns-listen", env("SYNCLOUD_ACME_DNS_LISTEN", ":53"), "address of SynCloud's own ACME challenge DNS server (UDP and TCP); it listens only after a challenge zone is set under Domains")
 	ctlSched := fs.String("controller-schedulable", env("SYNCLOUD_CONTROLLER_SCHEDULABLE", ""), "run services on the controller node: 1 or 0 (default 0, dev 1)")
 	fs.StringVar(&c.RegistryPullHost, "registry-pull-host", env("SYNCLOUD_REGISTRY_PULL_HOST", ""), "registry host nodes pull @registry images from (default registry.<base-domain>)")
 	regInsecure := fs.String("registry-insecure", env("SYNCLOUD_REGISTRY_INSECURE", ""), "builds push to the registry over HTTP: 1 or 0 (default 0, dev 1)")

@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"slices"
@@ -40,13 +42,18 @@ func (s *Server) checkDomain(ctx context.Context, project, host string) domainCh
 	for _, ip := range c.Targets {
 		records = append(records, host+". A "+ip)
 	}
+	// A wildcard is checked with a name nobody has made: a random label below it.
+	probe := host
+	if domain.IsWildcardHost(host) {
+		probe = "syn-check-" + randLabel() + "." + strings.TrimPrefix(host, "*.")
+	}
 	c.Record = strings.Join(records, "\n")
 	if len(c.Targets) > 0 {
 		c.Expected = c.Targets[0]
 	}
 	rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	_, addrs := domain.Resolves(rctx, host, c.Expected)
+	_, addrs := domain.Resolves(rctx, probe, c.Expected)
 	if addrs != nil {
 		c.Addresses = addrs
 	}
@@ -72,11 +79,13 @@ func (s *Server) handleListServiceDomains(w http.ResponseWriter, r *http.Request
 	}
 	type item struct {
 		store.Domain
-		DNS domainCheck `json:"dns"`
+		DNS         domainCheck `json:"dns"`
+		Wildcard    bool        `json:"wildcard"`
+		Certificate any         `json:"certificate"`
 	}
 	out := make([]item, 0, len(ds))
 	for _, d := range ds {
-		out = append(out, item{Domain: d, DNS: s.checkDomain(r.Context(), sv.Project, d.Host)})
+		out = append(out, item{Domain: d, DNS: s.checkDomain(r.Context(), sv.Project, d.Host), Wildcard: domain.IsWildcardHost(d.Host), Certificate: s.certPlan(d.Host)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
@@ -99,14 +108,20 @@ func (s *Server) handleAddServiceDomain(w http.ResponseWriter, r *http.Request) 
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	host, err := domain.Normalize(req.Host)
+	host, wildcard, err := domain.NormalizeHost(req.Host)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
 		return
 	}
-	if s.domains != nil {
-		if base := s.domains.Base(); base != "" && (host == base || host == domain.RegistryHost(base)) {
-			writeError(w, http.StatusBadRequest, CodeBadRequest, host+" is used by the platform")
+	if msg := s.reservedHost(host, wildcard); msg != "" {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, msg)
+		return
+	}
+	// A name under a registered domain needs a grant for the project (names
+	// outside every registered domain are free, as before).
+	if s.dns != nil {
+		if err := s.dns.Allowed(r.Context(), sv.Project, host); err != nil {
+			writeError(w, http.StatusForbidden, CodeForbidden, err.Error())
 			return
 		}
 	}
@@ -124,7 +139,7 @@ func (s *Server) handleAddServiceDomain(w http.ResponseWriter, r *http.Request) 
 	}
 	u, _ := currentUser(r.Context())
 	s.audit(r, u.ID, "service:AddDomain", "srn:syncloud:service/"+sv.Project+"/"+sv.Environment+"/"+sv.Name, map[string]any{"host": host, "path": d.Path, "redirectTo": d.RedirectTo})
-	writeJSON(w, http.StatusCreated, map[string]any{"domain": d, "dns": s.checkDomain(r.Context(), sv.Project, host)})
+	writeJSON(w, http.StatusCreated, map[string]any{"domain": d, "dns": s.checkDomain(r.Context(), sv.Project, host), "certificate": s.certPlan(host)})
 }
 
 func (s *Server) handleRemoveServiceDomain(w http.ResponseWriter, r *http.Request) {
@@ -148,11 +163,51 @@ func (s *Server) handleRemoveServiceDomain(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// reservedHost says why a host cannot be a service's domain: the platform's
+// own names, and wildcards that would cover them.
+func (s *Server) reservedHost(host string, wildcard bool) string {
+	if s.domains == nil {
+		return ""
+	}
+	base := s.domains.Base()
+	if base == "" {
+		return ""
+	}
+	reserved := []string{base, domain.RegistryHost(base), domain.GitHost(base), "agent." + base, "db." + base}
+	name := strings.TrimPrefix(host, "*.")
+	for _, p := range reserved {
+		if !wildcard && host == p {
+			return host + " is used by the platform"
+		}
+		if wildcard && (name == p || strings.HasSuffix(p, "."+name)) {
+			return host + " would cover " + p + ", which the platform uses"
+		}
+	}
+	if !wildcard && strings.HasSuffix(host, ".db."+base) {
+		return host + " is under db." + base + ", which the platform uses for databases"
+	}
+	return ""
+}
+
+// certPlan says how a host gets its certificate.
+func (s *Server) certPlan(host string) any {
+	if s.certs == nil {
+		return nil
+	}
+	return s.certs.PlanFor(host)
+}
+
 func (s *Server) handleCheckDomain(w http.ResponseWriter, r *http.Request) {
-	host, err := domain.Normalize(r.URL.Query().Get("host"))
+	host, _, err := domain.NormalizeHost(r.URL.Query().Get("host"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, s.checkDomain(r.Context(), r.URL.Query().Get("project"), host))
+}
+
+func randLabel() string {
+	b := make([]byte, 5)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }

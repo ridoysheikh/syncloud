@@ -393,7 +393,8 @@ func (p *Provider) ConfigFor(sc Scope) Dynamic {
 		if retry && !r.OwnRetry {
 			chain = append(chain, mwRetry)
 		}
-		rule := host(r.Host)
+		rule := hostRule(r.Host)
+		wild := strings.HasPrefix(r.Host, "*.")
 		if r.Path != "" {
 			rule += " && " + pathPrefix(r.Path)
 			if r.StripPrefix {
@@ -436,6 +437,9 @@ func (p *Provider) ConfigFor(sc Scope) Dynamic {
 			pr := Router{Rule: "(" + rule + ") && Header(`" + ProbeHeader + "`, `" + p.ProbeToken + "`)",
 				EntryPoints: web, Middlewares: free, Service: name}
 			pr.Priority = len(pr.Rule) * 10
+			if wild {
+				pr.Priority = wildcardPriority(len(rule)) + 3
+			}
 			if base != "" {
 				pr.EntryPoints, pr.TLS = websecure, &RouterTLS{}
 			}
@@ -445,6 +449,9 @@ func (p *Provider) ConfigFor(sc Scope) Dynamic {
 		// here in tens) so a route's twins rank right above it and below
 		// any longer rule on the same host.
 		prio := len(rule) * 10
+		if wild {
+			prio = wildcardPriority(len(rule)) // below every exact host
+		}
 		add := func(name, rule string, mws []string, prio int) {
 			if base == "" {
 				d.HTTP.Routers[name] = Router{Rule: rule, Priority: prio, EntryPoints: web, Middlewares: mws, Service: r.Name}
@@ -619,6 +626,23 @@ func hostSNI(h string) string {
 }
 
 var hostSafe = regexp.MustCompile(`^[a-z0-9.-]+$`)
+
+var wildHostSafe = regexp.MustCompile(`^\*\.[a-z0-9.-]+$`)
+
+// hostRule is host for the host of a service's domain, which may be a
+// wildcard (*.example.com): one label only, so the rule matches what the
+// wildcard certificate covers.
+func hostRule(h string) string {
+	if !wildHostSafe.MatchString(h) {
+		return host(h)
+	}
+	return "HostRegexp(`^[^.]+\\." + strings.ReplaceAll(strings.TrimPrefix(h, "*."), ".", "\\.") + "$`)"
+}
+
+// wildcardPriority ranks a wildcard route among wildcard routes (the longer
+// rule, the more specific) in a band below the shortest exact rule's, so an
+// exact host always beats a wildcard whatever their lengths.
+func wildcardPriority(ruleLen int) int { return 10 + min(ruleLen, 95) }
 
 var pathSafe = regexp.MustCompile(`^(/[A-Za-z0-9._~!$&'()*+,;=:@%-]+)+$`)
 

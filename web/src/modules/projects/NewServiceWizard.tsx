@@ -213,6 +213,11 @@ export function NewServiceWizard() {
           await api("PUT", `${path}/routing`, { ports: routing });
         }
         if (policy) await api("PUT", `${path}/autoscaling`, policy);
+        // The chosen domain: refused (no grant, taken) leaves no service behind either.
+        const http = f.network.ports.find((p) => p.kind === "http");
+        if (f.network.exposure === "public" && f.network.domain && http) {
+          await api("POST", `${path}/domains`, { host: f.network.domain, port: http.name });
+        }
       } catch (e) {
         await api("DELETE", path).catch(() => {});
         throw e;

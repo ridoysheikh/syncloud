@@ -25,6 +25,7 @@ var tagPrefix = map[string]string{
 	"traefik": "traefik", "traffic": "traffic", "quotas": "quota", "usage": "usage", "audit": "audit", "sts": "sts", "shell": "shell",
 	"docs": "docs", "nodepools": "nodepool", "storage": "s3",
 	"integrations": "integration", "gitserver": "gitserver", "databases": "database",
+	"domains": "domain", "dns": "dns", "certificates": "certificate",
 }
 
 type opInfo struct{ id, tag string }
@@ -92,11 +93,27 @@ var listOps = map[string]bool{
 	"usage:ExportUsage": true, "network:CheckReachability": true, "database:ListAllDatabases": true,
 	// The handler checks the exact resource (standalone or in a project).
 	"database:CreateDatabase": true,
+	"domain:ListDomains":      true, "dns:ListDnsProviders": true, "certificate:ListCertificateAuthorities": true,
+	"settings:ListCertificates": true,
+}
+
+// scopedOps act on one record or certificate whose name is in the request:
+// the first check only needs some policy to allow the action (conditions on
+// the record type are left out); the handler then decides on the exact
+// resource, so a key limited to TXT records under _acme-challenge works.
+var scopedOps = map[string]bool{
+	"domain:ListDomainRecords": true, "domain:CreateDomainRecord": true, "domain:UpdateDomainRecord": true, "domain:DeleteDomainRecord": true,
+	"domain:PointDomain": true, "certificate:RequestCertificate": true, "certificate:ImportCertificate": true,
+	"certificate:CreateCertificateRequest": true,
 }
 
 // Resource names.
 func projectSRN(p string) string { return "srn:syncloud:project/" + p }
 func envSRN(p, e string) string  { return projectSRN(p) + "/env/" + e }
+
+// domainSRN names a registered domain; recordSRN a record in it.
+func domainSRN(zone string) string       { return "srn:syncloud:domain/" + zone }
+func recordSRN(zone, name string) string { return domainSRN(zone) + "/record/" + name }
 func serviceSRN(p, e, s string) string {
 	return envSRN(p, e) + "/service/" + s
 }
@@ -172,6 +189,22 @@ func (s *Server) resourceOf(r *http.Request, action string) string {
 		return res
 	case strings.HasPrefix(path, "/api/v1/integrations/git/") && pv("connection") != "":
 		return "srn:syncloud:integration/git/" + pv("connection")
+	case strings.HasPrefix(path, "/api/v1/domains/") && pv("zone") != "":
+		return domainSRN(pv("zone"))
+	case strings.HasPrefix(path, "/api/v1/dns/providers"):
+		if id != "" {
+			return "srn:syncloud:dns-provider/" + id
+		}
+		return "srn:syncloud:dns-provider/*"
+	case strings.HasPrefix(path, "/api/v1/certificate-authorities"):
+		if id != "" {
+			return "srn:syncloud:certificate-authority/" + id
+		}
+		return "srn:syncloud:certificate-authority/*"
+	case strings.HasPrefix(path, "/api/v1/certificates/") && id != "":
+		return s.certificateSRN(id)
+	case strings.HasPrefix(path, "/api/v1/certificates/") && pv("host") != "":
+		return s.certificateSRN(pv("host")) // renew: a host, or the id of a certificate asked for
 	case strings.HasPrefix(path, "/api/v1/registry/"):
 		if repo := r.URL.Query().Get("repository"); repo != "" {
 			return "srn:syncloud:registry/" + repo
@@ -343,6 +376,42 @@ func (s *Server) canAny(r *http.Request, action string) bool {
 	return iam.AllowsAny(st, action, p.iamContext(r))
 }
 
+// canAnyRecord is canAny with the record-type conditions left for the handler.
+func (s *Server) canAnyRecord(r *http.Request, action string) bool {
+	p, ok := principal(r.Context())
+	if !ok {
+		return false
+	}
+	if p.isRoot() {
+		return true
+	}
+	st, err := s.statementsFor(r.Context(), p)
+	if err != nil {
+		return false
+	}
+	c := p.iamContext(r)
+	c.AnyRecordType = true
+	return iam.AllowsAny(st, action, c)
+}
+
+// decideRecord decides a DNS action on one record (its type is a condition).
+func (s *Server) decideRecord(r *http.Request, action, resource, recordType string) iam.Decision {
+	p, ok := principal(r.Context())
+	if !ok {
+		return iam.Decision{Reason: "not signed in"}
+	}
+	if p.isRoot() {
+		return iam.Decision{Allowed: true, Reason: "root account"}
+	}
+	st, err := s.statementsFor(r.Context(), p)
+	if err != nil {
+		return iam.Decision{Reason: "policies unavailable"}
+	}
+	c := p.iamContext(r)
+	c.RecordType = strings.ToUpper(recordType)
+	return iam.Evaluate(st, action, resource, c)
+}
+
 // canReadProject reports whether any read of a project's resources is allowed
 // (for events and listings that span many kinds of resource).
 func (s *Server) canReadService(r *http.Request, project, env, service string) bool {
@@ -364,6 +433,14 @@ func (s *Server) authorize(method, path string, next http.HandlerFunc) http.Hand
 		}
 		if s.requireMFAEnrollment(r, p) {
 			writeError(w, http.StatusForbidden, CodeMFARequired, "multi-factor authentication is required: enable it under IAM › My security first")
+			return
+		}
+		if scopedOps[action] {
+			if !s.canAnyRecord(r, action) {
+				s.denied(w, r, action, "srn:syncloud:*", "no policy allows "+action)
+				return
+			}
+			next(w, r.WithContext(context.WithValue(r.Context(), authzActionKey, action)))
 			return
 		}
 		if listOps[action] {

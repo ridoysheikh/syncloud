@@ -7,6 +7,7 @@ import { ChoiceCards, ChoiceField, Segmented } from "@/ui/choice";
 import { Select } from "@/ui/select";
 import { PortCheckHint, presets, usePortCheck, usePortsProblem } from "@/modules/compute/publicPorts";
 import { useBaseDomain } from "@/modules/databases/Network";
+import { DomainPicker } from "@/modules/domains/DomainPicker";
 import { NodeLimitEditor } from "./NodeLimits";
 import { ResourceFields, resourceError, resourceSummary, type ResourceForm } from "./Resources";
 
@@ -48,6 +49,8 @@ export interface NetworkForm {
   exposure: Exposure;
   ports: PortRow[];
   health: HealthForm;
+  /** An optional domain for the first HTTP port, added right after creation (Phase 28). */
+  domain?: string;
 }
 
 const row = (p: Partial<PortRow>): PortRow => ({
@@ -239,6 +242,15 @@ export function NetworkStep({
             A service can mix kinds: an HTTP admin page next to an MQTT port, for example. Labels, custom domains and
             allowed clients are set on the service's Networking tab once it exists.
           </p>
+        </div>
+      )}
+      {n.exposure === "public" && n.ports.some((p) => p.kind === "http") && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-muted text-xs">Domain (optional)</span>
+          <DomainPicker project={project} value={n.domain ?? ""} onChange={(domain) => domain !== (n.domain ?? "") && onChange({ ...n, domain })} />
+          <span className="text-faint text-xs">
+            The service also gets its generated address. Choose from your registered domains, or type a hostname; more domains, paths and redirects are set on the service's Networking tab.
+          </span>
         </div>
       )}
       {n.ports.length > 0 && <HealthEditor value={n.health} first={n.ports[0]!} onChange={(health) => onChange({ ...n, health })} />}
@@ -629,6 +641,11 @@ export function AddressesPreview({
               : `${r.protocol}://${name || "NAME"}.${env}.${project}.syncloud.internal:${r.container} (private)`}
         </span>
       ))}
+      {n.domain && (
+        <span className="font-mono break-all">
+          domain: https://{n.domain}
+        </span>
+      )}
       <span className="text-faint">
         Served by {lb}.
         {opensPorts && " Its Traefik restarts once to open the public ports, so HTTP traffic there pauses for a moment."}

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, RefreshCw, ShieldCheck } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { ExternalLink, Globe, RefreshCw, ShieldCheck } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { subscribe } from "@/lib/stream";
 import { PageHeader } from "@/ui/PageHeader";
@@ -43,7 +44,8 @@ export function DomainsPage() {
   const { data: settings } = useQuery({ queryKey: domainKey, queryFn: () => api<DomainSettings>("GET", "/settings/domain") });
   const { data: certs = [], isLoading } = useQuery({
     queryKey: certKey,
-    queryFn: async () => (await api<{ items: Certificate[] }>("GET", "/certificates")).items,
+    // Certificates somebody asked for are on Domains › SSL certificates.
+    queryFn: async () => (await api<{ items: (Certificate & { managed?: boolean })[] }>("GET", "/certificates")).items.filter((c) => !c.managed),
   });
   useEffect(
     () =>
@@ -80,7 +82,17 @@ export function DomainsPage() {
 
   return (
     <div className={cn("flex flex-col", gap)}>
-      <PageHeader crumbs={["Settings"]} title="Domains & certificates" />
+      <PageHeader
+        crumbs={["Settings"]}
+        title="Domains & certificates"
+        actions={
+          <Link to={"/domains" as string}>
+            <Button>
+              <Globe className="size-3.5" /> Manage domains and certificates
+            </Button>
+          </Link>
+        }
+      />
 
       {result && onNewHost && (
         <Alert tone="info">

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, CornerUpRight, Globe, Trash2 } from "lucide-react";
+import { ArrowRight, CornerUpRight, Globe, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { Panel } from "@/ui/Panel";
 import { DataTable } from "@/ui/DataTable";
@@ -17,6 +17,7 @@ import {
 import { ChoiceField, Segmented } from "@/ui/choice";
 import { confirmAction } from "@/ui/dialogs";
 import { Select } from "@/ui/select";
+import { DomainPicker } from "@/modules/domains/DomainPicker";
 
 interface DomainCheck {
   host: string;
@@ -41,6 +42,10 @@ interface ServiceDomain {
   redirectTo: string;
   createdAt: string;
   dns: DomainCheck;
+  /** A *.name host: one label (Phase 28). */
+  wildcard?: boolean;
+  /** How the host gets its certificate. */
+  certificate?: { state: "covered" | "issuing" | "automatic" | "needs_certificate"; note: string };
 }
 
 /** Custom domains of a service with live DNS status (§5.7, Phase 15c). */
@@ -60,6 +65,7 @@ export function DomainsPanel({
     refetchInterval: (q) =>
       q.state.data?.some((d) => !d.dns.ready) ? 10_000 : false,
   });
+  const project = path.split("/")[2] ?? "";
   const [host, setHost] = useState("");
   const [port, setPort] = useState("");
   const [mode, setMode] = useState<"route" | "redirect">("route");
@@ -109,15 +115,9 @@ export function DomainsPanel({
         onSubmit={submit}
         className="border-line flex flex-wrap items-end gap-1.5 border-b p-3"
       >
-        <Field label="Domain">
-          <Input
-            value={host}
-            onChange={(e) => setHost(e.target.value)}
-            placeholder="shop.example.com"
-            className="w-56 font-mono"
-            spellCheck={false}
-          />
-        </Field>
+        <div className="w-full">
+          <DomainPicker project={project} value={host} onChange={setHost} />
+        </div>
         <ChoiceField label="Action">
           <Segmented
             label="Action"
@@ -208,7 +208,8 @@ export function DomainsPanel({
           {
             header: "Domain",
             cell: (d) => (
-              <span className="font-mono break-all">
+              <span className="inline-flex items-center gap-1 font-mono break-all">
+                {d.wildcard && <Sparkles className="text-accent size-3 shrink-0" aria-label="wildcard" />}
                 {d.host}
                 {d.path}
               </span>
@@ -231,6 +232,16 @@ export function DomainsPanel({
                 )}
               </span>
             ),
+          },
+          {
+            header: "Certificate",
+            cell: (d) =>
+              d.certificate ? (
+                <span title={d.certificate.note} className="inline-flex items-center gap-1">
+                  <ShieldCheck className={d.certificate.state === "covered" ? "text-ok size-3.5" : "text-muted size-3.5"} />
+                  <span className="max-w-[16rem] truncate">{d.certificate.state === "covered" ? "valid" : d.certificate.state === "needs_certificate" ? "needs a wildcard certificate" : "automatic"}</span>
+                </span>
+              ) : null,
           },
           {
             header: "DNS",

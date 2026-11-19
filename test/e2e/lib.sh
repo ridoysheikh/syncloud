@@ -52,6 +52,9 @@ fi
 if [ "${WITH_ALERTS:-0}" = 1 ]; then
   CGO_ENABLED=0 GOOS=linux go build -o "$BIN/hooksink" ./test/e2e/hooksink
 fi
+if [ "${WITH_DOMAINSIM:-0}" = 1 ]; then
+  CGO_ENABLED=0 GOOS=linux go build -o "$BIN/domainsim" ./test/e2e/domainsim
+fi
 if [ "${WITH_METRICS:-0}" = 1 ]; then
   docker image inspect victoriametrics/victoria-metrics:v1.153.0 >/dev/null 2>&1 || docker pull -q victoriametrics/victoria-metrics:v1.153.0 >/dev/null
   docker save victoriametrics/victoria-metrics:v1.153.0 -o "$BIN/vmetrics.tar"
@@ -142,6 +145,15 @@ start_vlogs() {
 start_vmetrics() {
   x $E2E-ctl docker load -q -i /opt/sc/vmetrics.tar >/dev/null
   x $E2E-ctl docker run -d --name vmetrics -p 127.0.0.1:8428:8428 victoriametrics/victoria-metrics:v1.153.0 -storageDataPath=/vm -search.latencyOffset=0s >/dev/null
+}
+
+# start_domainsim runs the fake Cloudflare, DNS server and ACME CA beside the
+# controller (CTL_FLAGS must point the controller at them: DOMAINSIM_FLAGS).
+DOMAINSIM_FLAGS="--cloudflare-api http://127.0.0.1:9100/client/v4 --dns-resolvers 127.0.0.1:9153 --acme-directory http://127.0.0.1:9101/directory"
+start_domainsim() {
+  x -d $E2E-ctl sh -c "/opt/sc/domainsim --control 0.0.0.0:9102 > /var/log/domainsim.log 2>&1"
+  for _ in $(seq 1 20); do x $E2E-ctl curl -fs 127.0.0.1:9102/sim/records >/dev/null 2>&1 && return 0; sleep 1; done
+  fail "domainsim did not start"
 }
 
 # start_traefik runs Traefik on the controller node like the system task does,

@@ -2,15 +2,10 @@ package certs
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"golang.org/x/crypto/acme"
@@ -18,79 +13,68 @@ import (
 
 const settingAccountKey = "acme.account_key"
 
-// acmeClient issues certificates over ACME with the HTTP-01 challenge.
-type acmeClient struct {
-	m *Manager
-
-	mu         sync.Mutex
-	client     *acme.Client
-	registered bool
+// issued is what an order yields.
+type issued struct {
+	chainPEM []byte
+	keyPEM   []byte
+	leaf     *x509.Certificate
 }
 
-func (a *acmeClient) get(ctx context.Context) (*acme.Client, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.client == nil {
-		key, err := a.accountKey(ctx)
-		if err != nil {
-			return nil, err
-		}
-		a.client = &acme.Client{Key: key, DirectoryURL: a.m.cfg.DirectoryURL, HTTPClient: a.m.cfg.HTTPClient, UserAgent: "syncloud"}
+// finalize waits for an order to be ready, sends the CSR and downloads the chain.
+func finalize(ctx context.Context, c *acme.Client, orderURI string, names []string, keyType string) (*issued, error) {
+	order, err := c.WaitOrder(ctx, orderURI)
+	if err != nil {
+		return nil, fmt.Errorf("wait order: %w", err)
 	}
-	if !a.registered {
-		acct := &acme.Account{}
-		if a.m.cfg.Email != "" {
-			acct.Contact = []string{"mailto:" + a.m.cfg.Email}
-		}
-		if _, err := a.client.Register(ctx, acct, acme.AcceptTOS); err != nil && !errors.Is(err, acme.ErrAccountAlreadyExists) {
-			return nil, fmt.Errorf("register ACME account: %w", err)
-		}
-		a.registered = true
-	}
-	return a.client, nil
-}
-
-// accountKey loads the ACME account key (sealed in settings), creating it once.
-func (a *acmeClient) accountKey(ctx context.Context) (*ecdsa.PrivateKey, error) {
-	st, box := a.m.st, a.m.box
-	if v, ok, err := st.GetSetting(ctx, settingAccountKey); err != nil {
-		return nil, err
-	} else if ok {
-		sealed, err := base64.StdEncoding.DecodeString(v)
-		if err != nil {
-			return nil, err
-		}
-		der, err := box.Open(sealed, []byte(settingAccountKey))
-		if err != nil {
-			return nil, err
-		}
-		return x509.ParseECPrivateKey(der)
-	}
-	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, keyPEM, err := newKey(keyType)
 	if err != nil {
 		return nil, err
 	}
-	der, err := x509.MarshalECPrivateKey(k)
+	csr, _, err := csrFor(names, key)
 	if err != nil {
 		return nil, err
 	}
-	return k, st.SetSetting(ctx, settingAccountKey, base64.StdEncoding.EncodeToString(box.Seal(der, []byte(settingAccountKey))))
+	return finalizeWith(ctx, c, order, orderURI, csr, keyPEM)
 }
 
-func (a *acmeClient) issue(ctx context.Context, host string) ([]byte, []byte, time.Time, error) {
-	c, err := a.get(ctx)
+func finalizeWith(ctx context.Context, c *acme.Client, order *acme.Order, orderURI string, csr []byte, keyPEM []byte) (*issued, error) {
+	ders, _, err := c.CreateOrderCert(ctx, order.FinalizeURL, csr, true)
 	if err != nil {
-		return nil, nil, time.Time{}, err
+		// CreateOrderCert follows the Location header of the finalize response,
+		// which some servers omit; poll the order by its own URL instead.
+		o, werr := c.WaitOrder(ctx, orderURI)
+		if werr != nil || o.Status != acme.StatusValid || o.CertURL == "" {
+			return nil, fmt.Errorf("finalize: %w", err)
+		}
+		if ders, err = c.FetchCert(ctx, o.CertURL, true); err != nil {
+			return nil, fmt.Errorf("download certificate: %w", err)
+		}
 	}
-	order, err := c.AuthorizeOrder(ctx, acme.DomainIDs(host))
+	leaf, err := x509.ParseCertificate(ders[0])
 	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("new order: %w", err)
+		return nil, err
 	}
-	orderURI := order.URI
+	var chain []byte
+	for _, d := range ders {
+		chain = append(chain, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: d})...)
+	}
+	return &issued{chainPEM: chain, keyPEM: keyPEM, leaf: leaf}, nil
+}
+
+// issueHTTP orders a certificate for names over HTTP-01 (no wildcards).
+func (a *acmeClient) issueHTTP(ctx context.Context, au Authority, names []string, keyType string) (*issued, error) {
+	c, err := a.get(ctx, au)
+	if err != nil {
+		return nil, err
+	}
+	order, err := c.AuthorizeOrder(ctx, acme.DomainIDs(names...))
+	if err != nil {
+		return nil, fmt.Errorf("new order: %w", err)
+	}
 	for _, u := range order.AuthzURLs {
 		z, err := c.GetAuthorization(ctx, u)
 		if err != nil {
-			return nil, nil, time.Time{}, err
+			return nil, err
 		}
 		if z.Status == acme.StatusValid {
 			continue
@@ -102,59 +86,53 @@ func (a *acmeClient) issue(ctx context.Context, host string) ([]byte, []byte, ti
 			}
 		}
 		if chal == nil {
-			return nil, nil, time.Time{}, errors.New("the CA offered no http-01 challenge")
+			return nil, errors.New("the CA offered no http-01 challenge")
 		}
 		keyAuth, err := c.HTTP01ChallengeResponse(chal.Token)
 		if err != nil {
-			return nil, nil, time.Time{}, err
+			return nil, err
 		}
 		a.m.challenges.Store(chal.Token, keyAuth)
 		defer a.m.challenges.Delete(chal.Token)
 		if _, err := c.Accept(ctx, chal); err != nil {
-			return nil, nil, time.Time{}, fmt.Errorf("accept challenge: %w", err)
+			return nil, fmt.Errorf("accept challenge: %w", err)
 		}
 		if _, err := c.WaitAuthorization(ctx, z.URI); err != nil {
-			return nil, nil, time.Time{}, fmt.Errorf("http-01 validation of %s: %w", host, err)
+			return nil, fmt.Errorf("http-01 validation of %s: %w", z.Identifier.Value, err)
 		}
 	}
-	if order, err = c.WaitOrder(ctx, orderURI); err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("wait order: %w", err)
-	}
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{DNSNames: []string{host}}, key)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	ders, _, err := c.CreateOrderCert(ctx, order.FinalizeURL, csr, true)
-	if err != nil {
-		// CreateOrderCert follows the Location header of the finalize response,
-		// which some servers omit; poll the order by its own URL instead.
-		o, werr := c.WaitOrder(ctx, orderURI)
-		if werr != nil || o.Status != acme.StatusValid || o.CertURL == "" {
-			return nil, nil, time.Time{}, fmt.Errorf("finalize: %w", err)
-		}
-		if ders, err = c.FetchCert(ctx, o.CertURL, true); err != nil {
-			return nil, nil, time.Time{}, fmt.Errorf("download certificate: %w", err)
-		}
-	}
-	leaf, err := x509.ParseCertificate(ders[0])
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	var chain []byte
-	for _, d := range ders {
-		chain = append(chain, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: d})...)
-	}
-	kder, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	return chain, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kder}), leaf.NotAfter.UTC(), nil
+	return finalize(ctx, c, order.URI, names, keyType)
 }
 
+// issue is the automatic per-host certificate: HTTP-01 at the default
+// authority, then at the fallback one when the default is rate limited or
+// has failed repeatedly.
+func (a *acmeClient) issue(ctx context.Context, host string) ([]byte, []byte, time.Time, error) {
+	au, err := a.m.Authority(ctx, "")
+	if err != nil {
+		return nil, nil, time.Time{}, err
+	}
+	res, err := a.issueHTTP(ctx, au, []string{host}, au.KeyType)
+	if err != nil {
+		if fb := a.m.fallbackFor(ctx, host, "", err); fb != nil {
+			a.m.event(ctx, host, "fallback", "the first authority failed ("+err.Error()+"): trying "+fb.Name, "")
+			if res2, err2 := a.issueHTTP(ctx, *fb, []string{host}, fb.KeyType); err2 == nil {
+				a.m.noteAuthority(host, fb.ID)
+				return res2.chainPEM, res2.keyPEM, res2.leaf.NotAfter.UTC(), nil
+			}
+		}
+		return nil, nil, time.Time{}, err
+	}
+	a.m.noteAuthority(host, au.ID)
+	return res.chainPEM, res.keyPEM, res.leaf.NotAfter.UTC(), nil
+}
+
+// rateLimited says whether the CA refused for its rate limit, and until when.
+// The error may be wrapped ("new order: …").
 func rateLimited(err error) (time.Duration, bool) {
-	return acme.RateLimit(err)
+	var e *acme.Error
+	if errors.As(err, &e) {
+		return acme.RateLimit(e)
+	}
+	return 0, false
 }

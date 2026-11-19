@@ -53,6 +53,7 @@ const (
 	KeyMFAPresent     = "syn:MFAPresent"     // "true" | "false"
 	KeySourceIP       = "syn:SourceIp"       // the caller's address
 	KeyCredentialType = "syn:CredentialType" // session | token | access_key | role_session
+	KeyDnsRecordType  = "syn:DnsRecordType"  // A | AAAA | CNAME | TXT | MX | SRV | CAA | NS
 )
 
 var conditionOps = map[string]bool{
@@ -113,7 +114,7 @@ func (d Document) Validate() error {
 			}
 			for k, vs := range kv {
 				switch k {
-				case KeyMFAPresent, KeySourceIP, KeyCredentialType:
+				case KeyMFAPresent, KeySourceIP, KeyCredentialType, KeyDnsRecordType:
 				default:
 					return fmt.Errorf("%s: unknown condition key %q", where, k)
 				}
@@ -174,6 +175,11 @@ type Context struct {
 	MFA      bool
 	SourceIP string
 	CredType string
+	// RecordType is the DNS record type of the request; AnyRecordType says it
+	// is not known yet (the first check of a request that is decided later,
+	// record by record), so conditions on it are left for that decision.
+	RecordType    string
+	AnyRecordType bool
 }
 
 func (c Context) value(key string) string {
@@ -187,6 +193,8 @@ func (c Context) value(key string) string {
 		return c.SourceIP
 	case KeyCredentialType:
 		return c.CredType
+	case KeyDnsRecordType:
+		return c.RecordType
 	}
 	return ""
 }
@@ -197,6 +205,9 @@ func (s Statement) ConditionsHold(c Context) bool { return s.conditionsHold(c) }
 func (s Statement) conditionsHold(c Context) bool {
 	for op, kv := range s.Condition {
 		for k, vs := range kv {
+			if k == KeyDnsRecordType && c.AnyRecordType {
+				continue
+			}
 			v := c.value(k)
 			ok := false
 			switch op {

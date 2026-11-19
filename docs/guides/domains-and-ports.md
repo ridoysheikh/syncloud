@@ -21,6 +21,8 @@ synctl services routing web -p shop        # every port and how it's reached
 
 ## Custom domains
 
+> Register your domains under **Domains** to choose a domain and subdomain from a list, use wildcards (`*.example.com`), and manage their DNS records and certificates in one place: see [Domains, DNS and certificates](domains-dns-certificates.md). Typing any hostname here still works as before.
+
 Add a domain on the **Networking** tab, or with the CLI. The page shows the DNS record to create and checks it live. The certificate is issued (Let's Encrypt) as soon as DNS points at the cluster.
 
 ```sh

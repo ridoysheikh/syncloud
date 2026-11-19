@@ -4,6 +4,7 @@ import {
   Cpu,
   Database,
   FolderKanban,
+  Globe,
   GitBranch,
   HeartPulse,
   KeyRound,
@@ -42,7 +43,11 @@ import { QuotaPage, QuotasPage } from "./quota/QuotasPage";
 import { ApiPage } from "./api/ApiPage";
 import { NodesPage } from "./compute/NodesPage";
 import { NodePage } from "./compute/NodePage";
-import { EdgeNodesPage, NodePoolPage, NodePoolsPage } from "./compute/NodePoolsPage";
+import {
+  EdgeNodesPage,
+  NodePoolPage,
+  NodePoolsPage,
+} from "./compute/NodePoolsPage";
 import { NewProjectPage, ProjectsPage } from "./projects/ProjectsPage";
 import { ProjectPage } from "./projects/ProjectPage";
 import { NewServiceWizard } from "./projects/NewServiceWizard";
@@ -59,10 +64,18 @@ import { PlatformPage } from "./settings/PlatformPage";
 import { DomainsPage } from "./settings/DomainsPage";
 import { BackupsPage } from "./settings/BackupsPage";
 import { UpdatesPage } from "./settings/UpdatesPage";
-import { BucketPage, EndpointFormPage, EndpointPage, StoragePage } from "./storage/StoragePages";
+import {
+  BucketPage,
+  EndpointFormPage,
+  EndpointPage,
+  StoragePage,
+} from "./storage/StoragePages";
 import { TopologyPage } from "./network/TopologyPage";
 import { FirewallPage, FirewallPolicyPage } from "./network/FirewallPage";
-import { SecurityGroupPage, SecurityGroupsPage } from "./network/SecurityGroups";
+import {
+  SecurityGroupPage,
+  SecurityGroupsPage,
+} from "./network/SecurityGroups";
 import { IpamPage } from "./network/IpamPage";
 import { MiddlewarePage, RoutingPage } from "./network/RoutingPage";
 import { TraefikPage } from "./network/TraefikPage";
@@ -73,7 +86,22 @@ import { AlertsPage } from "./monitoring/AlertsPage";
 import { MetricsExplorerPage } from "./monitoring/MetricsExplorer";
 import { AlertRulePage } from "./monitoring/AlertRulePage";
 import { BuildsPage, GitSourcesPage } from "./git/GitPages";
-import { GitConnectionPage, GitConnectPage, IntegrationsPage } from "./integrations/IntegrationsPages";
+import {
+  GitConnectionPage,
+  GitConnectPage,
+  IntegrationsPage,
+} from "./integrations/IntegrationsPages";
+import { DomainsPage as ManagedDomainsPage } from "./domains/DomainsPage";
+import { AddDomainWizard } from "./domains/AddDomainWizard";
+import { DomainPage } from "./domains/DomainPage";
+import { ProviderFormPage, ProvidersPage } from "./domains/ProvidersPage";
+import { SslPage } from "./domains/SslPage";
+import { RequestCertificateWizard } from "./domains/RequestCertificateWizard";
+import { ImportCertificatePage } from "./domains/ImportCertificatePage";
+import { CertificatePage } from "./domains/CertificatePage";
+import { AuthoritiesPage, AuthorityFormPage } from "./domains/AuthoritiesPage";
+import { LookupPage } from "./domains/LookupPage";
+import { ChallengeServerPage } from "./domains/ChallengeServerPage";
 
 /** The module registry. The side nav and routes are built from this list. */
 export const modules: DashboardModule[] = [
@@ -93,15 +121,59 @@ export const modules: DashboardModule[] = [
     order: 5,
     pages: [
       { path: "/projects", label: "Projects", component: ProjectsPage },
-      { path: "/projects/quotas", label: "Quotas & usage", component: QuotasPage },
-      { path: "/projects/quotas/$project", label: "Quota", component: QuotaPage, hidden: true },
-      { path: "/projects/quotas/$project/$env", label: "Quota", component: QuotaPage, hidden: true },
-      { path: "/projects/new", label: "New project", component: NewProjectPage, hidden: true },
-      { path: "/projects/$project", label: "Project", component: ProjectPage, hidden: true },
-      { path: "/projects/$project/$env", label: "Project", component: ProjectPage, hidden: true },
-      { path: "/projects/$project/$env/new-service", label: "New service", component: NewServiceWizard, hidden: true },
-      { path: "/projects/$project/$env/services/$name", label: "Service", component: ServicePage, hidden: true },
-      { path: "/projects/$project/$env/services/$name/deployments/$id", label: "Deployment", component: DeploymentPage, hidden: true },
+      {
+        path: "/projects/quotas",
+        label: "Quotas & usage",
+        component: QuotasPage,
+      },
+      {
+        path: "/projects/quotas/$project",
+        label: "Quota",
+        component: QuotaPage,
+        hidden: true,
+      },
+      {
+        path: "/projects/quotas/$project/$env",
+        label: "Quota",
+        component: QuotaPage,
+        hidden: true,
+      },
+      {
+        path: "/projects/new",
+        label: "New project",
+        component: NewProjectPage,
+        hidden: true,
+      },
+      {
+        path: "/projects/$project",
+        label: "Project",
+        component: ProjectPage,
+        hidden: true,
+      },
+      {
+        path: "/projects/$project/$env",
+        label: "Project",
+        component: ProjectPage,
+        hidden: true,
+      },
+      {
+        path: "/projects/$project/$env/new-service",
+        label: "New service",
+        component: NewServiceWizard,
+        hidden: true,
+      },
+      {
+        path: "/projects/$project/$env/services/$name",
+        label: "Service",
+        component: ServicePage,
+        hidden: true,
+      },
+      {
+        path: "/projects/$project/$env/services/$name/deployments/$id",
+        label: "Deployment",
+        component: DeploymentPage,
+        hidden: true,
+      },
     ],
   },
   {
@@ -113,10 +185,29 @@ export const modules: DashboardModule[] = [
       { path: "/compute/tasks", label: "Tasks", component: TasksPage },
       { path: "/compute/jobs", label: "Jobs", component: JobsPage },
       { path: "/compute/nodes", label: "Nodes", component: NodesPage },
-      { path: "/compute/nodes/$name", label: "Node", component: NodePage, hidden: true },
-      { path: "/compute/node-pools", label: "Node Pools", component: NodePoolsPage },
-      { path: "/compute/node-pools/new", label: "New node pool", component: NodePoolPage, hidden: true },
-      { path: "/compute/node-pools/$name", label: "Node pool", component: NodePoolPage, hidden: true },
+      {
+        path: "/compute/nodes/$name",
+        label: "Node",
+        component: NodePage,
+        hidden: true,
+      },
+      {
+        path: "/compute/node-pools",
+        label: "Node Pools",
+        component: NodePoolsPage,
+      },
+      {
+        path: "/compute/node-pools/new",
+        label: "New node pool",
+        component: NodePoolPage,
+        hidden: true,
+      },
+      {
+        path: "/compute/node-pools/$name",
+        label: "Node pool",
+        component: NodePoolPage,
+        hidden: true,
+      },
     ],
   },
   {
@@ -128,18 +219,135 @@ export const modules: DashboardModule[] = [
       { path: "/network/traffic", label: "Traffic", component: TrafficPage },
       { path: "/network/traefik", label: "Traefik", component: TraefikPage },
       { path: "/network/routing", label: "Routing", component: RoutingPage },
-      { path: "/network/routing/middlewares/new", label: "New middleware", component: MiddlewarePage, hidden: true },
-      { path: "/network/routing/middlewares/$project/$name", label: "Middleware", component: MiddlewarePage, hidden: true },
-      { path: "/network/edge", label: "Load balancers", component: EdgeNodesPage },
+      {
+        path: "/network/routing/middlewares/new",
+        label: "New middleware",
+        component: MiddlewarePage,
+        hidden: true,
+      },
+      {
+        path: "/network/routing/middlewares/$project/$name",
+        label: "Middleware",
+        component: MiddlewarePage,
+        hidden: true,
+      },
+      {
+        path: "/network/edge",
+        label: "Load balancers",
+        component: EdgeNodesPage,
+      },
       { path: "/network/ports", label: "Ports", component: PortsPage },
       { path: "/network/topology", label: "Topology", component: TopologyPage },
-      { path: "/network/security-groups", label: "Security groups", component: SecurityGroupsPage },
-      { path: "/network/security-groups/new", label: "New security group", component: SecurityGroupPage, hidden: true },
-      { path: "/network/security-groups/$project/$group", label: "Security group", component: SecurityGroupPage, hidden: true },
+      {
+        path: "/network/security-groups",
+        label: "Security groups",
+        component: SecurityGroupsPage,
+      },
+      {
+        path: "/network/security-groups/new",
+        label: "New security group",
+        component: SecurityGroupPage,
+        hidden: true,
+      },
+      {
+        path: "/network/security-groups/$project/$group",
+        label: "Security group",
+        component: SecurityGroupPage,
+        hidden: true,
+      },
       { path: "/network/firewall", label: "Firewall", component: FirewallPage },
-      { path: "/network/firewall/policies/new", label: "New host policy", component: FirewallPolicyPage, hidden: true },
-      { path: "/network/firewall/policies/$id", label: "Host policy", component: FirewallPolicyPage, hidden: true },
+      {
+        path: "/network/firewall/policies/new",
+        label: "New host policy",
+        component: FirewallPolicyPage,
+        hidden: true,
+      },
+      {
+        path: "/network/firewall/policies/$id",
+        label: "Host policy",
+        component: FirewallPolicyPage,
+        hidden: true,
+      },
       { path: "/network/ipam", label: "IPAM & DNS", component: IpamPage },
+    ],
+  },
+  {
+    // Domains, their DNS records, and every SSL certificate (Phase 28).
+    id: "domains",
+    label: "Domains",
+    icon: Globe,
+    order: 22,
+    pages: [
+      { path: "/domains", label: "Domains", component: ManagedDomainsPage },
+      {
+        path: "/domains/certificates",
+        label: "SSL certificates",
+        component: SslPage,
+      },
+      {
+        path: "/domains/authorities",
+        label: "Authorities",
+        component: AuthoritiesPage,
+      },
+      {
+        path: "/domains/providers",
+        label: "DNS providers",
+        component: ProvidersPage,
+      },
+      {
+        path: "/domains/challenge-server",
+        label: "Challenge server",
+        component: ChallengeServerPage,
+      },
+      { path: "/domains/lookup", label: "DNS lookup", component: LookupPage },
+      {
+        path: "/domains/new",
+        label: "Add domain",
+        component: AddDomainWizard,
+        hidden: true,
+      },
+      {
+        path: "/domains/providers/new",
+        label: "Connect Cloudflare",
+        component: ProviderFormPage,
+        hidden: true,
+      },
+      {
+        path: "/domains/certificates/new",
+        label: "Request a certificate",
+        component: RequestCertificateWizard,
+        hidden: true,
+      },
+      {
+        path: "/domains/certificates/import",
+        label: "Import a certificate",
+        component: ImportCertificatePage,
+        hidden: true,
+      },
+      {
+        path: "/domains/certificates/$id",
+        label: "Certificate",
+        component: CertificatePage,
+        hidden: true,
+      },
+      {
+        path: "/domains/authorities/new",
+        label: "Add authority",
+        component: AuthorityFormPage,
+        hidden: true,
+      },
+      {
+        path: "/domains/authorities/$id",
+        label: "Authority",
+        component: AuthorityFormPage,
+        hidden: true,
+      },
+      {
+        path: "/domains/$zone",
+        label: "Domain",
+        component: DomainPage,
+        hidden: true,
+      },
     ],
   },
   {
@@ -156,10 +364,30 @@ export const modules: DashboardModule[] = [
     order: 40,
     pages: [
       { path: "/storage", label: "S3", component: StoragePage },
-      { path: "/storage/endpoints/new", label: "Add S3 endpoint", component: EndpointFormPage, hidden: true },
-      { path: "/storage/endpoints/$endpoint/edit", label: "Edit S3 endpoint", component: EndpointFormPage, hidden: true },
-      { path: "/storage/$endpoint", label: "S3 endpoint", component: EndpointPage, hidden: true },
-      { path: "/storage/$endpoint/$bucket", label: "Bucket", component: BucketPage, hidden: true },
+      {
+        path: "/storage/endpoints/new",
+        label: "Add S3 endpoint",
+        component: EndpointFormPage,
+        hidden: true,
+      },
+      {
+        path: "/storage/endpoints/$endpoint/edit",
+        label: "Edit S3 endpoint",
+        component: EndpointFormPage,
+        hidden: true,
+      },
+      {
+        path: "/storage/$endpoint",
+        label: "S3 endpoint",
+        component: EndpointPage,
+        hidden: true,
+      },
+      {
+        path: "/storage/$endpoint/$bucket",
+        label: "Bucket",
+        component: BucketPage,
+        hidden: true,
+      },
     ],
   },
   {
@@ -170,13 +398,48 @@ export const modules: DashboardModule[] = [
     permission: "database:ListAllDatabases",
     pages: [
       { path: "/databases", label: "Databases", component: DatabasesPage },
-      { path: "/databases/new", label: "New database", component: NewDatabaseWizard, hidden: true },
-      { path: "/databases/restore-archive", label: "Restore from another server", component: PgArchiveRestorePage, hidden: true },
-      { path: "/projects/$project/$env/new-database", label: "New database", component: NewDatabaseWizard, hidden: true },
-      { path: "/databases/$name", label: "Database", component: DatabasePage, hidden: true },
-      { path: "/databases/$name/roles/new", label: "New role", component: PgRolePage, hidden: true },
-      { path: "/databases/$name/restore", label: "Restore", component: PgRestorePage, hidden: true },
-      { path: "/databases/$name/roles/$role", label: "Role", component: PgRolePage, hidden: true },
+      {
+        path: "/databases/new",
+        label: "New database",
+        component: NewDatabaseWizard,
+        hidden: true,
+      },
+      {
+        path: "/databases/restore-archive",
+        label: "Restore from another server",
+        component: PgArchiveRestorePage,
+        hidden: true,
+      },
+      {
+        path: "/projects/$project/$env/new-database",
+        label: "New database",
+        component: NewDatabaseWizard,
+        hidden: true,
+      },
+      {
+        path: "/databases/$name",
+        label: "Database",
+        component: DatabasePage,
+        hidden: true,
+      },
+      {
+        path: "/databases/$name/roles/new",
+        label: "New role",
+        component: PgRolePage,
+        hidden: true,
+      },
+      {
+        path: "/databases/$name/restore",
+        label: "Restore",
+        component: PgRestorePage,
+        hidden: true,
+      },
+      {
+        path: "/databases/$name/roles/$role",
+        label: "Role",
+        component: PgRolePage,
+        hidden: true,
+      },
     ],
   },
   {
@@ -187,8 +450,16 @@ export const modules: DashboardModule[] = [
     permission: "registry:ListRepositories",
     pages: [
       { path: "/registry", label: "Dashboard", component: RegistryDashboard },
-      { path: "/registry/repos", label: "Repositories", component: RepositoriesPage },
-      { path: "/registry/upstreams", label: "Upstreams", component: UpstreamsPage },
+      {
+        path: "/registry/repos",
+        label: "Repositories",
+        component: RepositoriesPage,
+      },
+      {
+        path: "/registry/upstreams",
+        label: "Upstreams",
+        component: UpstreamsPage,
+      },
     ],
   },
   {
@@ -207,9 +478,23 @@ export const modules: DashboardModule[] = [
     icon: Plug,
     order: 62,
     pages: [
-      { path: "/integrations", label: "All integrations", component: IntegrationsPage },
-      { path: "/integrations/git/new", label: "Connect a Git provider", component: GitConnectPage, hidden: true },
-      { path: "/integrations/git/$name", label: "Git connection", component: GitConnectionPage, hidden: true },
+      {
+        path: "/integrations",
+        label: "All integrations",
+        component: IntegrationsPage,
+      },
+      {
+        path: "/integrations/git/new",
+        label: "Connect a Git provider",
+        component: GitConnectPage,
+        hidden: true,
+      },
+      {
+        path: "/integrations/git/$name",
+        label: "Git connection",
+        component: GitConnectionPage,
+        hidden: true,
+      },
     ],
   },
   {
@@ -219,7 +504,11 @@ export const modules: DashboardModule[] = [
     order: 70,
     pages: [
       { path: "/health", label: "Services", component: ServiceHealthPage },
-      { path: "/health/incidents", label: "Incidents", component: IncidentsPage },
+      {
+        path: "/health/incidents",
+        label: "Incidents",
+        component: IncidentsPage,
+      },
     ],
   },
   {
@@ -228,10 +517,24 @@ export const modules: DashboardModule[] = [
     icon: Activity,
     order: 80,
     pages: [
-      { path: "/monitoring/metrics", label: "Metrics", component: MetricsExplorerPage },
+      {
+        path: "/monitoring/metrics",
+        label: "Metrics",
+        component: MetricsExplorerPage,
+      },
       { path: "/monitoring/alerts", label: "Alerts", component: AlertsPage },
-      { path: "/monitoring/alerts/rules/new", label: "New alert rule", component: AlertRulePage, hidden: true },
-      { path: "/monitoring/alerts/rules/$id", label: "Alert rule", component: AlertRulePage, hidden: true },
+      {
+        path: "/monitoring/alerts/rules/new",
+        label: "New alert rule",
+        component: AlertRulePage,
+        hidden: true,
+      },
+      {
+        path: "/monitoring/alerts/rules/$id",
+        label: "Alert rule",
+        component: AlertRulePage,
+        hidden: true,
+      },
     ],
   },
   {
@@ -241,7 +544,12 @@ export const modules: DashboardModule[] = [
     order: 90,
     pages: [
       { path: "/developers", label: "API & CLI", component: ApiPage },
-      { path: "/device", label: "Sign in synctl", component: DevicePage, hidden: true },
+      {
+        path: "/device",
+        label: "Sign in synctl",
+        component: DevicePage,
+        hidden: true,
+      },
     ],
   },
   {
@@ -251,17 +559,57 @@ export const modules: DashboardModule[] = [
     order: 100,
     pages: [
       { path: "/iam/users", label: "Users", component: UsersPage },
-      { path: "/iam/users/new", label: "New user", component: NewUserPage, hidden: true },
-      { path: "/iam/users/$id", label: "User", component: UserPage, hidden: true },
+      {
+        path: "/iam/users/new",
+        label: "New user",
+        component: NewUserPage,
+        hidden: true,
+      },
+      {
+        path: "/iam/users/$id",
+        label: "User",
+        component: UserPage,
+        hidden: true,
+      },
       { path: "/iam/groups", label: "Groups", component: GroupsPage },
-      { path: "/iam/groups/new", label: "New group", component: GroupPage, hidden: true },
-      { path: "/iam/groups/$id", label: "Group", component: GroupPage, hidden: true },
+      {
+        path: "/iam/groups/new",
+        label: "New group",
+        component: GroupPage,
+        hidden: true,
+      },
+      {
+        path: "/iam/groups/$id",
+        label: "Group",
+        component: GroupPage,
+        hidden: true,
+      },
       { path: "/iam/roles", label: "Roles", component: RolesPage },
-      { path: "/iam/roles/new", label: "New role", component: RolePage, hidden: true },
-      { path: "/iam/roles/$id", label: "Role", component: RolePage, hidden: true },
+      {
+        path: "/iam/roles/new",
+        label: "New role",
+        component: RolePage,
+        hidden: true,
+      },
+      {
+        path: "/iam/roles/$id",
+        label: "Role",
+        component: RolePage,
+        hidden: true,
+      },
       { path: "/iam/policies", label: "Policies", component: PoliciesPage },
-      { path: "/iam/policies/new", label: "New policy", component: PolicyPage, hidden: true },
-      { path: "/iam/policies/$id", label: "Policy", component: PolicyPage, hidden: true },
+      {
+        path: "/iam/policies/new",
+        label: "New policy",
+        component: PolicyPage,
+        hidden: true,
+      },
+      {
+        path: "/iam/policies/$id",
+        label: "Policy",
+        component: PolicyPage,
+        hidden: true,
+      },
       { path: "/iam/keys", label: "Access keys", component: CredentialsPage },
       { path: "/iam/security", label: "My security", component: SecurityPage },
       { path: "/iam/audit", label: "Audit log", component: AuditPage },
@@ -275,7 +623,11 @@ export const modules: DashboardModule[] = [
     pages: [
       { path: "/settings/general", label: "General", component: GeneralPage },
       { path: "/settings/email", label: "Email", component: EmailPage },
-      { path: "/settings/platform", label: "Platform", component: PlatformPage },
+      {
+        path: "/settings/platform",
+        label: "Platform",
+        component: PlatformPage,
+      },
       { path: "/settings/domains", label: "Domains", component: DomainsPage },
       { path: "/settings/backups", label: "Backups", component: BackupsPage },
       { path: "/settings/updates", label: "Updates", component: UpdatesPage },

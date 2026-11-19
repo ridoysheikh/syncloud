@@ -87,14 +87,6 @@ func (s *Server) handleSetDomain(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) handleListCertificates(w http.ResponseWriter, _ *http.Request) {
-	items := []certs.View{}
-	if s.certs != nil {
-		items = s.certs.List()
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
-}
-
 func (s *Server) handleRenewCertificate(w http.ResponseWriter, r *http.Request) {
 	host := r.PathValue("host")
 	if s.certs == nil {

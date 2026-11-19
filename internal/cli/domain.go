@@ -91,9 +91,13 @@ func (a *app) certsCmd() *cobra.Command {
 					if x.NextAttemptAt != nil && x.NextAttemptAt.After(time.Now()) {
 						retry = x.NextAttemptAt.Local().Format(time.Kitchen)
 					}
-					rows = append(rows, []string{x.Host, x.Status, orDash(x.Issuer), expires, retry, orDash(x.LastError)})
+					id := ""
+					if x.Managed {
+						id = x.ID // certificates somebody asked for are shown by their id too
+					}
+					rows = append(rows, []string{x.Host, x.Status, orDash(x.Issuer), expires, retry, orDash(x.LastError), orDash(id), joinOrDash(x.Names)})
 				}
-				return a.printer().table(cs, []string{"HOST", "STATUS", "ISSUER", "EXPIRES", "RETRY AT", "LAST ERROR"}, rows)
+				return a.printer().table(cs, []string{"HOST", "STATUS", "ISSUER", "EXPIRES", "RETRY AT", "LAST ERROR", "ID", "NAMES"}, rows)
 			},
 		},
 		&cobra.Command{
@@ -112,5 +116,6 @@ func (a *app) certsCmd() *cobra.Command {
 			},
 		},
 	)
+	a.certsExtra(cc)
 	return cc
 }

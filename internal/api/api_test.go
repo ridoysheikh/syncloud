@@ -15,9 +15,11 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/ridoysheikh/syncloud/internal/acmedns"
 	"github.com/ridoysheikh/syncloud/internal/auth"
 	"github.com/ridoysheikh/syncloud/internal/branding"
 	"github.com/ridoysheikh/syncloud/internal/certs"
+	"github.com/ridoysheikh/syncloud/internal/dns"
 	"github.com/ridoysheikh/syncloud/internal/domain"
 	"github.com/ridoysheikh/syncloud/internal/events"
 	"github.com/ridoysheikh/syncloud/internal/registry"
@@ -32,6 +34,9 @@ type testEnv struct {
 	c     *http.Client
 	// recoveryKey is the key the test install was created with.
 	recoveryKey string
+	dns         *dns.Mem
+	// dns2 is the provider whose token is "validation": the zone validate.net.
+	dns2 *dns.Mem
 }
 
 func newEnv(t *testing.T) *testEnv {
@@ -64,14 +69,27 @@ func newEnv(t *testing.T) *testEnv {
 	domains := domain.NewService(st, "443", "http://localhost", "registry.localhost")
 	cm := certs.New(st, box, bus, log, certs.Config{})
 	domains.OnChange(func(ep domain.Endpoints) { cm.SetHosts([]string{ep.BaseDomain, domain.RegistryHost(ep.BaseDomain)}) })
+	mem := dns.NewMem("example.com")
+	ds := dns.NewService(st, box, log)
+	mem2 := dns.NewMem("validate.net")
+	ds.Factory = func(_, token string) (dns.Provider, error) {
+		if token == "validation" {
+			return mem2, nil
+		}
+		return mem, nil
+	}
+	ds.Builtin = acmedns.New(st, log, "127.0.0.1:0") // SynCloud's own challenge server, on a free port
+	t.Cleanup(ds.Builtin.Close)
+	ds.Resolvers = []string{"127.0.0.1:1"} // nothing is asked of the internet in tests
+	cm.SetDNS(dns.CertHost{Service: ds})
 	s := New(Options{
 		Store: st, Secrets: box, Registry: reg, Bus: bus, Log: log, Web: web,
-		Domains: domains, Detector: domain.NewDetector("203.0.113.10"), Certs: cm, Branding: branding.New(st),
+		Domains: domains, Detector: domain.NewDetector("203.0.113.10"), Certs: cm, Branding: branding.New(st), DNS: ds,
 	})
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
-	return &testEnv{srv: srv, st: st, token: tok, c: &http.Client{Jar: jar}, recoveryKey: rk}
+	return &testEnv{srv: srv, st: st, token: tok, c: &http.Client{Jar: jar}, recoveryKey: rk, dns: mem, dns2: mem2}
 }
 
 func (e *testEnv) do(t *testing.T, method, path string, body any, hdr map[string]string) (*http.Response, map[string]any) {

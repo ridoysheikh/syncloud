@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"log/slog"
@@ -34,6 +35,9 @@ const (
 	StatusFailed      = "failed"       // ACME failed, retrying with backoff
 	StatusRateLimited = "rate_limited" // the CA rate-limited us (§5.0.2)
 	StatusSelfSigned  = "self_signed"  // ACME disabled
+	StatusAwaitingDNS = "awaiting_dns" // an order waits for TXT records
+	StatusVerifying   = "verifying"    // the CA is checking the challenge
+	StatusRevoked     = "revoked"
 
 	IssuerACME       = "acme"
 	IssuerSelfSigned = "self-signed"
@@ -54,7 +58,8 @@ type Config struct {
 	RenewBefore time.Duration // default 30 days
 }
 
-// View is a certificate as shown in the API (never the key).
+// View is a certificate as shown in the API (never the key). The first
+// fields are as they always were; the rest (Phase 28) are additive.
 type View struct {
 	Host          string     `json:"host"`
 	Issuer        string     `json:"issuer"`
@@ -64,6 +69,31 @@ type View struct {
 	Failures      int        `json:"failures"`
 	NextAttemptAt *time.Time `json:"nextAttemptAt"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
+
+	ID          string     `json:"id"`             // the key: the host of an automatic certificate, cert_… for one asked for
+	Names       []string   `json:"names"`          // what it covers
+	Wildcard    bool       `json:"wildcard"`       // covers a *. name
+	Source      string     `json:"source"`         // acme | imported | origin-ca | self-signed
+	Method      string     `json:"method"`         // http-01 | dns-01 | dns-01-manual | import | origin-ca | self-signed
+	Managed     bool       `json:"managed"`        // asked for by a person (not made for a route)
+	Zone        string     `json:"zone,omitempty"` // the registered domain it belongs to
+	AuthorityID string     `json:"authorityId"`    // who issues it
+	Authority   string     `json:"authority"`      // its name
+	FallbackID  string     `json:"fallbackId,omitempty"`
+	IssuerName  string     `json:"issuerName,omitempty"` // as the certificate says
+	KeyType     string     `json:"keyType,omitempty"`
+	AutoRenew   bool       `json:"autoRenew"`
+	NotBefore   *time.Time `json:"notBefore,omitempty"`
+	Serial      string     `json:"serial,omitempty"`
+	Fingerprint string     `json:"fingerprint,omitempty"`
+	RevokedAt   *time.Time `json:"revokedAt,omitempty"`
+	AlertDays   []int      `json:"alertDays"`
+	Pinned      []string   `json:"pinnedHosts"`
+	CreatedAt   *time.Time `json:"createdAt,omitempty"`
+	Trusted     bool       `json:"trusted"`         // browsers trust it
+	UsedBy      []string   `json:"usedBy"`          // the hosts it serves
+	Order       *OrderView `json:"order,omitempty"` // an order in progress
+	DaysLeft    int        `json:"daysLeft"`
 }
 
 // Pair is a PEM certificate chain and key, as Traefik takes them.
@@ -72,6 +102,7 @@ type Pair struct{ CertPEM, KeyPEM string }
 type entry struct {
 	rec    store.Certificate
 	keyPEM string
+	covers []string // the names the certificate really holds (from its PEM)
 }
 
 // issueFunc obtains a certificate for host; tests replace it.
@@ -93,6 +124,13 @@ type Manager struct {
 	acme       *acmeClient
 	issue      issueFunc
 	challenges sync.Map // token -> key authorization
+	issuedBy   sync.Map // host -> the authority that just issued it
+
+	dnsHost    DNSHost
+	orders     map[string]*orderState // key -> order in progress (managed certificates)
+	renewNow   map[string]bool
+	stepAt     map[string]time.Time
+	originDays map[string]int
 }
 
 func New(st *store.Store, box *secrets.Box, bus *events.Bus, log *slog.Logger, cfg Config) *Manager {
@@ -102,7 +140,8 @@ func New(st *store.Store, box *secrets.Box, bus *events.Bus, log *slog.Logger, c
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	m := &Manager{st: st, box: box, bus: bus, log: log, cfg: cfg, now: time.Now, cache: map[string]*entry{}, kick: make(chan struct{}, 1)}
+	m := &Manager{st: st, box: box, bus: bus, log: log, cfg: cfg, now: time.Now, cache: map[string]*entry{}, kick: make(chan struct{}, 1),
+		orders: map[string]*orderState{}, renewNow: map[string]bool{}, stepAt: map[string]time.Time{}}
 	m.acme = &acmeClient{m: m}
 	m.issue = m.acme.issue
 	return m
@@ -117,14 +156,19 @@ func (m *Manager) Load(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, r := range recs {
+		if r.CertPEM == "" && r.Managed {
+			// Asked for, not issued yet: nothing to serve, no key to open.
+			m.cache[r.Host] = &entry{rec: r}
+			continue
+		}
 		key, err := m.box.Open(r.KeyEnc, []byte("cert:"+r.Host))
 		if err != nil {
 			m.log.Warn("unreadable certificate key, will reissue", "host", r.Host, "err", err)
 			continue
 		}
-		m.cache[r.Host] = &entry{rec: r, keyPEM: string(key)}
+		m.cache[r.Host] = &entry{rec: r, keyPEM: string(key), covers: coversOf(r)}
 	}
-	return nil
+	return m.loadOrders(ctx)
 }
 
 // SetHosts declares the hostnames that need certificates.
@@ -153,6 +197,10 @@ var ErrUnknownHost = errors.New("no certificate is managed for this host")
 func (m *Manager) Renew(ctx context.Context, host string) error {
 	m.mu.Lock()
 	e, ok := m.cache[host]
+	if ok && e.rec.Managed {
+		m.mu.Unlock()
+		return m.renewManaged(ctx, host, "")
+	}
 	wanted := slices.Contains(m.hosts, host)
 	if ok && wanted {
 		e.rec.NextAttemptAt = time.Time{}
@@ -171,7 +219,7 @@ func (m *Manager) Renew(ctx context.Context, host string) error {
 
 // Run reconciles on every Kick and every few minutes until ctx ends.
 func (m *Manager) Run(ctx context.Context) {
-	t := time.NewTicker(5 * time.Minute)
+	t := time.NewTicker(time.Minute) // orders waiting for DNS are checked every minute
 	defer t.Stop()
 	for {
 		m.Reconcile(ctx)
@@ -195,6 +243,7 @@ func (m *Manager) Reconcile(ctx context.Context) {
 		}
 		m.reconcileHost(ctx, h)
 	}
+	m.reconcileManaged(ctx)
 }
 
 func (m *Manager) reconcileHost(ctx context.Context, host string) {
@@ -207,6 +256,22 @@ func (m *Manager) reconcileHost(ctx context.Context, host string) {
 	}
 	m.mu.Unlock()
 
+	if m.coveredByManaged(host) {
+		return // a certificate a person asked for covers it (an imported one, a wildcard)
+	}
+	if strings.HasPrefix(host, "*.") {
+		// A wildcard needs DNS validation: no automatic HTTP-01. HTTPS keeps
+		// working with a placeholder until a wildcard certificate is requested.
+		if e == nil {
+			certPEM, keyPEM, notAfter, err := selfSigned(host, now)
+			if err != nil {
+				return
+			}
+			m.save(ctx, &entry{rec: store.Certificate{Host: host, Issuer: IssuerSelfSigned, CertPEM: string(certPEM), NotAfter: notAfter, Status: StatusPending,
+				LastError: "a wildcard certificate needs DNS validation: request one under Domains › Certificates", Method: "self-signed", Source: "self-signed"}, keyPEM: string(keyPEM)})
+		}
+		return
+	}
 	if e == nil {
 		certPEM, keyPEM, notAfter, err := selfSigned(host, now)
 		if err != nil {
@@ -257,20 +322,6 @@ func (m *Manager) reconcileHost(ctx context.Context, host string) {
 	m.save(ctx, &next)
 }
 
-func (m *Manager) save(ctx context.Context, e *entry) {
-	e.rec.UpdatedAt = m.now().UTC().Truncate(time.Second)
-	e.rec.KeyEnc = m.box.Seal([]byte(e.keyPEM), []byte("cert:"+e.rec.Host))
-	if err := m.st.PutCertificate(ctx, e.rec); err != nil {
-		m.log.Error("store certificate", "host", e.rec.Host, "err", err)
-	}
-	m.mu.Lock()
-	m.cache[e.rec.Host] = e
-	m.mu.Unlock()
-	if m.bus != nil {
-		m.bus.Publish(TopicUpdated, view(e.rec))
-	}
-}
-
 func backoff(failures int) time.Duration {
 	// The first retry is quick: on first start Traefik may not be serving yet.
 	steps := []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, time.Hour, 3 * time.Hour, 6 * time.Hour}
@@ -278,54 +329,6 @@ func backoff(failures int) time.Duration {
 		return steps[max(failures-1, 0)]
 	}
 	return 12 * time.Hour
-}
-
-// List returns the certificates for the current hosts.
-func (m *Manager) List() []View {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := []View{}
-	for _, h := range m.hosts {
-		if e, ok := m.cache[h]; ok {
-			out = append(out, view(e.rec))
-		} else {
-			out = append(out, View{Host: h, Status: StatusPending})
-		}
-	}
-	return out
-}
-
-func view(r store.Certificate) View {
-	v := View{Host: r.Host, Issuer: r.Issuer, Status: r.Status, NotAfter: r.NotAfter.UTC(), LastError: r.LastError, Failures: r.Failures, UpdatedAt: r.UpdatedAt}
-	if !r.NextAttemptAt.IsZero() && r.NextAttemptAt.Unix() > 0 {
-		t := r.NextAttemptAt.UTC()
-		v.NextAttemptAt = &t
-	}
-	return v
-}
-
-// Pairs returns the certificates Traefik should serve.
-func (m *Manager) Pairs() []Pair {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]Pair, 0, len(m.hosts))
-	for _, h := range m.hosts {
-		if e, ok := m.cache[h]; ok {
-			out = append(out, Pair{CertPEM: e.rec.CertPEM, KeyPEM: e.keyPEM})
-		}
-	}
-	return out
-}
-
-// PairFor returns host's certificate and key, if it has one.
-func (m *Manager) PairFor(host string) (Pair, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	e, ok := m.cache[host]
-	if !ok || !slices.Contains(m.hosts, host) {
-		return Pair{}, false
-	}
-	return Pair{CertPEM: e.rec.CertPEM, KeyPEM: e.keyPEM}, true
 }
 
 // ServeHTTP answers HTTP-01 challenges at /.well-known/acme-challenge/{token}.
@@ -409,4 +412,43 @@ func (m *Manager) SelfSignedBundle(hosts ...string) string {
 		}
 	}
 	return b.String()
+}
+
+// CountForZone counts the certificates that cover names in a domain.
+func (m *Manager) CountForZone(zone string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, e := range m.cache {
+		for _, name := range namesOf(e.rec) {
+			if inZone(strings.TrimPrefix(name, "*."), zone) {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
+// ZoneOf returns the registered domain of a certificate ("" if none).
+func (m *Manager) ZoneOf(key string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if e, ok := m.cache[key]; ok {
+		return e.rec.Zone
+	}
+	return ""
+}
+
+func inZone(name, zone string) bool { return name == zone || strings.HasSuffix(name, "."+zone) }
+
+// namesOf lists the names a certificate covers.
+func namesOf(r store.Certificate) []string {
+	if r.Names != "" {
+		var out []string
+		if json.Unmarshal([]byte(r.Names), &out) == nil && len(out) > 0 {
+			return out
+		}
+	}
+	return []string{r.Host}
 }

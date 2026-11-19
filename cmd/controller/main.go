@@ -28,6 +28,7 @@ import (
 	"time"
 	_ "time/tzdata" // job schedules use IANA timezones even on hosts without tzdata
 
+	"github.com/ridoysheikh/syncloud/internal/acmedns"
 	"github.com/ridoysheikh/syncloud/internal/agentgw"
 	"github.com/ridoysheikh/syncloud/internal/alerts"
 	"github.com/ridoysheikh/syncloud/internal/api"
@@ -41,6 +42,7 @@ import (
 	"github.com/ridoysheikh/syncloud/internal/config"
 	"github.com/ridoysheikh/syncloud/internal/dbs"
 	"github.com/ridoysheikh/syncloud/internal/discovery"
+	"github.com/ridoysheikh/syncloud/internal/dns"
 	"github.com/ridoysheikh/syncloud/internal/domain"
 	"github.com/ridoysheikh/syncloud/internal/edge"
 	"github.com/ridoysheikh/syncloud/internal/events"
@@ -235,6 +237,22 @@ func serve(args []string) error {
 	certMgr := certs.New(st, box, bus, log, certs.Config{
 		ACME: cfg.ACME, DirectoryURL: cfg.ACMEDirectory, Email: cfg.ACMEEmail, HTTPClient: acmeHTTP,
 	})
+	dnsSvc := dns.NewService(st, box, log)
+	dnsSvc.CloudflareBase = cfg.CloudflareAPI
+	// SynCloud's own challenge server answers _acme-challenge for domains without a provider.
+	acmeDNS := acmedns.New(st, log, cfg.AcmeDNSListen)
+	if err := acmeDNS.Load(ctx); err != nil {
+		log.Warn("challenge server", "err", err)
+	}
+	defer acmeDNS.Close()
+	dnsSvc.Builtin = acmeDNS
+	if cfg.DNSResolvers != "" {
+		for _, r := range strings.Split(cfg.DNSResolvers, ",") {
+			if r = strings.TrimSpace(r); r != "" {
+				dnsSvc.Resolvers = append(dnsSvc.Resolvers, r)
+			}
+		}
+	}
 	// platformCA is what to trust for a platform host while its certificate
 	// is self-signed (private networks): the registry bundle includes the
 	// dashboard, where Docker fetches registry tokens.
@@ -248,6 +266,8 @@ func serve(args []string) error {
 	if err := certMgr.Load(ctx); err != nil {
 		return fmt.Errorf("load certificates: %w", err)
 	}
+	certMgr.SetDNS(dns.CertHost{Service: dnsSvc})
+	dnsSvc.OnChange = certMgr.Kick
 
 	controllerURL := "http://" + loopbackURLHost(cfg.Listen)
 	traefikExtras := traefik.NewExtras(st, log)
@@ -1089,6 +1109,7 @@ func serve(args []string) error {
 		Ingress:          ingressMgr,
 		HostFirewall:     hostFW,
 		Ports:            portTable,
+		DNS:              dnsSvc,
 		Protection:       protect,
 		Upgrades:         upgrades,
 		S3:               s3Mgr,

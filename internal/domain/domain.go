@@ -67,6 +67,35 @@ func Normalize(d string) (string, error) {
 	return d, nil
 }
 
+// NormalizeHost is Normalize for the host of a service's domain, which may
+// be a wildcard: one leading "*." label and a name below it, so *.example.com
+// and *.sub.example.com. A wildcard covers exactly one label (as its
+// certificate does): *.example.com is not example.com or a.b.example.com.
+func NormalizeHost(d string) (host string, wildcard bool, err error) {
+	d = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(d)), ".")
+	rest, wild := strings.CutPrefix(d, "*.")
+	if strings.Contains(rest, "*") {
+		return "", false, errors.New("a wildcard is one leading *. label, like *.example.com or *.sub.example.com")
+	}
+	if wild && (rest == "localhost" || strings.HasSuffix(rest, ".localhost")) {
+		return "", false, errors.New("a wildcard under localhost is not allowed")
+	}
+	n, err := Normalize(rest)
+	if err != nil {
+		if wild {
+			return "", false, fmt.Errorf("%s: a wildcard needs a domain below the *., like *.example.com", err)
+		}
+		return "", false, err
+	}
+	if wild {
+		return "*." + n, true, nil
+	}
+	return n, false, nil
+}
+
+// IsWildcardHost reports whether a host is *.name.
+func IsWildcardHost(h string) bool { return strings.HasPrefix(h, "*.") }
+
 // IsPublic reports whether ip is routable on the internet.
 func IsPublic(a netip.Addr) bool {
 	return a.IsValid() && a.IsGlobalUnicast() && !a.IsPrivate() && !a.IsLoopback() &&

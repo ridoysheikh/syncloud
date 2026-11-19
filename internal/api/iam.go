@@ -341,7 +341,8 @@ type policyView struct {
 	Name        string          `json:"name"` // managed: ReadOnly, Developer
 	Description string          `json:"description"`
 	Managed     bool            `json:"managed"`
-	PerProject  bool            `json:"perProject"` // a template attached as Name:project
+	PerProject  bool            `json:"perProject"`      // a template attached as Name:project (or Name:domain)
+	Scope       string          `json:"scope,omitempty"` // for a template: project (default) or domain
 	Document    json.RawMessage `json:"document,omitempty"`
 	AttachedTo  int             `json:"attachedTo"`
 	UpdatedAt   *time.Time      `json:"updatedAt,omitempty"`
@@ -362,7 +363,7 @@ func (s *Server) handleListPolicies(w http.ResponseWriter, r *http.Request) {
 	for _, m := range iam.ManagedPolicies() {
 		doc, _ := iam.ManagedDocument(m.Name + map[bool]string{true: ":PROJECT", false: ""}[m.PerProject])
 		b, _ := json.Marshal(doc)
-		out = append(out, policyView{ID: m.Name, Name: m.Name, Description: m.Description, Managed: true, PerProject: m.PerProject, Document: b, AttachedTo: count[m.Name]})
+		out = append(out, policyView{ID: m.Name, Name: m.Name, Description: m.Description, Managed: true, PerProject: m.PerProject, Scope: scopeOf(m), Document: b, AttachedTo: count[m.Name]})
 	}
 	ps, err := s.store.ListIAMPolicies(r.Context())
 	if err != nil {
@@ -489,8 +490,12 @@ func (s *Server) validAttachment(ctx context.Context, a attachRequest) error {
 	if _, ok := iam.ManagedDocument(a.Policy); !ok {
 		return errors.New("unknown policy " + a.Policy + " (project templates are attached as Name:project, e.g. Developer:shop)")
 	}
-	if _, project, scoped := strings.Cut(a.Policy, ":"); scoped {
-		if _, err := s.store.ProjectByName(ctx, project); err != nil {
+	if base, project, scoped := strings.Cut(a.Policy, ":"); scoped {
+		if scopeOfName(base) == "domain" {
+			if _, err := s.store.Zone(ctx, project); err != nil {
+				return errors.New("no registered domain " + project)
+			}
+		} else if _, err := s.store.ProjectByName(ctx, project); err != nil {
 			return errors.New("no project " + project)
 		}
 	}
@@ -1187,4 +1192,24 @@ func (s *Server) handleDeviceToken(w http.ResponseWriter, r *http.Request) {
 	var creds tempCredentials
 	_ = json.Unmarshal(blob, &creds)
 	writeJSON(w, http.StatusOK, creds)
+}
+
+// scopeOf says what a managed template is attached for.
+func scopeOf(m iam.Managed) string {
+	switch {
+	case !m.PerProject:
+		return ""
+	case m.Scope != "":
+		return m.Scope
+	}
+	return "project"
+}
+
+func scopeOfName(name string) string {
+	for _, m := range iam.ManagedPolicies() {
+		if m.Name == name {
+			return scopeOf(m)
+		}
+	}
+	return ""
 }
