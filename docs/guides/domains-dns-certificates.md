@@ -127,7 +127,7 @@ Any domain, at any registrar, can renew wildcard certificates by itself if SynCl
    ```
 
    When that domain has a provider, **Create them for me** does it (`synctl domains challenge-server records`); the address record must stay DNS only (not proxied).
-2. Make sure UDP **and** TCP port 53 of the controller reach the internet and nothing else listens on it (flag `--acme-dns-listen`, default `:53`; a busy port is shown on the page, and saving retries).
+2. Port 53 is **open by default** in SynCloud's own host firewall (UDP and TCP on the controller, from anywhere), so nothing to do there; open UDP and TCP 53 in your cloud provider's firewall or security group, and make sure nothing else listens on it (the installer warns when something does) (flag `--acme-dns-listen`, default `:53`; a busy port is shown on the page, and saving retries).
 3. **Check it works** asks public resolvers for the NS record, the address and a probe value that only this server can answer.
 
 Then each domain needs only one CNAME, shown on its Challenge tab and on the certificate's Challenge page:

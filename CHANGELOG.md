@@ -2,6 +2,20 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.5.1]
+
+### Upgrading
+
+- Nothing to do. The new firewall rule reaches the controller at the next firewall sync after the upgrade.
+
+### Changed
+
+- **Port 53 is open by default** on the controller (UDP and TCP, built-in firewall rule `builtin:dns-*`, following `--acme-dns-listen`), so SynCloud's own challenge DNS server is reachable the moment it is set up. The installer's preflight warns when another resolver already holds port 53. Existing clusters get the rule at the next firewall sync after upgrading; cloud-provider firewalls are still yours to open.
+
+### Tests
+
+- A worker's firewall is checked end to end: it keeps address assignment (DHCP, DHCPv6), the mesh, replies, pings, loopback and the bridges its agent's DNS uses, and opens no port 53, 80 or 443 to the world.
+
 ## [0.5.0]
 
 ### Upgrading

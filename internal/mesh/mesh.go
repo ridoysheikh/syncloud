@@ -103,6 +103,10 @@ const ConfirmTimeout = 60
 type Options struct {
 	// ControllerPorts are opened to everyone on ctl-0 (HTTP, HTTPS, agent gateway).
 	ControllerPorts []string
+	// ControllerDNSPorts are opened to everyone on ctl-0 over both UDP and TCP:
+	// SynCloud's own ACME challenge DNS server (port 53), so a domain's
+	// _acme-challenge CNAME works without anyone editing the firewall.
+	ControllerDNSPorts []string
 	// Firewall turns the host firewall on.
 	Firewall bool
 	// IsEdge reports edge nodes, which open HTTP and HTTPS (§8.5).
@@ -318,6 +322,11 @@ func FirewallFor(self store.NodeNetwork, all []store.NodeNetwork, policies []sto
 	if self.NodeName == ControllerNode {
 		for _, p := range opts.ControllerPorts {
 			fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:controller-" + p, Protocol: "tcp", Ports: p, Description: "controller (built-in)"})
+		}
+		for _, p := range opts.ControllerDNSPorts {
+			for _, proto := range []string{"udp", "tcp"} {
+				fw.Rules = append(fw.Rules, &agentv1.FirewallRule{Id: "builtin:dns-" + proto + "-" + p, Protocol: proto, Ports: p, Description: "ACME challenge DNS server (built-in)"})
+			}
 		}
 		for _, p := range public {
 			if p.openOn(self.NodeName, true) {

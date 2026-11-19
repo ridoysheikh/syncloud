@@ -411,9 +411,9 @@ export function ChallengeServerPage() {
           <div className="flex flex-col gap-0.5">
             <b>The server could not start.</b>
             <span>
-              {s.error} Port 53 is often taken by another resolver
-              (systemd-resolved listens on 127.0.0.53 only, but dnsmasq or bind
-              use all addresses). Free it, or start the controller with{" "}
+              {s.error} Port 53 is often taken by a local resolver
+              (systemd-resolved, dnsmasq or bind). Free it, or start the
+              controller with{" "}
               <span className="font-mono">
                 --acme-dns-listen &lt;address:port&gt;
               </span>{" "}
@@ -430,12 +430,13 @@ export function ChallengeServerPage() {
           <Panel title="Before you start">
             <ul className="text-muted flex list-disc flex-col gap-1.5 pl-4 text-xs">
               <li>
-                UDP <b>and</b> TCP port 53 of this controller must be reachable
-                from the internet (open it in your cloud firewall and in{" "}
+                SynCloud's own host firewall already opens UDP <b>and</b> TCP
+                port 53 on this controller (see{" "}
                 <Link to={"/network/firewall" as string} className="underline">
                   Firewall
                 </Link>
-                ).
+                ). Your cloud provider's firewall or security group is yours to
+                open: allow UDP and TCP 53 from anywhere.
               </li>
               <li>Nothing else may listen on port 53 of the host.</li>
               <li>

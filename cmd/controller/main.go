@@ -354,6 +354,12 @@ func serve(args []string) error {
 	if host, _, _ := net.SplitHostPort(cfg.Listen); !isLoopback(host) {
 		ctlPorts = append(ctlPorts, portOf(cfg.Listen)) // the API was exposed on purpose
 	}
+	// SynCloud's own challenge DNS server (UDP and TCP, port 53 by default) is open by default,
+	// so a domain's _acme-challenge CNAME works the moment the server is set up.
+	var dnsPorts []string
+	if p := portOf(cfg.AcmeDNSListen); p != "" {
+		dnsPorts = []string{p}
+	}
 	// Edge nodes open HTTP and HTTPS; node pools say which nodes are edges.
 	var edgeCheck atomic.Pointer[func(string) bool]
 	isEdge := func(id string) bool {
@@ -422,7 +428,7 @@ func serve(args []string) error {
 	}
 	protect.IngressNodes, protect.Assigned = ingressMgr.Nodes, ingressMgr.Assigned
 	hostFW.AutoBan = protect.AutoBan
-	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts, IsEdge: isEdge, IsIngress: isIngress, PublicPorts: publicPorts,
+	meshMgr := mesh.NewManager(st, gw, bus, log, detector.PublicIP, mesh.Options{Firewall: cfg.Firewall, ControllerPorts: ctlPorts, ControllerDNSPorts: dnsPorts, IsEdge: isEdge, IsIngress: isIngress, PublicPorts: publicPorts,
 		Host: func(node string, cluster []string) ([]*agentv1.FirewallRule, []*agentv1.FirewallGuard, []*agentv1.FirewallBlock) {
 			rules, guards, blocks := hostFW.For(node, cluster)
 			return rules, append(guards, protect.Guards(node)...), blocks

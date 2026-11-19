@@ -118,6 +118,17 @@ for port in 80 443; do
   fi
 done
 
+# Port 53 (UDP and TCP) is where SynCloud's own ACME challenge DNS server listens
+# once you turn it on (Domains → Challenge server). Its firewall rule is open by
+# default; this only warns when another resolver already holds the port.
+holder53=$(ss -Hlnup "sport = :53" 2>/dev/null | grep -o 'users:(("[^"]*' | cut -d'"' -f2 | head -1 || true)
+[ -z "$holder53" ] && holder53=$(ss -Hltnp "sport = :53" 2>/dev/null | grep -o 'users:(("[^"]*' | cut -d'"' -f2 | head -1 || true)
+if [ -z "$holder53" ]; then
+  ok "port 53 is free (for SynCloud's challenge DNS server)"
+else
+  warn "port 53 is used by $holder53: SynCloud's own challenge DNS server (optional) cannot listen there; free it, or use --acme-dns-listen, a DNS provider or the 'another domain' way"
+fi
+
 for mod in wireguard ip_vs nf_tables; do
   if modprobe -n "$mod" 2>/dev/null || [ -d "/sys/module/$mod" ]; then ok "kernel module $mod"; else warn "kernel module $mod not found (needed for private networking, Phase 1)"; fi
 done
