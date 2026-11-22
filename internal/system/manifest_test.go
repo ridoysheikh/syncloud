@@ -1,6 +1,10 @@
 package system
 
-import "testing"
+import (
+	"regexp"
+	"strings"
+	"testing"
+)
 
 func TestGitServerIsOptional(t *testing.T) {
 	for _, s := range Specs(Config{}) {
@@ -54,5 +58,46 @@ func TestRegistryStorage(t *testing.T) {
 	c := find(Config{RegistryCopy: &RegistryCopy{S3: s3}}, RegistryCopyTaskID)
 	if c["REGISTRY_HTTP_ADDR"] != RegistryCopyAddr || c["REGISTRY_STORAGE"] != "s3" || c["REGISTRY_NOTIFICATIONS_ENDPOINTS"] != "" {
 		t.Fatalf("copy registry env %v", c)
+	}
+}
+
+// Components in the host network listen on loopback; two on one address
+// make the later one exit (the temporary registry once took Traefik's
+// registry entrypoint for its debug server and never started).
+func TestLoopbackAddressesUnique(t *testing.T) {
+	c := Config{
+		HTTPAddr: ":80", HTTPSAddr: ":443", AdminAddr: "127.0.0.1:8082",
+		GitServer:    &GitServerConfig{RootURL: "https://git.example.com/", SecretKey: "k", InternalToken: "t"},
+		RegistryCopy: &RegistryCopy{},
+	}
+	listen := regexp.MustCompile(`(?:^|=)(127\.0\.0\.1:\d+)$`)
+	owner := map[string]string{}
+	add := func(task, addr string) {
+		if prev, ok := owner[addr]; ok && prev != task {
+			t.Errorf("%s and %s both listen on %s", prev, task, addr)
+		}
+		owner[addr] = task
+	}
+	for _, s := range Specs(c) {
+		for k, v := range s.Env {
+			if strings.HasSuffix(k, "_ADDR") && strings.HasPrefix(v, "127.0.0.1:") {
+				add(s.TaskId, v)
+			}
+		}
+		for _, a := range s.Command {
+			if strings.Contains(a, ".address=") || strings.Contains(a, "ListenAddr=") {
+				if m := listen.FindStringSubmatch(a); m != nil {
+					add(s.TaskId, m[1])
+				}
+			}
+		}
+		if s.TaskId == GitServerTaskID {
+			add(s.TaskId, GitServerAddr)
+		}
+	}
+	for _, want := range []string{RegistryAddr, RegistryDebugAddr, RegistryCopyAddr, RegistryCopyDebugAddr, RegistryEntrypointAddr} {
+		if _, ok := owner[want]; !ok {
+			t.Errorf("nothing listens on %s; the test misses an address", want)
+		}
 	}
 }

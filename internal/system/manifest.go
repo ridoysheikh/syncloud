@@ -73,6 +73,14 @@ const RegistryEntrypointAddr = "127.0.0.1:5003"
 // while the registry switches storage (Phase 19); only the controller uses it.
 const RegistryCopyAddr = "127.0.0.1:5002"
 
+// The registries' debug servers. Every component runs in the host network,
+// so no two may share an address: a registry whose debug port is taken
+// exits at once (TestLoopbackAddressesUnique).
+const (
+	RegistryDebugAddr     = "127.0.0.1:5001"
+	RegistryCopyDebugAddr = "127.0.0.1:5004"
+)
+
 // RegistryCopyTaskID is that temporary registry's system task.
 const RegistryCopyTaskID = "sys-registry-copy"
 
@@ -239,7 +247,7 @@ func registrySpec(c Config) *agentv1.TaskSpec {
 		"headers": map[string][]string{TraefikTokenHeader: {c.TraefikToken}},
 		"timeout": "3s", "threshold": 5, "backoff": "10s",
 	}})
-	spec := registryTask(c, "sys-registry", "syncloud-registry", RegistryAddr, "127.0.0.1:5001", c.RegistryS3)
+	spec := registryTask(c, "sys-registry", "syncloud-registry", RegistryAddr, RegistryDebugAddr, c.RegistryS3)
 	spec.Env["REGISTRY_NOTIFICATIONS_ENDPOINTS"] = string(notify)
 	if c.RegistryReadOnly {
 		spec.Env["REGISTRY_STORAGE_MAINTENANCE_READONLY"] = `{"enabled": true}`
@@ -254,7 +262,7 @@ func registryCopySpec(c Config) *agentv1.TaskSpec {
 	if c.RegistryCopy == nil {
 		return nil
 	}
-	return registryTask(c, RegistryCopyTaskID, "syncloud-registry-copy", RegistryCopyAddr, "127.0.0.1:5003", c.RegistryCopy.S3)
+	return registryTask(c, RegistryCopyTaskID, "syncloud-registry-copy", RegistryCopyAddr, RegistryCopyDebugAddr, c.RegistryCopy.S3)
 }
 
 // registryTask is a registry on loopback with token auth, keeping images

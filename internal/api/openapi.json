@@ -20237,11 +20237,18 @@
       "BackupConfig": {
         "type": "object",
         "required": [
-          "endpoint",
-          "bucket",
-          "accessKeyId"
+          "bucket"
         ],
         "properties": {
+          "endpointId": {
+            "type": "string",
+            "description": "a registered S3 connection (ID or name): its credentials are read at every backup, so a key rotated on the connection applies at once. Without it, endpoint and keys are given here"
+          },
+          "endpointName": {
+            "type": "string",
+            "readOnly": true,
+            "description": "the S3 connection's name"
+          },
           "endpoint": {
             "type": "string",
             "example": "https://s3.eu-central-1.amazonaws.com"
@@ -20271,8 +20278,14 @@
             "type": "integer",
             "minimum": 1,
             "description": "default 48"
+          },
+          "pathStyle": {
+            "type": "boolean",
+            "readOnly": true,
+            "description": "path-style bucket addressing (from the S3 connection)"
           }
-        }
+        },
+        "description": "Give endpointId (a registered S3 connection), or endpoint, accessKeyId and secretAccessKey."
       },
       "BackupStatus": {
         "type": "object",

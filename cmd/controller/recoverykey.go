@@ -17,6 +17,7 @@ import (
 
 	"github.com/ridoysheikh/syncloud/internal/auth"
 	"github.com/ridoysheikh/syncloud/internal/backup"
+	"github.com/ridoysheikh/syncloud/internal/s3"
 	"github.com/ridoysheikh/syncloud/internal/secrets"
 	"github.com/ridoysheikh/syncloud/internal/store"
 )
@@ -130,6 +131,8 @@ func rotateRecoveryKey(ctx context.Context, dir string, box *secrets.Box, yes bo
 // may still carry the old key, and the second pass catches it.
 func rekeyBackups(ctx context.Context, st *store.Store, box *secrets.Box, dir string) error {
 	m := backup.NewManager(st, box, dir, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s3m := s3.New(st, box)
+	m.Connection, m.Connections = backupConnection(s3m), backupConnections(s3m)
 	if err := m.Load(ctx); err != nil {
 		return fmt.Errorf("read the backup settings: %w", err)
 	}

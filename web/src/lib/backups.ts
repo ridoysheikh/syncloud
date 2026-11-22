@@ -2,6 +2,9 @@ import { queryOptions } from "@tanstack/react-query";
 import { api } from "./api";
 
 export interface BackupConfig {
+  /** A registered S3 connection: its keys are read at every backup. */
+  endpointId?: string;
+  endpointName?: string;
   endpoint: string;
   region: string;
   bucket: string;

@@ -1024,6 +1024,14 @@ func serve(args []string) error {
 	}
 
 	backups := backup.NewManager(st, box, cfg.DataDir, bus, log)
+	backups.Connection, backups.Connections = backupConnection(s3Mgr), backupConnections(s3Mgr)
+	regInUse := s3Mgr.InUse
+	s3Mgr.InUse = func(ctx context.Context, id string) string {
+		if by := regInUse(ctx, id); by != "" {
+			return by
+		}
+		return backups.EndpointInUse(ctx, id)
+	}
 	if err := backups.Load(ctx); err != nil {
 		return fmt.Errorf("load backup settings: %w", err)
 	}
@@ -1515,4 +1523,38 @@ func portRange(s string) (int, int, bool) {
 	lo, err1 := strconv.Atoi(a)
 	hi, err2 := strconv.Atoi(b)
 	return lo, hi, err1 == nil && err2 == nil && lo >= 1024 && hi <= 65535 && lo <= hi
+}
+
+// backupConnection lets controller backups use a registered S3 connection,
+// whose credentials are read at every run.
+func backupConnection(m *s3.Manager) func(ctx context.Context, ref string) (backup.Creds, error) {
+	return func(ctx context.Context, ref string) (backup.Creds, error) {
+		e, err := m.Get(ctx, ref)
+		if err != nil {
+			return backup.Creds{}, err
+		}
+		c, err := m.Credentials(ctx, e.ID)
+		if err != nil {
+			return backup.Creds{}, err
+		}
+		return backup.Creds{ID: e.ID, Name: e.Name, URL: c.URL, Region: c.Region, AccessKeyID: c.AccessKeyID, SecretAccessKey: c.SecretAccessKey, PathStyle: c.PathStyle}, nil
+	}
+}
+
+// backupConnections lists the registered S3 connections with their keys.
+func backupConnections(m *s3.Manager) func(ctx context.Context) ([]backup.Creds, error) {
+	get := backupConnection(m)
+	return func(ctx context.Context) ([]backup.Creds, error) {
+		list, err := m.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]backup.Creds, 0, len(list))
+		for _, e := range list {
+			if c, err := get(ctx, e.ID); err == nil {
+				out = append(out, c)
+			}
+		}
+		return out, nil
+	}
 }

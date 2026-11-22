@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Download, Play } from "lucide-react";
+import { Archive, Cloud, Download, KeyRound, Play } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { subscribe } from "@/lib/stream";
 import { backupQuery, type BackupConfig, type BackupStatus } from "@/lib/backups";
@@ -12,6 +12,9 @@ import { EmptyState } from "@/ui/EmptyState";
 import { Alert, Button, Field, Input, StatusBadge } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { confirmAction } from "@/ui/dialogs";
+import { ChoiceCards } from "@/ui/choice";
+import { Select } from "@/ui/select";
+import { useS3Buckets, useS3Endpoints } from "@/lib/pg";
 import { RecoveryKeyPanel } from "./RecoveryKeyPanel";
 
 interface BackupObject {
@@ -20,7 +23,9 @@ interface BackupObject {
   createdAt: string;
 }
 
-const empty: BackupConfig = { endpoint: "", region: "", bucket: "", prefix: "", accessKeyId: "", secretAccessKey: "", intervalMinutes: 60, retain: 48 };
+const empty: BackupConfig = { endpointId: "", endpoint: "", region: "", bucket: "", prefix: "", accessKeyId: "", secretAccessKey: "", intervalMinutes: 60, retain: 48 };
+
+type Source = "connection" | "keys";
 
 function size(n: number) {
   if (n < 1024) return `${n} B`;
@@ -47,10 +52,19 @@ export function BackupsPage() {
   );
 
   const [form, setForm] = useState<BackupConfig>(empty);
+  const [source, setSource] = useState<Source>("connection");
   const [editing, setEditing] = useState(false);
+  const endpoints = useS3Endpoints();
+  const buckets = useS3Buckets(source === "connection" ? (form.endpointId ?? "") : "");
   useEffect(() => {
-    if (data?.config) setForm({ ...data.config, secretAccessKey: "" });
+    if (data?.config) {
+      setForm({ ...data.config, endpointId: data.config.endpointId ?? "", secretAccessKey: "" });
+      setSource(data.config.endpointId ? "connection" : "keys");
+    }
   }, [data?.config]);
+  useEffect(() => {
+    if (!data?.config && endpoints.data?.length === 0) setSource("keys");
+  }, [data?.config, endpoints.data]);
   const save = useMutation({
     mutationFn: (c: BackupConfig) => api("PUT", "/backups/config", c),
     onSuccess: () => {
@@ -70,8 +84,12 @@ export function BackupsPage() {
     setForm({ ...form, [k]: k === "intervalMinutes" || k === "retain" ? Number(e.target.value) : e.target.value });
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    save.mutate(form);
+    if (source === "connection") {
+      const { endpointId, bucket, prefix, intervalMinutes, retain } = form;
+      save.mutate({ endpointId, bucket, prefix, intervalMinutes, retain, endpoint: "", region: "", accessKeyId: "" });
+    } else save.mutate({ ...form, endpointId: "" });
   };
+  const inlineSaved = !!data?.configured && !data.config?.endpointId;
   const showForm = !data?.configured || editing;
   const st = data?.status;
 
@@ -121,27 +139,84 @@ export function BackupsPage() {
           {showForm ? (
             <form onSubmit={submit} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="sm:col-span-2">
-                <Field label="Endpoint" hint="AWS, Cloudflare R2, Backblaze B2, MinIO, SeaweedFS… (http only on a private network)">
-                  <Input value={form.endpoint} onChange={set("endpoint")} placeholder="https://s3.eu-central-1.amazonaws.com" className="font-mono" required />
-                </Field>
+                <ChoiceCards
+                  label="Credentials"
+                  value={source}
+                  onChange={(v) => setSource(v)}
+                  options={[
+                    {
+                      value: "connection",
+                      title: "S3 connection",
+                      icon: Cloud,
+                      description: "A connection registered under Storage. Its keys are read at every backup, so a key rotated there applies here at once.",
+                    },
+                    {
+                      value: "keys",
+                      title: "Keys entered here",
+                      icon: KeyRound,
+                      description: "An endpoint and keys only for backups. A rotated key must be entered here again.",
+                    },
+                  ]}
+                />
               </div>
-              <Field label="Bucket">
-                <Input value={form.bucket} onChange={set("bucket")} className="font-mono" required />
-              </Field>
-              <Field label="Region">
-                <Input value={form.region} onChange={set("region")} placeholder="us-east-1" className="font-mono" />
-              </Field>
-              <Field label="Prefix">
-                <Input value={form.prefix} onChange={set("prefix")} placeholder="syncloud/prod" className="font-mono" />
-              </Field>
-              <Field label="Access key ID">
-                <Input value={form.accessKeyId} onChange={set("accessKeyId")} className="font-mono" autoComplete="off" required />
-              </Field>
-              <div className="sm:col-span-2">
-                <Field label="Secret access key" hint={data?.configured ? "Leave empty to keep the stored secret." : undefined}>
-                  <Input type="password" value={form.secretAccessKey} onChange={set("secretAccessKey")} autoComplete="new-password" required={!data?.configured} />
-                </Field>
-              </div>
+              {source === "connection" ? (
+                <>
+                  <Field label="S3 connection">
+                    <Select value={form.endpointId ?? ""} onChange={(v) => setForm({ ...form, endpointId: v, bucket: "" })} className="w-full">
+                      <option value="">Choose…</option>
+                      {(endpoints.data ?? []).map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.name} — {e.url}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Bucket">
+                    <Select value={form.bucket} onChange={(v) => setForm({ ...form, bucket: v })} className="w-full">
+                      <option value="">Choose…</option>
+                      {form.bucket && !(buckets.data ?? []).some((b) => b.name === form.bucket) && <option value={form.bucket}>{form.bucket}</option>}
+                      {(buckets.data ?? []).map((b) => (
+                        <option key={b.name} value={b.name}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Prefix">
+                    <Input value={form.prefix} onChange={set("prefix")} placeholder="syncloud/prod" className="font-mono" />
+                  </Field>
+                  {endpoints.data && endpoints.data.length === 0 && (
+                    <div className="sm:col-span-2">
+                      <Alert tone="warn">No S3 connection is registered yet. Add one under Storage, or enter keys here.</Alert>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="sm:col-span-2">
+                    <Field label="Endpoint" hint="AWS, Cloudflare R2, Backblaze B2, MinIO, SeaweedFS… (http only on a private network)">
+                      <Input value={form.endpoint} onChange={set("endpoint")} placeholder="https://s3.eu-central-1.amazonaws.com" className="font-mono" required />
+                    </Field>
+                  </div>
+                  <Field label="Bucket">
+                    <Input value={form.bucket} onChange={set("bucket")} className="font-mono" required />
+                  </Field>
+                  <Field label="Region">
+                    <Input value={form.region} onChange={set("region")} placeholder="us-east-1" className="font-mono" />
+                  </Field>
+                  <Field label="Prefix">
+                    <Input value={form.prefix} onChange={set("prefix")} placeholder="syncloud/prod" className="font-mono" />
+                  </Field>
+                  <Field label="Access key ID">
+                    <Input value={form.accessKeyId} onChange={set("accessKeyId")} className="font-mono" autoComplete="off" required />
+                  </Field>
+                  <div className="sm:col-span-2">
+                    <Field label="Secret access key" hint={inlineSaved ? "Leave empty to keep the stored secret." : undefined}>
+                      <Input type="password" value={form.secretAccessKey} onChange={set("secretAccessKey")} autoComplete="new-password" required={!inlineSaved} />
+                    </Field>
+                  </div>
+                </>
+              )}
               <Field label="Every (minutes)">
                 <Input type="number" min={5} value={form.intervalMinutes} onChange={set("intervalMinutes")} />
               </Field>
@@ -154,7 +229,7 @@ export function BackupsPage() {
                 </div>
               )}
               <div className="flex gap-1.5 sm:col-span-2">
-                <Button type="submit" variant="primary" disabled={save.isPending}>
+                <Button type="submit" variant="primary" disabled={save.isPending || (source === "connection" && (!form.endpointId || !form.bucket))}>
                   {save.isPending ? "Checking bucket…" : "Save and back up"}
                 </Button>
                 {editing && (
@@ -166,8 +241,18 @@ export function BackupsPage() {
             </form>
           ) : (
             <dl className="grid grid-cols-[8rem_1fr] gap-y-1.5 text-xs">
-              <dt className="text-muted">Endpoint</dt>
-              <dd className="font-mono">{data?.config?.endpoint}</dd>
+              <dt className="text-muted">{data?.config?.endpointId ? "S3 connection" : "Endpoint"}</dt>
+              <dd className="font-mono">
+                {data?.config?.endpointId ? `${data.config.endpointName || data.config.endpointId} — ${data.config.endpoint}` : data?.config?.endpoint}
+              </dd>
+              <dt className="text-muted">Keys</dt>
+              <dd>
+                {data?.config?.endpointId ? (
+                  "the connection's, read at every backup"
+                ) : (
+                  <span className="text-muted">entered here (a rotated key must be entered again)</span>
+                )}
+              </dd>
               <dt className="text-muted">Bucket</dt>
               <dd className="font-mono">
                 {data?.config?.bucket}

@@ -33,10 +33,18 @@ const (
 	TopicUpdated = "backup.updated"
 )
 
-// Config is where and how often backups go. The secret is stored sealed.
+// Config is where and how often backups go. With EndpointID the
+// credentials are a registered S3 connection's, read live at every run, so
+// rotating its key there applies here too; otherwise they are the ones
+// entered with the settings, and the secret is stored sealed.
 type Config struct {
+	// EndpointID is a registered S3 connection (ID; name accepted on input).
+	EndpointID string `json:"endpointId,omitempty"`
+	// EndpointName is the connection's name (shown, not stored).
+	EndpointName    string `json:"endpointName,omitempty"`
 	Endpoint        string `json:"endpoint"` // e.g. https://s3.eu-central-1.amazonaws.com, http://10.0.0.5:9000
 	Region          string `json:"region"`
+	PathStyle       bool   `json:"pathStyle,omitempty"`
 	Bucket          string `json:"bucket"`
 	Prefix          string `json:"prefix"`
 	AccessKeyID     string `json:"accessKeyId"`
@@ -59,7 +67,20 @@ type Object struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// Creds are a registered S3 connection's live credentials.
+type Creds struct {
+	ID, Name, URL, Region, AccessKeyID, SecretAccessKey string
+	PathStyle                                           bool
+}
+
 type Manager struct {
+	// Connection resolves a registered S3 connection (by ID or name); nil
+	// means only entered credentials can be used.
+	Connection func(ctx context.Context, ref string) (Creds, error)
+	// Connections lists the registered S3 connections, so backups set up
+	// with entered keys can move to the matching one (adopt).
+	Connections func(ctx context.Context) ([]Creds, error)
+
 	st      *store.Store
 	box     *secrets.Box
 	dataDir string
@@ -89,37 +110,155 @@ func (m *Manager) Load(ctx context.Context) error {
 		if err := json.Unmarshal([]byte(raw), &c); err != nil {
 			return err
 		}
-		sec, _, err := m.st.GetSetting(ctx, settingSecret)
-		if err != nil {
-			return err
+		// With a connection the credentials are read at every run (live).
+		if c.EndpointID == "" {
+			sec, _, err := m.st.GetSetting(ctx, settingSecret)
+			if err != nil {
+				return err
+			}
+			sealed, err := base64.StdEncoding.DecodeString(sec)
+			if err != nil {
+				return err
+			}
+			plain, err := m.box.Open(sealed, []byte(settingSecret))
+			if err != nil {
+				return fmt.Errorf("backup secret: %w", err)
+			}
+			c.SecretAccessKey = string(plain)
 		}
-		sealed, err := base64.StdEncoding.DecodeString(sec)
-		if err != nil {
-			return err
-		}
-		plain, err := m.box.Open(sealed, []byte(settingSecret))
-		if err != nil {
-			return fmt.Errorf("backup secret: %w", err)
-		}
-		c.SecretAccessKey = string(plain)
 		m.cfg = &c
 	}
 	if raw, ok, _ := m.st.GetSetting(ctx, settingStatus); ok {
 		_ = json.Unmarshal([]byte(raw), &m.status)
 	}
+	// Entered keys that are a registered connection's: use the connection,
+	// so a key rotated there applies to backups too.
+	if cr, ok := m.matchConnection(ctx, false); ok {
+		if err := m.useConnection(ctx, cr); err != nil {
+			m.log.Warn("backups: use the matching S3 connection", "connection", cr.Name, "err", err)
+		}
+	}
 	return nil
 }
 
-// Config returns the configuration without the secret.
+func sameURL(a, b string) bool {
+	norm := func(s string) string { return strings.ToLower(strings.TrimRight(strings.TrimSpace(s), "/")) }
+	return norm(a) == norm(b)
+}
+
+// matchConnection finds the registered connection backups set up with
+// entered keys should use: the one with the same address and access key
+// ID or, once the entered key is refused (rejected), the only one with the
+// same address (the key was rotated there).
+func (m *Manager) matchConnection(ctx context.Context, rejected bool) (Creds, bool) {
+	m.mu.Lock()
+	cfg := m.cfg
+	m.mu.Unlock()
+	if cfg == nil || cfg.EndpointID != "" || m.Connections == nil || m.Connection == nil {
+		return Creds{}, false
+	}
+	conns, err := m.Connections(ctx)
+	if err != nil {
+		return Creds{}, false
+	}
+	var same []Creds
+	for _, c := range conns {
+		if sameURL(c.URL, cfg.Endpoint) {
+			if c.AccessKeyID == cfg.AccessKeyID {
+				return c, true
+			}
+			same = append(same, c)
+		}
+	}
+	if rejected && len(same) == 1 {
+		return same[0], true
+	}
+	return Creds{}, false
+}
+
+// useConnection switches the backup settings to a connection, keeping the
+// bucket, prefix and schedule; the entered secret is deleted.
+func (m *Manager) useConnection(ctx context.Context, cr Creds) error {
+	m.mu.Lock()
+	if m.cfg == nil {
+		m.mu.Unlock()
+		return ErrNotConfigured
+	}
+	c := *m.cfg
+	m.mu.Unlock()
+	c.EndpointID, c.EndpointName = cr.ID, ""
+	c.Endpoint, c.Region, c.AccessKeyID, c.SecretAccessKey, c.PathStyle = "", "", "", "", false
+	raw, _ := json.Marshal(c)
+	if err := m.st.SetSetting(ctx, settingConfig, string(raw)); err != nil {
+		return err
+	}
+	if err := m.st.DeleteSetting(ctx, settingSecret); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.cfg = &c
+	m.mu.Unlock()
+	m.log.Info("backups now use the S3 connection's keys", "connection", cr.Name)
+	return nil
+}
+
+// keyRejected reports an S3 error that means the key is wrong or gone.
+func keyRejected(err error) bool {
+	var r minio.ErrorResponse
+	return errors.As(err, &r) && (r.Code == "SignatureDoesNotMatch" || r.Code == "InvalidAccessKeyId")
+}
+
+// Config returns the configuration without the secret; with a connection,
+// its current address and key ID.
 func (m *Manager) Config() (Config, bool) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.cfg == nil {
+		m.mu.Unlock()
 		return Config{}, false
 	}
 	c := *m.cfg
+	m.mu.Unlock()
+	if c.EndpointID != "" && m.Connection != nil {
+		if cr, err := m.Connection(context.Background(), c.EndpointID); err == nil {
+			c.EndpointName, c.Endpoint, c.Region, c.AccessKeyID, c.PathStyle = cr.Name, cr.URL, cr.Region, cr.AccessKeyID, cr.PathStyle
+		}
+	}
 	c.SecretAccessKey = ""
 	return c, true
+}
+
+// live is the configuration with the credentials to use now: a
+// connection's are read again every time, never kept.
+func (m *Manager) live(ctx context.Context) (Config, error) {
+	m.mu.Lock()
+	cfg := m.cfg
+	m.mu.Unlock()
+	if cfg == nil {
+		return Config{}, ErrNotConfigured
+	}
+	c := *cfg
+	if c.EndpointID == "" {
+		return c, nil
+	}
+	if m.Connection == nil {
+		return c, errors.New("S3 connections are not available")
+	}
+	cr, err := m.Connection(ctx, c.EndpointID)
+	if err != nil {
+		return c, fmt.Errorf("S3 connection %s: %w", c.EndpointID, err)
+	}
+	c.EndpointName, c.Endpoint, c.Region, c.AccessKeyID, c.SecretAccessKey, c.PathStyle = cr.Name, cr.URL, cr.Region, cr.AccessKeyID, cr.SecretAccessKey, cr.PathStyle
+	return c, nil
+}
+
+// EndpointInUse blocks deleting the S3 connection backups go to.
+func (m *Manager) EndpointInUse(_ context.Context, id string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cfg != nil && m.cfg.EndpointID == id {
+		return "controller backups; choose another destination under Settings → Backups first"
+	}
+	return ""
 }
 
 func (m *Manager) Status() Status {
@@ -129,11 +268,24 @@ func (m *Manager) Status() Status {
 }
 
 // Validate checks and normalizes c; an empty secret keeps the stored one.
-func (m *Manager) normalize(c Config) (Config, error) {
+func (m *Manager) normalize(ctx context.Context, c Config) (Config, error) {
+	c.EndpointID, c.EndpointName = strings.TrimSpace(c.EndpointID), ""
+	if c.EndpointID != "" {
+		if m.Connection == nil {
+			return c, errors.New("S3 connections are not available")
+		}
+		cr, err := m.Connection(ctx, c.EndpointID)
+		if err != nil {
+			return c, fmt.Errorf("no S3 connection %q", c.EndpointID)
+		}
+		c.EndpointID, c.EndpointName = cr.ID, cr.Name
+		c.Endpoint, c.Region, c.AccessKeyID, c.SecretAccessKey, c.PathStyle = cr.URL, cr.Region, cr.AccessKeyID, cr.SecretAccessKey, cr.PathStyle
+	}
 	c.Endpoint = strings.TrimRight(strings.TrimSpace(c.Endpoint), "/")
 	c.Bucket = strings.TrimSpace(c.Bucket)
 	c.Prefix = strings.Trim(strings.TrimSpace(c.Prefix), "/")
 	c.AccessKeyID = strings.TrimSpace(c.AccessKeyID)
+	c.SecretAccessKey = strings.TrimSpace(c.SecretAccessKey) // a pasted newline breaks every signature
 	if u, err := url.Parse(c.Endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || (u.Path != "" && u.Path != "/") {
 		return c, errors.New("endpoint must be a URL like https://s3.amazonaws.com or http://10.0.0.5:9000")
 	}
@@ -142,7 +294,7 @@ func (m *Manager) normalize(c Config) (Config, error) {
 	}
 	if c.SecretAccessKey == "" {
 		m.mu.Lock()
-		if m.cfg != nil {
+		if m.cfg != nil && m.cfg.EndpointID == "" {
 			c.SecretAccessKey = m.cfg.SecretAccessKey
 		}
 		m.mu.Unlock()
@@ -168,7 +320,7 @@ func (m *Manager) normalize(c Config) (Config, error) {
 // SetConfig validates c, checks that the bucket is reachable, stores it and
 // triggers a first backup.
 func (m *Manager) SetConfig(ctx context.Context, c Config) error {
-	c, err := m.normalize(c)
+	c, err := m.normalize(ctx, c)
 	if err != nil {
 		return err
 	}
@@ -180,20 +332,40 @@ func (m *Manager) SetConfig(ctx context.Context, c Config) error {
 	defer cancel()
 	exists, err := cl.BucketExists(cctx, c.Bucket)
 	if err != nil {
-		return fmt.Errorf("cannot reach the bucket: %w", err)
+		return fmt.Errorf("cannot reach the bucket: %w", explainS3(err, c))
 	}
 	if !exists {
 		return fmt.Errorf("bucket %q does not exist", c.Bucket)
 	}
+	// Reaching the bucket is not enough: check that this key may upload.
+	probe := objectKey(c, ".syncloud-write-check")
+	if _, err := cl.PutObject(cctx, c.Bucket, probe, strings.NewReader("ok"), 2, minio.PutObjectOptions{ContentType: "text/plain"}); err != nil {
+		return fmt.Errorf("the bucket is reachable but uploads fail: %w", explainS3(err, c))
+	}
+	_ = cl.RemoveObject(cctx, c.Bucket, probe, minio.RemoveObjectOptions{})
 	pub := c
-	pub.SecretAccessKey = ""
+	pub.SecretAccessKey, pub.EndpointName = "", ""
+	if c.EndpointID != "" {
+		// Only the reference is stored: the connection's keys are read at
+		// every run, so a key rotated there is used here at once.
+		pub.Endpoint, pub.Region, pub.AccessKeyID, pub.PathStyle = "", "", "", false
+	}
 	raw, _ := json.Marshal(pub)
 	if err := m.st.SetSetting(ctx, settingConfig, string(raw)); err != nil {
 		return err
 	}
-	sealed := m.box.Seal([]byte(c.SecretAccessKey), []byte(settingSecret))
-	if err := m.st.SetSetting(ctx, settingSecret, base64.StdEncoding.EncodeToString(sealed)); err != nil {
-		return err
+	if c.EndpointID != "" {
+		if err := m.st.DeleteSetting(ctx, settingSecret); err != nil {
+			return err
+		}
+	} else {
+		sealed := m.box.Seal([]byte(c.SecretAccessKey), []byte(settingSecret))
+		if err := m.st.SetSetting(ctx, settingSecret, base64.StdEncoding.EncodeToString(sealed)); err != nil {
+			return err
+		}
+	}
+	if c.EndpointID != "" {
+		c = pub
 	}
 	m.mu.Lock()
 	m.cfg = &c
@@ -252,13 +424,32 @@ func (m *Manager) RunNow(ctx context.Context) (Object, error) {
 	m.run.Lock()
 	defer m.run.Unlock()
 	m.mu.Lock()
-	cfg := m.cfg
+	configured := m.cfg != nil
 	m.mu.Unlock()
-	if cfg == nil {
+	if !configured {
 		return Object{}, ErrNotConfigured
 	}
 	start := m.now().UTC()
-	obj, err := m.upload(ctx, *cfg, start)
+	cfg, err := m.live(ctx)
+	var obj Object
+	if err == nil {
+		obj, err = m.upload(ctx, cfg, start)
+	}
+	// The entered key was refused, but a registered connection to the same
+	// S3 has the current one (rotated there): use it, and keep it if it works.
+	if keyRejected(err) {
+		if cr, ok := m.matchConnection(ctx, true); ok {
+			alt := cfg
+			alt.EndpointID, alt.EndpointName = cr.ID, cr.Name
+			alt.Endpoint, alt.Region, alt.AccessKeyID, alt.SecretAccessKey, alt.PathStyle = cr.URL, cr.Region, cr.AccessKeyID, cr.SecretAccessKey, cr.PathStyle
+			if o, aerr := m.upload(ctx, alt, start); aerr == nil {
+				obj, err = o, nil
+				if uerr := m.useConnection(ctx, cr); uerr != nil {
+					m.log.Warn("backups: keep using the S3 connection", "err", uerr)
+				}
+			}
+		}
+	}
 	m.mu.Lock()
 	m.status.LastRunAt = &start
 	if err != nil {
@@ -299,7 +490,7 @@ func (m *Manager) upload(ctx context.Context, cfg Config, at time.Time) (Object,
 	defer cancel()
 	size := int64(buf.Len())
 	if _, err := cl.PutObject(uctx, cfg.Bucket, key, &buf, size, minio.PutObjectOptions{ContentType: "application/octet-stream"}); err != nil {
-		return Object{}, fmt.Errorf("upload: %w", err)
+		return Object{}, fmt.Errorf("upload: %w", explainS3(err, cfg))
 	}
 	if err := m.prune(uctx, cl, cfg); err != nil {
 		m.log.Warn("backup retention", "err", err)
@@ -329,17 +520,16 @@ func (m *Manager) prune(ctx context.Context, cl *minio.Client, cfg Config) error
 
 // List returns stored backups, newest first.
 func (m *Manager) List(ctx context.Context) ([]Object, error) {
-	m.mu.Lock()
-	cfg := m.cfg
-	m.mu.Unlock()
-	if cfg == nil {
-		return nil, ErrNotConfigured
-	}
-	cl, err := s3Client(*cfg)
+	cfg, err := m.live(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return list(ctx, cl, *cfg)
+	cl, err := s3Client(cfg)
+	if err != nil {
+		return nil, err
+	}
+	objs, err := list(ctx, cl, cfg)
+	return objs, explainS3(err, cfg)
 }
 
 func list(ctx context.Context, cl *minio.Client, cfg Config) ([]Object, error) {
@@ -396,10 +586,15 @@ func s3Client(c Config) (*minio.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	lookup := minio.BucketLookupAuto
+	if c.PathStyle {
+		lookup = minio.BucketLookupPath
+	}
 	return minio.New(u.Host, &minio.Options{
-		Creds:  credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKey, ""),
-		Secure: u.Scheme == "https",
-		Region: c.Region,
+		Creds:        credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKey, ""),
+		Secure:       u.Scheme == "https",
+		Region:       c.Region,
+		BucketLookup: lookup,
 	})
 }
 
@@ -425,19 +620,18 @@ func (m *Manager) RekeyAll(ctx context.Context) (RekeyResult, error) {
 	res := RekeyResult{Skipped: []string{}, Failed: []string{}}
 	m.run.Lock()
 	defer m.run.Unlock()
-	m.mu.Lock()
-	cfg := m.cfg
-	m.mu.Unlock()
-	if cfg == nil {
-		return res, ErrNotConfigured
-	}
-	cl, err := s3Client(*cfg)
+	live, err := m.live(ctx)
 	if err != nil {
 		return res, err
 	}
-	objs, err := list(ctx, cl, *cfg)
+	cfg := &live
+	cl, err := s3Client(live)
 	if err != nil {
 		return res, err
+	}
+	objs, err := list(ctx, cl, live)
+	if err != nil {
+		return res, explainS3(err, live)
 	}
 	for _, o := range objs {
 		key := objectKey(*cfg, o.Name)
@@ -471,4 +665,37 @@ func (m *Manager) RekeyAll(ctx context.Context) (RekeyResult, error) {
 	}
 	m.log.Info("backups re-keyed", "rekeyed", res.Rekeyed, "current", res.Current, "skipped", len(res.Skipped), "failed", len(res.Failed))
 	return res, nil
+}
+
+// explainS3 says what to do about the S3 errors a changed key causes; the
+// provider's own text says only that a signature does not match.
+func explainS3(err error, c Config) error {
+	if err == nil {
+		return nil
+	}
+	where := "under Settings → Backups → Edit"
+	if c.EndpointID != "" {
+		where = "on the S3 connection " + orName(c) + " (Storage)"
+	}
+	var hint string
+	switch minio.ToErrorResponse(err).Code {
+	case "SignatureDoesNotMatch":
+		hint = fmt.Sprintf("the secret access key does not belong to access key ID %s: it is wrong, or the key was rotated at the provider. Enter the current secret %s", c.AccessKeyID, where)
+	case "InvalidAccessKeyId":
+		hint = fmt.Sprintf("the provider does not know access key ID %s: it was deleted or rotated. Enter the current key %s", c.AccessKeyID, where)
+	case "AccessDenied":
+		hint = fmt.Sprintf("access key ID %s may not write to bucket %s: give it read, write, list and delete there", c.AccessKeyID, c.Bucket)
+	case "RequestTimeTooSkewed":
+		hint = "this server's clock is off: sync it (timedatectl set-ntp true)"
+	default:
+		return err
+	}
+	return fmt.Errorf("%s (%w)", hint, err)
+}
+
+func orName(c Config) string {
+	if c.EndpointName != "" {
+		return c.EndpointName
+	}
+	return c.EndpointID
 }

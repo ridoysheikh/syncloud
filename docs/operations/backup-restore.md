@@ -6,7 +6,9 @@ Databases you create are backed up separately ([PostgreSQL backups](../guides/po
 
 ## Configure backups
 
-**Settings → Backups**, or:
+**Settings → Backups**. Choose an **S3 connection** registered under **Storage** (recommended): backups read its keys at every run, so when you rotate the key on the connection, backups, the registry and PostgreSQL all use the new one. A connection used by backups can't be deleted. Or enter an endpoint and keys only for backups. A key rotated at the provider must then be entered again here, and until it is, every backup fails with "the secret access key does not belong to access key ID …".
+
+With keys entered by hand, from the CLI:
 
 ```sh
 synctl backups config set --endpoint https://s3.example.com --region eu-central-1 \

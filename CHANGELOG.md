@@ -2,6 +2,23 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.5.3]
+
+### Upgrading
+
+- Nothing to do. Backups set up with keys typed into Settings → Backups move to the matching S3 connection by themselves: at the first start when the address and access key ID match a registered connection, or at the next backup when their own key is refused and exactly one connection points at the same S3. The separate copy of the secret is then deleted.
+- If a registry storage switch failed with "the temporary registry did not start in time", start it again from Docker Storage.
+
+### Added
+
+- **Backups can use an S3 connection.** Settings → Backups → Edit offers **S3 connection** (recommended) or **Keys entered here**. With a connection, only a reference is stored and its keys are read at every backup, so a key rotated on the connection applies to backups, the registry and PostgreSQL at once. A connection used by backups can't be deleted. API: `endpointId` on `PUT /api/v1/backups/config`.
+
+### Fixed
+
+- **Backups failed with "the request signature we calculated does not match" after an S3 key rotation.** They kept their own copy of the keys, taken when the settings were saved, while PostgreSQL read the connection's current key. They now use the connection, see above. The error now names the refused access key ID and where to enter the current one.
+- **Saving the backup settings now tests an upload**, so a key that can reach the bucket but not write to it is refused when saving. A pasted secret has stray spaces and newlines removed.
+- **Switching registry storage failed with "the temporary registry did not start in time".** The temporary registry's debug server used `127.0.0.1:5003`, which Traefik's registry entrypoint has used since 0.4, so it exited at once. It now uses `127.0.0.1:5004`, and a test checks that no two platform components listen on the same address.
+
 ## [0.5.2]
 
 ### Upgrading
