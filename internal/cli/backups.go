@@ -143,7 +143,6 @@ func (a *app) backupsCmd() *cobra.Command {
 			},
 		},
 		download,
-		a.recoveryKeyCmd(),
 	)
 	return b
 }

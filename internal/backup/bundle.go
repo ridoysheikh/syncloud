@@ -16,6 +16,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,14 +34,27 @@ const (
 	Ext = ".synbak"
 )
 
-// skipped are data-dir files never put in a bundle: the live database (a
-// snapshot is added instead), the unwrapped master key and one-time secrets.
+// skipped are data-dir paths never put in a bundle: the live database (a
+// snapshot is added instead), the unwrapped master key, one-time secrets,
+// and transient files. images/ is the work folder system images are
+// downloaded and unpacked in (hundreds of MB, fetched again when needed);
+// dot-files and *.tmp are files being written (atomic replaces, unpacked
+// layouts, downloads) that can vanish while the bundle is made.
 func skipped(rel string) bool {
-	base := filepath.Base(rel)
+	rel = filepath.ToSlash(rel)
+	if rel == "images" || strings.HasPrefix(rel, "images/") {
+		return true
+	}
+	for _, part := range strings.Split(rel, "/") {
+		if strings.HasPrefix(part, ".") {
+			return true
+		}
+	}
+	base := path.Base(rel)
 	switch {
-	case strings.HasPrefix(base, dbName), strings.HasPrefix(base, ".backup-"),
+	case strings.HasPrefix(base, dbName), strings.HasSuffix(base, ".tmp"),
 		base == "master.key", base == "master.key.wrapped",
-		base == "setup-token", base == "recovery-key", base == "local-join.token":
+		base == "setup-token", base == "recovery-key", base == "local-join.token", base == "local-rejoin.token":
 		return true
 	}
 	return false
@@ -57,8 +71,8 @@ func Create(ctx context.Context, st *store.Store, box *secrets.Box, dataDir stri
 	var tgz bytes.Buffer
 	gz := gzip.NewWriter(&tgz)
 	tw := tar.NewWriter(gz)
-	add := func(name, path string) error {
-		b, err := os.ReadFile(path)
+	add := func(name, file string) error {
+		b, err := os.ReadFile(file)
 		if err != nil {
 			return err
 		}
@@ -71,15 +85,32 @@ func Create(ctx context.Context, st *store.Store, box *secrets.Box, dataDir stri
 	if err := add(dbName, snap); err != nil {
 		return err
 	}
-	err := filepath.WalkDir(dataDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !d.Type().IsRegular() {
+	err := filepath.WalkDir(dataDir, func(file string, d fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil // removed while the walk ran
+		}
+		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(dataDir, path)
-		if err != nil || skipped(rel) {
+		rel, err := filepath.Rel(dataDir, file)
+		if err != nil {
 			return err
 		}
-		return add(filepath.ToSlash(rel), path)
+		if rel != "." && skipped(rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || !d.Type().IsRegular() {
+			return nil
+		}
+		if err := add(filepath.ToSlash(rel), file); errors.Is(err, fs.ErrNotExist) {
+			return nil // replaced or removed between the listing and the read
+		} else if err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("add files: %w", err)
@@ -127,11 +158,15 @@ func split(bundle []byte) (wrapped, sealed []byte, err error) {
 // (another install, or one from before a restore onto a new key).
 var ErrOtherMasterKey = errors.New("the backup was made with another master key")
 
+// ErrCurrent means a bundle already carries the current wrapped master key.
+var ErrCurrent = errors.New("the backup already opens with the current recovery key")
+
 // Rekey gives a bundle the box's current wrapped master key, so it opens
 // with the current recovery key (Phase 19b). The body is checked to be
-// sealed with the box's master key and is kept byte for byte.
+// sealed with the box's master key and is kept byte for byte. A bundle that
+// already has the current key returns ErrCurrent and needs no upload.
 func Rekey(bundle []byte, box *secrets.Box) ([]byte, error) {
-	_, sealed, err := split(bundle)
+	have, sealed, err := split(bundle)
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +176,9 @@ func Rekey(bundle []byte, box *secrets.Box) ([]byte, error) {
 	wrapped := box.Wrapped()
 	if len(wrapped) == 0 {
 		return nil, errors.New("no wrapped master key")
+	}
+	if bytes.Equal(have, wrapped) {
+		return nil, ErrCurrent
 	}
 	return append(header(wrapped), sealed...), nil
 }

@@ -20,9 +20,21 @@ synctl backups config set --endpoint https://s3.example.com --region eu-central-
 
 The header warns until backups run, and again when they fail.
 
-> Without the recovery key (`SYNRK-…`), a backup can't be opened. It is kept on the controller: the root user can open it at any time under **Settings → Backups → Recovery key**, or with `synctl backups recovery-key show`. Keep a copy offline too, because the copy on the controller is lost with the server.
->
-> **Installs from before keys were kept** can't show their key. **Create recovery key** (or `synctl backups recovery-key create`) makes a new key that is kept, and re-keys the backups in S3 so it opens them all. Services and data aren't affected; nothing is re-encrypted. Downloaded `.synbak` files from before still need the old key.
+> Without the recovery key (`SYNRK-…`), a backup can't be opened. It is shown once, at install, and isn't stored on the controller, so keep it offline. No dashboard page, API call or `synctl` command can show or change it: it is managed only on the controller host, as root.
+
+### Rotate the recovery key
+
+Run this on the controller host. The controller keeps running:
+
+```bash
+sudo syncloud-controller recovery-key rotate
+```
+
+It makes a new key and shows it once. Save it before you close the terminal. It then re-keys the backups in S3 so the new key opens them all, and the old key no longer does. Nothing is re-encrypted, and services and data aren't affected. The next backup uses the new key without a restart. Downloaded `.synbak` files still need the key that was current when they were made.
+
+- `sudo syncloud-controller recovery-key verify` checks that a key (typed, not echoed) opens this install. Use it to test an offline copy.
+- `sudo syncloud-controller recovery-key rekey` retries the re-keying if S3 couldn't be reached during a rotation. It needs no key.
+- **Settings → Backups** shows when the key was last set, never the key itself.
 
 ## Restore, or move to a new server
 

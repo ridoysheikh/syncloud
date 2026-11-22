@@ -492,13 +492,15 @@ func (m *Manager) Evaluate(ctx context.Context) {
 	}
 	for _, r := range rules {
 		if !r.Enabled {
+			m.clear(ctx, r.ID) // a disabled rule has no active alerts
 			continue
 		}
 		switch r.Type {
 		case "deployment", "build", "job":
 			if ferr == nil {
-				m.events(ctx, r, failures, services)
+				m.events(ctx, r, failures, services, now)
 			}
+			m.resolveRecovered(ctx, r, services, now)
 			continue
 		case "database_failover":
 			if dberr == nil {
@@ -628,8 +630,45 @@ func inScope(r Rule, project, env, service string) bool {
 
 func svcLabel(s store.Service) string { return s.Project + "/" + s.Environment + "/" + s.Name }
 
-// events notifies each failure in the rule's scope once.
-func (m *Manager) events(ctx context.Context, r Rule, failures []store.Failure, services map[string]store.Service) {
+// clear drops a rule's active alerts without notifying (disabled rules).
+func (m *Manager) clear(ctx context.Context, ruleID string) {
+	m.mu.Lock()
+	cur := m.states[ruleID]
+	delete(m.states, ruleID)
+	for key := range cur {
+		delete(m.lastSent, ruleID+"/"+key)
+	}
+	m.mu.Unlock()
+	for key := range cur {
+		_ = m.st.DeleteAlertState(ctx, ruleID, key)
+	}
+}
+
+// failureKey is the alert instance a failure belongs to: its service for
+// deployments and builds, its job for job runs. It is "" for failures that
+// nothing can follow up (ad-hoc runs, deleted services), which stay events.
+func failureKey(f store.Failure) string {
+	switch {
+	case f.Kind == "job" && f.JobID != "":
+		return "job:" + f.JobID
+	case f.Kind != "job" && f.ServiceID != "":
+		return "svc:" + f.ServiceID
+	}
+	return ""
+}
+
+// events turns failures in the rule's scope into alerts. A failure of a
+// service (or job) fires an alert that stays active until a later
+// deployment, build or run of it succeeds (resolveRecovered); repeated
+// failures meanwhile update it without notifying again.
+func (m *Manager) events(ctx context.Context, r Rule, failures []store.Failure, services map[string]store.Service, now time.Time) {
+	m.mu.Lock()
+	cur := m.states[r.ID]
+	if cur == nil {
+		cur = map[string]*store.AlertState{}
+		m.states[r.ID] = cur
+	}
+	m.mu.Unlock()
 	for _, f := range failures {
 		if f.Kind != r.Type {
 			continue
@@ -655,7 +694,84 @@ func (m *Manager) events(ctx context.Context, r Rule, failures []store.Failure, 
 		if f.Message != "" {
 			msg += ": " + f.Message
 		}
-		m.notify(ctx, r, "event", store.AlertState{RuleID: r.ID, Key: f.ID, Label: label, Message: msg})
+		key := failureKey(f)
+		if key == "" {
+			m.notify(ctx, r, "event", store.AlertState{RuleID: r.ID, Key: f.ID, Label: label, Message: msg})
+			continue
+		}
+		// Already followed by a success (both in this interval): nothing
+		// is wrong any more, so it is only recorded.
+		if o, found, err := m.st.LatestOutcome(ctx, f.Kind, strings.SplitN(key, ":", 2)[1]); err == nil && found && o.Succeeded && !o.At.Before(f.At) && o.ID != f.ID {
+			m.notify(ctx, r, "event", store.AlertState{RuleID: r.ID, Key: f.ID, Label: label, Message: msg})
+			continue
+		}
+		s, ok := cur[key]
+		if !ok {
+			s = &store.AlertState{RuleID: r.ID, Key: key, State: "firing", Since: f.At.Truncate(time.Second)}
+			cur[key] = s
+			s.Label, s.Message = label, msg
+			m.notify(ctx, r, "firing", *s)
+			m.setSent(r.ID+"/"+key, now)
+		} else {
+			s.Label, s.Message, s.State = label, msg, "firing"
+		}
+		_ = m.st.PutAlertState(ctx, *s)
+	}
+}
+
+// resolveRecovered resolves the failure alerts whose service (or job) has
+// since succeeded, or is gone, and sends due reminders for the rest.
+func (m *Manager) resolveRecovered(ctx context.Context, r Rule, services map[string]store.Service, now time.Time) {
+	m.mu.Lock()
+	cur := m.states[r.ID]
+	keys := make([]string, 0, len(cur))
+	for k := range cur {
+		keys = append(keys, k)
+	}
+	m.mu.Unlock()
+	for _, key := range keys {
+		s := cur[key]
+		kind, id, ok := strings.Cut(key, ":")
+		if !ok {
+			continue
+		}
+		reason := ""
+		if kind == "svc" {
+			if _, live := services[id]; !live {
+				reason = "the service was deleted"
+			}
+		}
+		if reason == "" {
+			outcomeKind := r.Type
+			if kind == "job" {
+				outcomeKind = "job"
+			}
+			o, found, err := m.st.LatestOutcome(ctx, outcomeKind, id)
+			switch {
+			case err != nil:
+				continue // unknown is not resolved
+			case !found && kind == "job":
+				reason = "the job was deleted"
+			case found && o.Succeeded:
+				reason = fmt.Sprintf("%s %s succeeded", r.Type, o.ID)
+			}
+		}
+		if reason == "" {
+			sent := r.ID + "/" + key
+			if r.RepeatHours > 0 && now.Sub(m.sentAt(sent, now)) >= time.Duration(r.RepeatHours)*time.Hour {
+				m.notify(ctx, r, "reminder", *s)
+				m.setSent(sent, now)
+			}
+			continue
+		}
+		res := *s
+		res.Message = "resolved: " + reason + " (was: " + s.Message + ")"
+		m.notify(ctx, r, "resolved", res)
+		m.mu.Lock()
+		delete(m.lastSent, r.ID+"/"+key)
+		delete(cur, key)
+		m.mu.Unlock()
+		_ = m.st.DeleteAlertState(ctx, r.ID, key)
 	}
 }
 

@@ -28,6 +28,8 @@ import (
 	"time"
 	_ "time/tzdata" // job schedules use IANA timezones even on hosts without tzdata
 
+	"golang.org/x/term"
+
 	"github.com/ridoysheikh/syncloud/internal/acmedns"
 	"github.com/ridoysheikh/syncloud/internal/agentgw"
 	"github.com/ridoysheikh/syncloud/internal/alerts"
@@ -96,6 +98,7 @@ func main() {
 const usage = `Usage: syncloud-controller [serve] [flags]   run the controller (default)
        syncloud-controller doctor [flags]    check every component and print fixes
        syncloud-controller restore [flags]   restore a backup into the data directory
+       syncloud-controller recovery-key rotate|verify|rekey  manage the backup recovery key (host only)
        syncloud-controller upgrade [flags]   upgrade to a new release, rolling back if it is unhealthy
        syncloud-controller uninstall [--purge]  remove SynCloud from this host
        syncloud-controller version`
@@ -109,6 +112,8 @@ func run(args []string) error {
 			return doctor(args[1:])
 		case "restore":
 			return restore(args[1:])
+		case "recovery-key":
+			return recoveryKeyCmd(args[1:])
 		case "upgrade":
 			return upgradeCmd(args[1:])
 		case "upgrade-guard":
@@ -155,13 +160,15 @@ func serve(args []string) error {
 		if err := st.SetSetting(ctx, store.SettingRecoverySuffixHash, auth.HashToken(secrets.RecoveryKeySuffix(recoveryKey))); err != nil {
 			return err
 		}
-		if err := backup.StoreRecoveryKey(ctx, st, box, recoveryKey); err != nil {
-			return err
-		}
 		// For install.sh to show once; removed when setup completes.
 		if err := os.WriteFile(filepath.Join(cfg.DataDir, recoveryKeyFile), []byte(recoveryKey+"\n"), 0o600); err != nil {
 			return err
 		}
+	}
+	// The recovery key is never kept on the instance; older releases kept a
+	// sealed copy for the dashboard, which is removed (see recovery-key rotate).
+	if err := st.DeleteSetting(ctx, store.SettingRecoveryKey); err != nil {
+		log.Warn("remove the kept recovery key", "err", err)
 	}
 
 	brand := branding.New(st)
@@ -1160,9 +1167,10 @@ func serve(args []string) error {
 	}
 	log.Info("controller started", "version", version.Version, "listen", ln.Addr().String(), "data", cfg.DataDir)
 	if token != "" {
-		printSetupBanner(domains.Endpoints().DashboardURL, token, recoveryKey)
+		printSetupBanner(cfg.DataDir, domains.Endpoints().DashboardURL, token, recoveryKey)
 	} else if recoveryKey != "" {
-		log.Warn("a recovery key was created for this install; it is needed to restore backups (the root user can open it under Settings → Backups; keep a copy offline too)", "recovery_key", recoveryKey,
+		// The key itself is never logged: logs leave the host.
+		log.Warn("a recovery key was created for this install; it is needed to restore backups and is shown only in this file, which setup removes: save it offline",
 			"file", filepath.Join(cfg.DataDir, recoveryKeyFile))
 	}
 
@@ -1195,17 +1203,23 @@ const (
 	recoveryKeyFile = "recovery-key"
 )
 
-func printSetupBanner(url, token, recoveryKey string) {
+func printSetupBanner(dataDir, url, token, recoveryKey string) {
 	line := func(label, v string) { fmt.Fprintf(os.Stderr, "  %-14s %s\n", label, v) }
 	fmt.Fprintln(os.Stderr, "\n  SynCloud is ready for setup")
 	fmt.Fprintln(os.Stderr, "  "+strings.Repeat("─", 66))
 	line("Dashboard:", url)
 	line("Setup token:", token+"  (valid 1 hour; restart for a new one)")
 	if recoveryKey != "" {
-		line("Recovery key:", recoveryKey)
-		fmt.Fprintln(os.Stderr, "\n  The recovery key is needed to restore backups. The root user can open it")
-		fmt.Fprintln(os.Stderr, "  later (Settings → Backups), but keep a copy offline too: it is lost with")
-		fmt.Fprintln(os.Stderr, "  this server. Setup asks for its last 6 characters.")
+		// Only on a terminal: under systemd stderr goes to the journal, and
+		// install.sh shows the key from the file instead.
+		if term.IsTerminal(int(os.Stderr.Fd())) {
+			line("Recovery key:", recoveryKey)
+		} else {
+			line("Recovery key:", "in "+filepath.Join(dataDir, recoveryKeyFile)+" (removed when setup completes)")
+		}
+		fmt.Fprintln(os.Stderr, "\n  The recovery key is needed to restore backups. It is shown only now and")
+		fmt.Fprintln(os.Stderr, "  is not stored: save it offline. Setup asks for its last 6 characters.")
+		fmt.Fprintln(os.Stderr, "  A new one can be made on this host: syncloud-controller recovery-key rotate")
 	}
 	fmt.Fprintln(os.Stderr, "  "+strings.Repeat("─", 66)+"\n")
 }

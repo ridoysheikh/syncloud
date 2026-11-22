@@ -28,7 +28,7 @@
 | **Networking** | `sg apply/get/list/delete/check/service`, `firewall apply/get/list/delete/effective/counters/drops`, `middlewares apply/list/delete`, `traefik settings`, `network`, `domain get/set`, `domains list/add/get/update/remove/challenge/delegate`, `domains challenge-server show/set/records/check`, `dns providers list/add/get/update/remove/sync/zones`, `dns records list/add/update/remove`, `dns point`, `dns cleanup`, `dns lookup`, `certificates list/request/get/update/verify/renew/reissue/revoke/delete/events/chain/export/import`, `certificates csr new/list/complete/delete`, `certificates authorities list/add/get/update/test/remove` |
 | **Observability** | `metrics`, `traffic`, `requests`, `health services/incidents`, `alerts rules/channels/active/events`, `audit` |
 | **Access** | `iam users/groups/roles/policies/attach/detach/attachments/simulate/actions/access-keys/tokens/mfa/password/settings`, `sts assume-role` |
-| **Cluster** | `nodes list/join-tokens/cordon/drain/delete/rejoin-command/shell/metrics/upgrade-agents`, `pools …`, `system health/tasks/upgrade`, `backups config/run/list/download/recovery-key`, `settings branding/smtp`, `integrations git …`, `integrations git-server …` |
+| **Cluster** | `nodes list/join-tokens/cordon/drain/delete/rejoin-command/shell/metrics/upgrade-agents`, `pools …`, `system health/tasks/upgrade`, `backups config/run/list/download`, `settings branding/smtp`, `integrations git …`, `integrations git-server …` |
 | **Anything else** | `api METHOD PATH [-d BODY]` sends a signed request to any endpoint |
 
 Every API operation has a synctl command. A test in the repository keeps the two in step.

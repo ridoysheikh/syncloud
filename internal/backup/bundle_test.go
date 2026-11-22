@@ -135,3 +135,90 @@ func TestRekeyAfterRotation(t *testing.T) {
 		t.Fatalf("another install's bundle: %v", err)
 	}
 }
+
+// The recovery key is rotated on the host by another process
+// (syncloud-controller recovery-key rotate) while the controller runs: the
+// controller's next backup must open with the new key, without a restart.
+func TestRotationByAnotherProcess(t *testing.T) {
+	ctx := context.Background()
+	src := t.TempDir()
+	running, oldKey, err := secrets.LoadOrCreate(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(ctx, filepath.Join(src, "syncloud.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	host, err := secrets.Load(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newKey := secrets.NewRecoveryKey()
+	if err := host.Rewrap(newKey); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Create(ctx, st, running, src, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Restore(buf.Bytes(), newKey, t.TempDir(), false); err != nil {
+		t.Fatalf("backup after a host rotation, new key: %v", err)
+	}
+	if _, err := Restore(buf.Bytes(), oldKey, t.TempDir(), false); !errors.Is(err, secrets.ErrWrongRecoveryKey) {
+		t.Fatalf("backup after a host rotation opens with the old key: %v", err)
+	}
+	// A bundle with the current key needs no re-keying.
+	if _, err := Rekey(buf.Bytes(), running); !errors.Is(err, ErrCurrent) {
+		t.Fatalf("rekey of a current bundle: %v", err)
+	}
+	// Load never creates a key.
+	if _, err := secrets.Load(t.TempDir()); err == nil {
+		t.Fatal("Load created a master key")
+	}
+}
+
+// Transient files in the data directory (system image work folder, atomic
+// replaces, unpacked layouts) are not backed up, and one that vanishes
+// while the bundle is made does not fail the backup.
+func TestTransientFilesSkipped(t *testing.T) {
+	ctx := context.Background()
+	src := t.TempDir()
+	box, rk, err := secrets.LoadOrCreate(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(ctx, filepath.Join(src, "syncloud.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for _, f := range []string{"images/postgres-17.tar.gz", "images/.layout-1/blobs/sha256/x", "registry/blobs/sha256/.gz-1",
+		"master.key.wrapped.tmp", "controller-run.json.tmp", "local-rejoin.token", "ca.key"} {
+		os.MkdirAll(filepath.Join(src, filepath.Dir(f)), 0o700)
+		os.WriteFile(filepath.Join(src, f), []byte("x"), 0o600)
+	}
+	for _, rel := range []string{"images", "images/a", ".layout-1/x", "registry/blobs/sha256/.gz-9", "a.tmp", "local-rejoin.token"} {
+		if !skipped(rel) {
+			t.Errorf("%s is backed up", rel)
+		}
+	}
+	for _, rel := range []string{"ca.key", "registry/registry-token.key", "imagesx/a", "gitserver-ca/ca.crt"} {
+		if skipped(rel) {
+			t.Errorf("%s is skipped", rel)
+		}
+	}
+	var buf bytes.Buffer
+	if err := Create(ctx, st, box, src, &buf); err != nil {
+		t.Fatal(err)
+	}
+	names, err := Restore(buf.Bytes(), rk, t.TempDir(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"ca.key", "syncloud.db"}) {
+		t.Fatalf("files: %v", names)
+	}
+}

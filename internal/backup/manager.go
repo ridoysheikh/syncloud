@@ -411,6 +411,8 @@ func (m *Manager) WriteBundle(ctx context.Context, w io.Writer) error {
 // RekeyResult is the outcome of re-keying the stored backups.
 type RekeyResult struct {
 	Rekeyed int `json:"rekeyed"`
+	// Current already opened with the current recovery key.
+	Current int `json:"current"`
 	// Skipped were made with another master key and left as they are.
 	Skipped []string `json:"skipped"`
 	// Failed could not be read or written (name: error).
@@ -457,6 +459,8 @@ func (m *Manager) RekeyAll(ctx context.Context) (RekeyResult, error) {
 			return err
 		}()
 		switch {
+		case errors.Is(err, ErrCurrent):
+			res.Current++
 		case errors.Is(err, ErrOtherMasterKey):
 			res.Skipped = append(res.Skipped, o.Name)
 		case err != nil:
@@ -465,6 +469,6 @@ func (m *Manager) RekeyAll(ctx context.Context) (RekeyResult, error) {
 			res.Rekeyed++
 		}
 	}
-	m.log.Info("backups re-keyed", "rekeyed", res.Rekeyed, "skipped", len(res.Skipped), "failed", len(res.Failed))
+	m.log.Info("backups re-keyed", "rekeyed", res.Rekeyed, "current", res.Current, "skipped", len(res.Skipped), "failed", len(res.Failed))
 	return res, nil
 }

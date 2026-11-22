@@ -12,10 +12,19 @@ type backupSettings struct {
 	Configured bool           `json:"configured"`
 	Config     *backup.Config `json:"config"`
 	Status     backup.Status  `json:"status"`
+	// RecoveryKeySetAt is when the recovery key was made or last rotated
+	// (on the host: syncloud-controller recovery-key rotate). The key
+	// itself is never served.
+	RecoveryKeySetAt *time.Time `json:"recoveryKeySetAt"`
 }
 
 func (s *Server) backupSettings() backupSettings {
 	out := backupSettings{Status: s.backups.Status()}
+	if s.secrets != nil {
+		if at := s.secrets.RecoveryKeySetAt(); !at.IsZero() {
+			out.RecoveryKeySetAt = &at
+		}
+	}
 	if c, ok := s.backups.Config(); ok {
 		out.Configured, out.Config = true, &c
 	}

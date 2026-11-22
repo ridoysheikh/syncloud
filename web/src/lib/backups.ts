@@ -24,6 +24,8 @@ export interface BackupSettings {
   configured: boolean;
   config: BackupConfig | null;
   status: BackupStatus;
+  /** When the recovery key was made or last rotated; the key is never served. */
+  recoveryKeySetAt: string | null;
 }
 
 export const backupQuery = queryOptions({

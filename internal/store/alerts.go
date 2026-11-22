@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -229,6 +230,7 @@ type Failure struct {
 	Kind      string // deployment | build | job
 	ID        string
 	ServiceID string
+	JobID     string
 	JobName   string
 	Message   string
 	At        time.Time
@@ -239,9 +241,9 @@ func (s *Store) FailedSince(ctx context.Context, t time.Time) ([]Failure, error)
 	q := []struct {
 		kind, sql string
 	}{
-		{"deployment", `SELECT id, service_id, '', message, finished_at FROM deployments WHERE status IN ('failed', 'rolled_back') AND finished_at > ?`},
-		{"build", `SELECT id, service_id, '', message, finished_at FROM builds WHERE status = 'failed' AND finished_at > ?`},
-		{"job", `SELECT r.id, coalesce(r.service_id, ''), coalesce(j.name, ''), r.message, r.finished_at FROM job_runs r LEFT JOIN jobs j ON j.id = r.job_id
+		{"deployment", `SELECT id, service_id, '', '', message, finished_at FROM deployments WHERE status IN ('failed', 'rolled_back') AND finished_at > ?`},
+		{"build", `SELECT id, service_id, '', '', message, finished_at FROM builds WHERE status = 'failed' AND finished_at > ?`},
+		{"job", `SELECT r.id, coalesce(r.service_id, ''), coalesce(r.job_id, ''), coalesce(j.name, ''), r.message, r.finished_at FROM job_runs r LEFT JOIN jobs j ON j.id = r.job_id
 			WHERE r.status IN ('failed', 'timed_out') AND r.trigger != 'build' AND r.finished_at > ?`},
 	}
 	for _, x := range q {
@@ -252,7 +254,7 @@ func (s *Store) FailedSince(ctx context.Context, t time.Time) ([]Failure, error)
 		for rows.Next() {
 			f := Failure{Kind: x.kind}
 			var at int64
-			if err := rows.Scan(&f.ID, &f.ServiceID, &f.JobName, &f.Message, &at); err != nil {
+			if err := rows.Scan(&f.ID, &f.ServiceID, &f.JobID, &f.JobName, &f.Message, &at); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -262,4 +264,41 @@ func (s *Store) FailedSince(ctx context.Context, t time.Time) ([]Failure, error)
 		rows.Close()
 	}
 	return out, nil
+}
+
+// Outcome is how the latest finished deployment, build or job run of a
+// service (or job) ended.
+type Outcome struct {
+	ID        string
+	Succeeded bool
+	At        time.Time
+}
+
+// LatestOutcome returns the newest finished deployment or build of a
+// service, or run of a job (kind job, id = the job's ID); found is false
+// when there is none.
+func (s *Store) LatestOutcome(ctx context.Context, kind, id string) (o Outcome, found bool, err error) {
+	var q string
+	switch kind {
+	case "deployment":
+		q = `SELECT id, status = 'succeeded', finished_at FROM deployments
+			WHERE service_id = ? AND status IN ('succeeded', 'failed', 'rolled_back') AND finished_at IS NOT NULL`
+	case "build":
+		q = `SELECT id, status = 'succeeded', finished_at FROM builds
+			WHERE service_id = ? AND status IN ('succeeded', 'failed') AND finished_at IS NOT NULL`
+	case "job":
+		q = `SELECT id, status = 'succeeded', finished_at FROM job_runs
+			WHERE job_id = ? AND trigger != 'build' AND status IN ('succeeded', 'failed', 'timed_out') AND finished_at IS NOT NULL`
+	default:
+		return o, false, fmt.Errorf("unknown outcome kind %q", kind)
+	}
+	var at int64
+	err = s.R.QueryRowContext(ctx, q+` ORDER BY finished_at DESC, rowid DESC LIMIT 1`, id).Scan(&o.ID, &o.Succeeded, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return o, false, nil
+	} else if err != nil {
+		return o, false, err
+	}
+	o.At = time.Unix(at, 0).UTC()
+	return o, true, nil
 }

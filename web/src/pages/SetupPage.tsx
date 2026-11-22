@@ -289,7 +289,12 @@ export function SetupPage() {
                       <span className="text-accent">IRWKX</span>
                     </span>
                     , type <span className="text-accent font-mono">2IRWKX</span>
-                    . The root user can open it later under Settings → Backups.
+                    . It is not stored and can't be shown again; a new one can
+                    be made on the controller host with{" "}
+                    <span className="font-mono">
+                      syncloud-controller recovery-key rotate
+                    </span>
+                    .
                   </Callout>
                 )}
               </div>

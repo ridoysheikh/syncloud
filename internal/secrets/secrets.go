@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 const keyFile = "master.key"
@@ -21,14 +22,35 @@ type Box struct {
 	key     []byte
 	dataDir string // where the wrapped copy lives ("" = not loaded from disk)
 
-	mu      sync.RWMutex
+	mu      sync.Mutex
 	wrapped []byte
+	seen    os.FileInfo // the wrapped file when it was last read
 }
 
-// Wrapped returns the master key wrapped by the recovery key (safe to back up).
+// unchanged reports whether fi is still the file last read: a rotation
+// replaces it by rename (a new file), or at least changes its time.
+func (b *Box) unchanged(fi os.FileInfo) bool {
+	return b.seen != nil && os.SameFile(b.seen, fi) && b.seen.ModTime().Equal(fi.ModTime()) && b.seen.Size() == fi.Size()
+}
+
+// Wrapped returns the master key wrapped by the recovery key (safe to back
+// up). The recovery key is rotated on the host by another process
+// (syncloud-controller recovery-key rotate), so the stored copy is read
+// again whenever it changed: every backup carries the current one.
 func (b *Box) Wrapped() []byte {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.dataDir == "" {
+		return b.wrapped
+	}
+	path := filepath.Join(b.dataDir, wrappedFile)
+	fi, err := os.Stat(path)
+	if err != nil || b.unchanged(fi) {
+		return b.wrapped
+	}
+	if w, err := os.ReadFile(path); err == nil && len(w) > len(wrapMagic) && string(w[:len(wrapMagic)]) == wrapMagic {
+		b.wrapped, b.seen = w, fi
+	}
 	return b.wrapped
 }
 
@@ -57,10 +79,14 @@ func (b *Box) Rewrap(recoveryKey string) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if err := writeAtomic(filepath.Join(b.dataDir, wrappedFile), wrapped); err != nil {
+	path := filepath.Join(b.dataDir, wrappedFile)
+	if err := writeAtomic(path, wrapped); err != nil {
 		return err
 	}
 	b.wrapped = wrapped
+	if fi, err := os.Stat(path); err == nil {
+		b.seen = fi
+	}
 	return nil
 }
 
@@ -105,9 +131,40 @@ func LoadOrCreate(dataDir string) (box *Box, recoveryKey string, err error) {
 		if err := os.WriteFile(wpath, box.wrapped, 0o600); err != nil {
 			return nil, "", err
 		}
-		return box, recoveryKey, nil
+		err = nil
+	} else if err != nil {
+		return nil, "", err
 	}
-	return box, "", err
+	if fi, err := os.Stat(wpath); err == nil {
+		box.seen = fi
+	}
+	return box, recoveryKey, nil
+}
+
+// Load reads an existing master key and its wrapped copy from dataDir; it
+// never creates them (host tools that run beside the controller).
+func Load(dataDir string) (*Box, error) {
+	if _, err := os.Stat(filepath.Join(dataDir, keyFile)); err != nil {
+		return nil, fmt.Errorf("read master key: %w", err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, wrappedFile)); err != nil {
+		return nil, fmt.Errorf("read the wrapped master key: %w", err)
+	}
+	box, _, err := LoadOrCreate(dataDir)
+	return box, err
+}
+
+// RecoveryKeySetAt is when the recovery key was last set (created or
+// rotated); zero when unknown. It never reveals the key.
+func (b *Box) RecoveryKeySetAt() time.Time {
+	if b.dataDir == "" {
+		return time.Time{}
+	}
+	fi, err := os.Stat(filepath.Join(b.dataDir, wrappedFile))
+	if err != nil {
+		return time.Time{}
+	}
+	return fi.ModTime().UTC().Truncate(time.Second)
 }
 
 func loadOrCreateKey(dataDir string) (*Box, error) {

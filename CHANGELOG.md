@@ -2,6 +2,30 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.5.2]
+
+### Upgrading
+
+- **The recovery key can no longer be shown in the dashboard, the API or `synctl`.** It is managed only on the controller host, as root. If nobody saved the current key offline, run `sudo syncloud-controller recovery-key rotate` once after upgrading: it shows a new key and re-keys the stored backups.
+- `synctl backups recovery-key show|create` and `GET/POST /api/v1/backups/recovery-key` are removed. At its first start the controller deletes the copy of the key that older releases kept.
+- Deployment, build and job alert rules now open an alert that resolves later, instead of sending a one-off notice. Their notifications are now *firing* and *resolved* instead of *event*.
+
+### Added
+
+- **`syncloud-controller recovery-key rotate|verify|rekey`**, run on the controller host. `rotate` asks you to type ROTATE, shows the new key once (it is not stored), and re-keys the backups in S3 so only the new key opens them. The running controller uses the new key from its next backup on, with no restart. `verify` checks an offline copy (input is not echoed), and `rekey` retries the re-keying after a rotation that couldn't reach S3. Each rotation is audited. **Settings → Backups** shows when the key was last set, never the key itself.
+
+### Fixed
+
+- **Backups failed after a recovery key change.** The re-keying ran inside a single web request, and when the request timed out (after about 60 s with many backups), the rest of the re-keying and the fresh backup were cancelled. That left backups that only opened with the old key, and marked backups as failing. The re-keying now runs on the host, with a second pass for any backup taken while it ran. Backups that already have the current key are not uploaded again.
+- **Backups failed when a file in the data directory changed during the backup.** Temporary files (atomic replaces, unpacked image layouts) and the `images/` work folder (system image archives, hundreds of MB) are no longer put in the bundle, and a file that disappears during the backup no longer fails it.
+- **Alerts for failed deployments, builds and job runs never cleared.** They now stay active until a later deployment, build or run of that service or job succeeds, or the service or job is deleted, and then resolve. Repeated failures update the open alert without sending a new notice. Reminders follow the rule's repeat setting.
+- Disabling an alert rule now clears its active alerts.
+- The Overview's failed-builds item only counts services whose latest build failed.
+
+### Security
+
+- The recovery key is no longer written to the controller log. At first start the setup message shows it only on a terminal; `install.sh` still shows it once from its file.
+
 ## [0.5.1]
 
 ### Upgrading

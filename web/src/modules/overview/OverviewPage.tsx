@@ -228,7 +228,16 @@ export function OverviewPage() {
       x.lastError !== "" ||
       (x.notAfter && Date.parse(x.notAfter) - Date.now() < 14 * 864e5),
   );
-  const failedBuilds = (builds ?? []).filter(
+  // A failure counts until a later build of the same service succeeds.
+  const newestFinished = new Map<string, Build>();
+  for (const b of builds ?? []) {
+    if (b.status !== "succeeded" && b.status !== "failed") continue;
+    const k = `${b.project}/${b.environment}/${b.service}`;
+    const seen = newestFinished.get(k);
+    if (!seen || Date.parse(b.createdAt) > Date.parse(seen.createdAt))
+      newestFinished.set(k, b);
+  }
+  const failedBuilds = [...newestFinished.values()].filter(
     (b) =>
       b.status === "failed" && Date.now() - Date.parse(b.createdAt) < 864e5,
   );
@@ -261,7 +270,7 @@ export function OverviewPage() {
   if (failedBuilds.length)
     attention.push({
       tone: "warn",
-      text: `${failedBuilds.length} build${failedBuilds.length > 1 ? "s" : ""} failed in the last 24 hours`,
+      text: `${failedBuilds.length} service${failedBuilds.length > 1 ? "s'" : "'s"} last build failed`,
       href: "/git/builds",
     });
   if (certProblems.length)
