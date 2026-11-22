@@ -1,5 +1,9 @@
 # build output
 /bin/
+# go build ./cmd/... in the repo root
+/controller
+/agent
+/synctl
 /internal/web/dist/*
 !/internal/web/dist/.gitkeep
 
