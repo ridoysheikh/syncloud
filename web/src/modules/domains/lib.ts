@@ -253,6 +253,8 @@ export interface ChallengeServer {
   ip: string;
   listen: string;
   listening: boolean;
+  /** Where it listens: `listen`, or each address that is not loopback when systemd-resolved holds the port on 127.0.0.53. */
+  addresses?: string[];
   error?: string;
   records: number;
   /** The zone is `_acme-challenge.<ip>.sslip.io`, which sslip.io delegates to the controller (false: an older zone under one of your domains). */

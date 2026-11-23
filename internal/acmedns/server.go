@@ -20,6 +20,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	mdns "github.com/miekg/dns"
@@ -67,8 +68,11 @@ type Status struct {
 	Enabled   bool   `json:"enabled"`
 	Listen    string `json:"listen"`
 	Listening bool   `json:"listening"`
-	Error     string `json:"error,omitempty"`
-	Records   int    `json:"records"`
+	// Addresses it listens on: Listen itself, or each address that is not
+	// loopback when another server (systemd-resolved) holds the port on one.
+	Addresses []string `json:"addresses,omitempty"`
+	Error     string   `json:"error,omitempty"`
+	Records   int      `json:"records"`
 }
 
 // Server is the challenge server.
@@ -81,8 +85,8 @@ type Server struct {
 
 	mu        sync.Mutex
 	cfg       Config
-	udp, tcp  *mdns.Server
-	addr      string
+	servers   []*mdns.Server // UDP and TCP for each address
+	addrs     []string       // where it listens
 	listening bool
 	err       string
 }
@@ -178,23 +182,66 @@ func (s *Server) apply(c Config) {
 	if c.Zone == "" {
 		return
 	}
-	pc, err := net.ListenPacket("udp", s.listen())
+	listen := s.listen()
+	err := s.bindLocked(listen)
+	if err != nil && errors.Is(err, syscall.EADDRINUSE) {
+		// Every address (":53") cannot be had while something holds the
+		// port on one of them: systemd-resolved does on 127.0.0.53 and
+		// 127.0.0.54. The internet reaches the addresses that are not
+		// loopback, so listen on each of those instead.
+		if host, port, perr := net.SplitHostPort(listen); perr == nil && (host == "" || host == "0.0.0.0" || host == "::") {
+			err = s.bindEachLocked(port)
+		}
+	}
 	if err != nil {
-		s.err = "cannot listen on " + s.listen() + ": " + err.Error()
+		s.stopLocked()
+		s.err = err.Error()
 		s.log.Warn("challenge server", "err", s.err)
 		return
+	}
+	s.listening = true
+	s.log.Info("challenge server listening", "zone", c.Zone, "addr", strings.Join(s.addrs, ", "))
+}
+
+// bindEachLocked listens on every IPv4 address that is not loopback. It
+// fails only when none can be had.
+func (s *Server) bindEachLocked(port string) error {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return fmt.Errorf("list the addresses to listen on: %w", err)
+	}
+	var errs []error
+	for _, a := range addrs {
+		ip, _, err := net.ParseCIDR(a.String())
+		if err != nil || ip.To4() == nil || ip.IsLoopback() {
+			continue
+		}
+		if err := s.bindLocked(net.JoinHostPort(ip.String(), port)); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(s.addrs) == 0 {
+		if len(errs) == 0 {
+			return fmt.Errorf("port %s is in use and this host has no address other than loopback to listen on", port)
+		}
+		return errors.Join(errs...)
+	}
+	return nil
+}
+
+// bindLocked listens on one address over UDP and TCP.
+func (s *Server) bindLocked(addr string) error {
+	pc, err := net.ListenPacket("udp", addr)
+	if err != nil {
+		return fmt.Errorf("cannot listen on %s: %w", addr, err)
 	}
 	ln, err := net.Listen("tcp", pc.LocalAddr().String())
 	if err != nil {
 		_ = pc.Close()
-		s.err = "cannot listen on tcp " + pc.LocalAddr().String() + ": " + err.Error()
-		s.log.Warn("challenge server", "err", s.err)
-		return
+		return fmt.Errorf("cannot listen on tcp %s: %w", pc.LocalAddr(), err)
 	}
-	s.udp = &mdns.Server{PacketConn: pc, Handler: mdns.HandlerFunc(s.serve)}
-	s.tcp = &mdns.Server{Listener: ln, Handler: mdns.HandlerFunc(s.serve)}
-	s.addr = pc.LocalAddr().String()
-	udp, tcp := s.udp, s.tcp
+	udp := &mdns.Server{PacketConn: pc, Handler: mdns.HandlerFunc(s.serve)}
+	tcp := &mdns.Server{Listener: ln, Handler: mdns.HandlerFunc(s.serve)}
 	started := make(chan struct{}, 2)
 	udp.NotifyStartedFunc = func() { started <- struct{}{} }
 	tcp.NotifyStartedFunc = func() { started <- struct{}{} }
@@ -206,18 +253,16 @@ func (s *Server) apply(c Config) {
 		case <-time.After(3 * time.Second):
 		}
 	}
-	s.listening = true
-	s.log.Info("challenge server listening", "zone", c.Zone, "addr", s.addr)
+	s.servers = append(s.servers, udp, tcp)
+	s.addrs = append(s.addrs, pc.LocalAddr().String())
+	return nil
 }
 
 func (s *Server) stopLocked() {
-	if s.udp != nil {
-		_ = s.udp.Shutdown()
+	for _, srv := range s.servers {
+		_ = srv.Shutdown()
 	}
-	if s.tcp != nil {
-		_ = s.tcp.Shutdown()
-	}
-	s.udp, s.tcp, s.listening, s.addr = nil, nil, false, ""
+	s.servers, s.addrs, s.listening = nil, nil, false
 }
 
 // Close stops the server.
@@ -227,11 +272,14 @@ func (s *Server) Close() {
 	s.stopLocked()
 }
 
-// Addr is the address the server listens on ("" when it does not).
+// Addr is the first address the server listens on ("" when it does not).
 func (s *Server) Addr() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.addr
+	if len(s.addrs) == 0 {
+		return ""
+	}
+	return s.addrs[0]
 }
 
 // Enabled reports whether a zone is configured (the server may still have
@@ -259,7 +307,7 @@ func (s *Server) Config() Config {
 // Status describes the server.
 func (s *Server) Status(ctx context.Context) Status {
 	s.mu.Lock()
-	st := Status{Config: s.cfg, Enabled: s.cfg.Zone != "", Listen: s.listen(), Listening: s.listening, Error: s.err}
+	st := Status{Config: s.cfg, Enabled: s.cfg.Zone != "", Listen: s.listen(), Listening: s.listening, Error: s.err, Addresses: append([]string(nil), s.addrs...)}
 	s.mu.Unlock()
 	if n, err := s.st.CountAcmeDNSRecords(ctx); err == nil {
 		st.Records = n

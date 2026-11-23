@@ -253,8 +253,11 @@ type ChallengeServer struct {
 	IP        string `json:"ip"`
 	Listen    string `json:"listen"`
 	Listening bool   `json:"listening"`
-	Error     string `json:"error"`
-	Records   int    `json:"records"`
+	// Addresses it listens on: Listen, or each address that is not loopback
+	// when another server (systemd-resolved) holds the port on one.
+	Addresses []string `json:"addresses"`
+	Error     string   `json:"error"`
+	Records   int      `json:"records"`
 	// Sslip: the zone is _acme-challenge.<ip>.sslip.io, which sslip.io
 	// delegates to the controller (nothing to create at any DNS host).
 	Sslip bool `json:"sslip"`

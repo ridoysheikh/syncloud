@@ -26675,6 +26675,13 @@
           "listening": {
             "type": "boolean"
           },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "where it listens: listen itself, or each address that is not loopback when another server (systemd-resolved) holds the port on one"
+          },
           "error": {
             "type": "string"
           },

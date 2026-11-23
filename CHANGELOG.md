@@ -2,6 +2,12 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.5.5]
+
+### Fixed
+
+- **The challenge server could not start on hosts with systemd-resolved** (Ubuntu, Debian): "cannot listen on :53: address already in use". systemd-resolved holds port 53 only on 127.0.0.53 and 127.0.0.54, but that is enough to make a bind to every address fail. When the port is taken like this, the server now listens on each address that is not loopback, which is where the internet reaches it. The page, `synctl domains challenge-server show` and the API (`addresses`) list where it listens. The installer no longer warns about a resolver on loopback only.
+
 ## [0.5.4]
 
 ### Upgrading

@@ -120,13 +120,17 @@ done
 
 # Port 53 (UDP and TCP) is where SynCloud's own ACME challenge DNS server listens
 # once you turn it on (Domains → Challenge server). Its firewall rule is open by
-# default; this only warns when another resolver already holds the port.
-holder53=$(ss -Hlnup "sport = :53" 2>/dev/null | grep -o 'users:(("[^"]*' | cut -d'"' -f2 | head -1 || true)
-[ -z "$holder53" ] && holder53=$(ss -Hltnp "sport = :53" 2>/dev/null | grep -o 'users:(("[^"]*' | cut -d'"' -f2 | head -1 || true)
-if [ -z "$holder53" ]; then
-  ok "port 53 is free (for SynCloud's challenge DNS server)"
+# default. A resolver on loopback only (systemd-resolved on 127.0.0.53) is fine:
+# the server then listens on each address that is not loopback. This only warns
+# when something holds the port where the internet reaches it.
+holder53=$(ss -Hlnup "sport = :53" 2>/dev/null; ss -Hltnp "sport = :53" 2>/dev/null) || true
+public53=$(printf '%s\n' "$holder53" | awk 'NF && $4 !~ /^(127\.|\[::1\]|::1)/' | grep -o 'users:(("[^"]*' | cut -d'"' -f2 | head -1 || true)
+if [ -n "$public53" ]; then
+  warn "port 53 is used by $public53 on a public address: SynCloud's own challenge DNS server (optional) cannot listen there; free it, or use --acme-dns-listen, a DNS provider or the 'another domain' way"
+elif [ -n "$holder53" ]; then
+  ok "port 53 is held on loopback only (systemd-resolved): SynCloud's challenge DNS server listens on the other addresses"
 else
-  warn "port 53 is used by $holder53: SynCloud's own challenge DNS server (optional) cannot listen there; free it, or use --acme-dns-listen, a DNS provider or the 'another domain' way"
+  ok "port 53 is free (for SynCloud's challenge DNS server)"
 fi
 
 for mod in wireguard ip_vs nf_tables; do

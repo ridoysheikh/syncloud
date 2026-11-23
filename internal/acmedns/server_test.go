@@ -2,11 +2,13 @@ package acmedns
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	mdns "github.com/miekg/dns"
@@ -213,5 +215,60 @@ func TestAnswersTheSslipZoneAndItsApex(t *testing.T) {
 	}
 	if in := ask(t, addr, "203-0-113-9.sslip.io", mdns.TypeA, "udp"); in.Rcode != mdns.RcodeRefused {
 		t.Fatalf("the parent is sslip.io's, not ours: %v", in)
+	}
+}
+
+// systemd-resolved holds port 53 on 127.0.0.53 and 127.0.0.54 only, which
+// makes a bind to every address (":53") fail. The server then listens on each
+// address that is not loopback, where the internet's questions arrive.
+func TestListensBesideALoopbackResolver(t *testing.T) {
+	ctx := context.Background()
+	var outside string
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range addrs {
+			if ip, _, err := net.ParseCIDR(a.String()); err == nil && ip.To4() != nil && !ip.IsLoopback() {
+				outside = ip.String()
+				break
+			}
+		}
+	}
+	if outside == "" {
+		t.Skip("no address other than loopback")
+	}
+	// The stub resolver, on a free port.
+	u, err := net.ListenPacket("udp", "127.0.0.53:0")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer u.Close()
+	port := u.LocalAddr().(*net.UDPAddr).Port
+	tl, err := net.Listen("tcp", net.JoinHostPort("127.0.0.53", fmt.Sprint(port)))
+	if err != nil {
+		t.Skip(err)
+	}
+	defer tl.Close()
+
+	s, _ := newServer(t)
+	s.Listen = fmt.Sprintf(":%d", port)
+	if err := s.Configure(ctx, ForIP("203.0.113.9")); err != nil {
+		t.Fatal(err)
+	}
+	st := s.Status(ctx)
+	if !st.Listening || st.Error != "" || len(st.Addresses) == 0 {
+		t.Fatalf("%+v", st)
+	}
+	for _, a := range st.Addresses {
+		if ip := net.ParseIP(strings.Split(a, ":")[0]); ip == nil || ip.IsLoopback() {
+			t.Fatalf("listens on %s", a)
+		}
+	}
+	if _, err := s.Put(ctx, "x."+s.Zone(), "v"); err != nil {
+		t.Fatal(err)
+	}
+	addr := net.JoinHostPort(outside, fmt.Sprint(port))
+	for _, network := range []string{"udp", "tcp"} {
+		if got := txts(ask(t, addr, "x."+s.Zone(), mdns.TypeTXT, network)); !slices.Equal(got, []string{"v"}) {
+			t.Fatalf("%s: %v", network, got)
+		}
 	}
 }

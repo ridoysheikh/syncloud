@@ -244,7 +244,9 @@ export function ChallengeServerPage() {
               value={state}
               tone={s.listening ? "ok" : "bad"}
               hint={
-                s.listening ? `UDP and TCP on ${s.listen}` : (s.error ?? "")
+                s.listening
+                  ? `UDP and TCP on ${(s.addresses?.length ? s.addresses : [s.listen]).join(", ")}`
+                  : (s.error ?? "")
               }
             />
             <StatTile
@@ -272,9 +274,9 @@ export function ChallengeServerPage() {
               <div className="flex flex-col gap-0.5">
                 <b>The server could not start.</b>
                 <span>
-                  {s.error} Port 53 is often taken by a local resolver
-                  (systemd-resolved, dnsmasq or bind). Free it, or start the
-                  controller with{" "}
+                  {s.error} Another DNS server holds port 53 on this host's
+                  public addresses (systemd-resolved alone is fine: it only
+                  holds 127.0.0.53). Free it, or start the controller with{" "}
                   <span className="font-mono">
                     --acme-dns-listen &lt;address:port&gt;
                   </span>{" "}

@@ -108,7 +108,7 @@ func (s *Service) CheckChallengeServer(ctx context.Context) ([]Check, error) {
 	}
 
 	if st.Listening {
-		add("Listening", true, "UDP and TCP on "+st.Listen)
+		add("Listening", true, "UDP and TCP on "+strings.Join(firstNonEmptyList(st.Addresses, []string{st.Listen}), ", "))
 	} else {
 		add("Listening", false, firstNonEmpty(st.Error, "not listening on "+st.Listen))
 	}
@@ -147,4 +147,11 @@ func (s *Service) CheckChallengeServer(ctx context.Context) ([]Check, error) {
 		add("Reachable from the internet", false, "resolvers did not get an answer from "+net.JoinHostPort(st.IP, "53")+" through "+st.NS+": check that UDP and TCP port 53 reach the controller (cloud firewall, and nothing else using the port) and that "+st.IP+" is still its public address")
 	}
 	return out, nil
+}
+
+func firstNonEmptyList(a, b []string) []string {
+	if len(a) > 0 {
+		return a
+	}
+	return b
 }

@@ -670,6 +670,7 @@ type challengeServerRow struct {
 	IP        string   `json:"ip"`
 	Listen    string   `json:"listen"`
 	Listening bool     `json:"listening"`
+	Addresses []string `json:"addresses"`
 	Error     string   `json:"error"`
 	Records   int      `json:"records"`
 	Sslip     bool     `json:"sslip"`
@@ -685,6 +686,9 @@ func printChallengeServer(a *app, v challengeServerRow) error {
 		return nil
 	}
 	state := "listening on " + v.Listen
+	if len(v.Addresses) > 0 {
+		state = "listening on " + strings.Join(v.Addresses, ", ")
+	}
 	if !v.Listening {
 		state = "NOT listening on " + v.Listen + ": " + orDash(v.Error)
 	}
