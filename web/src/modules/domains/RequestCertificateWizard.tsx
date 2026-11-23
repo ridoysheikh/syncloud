@@ -329,9 +329,9 @@ export function RequestCertificateWizard() {
                       Without a DNS provider on the domain you add the TXT
                       record by hand, and again at every renewal (about every 60
                       days); an alert warns before it expires. Connect
-                      Cloudflare, or set up SynCloud's challenge server (Domains
-                      → Challenge server) and add one CNAME, to make it
-                      automatic.
+                      Cloudflare, or turn on SynCloud's challenge server (one
+                      click, Domains → Challenge server) and add one CNAME, to
+                      make it automatic.
                     </Alert>
                   )}
                 </div>

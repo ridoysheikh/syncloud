@@ -64,6 +64,19 @@ func (m *Manager) SetDNS(h DNSHost) { m.mu.Lock(); m.dnsHost = h; m.mu.Unlock() 
 
 func (m *Manager) dns() DNSHost { m.mu.Lock(); defer m.mu.Unlock(); return m.dnsHost }
 
+// ownSslipName reports whether a host is the controller's own <ip>.sslip.io
+// with the challenge server on: sslip.io hands its _acme-challenge name to
+// the controller, so the server answers it at the name itself.
+func (m *Manager) ownSslipName(ctx context.Context, host string) bool {
+	h := m.dns()
+	if h == nil {
+		return false
+	}
+	name := "_acme-challenge." + strings.ToLower(strings.TrimSuffix(host, "."))
+	info := h.Challenge(ctx, name)
+	return info.Mode == "builtin" && info.Target == name
+}
+
 // ── what an order shows ─────────────────────────────────────────────────────
 
 // Challenge is a TXT record an order needs.
@@ -312,8 +325,8 @@ func (m *Manager) Request(ctx context.Context, in RequestInput) (View, error) {
 	}
 	if method == "dns-01" {
 		for _, n := range names {
-			if h := strings.TrimPrefix(n, "*."); strings.HasSuffix(h, ".sslip.io") || strings.HasSuffix(h, ".nip.io") {
-				return View{}, invalid("%s cannot use DNS validation: sslip.io and nip.io do not let you add records", n)
+			if h := strings.TrimPrefix(n, "*."); (strings.HasSuffix(h, ".sslip.io") || strings.HasSuffix(h, ".nip.io")) && !m.ownSslipName(ctx, h) {
+				return View{}, invalid("%s cannot use DNS validation: sslip.io and nip.io do not let you add records (only the controller's own <ip>.sslip.io can, with SynCloud's challenge server on)", n)
 			}
 		}
 	}

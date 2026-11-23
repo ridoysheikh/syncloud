@@ -76,9 +76,6 @@ func TestAnswersOnlyItsZone(t *testing.T) {
 	if _, err := s.Put(ctx, "other.example.com", "x"); err == nil {
 		t.Fatal("outside the zone")
 	}
-	if _, err := s.Put(ctx, "acme.example.com", "x"); err == nil {
-		t.Fatal("the apex holds no challenge")
-	}
 
 	for _, network := range []string{"udp", "tcp"} {
 		in := ask(t, addr, "Ab12.acme.example.com", mdns.TypeTXT, network)
@@ -175,5 +172,46 @@ func TestListenFailureIsShownNotFatal(t *testing.T) {
 	}
 	if st := s.Status(ctx); !st.Enabled || st.Listening || st.Error == "" {
 		t.Fatalf("%+v", st)
+	}
+}
+
+func TestForIPIsTheSslipZone(t *testing.T) {
+	c := ForIP("203.0.113.9")
+	if c.Zone != "_acme-challenge.203-0-113-9.sslip.io" || c.NS != "203-0-113-9.sslip.io" || c.IP != "203.0.113.9" {
+		t.Fatalf("%+v", c)
+	}
+	if err := ValidConfig(c); err != nil {
+		t.Fatal(err)
+	}
+	if !IsSslip(c) || IsSslip(Config{Zone: "acme.example.com", NS: "acme-ns.example.com", IP: "203.0.113.9"}) {
+		t.Fatal("IsSslip")
+	}
+}
+
+// sslip.io hands _acme-challenge.<ip>.sslip.io and every name below it to the
+// IP: the server answers a CNAME target below the zone and, for the
+// controller's own *.<ip>.sslip.io wildcard, the zone apex itself.
+func TestAnswersTheSslipZoneAndItsApex(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newServer(t)
+	if err := s.Configure(ctx, ForIP("203.0.113.9")); err != nil {
+		t.Fatal(err)
+	}
+	zone := "_acme-challenge.203-0-113-9.sslip.io"
+	if _, err := s.Put(ctx, "3f9a1c2b7d4e."+zone, "below"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Put(ctx, zone, "apex"); err != nil {
+		t.Fatal(err)
+	}
+	addr := s.Addr()
+	if got := txts(ask(t, addr, "3f9a1c2b7d4e."+zone, mdns.TypeTXT, "udp")); !slices.Equal(got, []string{"below"}) {
+		t.Fatalf("below: %v", got)
+	}
+	if in := ask(t, addr, zone, mdns.TypeTXT, "udp"); !in.Authoritative || !slices.Equal(txts(in), []string{"apex"}) {
+		t.Fatalf("apex: %v", in)
+	}
+	if in := ask(t, addr, "203-0-113-9.sslip.io", mdns.TypeA, "udp"); in.Rcode != mdns.RcodeRefused {
+		t.Fatalf("the parent is sslip.io's, not ours: %v", in)
 	}
 }

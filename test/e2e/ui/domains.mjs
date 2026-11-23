@@ -195,7 +195,8 @@ await step(admin, "a wildcard certificate is requested: the TXT records are writ
   await admin.waitForURL(/\/domains\/certificates\/cert_/);
   await until("the certificate to be valid", async () => {
     await admin.reload();
-    return (await admin.getByText("valid", { exact: true }).count()) > 0;
+    // Wait for the page to render after the reload: counting at once races it.
+    return admin.getByText("valid", { exact: true }).first().waitFor({ timeout: 3000 }).then(() => true, () => false);
   }, 120);
   await shot(admin, "certificate-valid");
   await admin.getByRole("tab", { name: "Details" }).click();
@@ -249,7 +250,8 @@ await step(admin, "a manual domain: the TXT record is shown, checked live, and t
   await admin.getByRole("button", { name: "Verify now" }).click();
   await until("the certificate to be issued", async () => {
     await admin.reload();
-    return (await admin.getByText("valid", { exact: true }).count()) > 0;
+    // Wait for the page to render after the reload: counting at once races it.
+    return admin.getByText("valid", { exact: true }).first().waitFor({ timeout: 3000 }).then(() => true, () => false);
   }, 60);
   await shot(admin, "manual-valid");
 });
@@ -308,7 +310,8 @@ await step(admin, "a manual domain delegates _acme-challenge with one CNAME: the
   await admin.getByRole("button", { name: "Verify now" }).click();
   await until("the certificate to be issued through the CNAME", async () => {
     await admin.reload();
-    return (await admin.getByText("valid", { exact: true }).count()) > 0;
+    // Wait for the page to render after the reload: counting at once races it.
+    return admin.getByText("valid", { exact: true }).first().waitFor({ timeout: 3000 }).then(() => true, () => false);
   }, 90);
   // SynCloud wrote its TXT in the validation domain and removed it again.
   const recs = Object.values(await sim("GET", "/sim/records")).flat();
@@ -445,24 +448,18 @@ await step(admin, "a name outside the domain's grants is refused with the reason
   await adminApi("PUT", "/domains/example.test", { grants: [{ project: "*", wildcards: true }] });
 });
 
-await step(admin, "SynCloud's own challenge server: set up, records created, checked from the internet; a domain without a provider renews by itself after one CNAME", async () => {
+await step(admin, "SynCloud's own challenge server: one click on (sslip.io delegates its zone, nothing to create), checked from the internet; a domain without a provider renews by itself after one CNAME", async () => {
   await admin.goto(`${BASE}/domains/challenge-server`);
   await admin.getByText("Turn it on").waitFor();
   await shot(admin, "challenge-server-off");
-  await admin.getByLabel("Challenge zone").fill("acme.example.test");
-  await admin.getByRole("button", { name: /Show name server and address/ }).click();
+  // The dev controller's detected address is local: give the public one, as behind NAT.
+  await admin.getByRole("button", { name: /Behind NAT/ }).click();
   await admin.getByLabel("Public address").fill("203.0.113.9");
-  await admin.getByRole("button", { name: "Turn on" }).click();
-  await admin.getByText("Records to create").waitFor();
-  await admin.getByText("acme-ns.example.test").first().waitFor();
-  await admin.getByText(/created by SynCloud in example\.test/).first().waitFor(); // the parent domain has a provider
-  // Nothing is published yet: the check says what is missing.
-  await admin.getByRole("button", { name: "Check it works" }).click();
-  await admin.getByText("resolvers do not know acme.example.test yet", { exact: false }).waitFor();
-  await admin.getByRole("button", { name: "Create them for me" }).click();
-  await admin.getByText(/Created 2 record/).waitFor();
-  const dnsRecords = (await sim("GET", "/sim/records"))["example.test"];
-  if (!dnsRecords.some((r) => r.type === "NS" && r.name === "acme.example.test") || !dnsRecords.some((r) => r.type === "A" && r.name === "acme-ns.example.test" && r.content === "203.0.113.9")) throw new Error("the records were not created");
+  await admin.getByRole("button", { name: "Turn on", exact: true }).click();
+  await admin.getByText("Check from the internet").waitFor();
+  await admin.getByText("_acme-challenge.203-0-113-9.sslip.io").first().waitFor();
+  await admin.getByText("delegated by sslip.io").waitFor();
+  if ((await admin.getByText("Records to create").count()) > 0) throw new Error("there should be no records to create");
   await admin.getByRole("button", { name: "Check it works" }).click();
   await admin.getByText("Everything works.").waitFor();
   await shot(admin, "challenge-server-ok");
@@ -483,7 +480,7 @@ await step(admin, "SynCloud's own challenge server: set up, records created, che
   await admin.getByRole("tab", { name: "Challenge" }).click();
   await admin.getByText("not created yet").waitFor();
   const codes = await admin.locator("code").allInnerTexts();
-  const target = codes.map((c) => c.trim()).find((c) => /^[0-9a-f]{12}\.acme\.example\.test$/.test(c));
+  const target = codes.map((c) => c.trim()).find((c) => /^[0-9a-f]{12}\._acme-challenge\.203-0-113-9\.sslip\.io$/.test(c));
   if (!target) throw new Error(`no CNAME target on the page: ${codes}`);
   await shot(admin, "challenge-builtin");
 
@@ -505,7 +502,8 @@ await step(admin, "SynCloud's own challenge server: set up, records created, che
   await admin.getByRole("button", { name: "Verify now" }).click();
   await until("the certificate to be issued by SynCloud's own server", async () => {
     await admin.reload();
-    return (await admin.getByText("valid", { exact: true }).count()) > 0;
+    // Wait for the page to render after the reload: counting at once races it.
+    return admin.getByText("valid", { exact: true }).first().waitFor({ timeout: 3000 }).then(() => true, () => false);
   }, 90);
   const held = (await adminApi("GET", "/domains/challenge-server")).records;
   if (held !== 0) throw new Error(`the server still holds ${held} challenge value(s)`);

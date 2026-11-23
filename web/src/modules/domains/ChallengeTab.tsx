@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import {
   ArrowRight,
   Check,
@@ -32,6 +31,7 @@ import {
   useChallengeServer,
   useDomains,
 } from "./lib";
+import { TurnOnChallengeServer } from "./ChallengeServerButton";
 
 type Way = "provider" | "builtin" | "zone" | "hand";
 
@@ -350,7 +350,7 @@ export function ChallengeTab({ d }: { d: Domain }) {
                     "SynCloud answers the challenge itself. One CNAME, once; no DNS provider needed.",
                   disabled: !serverOn,
                   aside: !serverOn ? (
-                    <StatusBadge tone="warn">not set up</StatusBadge>
+                    <StatusBadge tone="warn">off</StatusBadge>
                   ) : undefined,
                 },
                 {
@@ -396,16 +396,14 @@ export function ChallengeTab({ d }: { d: Domain }) {
               ]}
             />
             {!serverOn && (
-              <p className="text-muted text-xs">
-                <Link
-                  to={"/domains/challenge-server" as string}
-                  className="underline"
-                >
-                  Set up SynCloud's challenge server
-                </Link>{" "}
-                to renew wildcard certificates for domains without a provider by
-                themselves.
-              </p>
+              <div className="flex flex-col gap-1.5">
+                <p className="text-muted text-xs">
+                  SynCloud's challenge server renews wildcard certificates for
+                  domains without a provider by themselves: one click, then one
+                  CNAME for this domain, once.
+                </p>
+                <TurnOnChallengeServer />
+              </div>
             )}
             {way === "zone" && (
               <Field
@@ -463,10 +461,10 @@ export function ChallengeTab({ d }: { d: Domain }) {
           <dl className="text-muted grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-2 text-xs">
             <dt className="text-fg font-medium">SynCloud's server</dt>
             <dd>
-              The default for a domain without a provider. Set the server up
-              once for the whole cluster (a zone under a domain you own, and
-              port 53), then one CNAME per domain. Works at any registrar and
-              keeps your DNS credentials out of SynCloud.
+              The default for a domain without a provider. Turn the server on
+              once for the whole cluster (one click; port 53 open), then one
+              CNAME per domain. Works at any registrar and keeps your DNS
+              credentials out of SynCloud.
             </dd>
             <dt className="text-fg font-medium">Provider</dt>
             <dd>

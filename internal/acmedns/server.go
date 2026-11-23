@@ -3,6 +3,10 @@
 // challenges for one zone, so a domain at any registrar can renew wildcard
 // certificates with a single CNAME and no DNS provider.
 //
+// The zone is _acme-challenge.<a-b-c-d>.sslip.io (ForIP): sslip.io already
+// delegates every name under it to the IP a-b-c-d, so turning the server on
+// needs no NS or A record anywhere, only port 53 open on that IP.
+//
 // It is not a general name server. It answers TXT, plus the zone's SOA and
 // NS, for names under its challenge zone, and refuses everything else.
 package acmedns
@@ -29,12 +33,32 @@ const SettingKey = "acme_dns"
 // DefaultListen is where the server listens (UDP and TCP).
 const DefaultListen = ":53"
 
-// Config is what the person sets: the zone the server answers for, the
-// name server host that points at it, and its public address.
+// Config is the zone the server answers for, the name server host that
+// points at it, and the controller's public address. ForIP makes it.
 type Config struct {
-	Zone string `json:"zone"` // acme.example.com ("" = off)
-	NS   string `json:"ns"`   // acme-ns.example.com: an A record to IP, named by the zone's NS record
+	Zone string `json:"zone"` // _acme-challenge.203-0-113-9.sslip.io ("" = off)
+	NS   string `json:"ns"`   // 203-0-113-9.sslip.io: the host sslip.io delegates the zone to
 	IP   string `json:"ip"`   // the controller's public address
+	// Pinned: the address was given by hand (NAT): it is not followed.
+	Pinned bool `json:"pinned,omitempty"`
+}
+
+// SslipSuffix is the wildcard DNS service whose _acme-challenge delegation
+// the zone relies on.
+const SslipSuffix = "sslip.io"
+
+// ForIP is the configuration for a public address: the zone sslip.io
+// delegates to it, with nothing to create at any DNS host.
+func ForIP(ip string) Config {
+	host := strings.NewReplacer(".", "-", ":", "-").Replace(strings.TrimSpace(ip)) + "." + SslipSuffix
+	return Config{Zone: "_acme-challenge." + host, NS: host, IP: strings.TrimSpace(ip)}
+}
+
+// IsSslip reports whether a configuration is the sslip.io form of ForIP
+// (an older one may be a zone under one of the person's domains).
+func IsSslip(c Config) bool {
+	f := ForIP(c.IP)
+	return c.Zone != "" && c.Zone == f.Zone && c.NS == f.NS
 }
 
 // Status is what the server is doing.
@@ -118,8 +142,8 @@ func validName(n string) error {
 			return fmt.Errorf("%q has an invalid label", n)
 		}
 		for _, r := range l {
-			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
-				return fmt.Errorf("%q: only letters, digits and hyphens", n)
+			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+				return fmt.Errorf("%q: only letters, digits, hyphens and underscores", n)
 			}
 		}
 	}
@@ -244,7 +268,7 @@ func (s *Server) Status(ctx context.Context) Status {
 }
 
 // ErrOff means the server has no zone.
-var ErrOff = errors.New("the challenge server is not set up")
+var ErrOff = errors.New("the challenge server is off")
 
 func (s *Server) inZone(name string) (string, error) {
 	zone := s.Zone()
@@ -252,7 +276,8 @@ func (s *Server) inZone(name string) (string, error) {
 		return "", ErrOff
 	}
 	name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
-	if name == zone || !strings.HasSuffix(name, "."+zone) {
+	// The apex too: it is the challenge name of *.<ip>.sslip.io itself.
+	if name != zone && !strings.HasSuffix(name, "."+zone) {
 		return "", fmt.Errorf("%q is not a name inside the challenge zone %s", name, zone)
 	}
 	return name, nil

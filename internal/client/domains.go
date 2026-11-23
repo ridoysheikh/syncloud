@@ -255,14 +255,9 @@ type ChallengeServer struct {
 	Listening bool   `json:"listening"`
 	Error     string `json:"error"`
 	Records   int    `json:"records"`
-	// Needed are the records to create so the internet reaches the server.
-	Needed []struct {
-		Type    string `json:"type"`
-		Name    string `json:"name"`
-		Content string `json:"content"`
-		Zone    string `json:"zone"`
-		Managed bool   `json:"managed"`
-	} `json:"needed"`
+	// Sslip: the zone is _acme-challenge.<ip>.sslip.io, which sslip.io
+	// delegates to the controller (nothing to create at any DNS host).
+	Sslip bool `json:"sslip"`
 	// Domains are the registered domains whose challenges it answers.
 	Domains []string `json:"domains"`
 }
@@ -272,9 +267,10 @@ func (c *Client) ChallengeServer(ctx context.Context) (ChallengeServer, error) {
 	return out, c.Do(ctx, "GET", "/api/v1/domains/challenge-server", nil, &out)
 }
 
-// SetChallengeServer turns the server on for a zone below a domain you own
-// (like acme.example.com); an empty zone switches it off. ns and ip default.
-func (c *Client) SetChallengeServer(ctx context.Context, zone, ns, ip string) (ChallengeServer, error) {
+// SetChallengeServer turns the server on (zone _acme-challenge.<public
+// ip>.sslip.io, nothing to create at any DNS host) or off. ip overrides the
+// detected address and is then kept when the address changes.
+func (c *Client) SetChallengeServer(ctx context.Context, enabled bool, ip string) (ChallengeServer, error) {
 	var out ChallengeServer
-	return out, c.Do(ctx, "PUT", "/api/v1/domains/challenge-server", map[string]string{"zone": zone, "ns": ns, "ip": ip}, &out)
+	return out, c.Do(ctx, "PUT", "/api/v1/domains/challenge-server", map[string]any{"enabled": enabled, "ip": ip}, &out)
 }

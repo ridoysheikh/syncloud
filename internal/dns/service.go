@@ -369,7 +369,7 @@ func (s *Service) AddZone(ctx context.Context, in AddZoneInput) (ZoneView, error
 		z.ChallengeZone = cz
 	} else if in.ChallengeBuiltin {
 		if s.Builtin == nil || !s.Builtin.Enabled() {
-			return ZoneView{}, invalid("challengeBuiltin: set up SynCloud's challenge server first (Domains → Challenge server)")
+			return ZoneView{}, invalid("challengeBuiltin: turn on SynCloud's challenge server first (Domains → Challenge server, one click)")
 		}
 		z.ChallengeBuiltin = true
 	}
@@ -570,7 +570,7 @@ func (s *Service) UpdateZone(ctx context.Context, name string, in UpdateZoneInpu
 	if in.ChallengeBuiltin != nil {
 		if *in.ChallengeBuiltin {
 			if s.Builtin == nil || !s.Builtin.Enabled() {
-				return ZoneView{}, invalid("challengeBuiltin: set up SynCloud's challenge server first (Domains → Challenge server)")
+				return ZoneView{}, invalid("challengeBuiltin: turn on SynCloud's challenge server first (Domains → Challenge server, one click)")
 			}
 			if z.ChallengeZone != "" {
 				cleared, z.ChallengeZone = true, ""

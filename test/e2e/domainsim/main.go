@@ -54,6 +54,9 @@ var (
 	// forwards: challenge zones SynCloud's own server answers (zone -> its address),
 	// reached only while the zone's NS record exists, as on the internet.
 	forwards = map[string]string{}
+	// sslipZones: _acme-challenge.<ip>.sslip.io zones, delegated always (as
+	// sslip.io does) to SynCloud's own server: zone -> its address.
+	sslipZones = map[string]string{}
 	caKey    *ecdsa.PrivateKey
 	caCert   *x509.Certificate
 )
@@ -62,6 +65,11 @@ var (
 // forwarded zone that is delegated (its NS record exists). The caller holds mu.
 func forwardFor(name string) (string, bool) {
 	name = strings.ToLower(strings.TrimSuffix(name, "."))
+	for z, addr := range sslipZones {
+		if name == z || strings.HasSuffix(name, "."+z) {
+			return addr, true
+		}
+	}
 	for fz, addr := range forwards {
 		if !strings.HasSuffix(name, "."+fz) {
 			continue
@@ -375,6 +383,7 @@ func main() {
 	controlAddr := flag.String("control", "127.0.0.1:9102", "control endpoints (/sim/records)")
 	cfZones := flag.String("cf-zones", "example.test,apps.test", "zones the Cloudflare token can see")
 	forward := flag.String("forward", "acme.example.test=127.0.0.1:9154", "challenge zones answered by SynCloud's own server: zone=host:port, comma separated (reached once the zone's NS record exists)")
+	sslip := flag.String("sslip", "203.0.113.9=127.0.0.1:9154", "public addresses whose _acme-challenge.<ip>.sslip.io is delegated to SynCloud's own server, as sslip.io does: ip=host:port, comma separated")
 	otherZones := flag.String("other-zones", "manual.test,deleg.test,builtin.test", "zones that exist in DNS but are not at Cloudflare")
 	flag.Parse()
 
@@ -391,6 +400,11 @@ func main() {
 	for _, f := range strings.Split(*forward, ",") {
 		if z, addr, ok := strings.Cut(strings.TrimSpace(f), "="); ok {
 			forwards[z] = addr
+		}
+	}
+	for _, f := range strings.Split(*sslip, ",") {
+		if ip, addr, ok := strings.Cut(strings.TrimSpace(f), "="); ok {
+			sslipZones["_acme-challenge."+strings.ReplaceAll(ip, ".", "-")+".sslip.io"] = addr
 		}
 	}
 	for _, z := range strings.Split(*otherZones, ",") {

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "@/lib/api";
 import { subscribe } from "@/lib/stream";
 
@@ -255,13 +255,8 @@ export interface ChallengeServer {
   listening: boolean;
   error?: string;
   records: number;
-  needed: {
-    type: string;
-    name: string;
-    content: string;
-    zone?: string;
-    managed: boolean;
-  }[];
+  /** The zone is `_acme-challenge.<ip>.sslip.io`, which sslip.io delegates to the controller (false: an older zone under one of your domains). */
+  sslip: boolean;
   domains: string[];
 }
 
@@ -269,6 +264,16 @@ export function useChallengeServer() {
   return useQuery({
     queryKey: ["dm", "challenge-server"],
     queryFn: () => api<ChallengeServer>("GET", "/domains/challenge-server"),
+  });
+}
+
+/** Turns SynCloud's challenge server on (or off): one click, nothing to type. */
+export function useSetChallengeServer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { enabled: boolean; ip?: string }) =>
+      api<ChallengeServer>("PUT", "/domains/challenge-server", body),
+    onSuccess: () => invalidateAll(qc),
   });
 }
 
@@ -429,7 +434,7 @@ export function challengeSummary(
     };
   return {
     label: "by hand",
-    hint: "set up SynCloud's challenge server, or add a TXT record at each renewal",
+    hint: "turn on SynCloud's challenge server (one click), or add a TXT record at each renewal",
   };
 }
 

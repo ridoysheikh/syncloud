@@ -38,7 +38,7 @@ go build -o "$T/domainsim" ./test/e2e/domainsim
 
 echo "== the simulated outside world"
 CF=$(free_port); ACME=$(free_port); DNS=$(free_port); CTRL=$(free_port); ADNS=$(free_port)
-"$T/domainsim" --cloudflare "127.0.0.1:$CF" --acme "127.0.0.1:$ACME" --dns "127.0.0.1:$DNS" --control "127.0.0.1:$CTRL" --forward "acme.example.test=127.0.0.1:$ADNS" >"$T/domainsim.log" 2>&1 &
+"$T/domainsim" --cloudflare "127.0.0.1:$CF" --acme "127.0.0.1:$ACME" --dns "127.0.0.1:$DNS" --control "127.0.0.1:$CTRL" --forward "acme.example.test=127.0.0.1:$ADNS" --sslip "203.0.113.9=127.0.0.1:$ADNS" >"$T/domainsim.log" 2>&1 &
 PIDS+=($!)
 
 echo "== the controller"

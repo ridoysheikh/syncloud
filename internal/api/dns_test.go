@@ -197,37 +197,31 @@ func TestChallengeServerSetupAndUse(t *testing.T) {
 	if resp, body := e.do(t, "PUT", "/api/v1/domains/example.com", map[string]any{"challengeBuiltin": true}, nil); resp.StatusCode != 400 {
 		t.Fatalf("%d %v", resp.StatusCode, body)
 	}
-	if resp, _ := e.do(t, "PUT", "/api/v1/domains/challenge-server", map[string]any{"zone": "example.com"}, nil); resp.StatusCode != 400 {
-		t.Fatalf("a registered domain cannot be the challenge zone: %d", resp.StatusCode)
-	}
 
-	// On: the address defaults to the controller's, the name server from the zone.
-	resp, srv := e.do(t, "PUT", "/api/v1/domains/challenge-server", map[string]any{"zone": "acme.example.com"}, nil)
-	if resp.StatusCode != 200 || srv["enabled"] != true || srv["ns"] != "acme-ns.example.com" || srv["ip"] != "203.0.113.10" || srv["listening"] != true {
+	// One click: the zone is the sslip.io one for the controller's detected address.
+	resp, srv := e.do(t, "PUT", "/api/v1/domains/challenge-server", map[string]any{"enabled": true}, nil)
+	if resp.StatusCode != 200 || srv["enabled"] != true || srv["sslip"] != true || srv["zone"] != "_acme-challenge.203-0-113-10.sslip.io" || srv["ns"] != "203-0-113-10.sslip.io" || srv["ip"] != "203.0.113.10" || srv["listening"] != true {
 		t.Fatalf("%d %v", resp.StatusCode, srv)
 	}
-	needed := srv["needed"].([]any)
-	if len(needed) != 2 || needed[0].(map[string]any)["managed"] != true {
-		t.Fatalf("example.com has a provider, so SynCloud can create them: %v", needed)
+	if _, ok := srv["needed"]; ok {
+		t.Fatal("there are no records to create any more")
 	}
-	resp, made := e.do(t, "POST", "/api/v1/domains/challenge-server/records", nil, nil)
-	if resp.StatusCode != 200 || made["created"] != float64(2) {
-		t.Fatalf("%d %v", resp.StatusCode, made)
+	if resp, _ := e.do(t, "PUT", "/api/v1/domains/challenge-server", map[string]any{"enabled": true, "ip": "not-an-ip"}, nil); resp.StatusCode != 400 {
+		t.Fatalf("a bad address: %d", resp.StatusCode)
 	}
-	_, recs := e.do(t, "GET", "/api/v1/domains/example.com/records", nil, nil)
-	if len(recs["items"].([]any)) != 2 {
-		t.Fatalf("%v", recs)
+	if resp, _ := e.do(t, "POST", "/api/v1/domains/challenge-server/records", nil, nil); resp.StatusCode < 400 {
+		t.Fatalf("the records step is gone: %d", resp.StatusCode)
 	}
 	// The check reports each step; with no resolver reachable it fails without hanging.
 	_, chk := e.do(t, "POST", "/api/v1/domains/challenge-server/check", nil, nil)
-	if chk["ok"] != false || len(chk["checks"].([]any)) != 4 {
+	if chk["ok"] != false || len(chk["checks"].([]any)) != 2 {
 		t.Fatalf("%v", chk)
 	}
 
 	// The manual domain now uses it by itself; a provider domain keeps its provider until it chooses.
 	_, route = e.do(t, "GET", "/api/v1/domains/manual.org/challenge", nil, nil)
 	cname, _ := route["cname"].(map[string]any)
-	if route["mode"] != "builtin" || route["auto"] != true || !strings.HasSuffix(route["target"].(string), ".acme.example.com") || cname == nil || cname["managed"] != false {
+	if route["mode"] != "builtin" || route["auto"] != true || !strings.HasSuffix(route["target"].(string), "._acme-challenge.203-0-113-10.sslip.io") || cname == nil || cname["managed"] != false {
 		t.Fatalf("%v", route)
 	}
 	_, route = e.do(t, "GET", "/api/v1/domains/example.com/challenge", nil, nil)
@@ -254,15 +248,15 @@ func TestChallengeServerSetupAndUse(t *testing.T) {
 		t.Fatalf("reading: %d", resp.StatusCode)
 	}
 	for _, c := range []struct{ method, path string }{
-		{"PUT", "/api/v1/domains/challenge-server"}, {"POST", "/api/v1/domains/challenge-server/records"}, {"POST", "/api/v1/domains/challenge-server/check"},
+		{"PUT", "/api/v1/domains/challenge-server"}, {"POST", "/api/v1/domains/challenge-server/check"},
 	} {
-		if resp, _ := a.do(t, c.method, c.path, map[string]any{"zone": ""}, nil); resp.StatusCode != 403 {
+		if resp, _ := a.do(t, c.method, c.path, map[string]any{"enabled": false}, nil); resp.StatusCode != 403 {
 			t.Errorf("%s %s: %d", c.method, c.path, resp.StatusCode)
 		}
 	}
 
 	// Switching it off.
-	if resp, srv := e.do(t, "PUT", "/api/v1/domains/challenge-server", map[string]any{"zone": ""}, nil); resp.StatusCode != 200 || srv["enabled"] != false {
+	if resp, srv := e.do(t, "PUT", "/api/v1/domains/challenge-server", map[string]any{"enabled": false}, nil); resp.StatusCode != 200 || srv["enabled"] != false {
 		t.Fatalf("%d %v", resp.StatusCode, srv)
 	}
 }

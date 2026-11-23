@@ -2,6 +2,19 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.5.4]
+
+### Upgrading
+
+- **SynCloud's challenge server now turns on with one click and needs no DNS records of its own.** Its zone is `_acme-challenge.<public ip>.sslip.io`, which sslip.io already delegates to the controller. The challenge-zone, name-server and "records to create" steps are gone. A server set up before keeps its zone until you press **Switch to sslip.io**; each domain's CNAME then changes once.
+- API: `PUT /api/v1/domains/challenge-server` takes `{"enabled": true|false, "ip"?}` instead of `{"zone", "ns", "ip"}`. `POST /api/v1/domains/challenge-server/records` is removed. The `needed` field is removed and `sslip` is added. `synctl domains challenge-server set/records` become `on/off`. The SDK's `setChallengeServer(zone, …)` becomes `setChallengeServer(enabled, { ip })`.
+
+### Added
+
+- **One-click challenge server.** On the Challenge server page, on any domain's Challenge tab, or in the Add-domain wizard. Each domain then needs one CNAME, once, and every wildcard certificate and renewal after it is automatic.
+- The zone follows the controller's public address (checked every 10 minutes). An address given by hand, for NAT, is kept.
+- A real wildcard certificate for the controller's own `*.<ip>.sslip.io`, validated by the challenge server with no CNAME.
+
 ## [0.5.3]
 
 ### Upgrading

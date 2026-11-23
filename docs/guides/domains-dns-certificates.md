@@ -108,7 +108,7 @@ A name's challenge is answered in one of four ways. The **Challenge** tab of a d
 
 | Way | When | What you do | Renewals |
 | --- | --- | --- | --- |
-| **SynCloud's challenge server** (*builtin*) | the server is set up; the default for a domain without a provider | create one CNAME, once | automatic |
+| **SynCloud's challenge server** (*builtin*) | the server is on (one click); the default for a domain without a provider | create one CNAME, once | automatic |
 | **Through the provider** (*direct*) | the domain has a DNS provider | nothing | automatic |
 | **Another domain you own** (*delegated*), optional | a validation domain that has a provider | create one CNAME, once | automatic |
 | **By hand** (*manual*) | none of the above | add each TXT record | a person, about every 60 days |
@@ -117,26 +117,32 @@ The first match wins: an external validation domain you chose, then SynCloud's s
 
 ### SynCloud's own challenge server
 
-Any domain, at any registrar, can renew wildcard certificates by itself if SynCloud answers the challenge. **Domains → Challenge server** sets it up once for the whole cluster:
+Any domain, at any registrar, can renew wildcard certificates by itself if SynCloud answers the challenge. Turn it on once for the whole cluster with one click: **Domains → Challenge server → Turn on** (or **Turn on** on any domain's Challenge tab, or `synctl domains challenge-server on`). There is nothing to type and nothing to create at any DNS host.
 
-1. Choose a **challenge zone**: a name below a domain you own that nothing else uses, like `acme.example.com` (`synctl domains challenge-server set acme.example.com`). SynCloud shows two records to create at the DNS of that domain:
+It works because of sslip.io. sslip.io already hands every name under `_acme-challenge.<a-b-c-d>.sslip.io` to the address `a.b.c.d`. So when the controller at `203.0.113.9` listens on port 53, it is the server for `_acme-challenge.203-0-113-9.sslip.io` automatically.
 
-   ```text
-   acme-ns.example.com   A    <this controller's public address>
-   acme.example.com      NS   acme-ns.example.com
-   ```
-
-   When that domain has a provider, **Create them for me** does it (`synctl domains challenge-server records`); the address record must stay DNS only (not proxied).
-2. Port 53 is **open by default** in SynCloud's own host firewall (UDP and TCP on the controller, from anywhere), so nothing to do there; open UDP and TCP 53 in your cloud provider's firewall or security group, and make sure nothing else listens on it (the installer warns when something does) (flag `--acme-dns-listen`, default `:53`; a busy port is shown on the page, and saving retries).
-3. **Check it works** asks public resolvers for the NS record, the address and a probe value that only this server can answer.
-
-Then each domain needs only one CNAME, shown on its Challenge tab and on the certificate's Challenge page:
+Then each domain needs only one CNAME, once. The domain's Challenge tab and the certificate's Challenge page show it:
 
 ```text
-_acme-challenge.example.org   CNAME   3f9a1c07d2be.acme.example.com
+_acme-challenge.example.org   CNAME   3f9a1c07d2be._acme-challenge.203-0-113-9.sslip.io
 ```
 
-SynCloud answers the TXT value of the open order at that name from its own store (so an order survives a restart) and removes it afterwards. `example.org` and `*.example.org` share the CNAME; a nested wildcard has its own name. The server answers TXT, and the zone's SOA and NS, for the challenge zone only: it refuses every other question, so it is not a name server for your domains and not an open resolver. Turning it off sends domains back to adding the TXT record by hand; certificates that exist keep serving.
+A certificate for `*.example.org` then goes like this:
+
+1. Let's Encrypt asks for the TXT record at `_acme-challenge.example.org`.
+2. Your DNS host answers with the CNAME. sslip.io sends the question on to `203.0.113.9`.
+3. SynCloud answers with the value of the open order, and the certificate is issued.
+
+At every renewal the value is new. SynCloud stores it itself and the CNAME stays the same, so renewals need nobody.
+
+- `example.org` and `*.example.org` share one CNAME. A nested wildcard such as `*.shop.example.org` uses `_acme-challenge.shop.example.org`, which has its own CNAME.
+- The controller's own `*.203-0-113-9.sslip.io` also gets a real wildcard certificate this way, with no CNAME at all. Its challenge name is the zone itself.
+- **Port 53** is open by default in SynCloud's own host firewall (UDP and TCP on the controller, from anywhere). Open UDP and TCP 53 in your cloud provider's firewall or security group too, and make sure nothing else listens on that port; the installer warns when something does. The listen address is set with `--acme-dns-listen` (default `:53`). If the port is busy, the page shows it, and turning the server on again retries.
+- **Check it works** sends a probe value through public resolvers. The probe can only come back if sslip.io's delegation reaches this controller and port 53 is open.
+- **If the public address changes**, SynCloud moves the zone within 10 minutes. Each domain's Challenge tab then shows the new CNAME to set. Behind NAT, give the address by hand (**Behind NAT? Give the public address**, or `--ip`); an address given by hand is kept.
+- The server keeps values in its own store, so an order survives a restart, and removes them afterwards. It answers TXT, and the zone's SOA and NS, for its zone only. It refuses every other question, so it is not a name server for your domains and not an open resolver.
+- Turning it off sends domains back to adding the TXT record by hand. Certificates that already exist keep serving.
+- It depends on sslip.io answering, as the default base domain already does. A renewal that fails keeps retrying for weeks before the certificate expires.
 
 - **Through the provider:** SynCloud writes the TXT record, waits until DNS answers, finishes the order and removes it. If the name already is a CNAME that you made, the record is written where it points (when that is a domain SynCloud can write), because a TXT cannot sit beside a CNAME.
 - **Another domain you own (optional):** the external way, for when you would rather not open port 53 or run the server: a domain at a registrar or DNS host SynCloud cannot write still renews by itself. Pick a registered domain with a provider as the domain's **validation domain** (`synctl domains update example.org --challenge-zone example.com`). The authority is sent there with one CNAME:
@@ -147,7 +153,7 @@ SynCloud answers the TXT value of the open order at that name from its own store
 
   SynCloud then writes and removes the TXT record at `3f9a1c07d2be.acme.example.com` itself, at the first certificate and at every renewal. The CNAME is set **once**: `example.org` and `*.example.org` share it, while a nested wildcard such as `*.shop.example.org` has its own name and target (the **Check a name** box on the tab shows each). If the domain being delegated also has a provider, SynCloud creates the CNAME for you (**Create the CNAME for me**, or `synctl domains delegate`); on a manual domain you create that one record at your DNS host. Until it is visible the certificate's order waits, shows exactly this record, and finishes the moment resolvers answer. Any domain you own can be the validation domain; it need not be related. A name that is a CNAME cannot hold other records, so an existing record on that name is only replaced when you confirm.
 - **By hand:** the certificate's **Challenge** tab shows each name and value to copy, what public resolvers and the zone's own servers answer, and **Verify now**. SynCloud also checks every minute and finishes the order as soon as every record is visible. The order stays open a week. Every renewal has a new value, so a certificate that cannot renew by itself raises the *Certificate expiring* alert 14 days (or whatever you set) before it expires. Connecting Cloudflare, or delegating with one CNAME, makes it automatic.
-- sslip.io and nip.io names cannot use DNS-01 (you cannot add records there): they stay on per-host HTTP-01.
+- sslip.io and nip.io names cannot use DNS-01 (you cannot add records there): they stay on per-host HTTP-01. The one exception is the controller's own `<ip>.sslip.io` while SynCloud's challenge server is on (see above).
 
 Check any name from the CLI or API (the same answer for every way): `synctl domains challenge example.org --name '*.shop.example.org'` (`GET /api/v1/domains/{zone}/challenge?name=`) says which way it is answered, the name and target, and whether public resolvers show the CNAME.
 

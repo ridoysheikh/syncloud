@@ -253,6 +253,8 @@ func serve(args []string) error {
 	}
 	defer acmeDNS.Close()
 	dnsSvc.Builtin = acmeDNS
+	// Its zone (_acme-challenge.<ip>.sslip.io) follows the public address.
+	go followChallengeServerIP(ctx, dnsSvc, detector, log)
 	if cfg.DNSResolvers != "" {
 		for _, r := range strings.Split(cfg.DNSResolvers, ",") {
 			if r = strings.TrimSpace(r); r != "" {
@@ -1556,5 +1558,27 @@ func backupConnections(m *s3.Manager) func(ctx context.Context) ([]backup.Creds,
 			}
 		}
 		return out, nil
+	}
+}
+
+// followChallengeServerIP moves the challenge server's sslip.io zone when the
+// controller's public address changes (every 10 minutes, and once at start).
+// The domains' CNAMEs then need the new target, which their pages show.
+func followChallengeServerIP(ctx context.Context, svc *dns.Service, det *domain.Detector, log *slog.Logger) {
+	t := time.NewTicker(10 * time.Minute)
+	defer t.Stop()
+	for {
+		if ip, err := det.PublicIP(ctx); err == nil {
+			if moved, err := svc.FollowChallengeServerIP(ctx, ip); err != nil {
+				log.Warn("challenge server: follow the public address", "err", err)
+			} else if moved {
+				log.Warn("challenge server moved to the new public address: update each domain's _acme-challenge CNAME (shown on its Challenge tab)", "ip", ip, "zone", svc.Builtin.Zone())
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
 	}
 }

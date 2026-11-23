@@ -18,6 +18,7 @@ import {
   type Domain,
   type RemoteZone,
 } from "./lib";
+import { TurnOnChallengeServer } from "./ChallengeServerButton";
 
 const steps = [
   "Provider",
@@ -324,7 +325,7 @@ export function AddDomainWizard() {
                         title: "By hand",
                         icon: Hand,
                         description:
-                          "SynCloud shows the TXT record; you add it at every renewal, about every 60 days. Set up the challenge server to avoid that.",
+                          "SynCloud shows the TXT record; you add it at every renewal, about every 60 days. Turn on the challenge server (one click) to avoid that.",
                       },
                 ...(prov && serverOn
                   ? [
@@ -354,16 +355,14 @@ export function AddDomainWizard() {
               ]}
             />
             {!prov && !serverOn && (
-              <p className="text-muted text-xs">
-                <Link
-                  to={"/domains/challenge-server" as string}
-                  className="underline"
-                >
-                  Set up SynCloud's challenge server
-                </Link>{" "}
-                to renew wildcard certificates for domains without a provider by
-                themselves.
-              </p>
+              <div className="flex flex-col gap-1.5">
+                <p className="text-muted text-xs">
+                  SynCloud's challenge server renews wildcard certificates for
+                  domains without a provider by themselves: one click, then one
+                  CNAME for this domain, once.
+                </p>
+                <TurnOnChallengeServer />
+              </div>
             )}
             {way === "zone" && (
               <Field

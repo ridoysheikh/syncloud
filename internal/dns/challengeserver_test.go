@@ -43,25 +43,23 @@ func TestBuiltinServerIsTheDefaultForDomainsWithoutAProvider(t *testing.T) {
 		t.Fatalf("the server must be set up first: %v", err)
 	}
 
-	// The challenge zone cannot be a registered domain.
-	if _, err := s.ConfigureChallengeServer(ctx, "validate.net", "", "203.0.113.9"); !errors.Is(err, ErrInvalid) {
-		t.Fatal(err)
+	// One click: no zone to choose, no address to give when it is detected.
+	if _, err := s.ConfigureChallengeServer(ctx, true, "", false); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("an address is needed: %v", err)
 	}
-	v, err := s.ConfigureChallengeServer(ctx, "acme.example.org", "", "203.0.113.9")
-	if err != nil || !v.Listening || v.NS != "acme-ns.example.org" {
+	v, err := s.ConfigureChallengeServer(ctx, true, "203.0.113.9", false)
+	zone := "_acme-challenge.203-0-113-9.sslip.io"
+	if err != nil || !v.Listening || v.Zone != zone || v.NS != "203-0-113-9.sslip.io" {
 		t.Fatalf("%+v %v", v, err)
-	}
-	if len(v.Needed) != 2 || v.Needed[0].Type != "A" || v.Needed[1].Type != "NS" || v.Needed[0].Managed {
-		t.Fatalf("records to create: %+v", v.Needed)
 	}
 	if !slices.Equal(v.Domains, []string{"shop.com"}) {
 		t.Fatalf("only the manual domain uses it by default: %v", v.Domains)
 	}
 
 	// shop.com has no provider: its challenge is answered by SynCloud.
-	want := BuiltinTarget("shop.com", "acme.example.org")
+	want := BuiltinTarget("shop.com", zone)
 	r := s.Route(ctx, "*.shop.com")
-	if r.Mode != "builtin" || !r.Auto || r.Target != want || r.TargetZone != "acme.example.org" || !strings.HasSuffix(want, ".acme.example.org") {
+	if r.Mode != "builtin" || !r.Auto || r.Target != want || r.TargetZone != zone || !strings.HasSuffix(want, "."+zone) {
 		t.Fatalf("%+v", r)
 	}
 	// Names outside every registered domain too.
@@ -113,7 +111,7 @@ func TestBuiltinServerIsTheDefaultForDomainsWithoutAProvider(t *testing.T) {
 	}
 
 	// Switching the server off: manual domains are manual again.
-	if _, err := s.ConfigureChallengeServer(ctx, "", "", ""); err != nil {
+	if _, err := s.ConfigureChallengeServer(ctx, false, "", false); err != nil {
 		t.Fatal(err)
 	}
 	if r := s.Route(ctx, "shop.com"); r.Mode != "manual" {
@@ -134,21 +132,18 @@ func ask(t *testing.T, addr, name string, qtype uint16) *mdns.Msg {
 	return in
 }
 
-func TestChallengeServerRecordsAndCheck(t *testing.T) {
+func TestChallengeServerCheck(t *testing.T) {
 	ctx := context.Background()
-	s, memA, _, _ := delegationSvc(t)
+	s, _, _, _ := delegationSvc(t)
 	b := withBuiltin(t, s)
-	pa, _ := s.AddProvider(ctx, "a", "cloudflare", "a")
-	s.AddZone(ctx, AddZoneInput{Name: "shop.com", ProviderID: pa.ID})
-	v, err := s.ConfigureChallengeServer(ctx, "acme.shop.com", "ns.acme-dns.shop.com", "203.0.113.9")
-	if err != nil {
+	if _, err := s.CheckChallengeServer(ctx); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("off: %v", err)
+	}
+	if _, err := s.ConfigureChallengeServer(ctx, true, "203.0.113.9", false); err != nil {
 		t.Fatal(err)
 	}
-	if !v.Needed[0].Managed || v.Needed[0].Zone != "shop.com" || v.Needed[1].Zone != "shop.com" {
-		t.Fatalf("the records belong in shop.com, which has a provider: %+v", v.Needed)
-	}
 
-	// The check says what is missing, then passes once DNS is right.
+	// Until the internet reaches the server, the check says so.
 	resolver, raddr := startRecursor(t, b)
 	s.Resolvers = []string{raddr}
 	checks, err := s.CheckChallengeServer(ctx)
@@ -159,32 +154,78 @@ func TestChallengeServerRecordsAndCheck(t *testing.T) {
 	for _, c := range checks {
 		byName[c.Name] = c
 	}
-	if !byName["Listening"].OK || byName["NS record"].OK || byName["Name server address"].OK || byName["Reachable from the internet"].OK {
-		t.Fatalf("nothing is published yet: %+v", checks)
+	if len(checks) != 2 || !byName["Listening"].OK || byName["Reachable from the internet"].OK {
+		t.Fatalf("not reachable yet: %+v", checks)
 	}
 
-	n, err := s.CreateChallengeServerRecords(ctx, false)
-	if err != nil || n != 2 {
-		t.Fatalf("%d %v", n, err)
-	}
-	if got := memA.Snapshot(); !slices.Contains(got, "A ns.acme-dns.shop.com 203.0.113.9") || !slices.Contains(got, "NS acme.shop.com ns.acme-dns.shop.com") {
-		t.Fatalf("%v", got)
-	}
-	memA.Calls = nil
-	if n, err := s.CreateChallengeServerRecords(ctx, false); err != nil || n != 0 || len(memA.Calls) != 0 {
-		t.Fatalf("idempotent: %d %v %v", n, err, memA.Calls)
-	}
-
-	// The "internet" now has the delegation: the recursor knows it.
-	resolver.publish("acme.shop.com", "ns.acme-dns.shop.com", "203.0.113.9")
+	// sslip.io delegates the zone to the address: the probe comes back.
+	resolver.publish(b.Zone(), b.Config().NS, "203.0.113.9")
 	checks, _ = s.CheckChallengeServer(ctx)
 	for _, c := range checks {
 		if !c.OK {
 			t.Fatalf("%+v", checks)
 		}
 	}
-	if left := ask(t, b.Addr(), "probe-x.acme.shop.com", mdns.TypeTXT); len(left.Answer) != 0 {
+	if left := ask(t, b.Addr(), "probe-x."+b.Zone(), mdns.TypeTXT); len(left.Answer) != 0 {
 		t.Fatal("the probe value was left behind")
+	}
+}
+
+func TestChallengeServerFollowsTheAddress(t *testing.T) {
+	ctx := context.Background()
+	s, _, _, _ := delegationSvc(t)
+	b := withBuiltin(t, s)
+	if changed, err := s.FollowChallengeServerIP(ctx, "198.51.100.7"); changed || err != nil || b.Enabled() {
+		t.Fatalf("off stays off: %v %v", changed, err)
+	}
+	s.ConfigureChallengeServer(ctx, true, "203.0.113.9", false)
+	if changed, err := s.FollowChallengeServerIP(ctx, "203.0.113.9"); changed || err != nil {
+		t.Fatalf("same address: %v %v", changed, err)
+	}
+	changed, err := s.FollowChallengeServerIP(ctx, "198.51.100.7")
+	if !changed || err != nil || b.Zone() != "_acme-challenge.198-51-100-7.sslip.io" {
+		t.Fatalf("%v %v %q", changed, err, b.Zone())
+	}
+	// An address given by hand (NAT) is kept.
+	s.ConfigureChallengeServer(ctx, true, "203.0.113.9", true)
+	if changed, _ := s.FollowChallengeServerIP(ctx, "192.0.2.1"); changed || b.Config().IP != "203.0.113.9" {
+		t.Fatal("a pinned address was moved")
+	}
+	// A zone of the older kind (under one of your domains) is left alone.
+	b.Configure(ctx, acmedns.Config{Zone: "acme.example.org", NS: "acme-ns.example.org", IP: "203.0.113.9"})
+	if changed, _ := s.FollowChallengeServerIP(ctx, "192.0.2.1"); changed || b.Zone() != "acme.example.org" {
+		t.Fatal("an older zone was moved")
+	}
+}
+
+// The controller's own *.<ip>.sslip.io wildcard: its challenge name is the
+// zone itself, so it needs no CNAME and the authority asks the server directly.
+func TestOwnSslipWildcardNeedsNoCNAME(t *testing.T) {
+	ctx := context.Background()
+	s, _, _, _ := delegationSvc(t)
+	b := withBuiltin(t, s)
+	if r := s.Route(ctx, "*.203-0-113-9.sslip.io"); r.Mode != "manual" {
+		t.Fatalf("off: %+v", r)
+	}
+	s.ConfigureChallengeServer(ctx, true, "203.0.113.9", false)
+	r := s.Challenge(ctx, "*.203-0-113-9.sslip.io")
+	if r.Mode != "builtin" || !r.Auto || r.Target != b.Zone() || r.CNAME != nil {
+		t.Fatalf("%+v", r)
+	}
+	if info := (CertHost{Service: s}).Challenge(ctx, "_acme-challenge.203-0-113-9.sslip.io"); !info.CNAMEOK || info.Mode != "builtin" {
+		t.Fatalf("nothing to wait for: %+v", info)
+	}
+	id, err := s.PutTXT(ctx, "_acme-challenge.203-0-113-9.sslip.io", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in := ask(t, b.Addr(), b.Zone(), mdns.TypeTXT); len(in.Answer) != 1 {
+		t.Fatalf("%v", in)
+	}
+	s.DeleteTXT(ctx, "_acme-challenge.203-0-113-9.sslip.io", id)
+	// Another address's sslip.io name is not the controller's: it needs a CNAME it can never get.
+	if r := s.Route(ctx, "*.198-51-100-7.sslip.io"); r.Target == r.Name {
+		t.Fatalf("%+v", r)
 	}
 }
 
@@ -227,7 +268,7 @@ func startRecursor(t *testing.T, b *acmedns.Server) (*recursor, string) {
 				a.Answer = append(a.Answer, &mdns.A{Hdr: withType(hdr, mdns.TypeA), A: net.ParseIP(ip)})
 			}
 		default:
-			if _, delegated := r.ns[b.Zone()]; delegated && strings.HasSuffix(name, "."+b.Zone()) {
+			if _, delegated := r.ns[b.Zone()]; delegated && (name == b.Zone() || strings.HasSuffix(name, "."+b.Zone())) {
 				if in, _, err := new(mdns.Client).Exchange(q, b.Addr()); err == nil {
 					a.Answer = in.Answer
 				}

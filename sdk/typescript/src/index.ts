@@ -136,10 +136,10 @@ export class SynCloud {
         this.post<ChallengeRoute>(
           `/api/v1/domains/${e(zone)}/challenge/delegation?${new URLSearchParams({ ...(name ? { name } : {}), ...(opt.replaceConflicts ? { replace: "conflicts" } : {}) })}`,
         ),
-      /** SynCloud's own ACME challenge DNS server: its zone, whether it listens, and the A and NS records that point the internet at it. */
+      /** SynCloud's own ACME challenge DNS server: its zone (`_acme-challenge.<ip>.sslip.io`), whether it listens, and the domains it answers for. */
       challengeServer: () => this.get<ChallengeServer>("/api/v1/domains/challenge-server"),
-      /** Turns the server on for a zone below a domain you own (like `acme.example.com`); an empty zone turns it off. `ns` and `ip` default. */
-      setChallengeServer: (zone: string, opt: { ns?: string; ip?: string } = {}) => this.put<ChallengeServer>("/api/v1/domains/challenge-server", { zone, ...opt }),
+      /** Turns the server on or off in one step: nothing to create at any DNS host (sslip.io delegates the zone to the controller). `ip` overrides the detected address and is kept when it changes. */
+      setChallengeServer: (enabled: boolean, opt: { ip?: string } = {}) => this.put<ChallengeServer>("/api/v1/domains/challenge-server", { enabled, ...opt }),
       lookup: (name: string, type = "A", via?: "public" | "authoritative") =>
         this.get<{ answers: DnsAnswer[] }>(`/api/v1/dns/lookup?${new URLSearchParams({ name, type, ...(via ? { via } : {}) })}`),
     };
@@ -183,15 +183,17 @@ export interface Domain {
 
 export interface ChallengeServer {
   enabled: boolean;
+  /** `_acme-challenge.<ip>.sslip.io` ("" when off). */
   zone: string;
+  /** `<ip>.sslip.io`: where sslip.io delegates the zone. */
   ns: string;
   ip: string;
   listen: string;
   listening: boolean;
   error?: string;
   records: number;
-  /** Records to create so the internet reaches the server. */
-  needed: { type: string; name: string; content: string; zone?: string; managed: boolean }[];
+  /** The zone is `_acme-challenge.<ip>.sslip.io`, which sslip.io delegates to the controller (false: an older zone under one of your domains). */
+  sslip: boolean;
   domains: string[];
 }
 

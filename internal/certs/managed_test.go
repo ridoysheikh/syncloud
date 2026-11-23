@@ -39,15 +39,20 @@ type fakeDNS struct {
 	ensured                          int
 	onHas                            func() // runs when the TXT records are looked up
 	origin                           func(csrPEM string, names []string) (string, error)
+	// builtinAt: the challenge name SynCloud's server answers itself (the controller's own sslip.io name).
+	builtinAt string
 }
 
 func newFakeDNS(managed bool) *fakeDNS {
 	return &fakeDNS{managed: managed, records: map[string][]string{}, ids: map[string]string{}}
 }
 
-func (d *fakeDNS) Challenge(context.Context, string) ChallengeInfo {
+func (d *fakeDNS) Challenge(_ context.Context, name string) ChallengeInfo {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.builtinAt != "" && name == d.builtinAt {
+		return ChallengeInfo{Mode: "builtin", Auto: true, Target: name, CNAMEOK: true}
+	}
 	if d.delegated {
 		return ChallengeInfo{Mode: "delegated", Auto: true, Target: "abc.acme.validate.test", CNAMEOK: d.cnameOK, CNAMEManaged: d.cnameManaged}
 	}
@@ -284,6 +289,34 @@ func TestRequestRules(t *testing.T) {
 		if _, err := m.Request(ctx, c.in); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: %v", c.name, err)
 		}
+	}
+}
+
+// The controller's own *.<ip>.sslip.io validates with DNS once SynCloud's
+// challenge server is on (sslip.io hands the challenge name to it); any
+// other sslip.io name still cannot.
+func TestOwnSslipWildcardValidatesWithDNS(t *testing.T) {
+	ctx := context.Background()
+	f := acmesim.Start(t)
+	d := newFakeDNS(false)
+	m, _ := newACMEManager(t, f, d)
+	if _, err := m.Request(ctx, RequestInput{Names: []string{"*.203-0-113-9.sslip.io"}}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("the server is off: %v", err)
+	}
+	d.builtinAt = "_acme-challenge.203-0-113-9.sslip.io"
+	if _, err := m.Request(ctx, RequestInput{Names: []string{"*.198-51-100-7.sslip.io"}}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("another address: %v", err)
+	}
+	v, err := m.Request(ctx, RequestInput{Names: []string{"203-0-113-9.sslip.io", "*.203-0-113-9.sslip.io"}})
+	if err != nil || v.Method != "dns-01" {
+		t.Fatalf("%+v %v", v, err)
+	}
+	for i := 0; i < 20 && v.Status != StatusValid; i++ {
+		m.Reconcile(ctx)
+		v, _ = m.Get(ctx, v.ID)
+	}
+	if v.Status != StatusValid {
+		t.Fatalf("not issued: %+v", v)
 	}
 }
 

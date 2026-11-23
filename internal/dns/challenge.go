@@ -24,8 +24,10 @@ import (
 //	           the certificate authority follows the CNAME. One CNAME, set
 //	           once, covers the name and its wildcard for ever.
 //	builtin    SynCloud's own challenge server answers: the name is a CNAME
-//	           to a name in its challenge zone, and the TXT is stored there. No
-//	           provider is needed, and it is how a domain without one renews.
+//	           to a name in its challenge zone (_acme-challenge.<ip>.sslip.io,
+//	           which sslip.io delegates to the controller), and the TXT is
+//	           stored there. No provider is needed, and it is how a domain
+//	           without one renews.
 //	manual     nothing can be written: the person adds each TXT record.
 
 // AcmePrefix is the label every DNS-01 challenge lives under.
@@ -95,6 +97,13 @@ type ChallengeRoute struct {
 func (s *Service) Route(ctx context.Context, host string) ChallengeRoute {
 	name := ChallengeName(host)
 	r := ChallengeRoute{Name: name, Host: strings.TrimPrefix(name, AcmePrefix), Mode: "manual"}
+	// The controller's own *.<ip>.sslip.io: sslip.io hands its challenge name
+	// to this address, so the server answers it directly, with no CNAME.
+	if b := s.Builtin; b != nil && b.Enabled() && name == b.Zone() {
+		r.Mode, r.Auto, r.TargetZone, r.Target = "builtin", true, b.Zone(), name
+		r.Note = "sslip.io hands this name to SynCloud's challenge server: nothing to create"
+		return r
+	}
 	z, ok := s.ZoneFor(ctx, name)
 	if !ok {
 		if b := s.Builtin; b != nil && b.Enabled() {
@@ -125,7 +134,7 @@ func (s *Service) Route(ctx context.Context, host string) ChallengeRoute {
 	}
 	if z.ProviderID == "" {
 		if r.Note == "" {
-			r.Note = "this domain has no DNS provider: add the TXT record by hand, delegate " + name + " to a domain that has one, or set up SynCloud's own challenge server"
+			r.Note = "this domain has no DNS provider: add the TXT record by hand, delegate " + name + " to a domain that has one, or turn on SynCloud's own challenge server (one click)"
 		}
 		return r
 	}
@@ -170,7 +179,7 @@ func (s *Service) cnameAt(ctx context.Context, z store.Zone, name string) (strin
 // Challenge is Route plus what public resolvers show of the delegating CNAME.
 func (s *Service) Challenge(ctx context.Context, host string) ChallengeRoute {
 	r := s.Route(ctx, host)
-	if !cnameBased(r.Mode) {
+	if !cnameBased(r.Mode) || r.Target == r.Name { // answered at the name itself: no CNAME
 		return r
 	}
 	z, _ := s.ZoneFor(ctx, r.Name)
@@ -211,7 +220,7 @@ func (s *Service) cnameVisible(ctx context.Context, name, target string) (bool, 
 func (s *Service) EnsureDelegation(ctx context.Context, host string, replace bool) (ChallengeRoute, error) {
 	r := s.Route(ctx, host)
 	if !cnameBased(r.Mode) {
-		return r, invalid("%s is not delegated: set the validation domain of %s, or set up the challenge server, first", r.Name, firstNonEmpty(r.Zone, r.Host))
+		return r, invalid("%s is not delegated: set the validation domain of %s, or turn on the challenge server, first", r.Name, firstNonEmpty(r.Zone, r.Host))
 	}
 	z, ok := s.ZoneFor(ctx, r.Name)
 	if !ok || z.ProviderID == "" {
@@ -275,6 +284,8 @@ func (d CertHost) Challenge(ctx context.Context, name string) certs.ChallengeInf
 	info := certs.ChallengeInfo{Mode: r.Mode, Auto: r.Auto, Target: r.Target}
 	if r.CNAME != nil {
 		info.CNAMEOK, info.CNAMEManaged = r.CNAME.Present, r.CNAME.Managed
+	} else if cnameBased(r.Mode) {
+		info.CNAMEOK = true // answered at the name itself (the controller's own sslip.io name)
 	}
 	return info
 }

@@ -19239,7 +19239,7 @@
         "tags": [
           "domains"
         ],
-        "summary": "SynCloud's own ACME challenge DNS server: its zone, whether it listens, the records to create so the internet reaches it, and the domains it answers for",
+        "summary": "SynCloud's own ACME challenge DNS server: its zone (_acme-challenge.<public ip>.sslip.io, which sslip.io delegates to this controller), whether it listens, and the domains it answers for",
         "responses": {
           "200": {
             "description": "OK",
@@ -19261,7 +19261,7 @@
         "tags": [
           "domains"
         ],
-        "summary": "Set the challenge zone (a name below a domain you own, like acme.example.com); '' switches the server off. It answers TXT for that zone only: it is not a general name server",
+        "summary": "Turn the challenge server on or off, in one step: the zone is _acme-challenge.<public ip>.sslip.io, so nothing has to be created at any DNS host. Each domain then needs one CNAME. It answers TXT for that zone only: it is not a general name server",
         "requestBody": {
           "required": true,
           "content": {
@@ -19269,20 +19269,16 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "zone": {
-                    "type": "string"
-                  },
-                  "ns": {
-                    "type": "string",
-                    "description": "default: <first label>-ns.<rest of the zone>"
+                  "enabled": {
+                    "type": "boolean"
                   },
                   "ip": {
                     "type": "string",
-                    "description": "default: this controller's public address"
+                    "description": "default: this controller's detected public IPv4 address"
                   }
                 },
                 "required": [
-                  "zone"
+                  "enabled"
                 ]
               }
             }
@@ -19305,64 +19301,13 @@
         }
       }
     },
-    "/api/v1/domains/challenge-server/records": {
-      "post": {
-        "operationId": "createChallengeServerRecords",
-        "tags": [
-          "domains"
-        ],
-        "summary": "Create the A and NS records that point the internet at the challenge server, in the domains that have a provider (the others are listed under needed). replace=conflicts also removes records that are in the way",
-        "parameters": [
-          {
-            "name": "replace",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "conflicts"
-              ]
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "created": {
-                      "type": "integer"
-                    },
-                    "server": {
-                      "$ref": "#/components/schemas/ChallengeServer"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/api/v1/domains/challenge-server/check": {
       "post": {
         "operationId": "checkChallengeServer",
         "tags": [
           "domains"
         ],
-        "summary": "Test the challenge server from the outside: it listens, the NS record and its address are visible, and a probe value comes back through public resolvers (port 53 is open)",
+        "summary": "Test the challenge server from the outside: it listens, and a probe value comes back through public resolvers (sslip.io's delegation reaches this address and port 53 is open)",
         "responses": {
           "200": {
             "description": "OK",
@@ -26702,41 +26647,23 @@
           }
         }
       },
-      "NeededRecord": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "content": {
-            "type": "string"
-          },
-          "zone": {
-            "type": "string",
-            "description": "the registered domain the record belongs in"
-          },
-          "managed": {
-            "type": "boolean",
-            "description": "that domain has a provider: SynCloud can create the record"
-          }
-        }
-      },
       "ChallengeServer": {
         "type": "object",
         "properties": {
           "enabled": {
             "type": "boolean"
           },
+          "sslip": {
+            "type": "boolean",
+            "description": "the zone is the sslip.io one for the address (false: an older zone under one of your domains)"
+          },
           "zone": {
             "type": "string",
-            "description": "the challenge zone, like acme.example.com ('' = off)"
+            "description": "the challenge zone, _acme-challenge.<ip>.sslip.io ('' = off)"
           },
           "ns": {
             "type": "string",
-            "description": "the name server host the zone's NS record names"
+            "description": "the host sslip.io delegates the zone to: <ip>.sslip.io"
           },
           "ip": {
             "type": "string",
@@ -26754,12 +26681,6 @@
           "records": {
             "type": "integer",
             "description": "challenge values it holds right now"
-          },
-          "needed": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NeededRecord"
-            }
           },
           "domains": {
             "type": "array",

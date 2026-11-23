@@ -604,7 +604,6 @@ func (s *Server) Routes() []Route {
 		{Method: "POST", Path: "/api/v1/domains/{zone}/records/cleanup", h: s.handleCleanupDomainRecords},
 		{Method: "GET", Path: "/api/v1/domains/challenge-server", h: s.handleGetChallengeServer},
 		{Method: "PUT", Path: "/api/v1/domains/challenge-server", h: s.handleUpdateChallengeServer},
-		{Method: "POST", Path: "/api/v1/domains/challenge-server/records", h: s.handleCreateChallengeServerRecords},
 		{Method: "POST", Path: "/api/v1/domains/challenge-server/check", h: s.handleCheckChallengeServer},
 		{Method: "GET", Path: "/api/v1/domains/{zone}/challenge", h: s.handleGetDomainChallenge},
 		{Method: "POST", Path: "/api/v1/domains/{zone}/challenge/delegation", h: s.handleDelegateDomainChallenge},

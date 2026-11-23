@@ -643,53 +643,38 @@ func (s *Server) handleGetChallengeServer(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, v)
 }
 
-// handleUpdateChallengeServer sets the challenge zone; an empty zone switches the server off.
+// handleUpdateChallengeServer turns the server on or off: one click. The
+// zone is _acme-challenge.<public ip>.sslip.io, which sslip.io already
+// delegates to this controller; ip overrides the detected address.
 func (s *Server) handleUpdateChallengeServer(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDNS(w) {
 		return
 	}
 	var req struct {
-		Zone string `json:"zone"`
-		NS   string `json:"ns"`
-		IP   string `json:"ip"`
+		Enabled bool   `json:"enabled"`
+		IP      string `json:"ip"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if req.Zone != "" && strings.TrimSpace(req.IP) == "" && s.detector != nil {
+	pinned := strings.TrimSpace(req.IP) != ""
+	if req.Enabled && strings.TrimSpace(req.IP) == "" && s.detector != nil {
 		if ip, err := s.detector.PublicIP(r.Context()); err == nil {
 			req.IP = ip
 		}
 	}
-	if req.Zone != "" && strings.TrimSpace(req.IP) == "" {
+	if req.Enabled && strings.TrimSpace(req.IP) == "" {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, "ip: this controller's public address could not be detected: give it")
 		return
 	}
-	v, err := s.dns.ConfigureChallengeServer(r.Context(), req.Zone, req.NS, req.IP)
+	v, err := s.dns.ConfigureChallengeServer(r.Context(), req.Enabled, req.IP, pinned)
 	if err != nil {
 		s.dnsError(w, "set up the challenge server", err)
 		return
 	}
 	u, _ := currentUser(r.Context())
-	s.audit(r, u.ID, "domain:UpdateChallengeServer", "srn:syncloud:domains", map[string]any{"zone": v.Zone})
+	s.audit(r, u.ID, "domain:UpdateChallengeServer", "srn:syncloud:domains", map[string]any{"enabled": v.Enabled, "zone": v.Zone})
 	writeJSON(w, http.StatusOK, v)
-}
-
-// handleCreateChallengeServerRecords makes the A and NS records that point the
-// internet at the server, in the domains that have a provider.
-func (s *Server) handleCreateChallengeServerRecords(w http.ResponseWriter, r *http.Request) {
-	if !s.requireDNS(w) {
-		return
-	}
-	made, err := s.dns.CreateChallengeServerRecords(r.Context(), r.URL.Query().Get("replace") == "conflicts")
-	if err != nil {
-		s.dnsError(w, "create the challenge server records", err)
-		return
-	}
-	u, _ := currentUser(r.Context())
-	s.audit(r, u.ID, "domain:CreateChallengeServerRecords", "srn:syncloud:domains", map[string]any{"created": made})
-	v, _ := s.dns.ChallengeServer(r.Context())
-	writeJSON(w, http.StatusOK, map[string]any{"created": made, "server": v})
 }
 
 func (s *Server) handleCheckChallengeServer(w http.ResponseWriter, r *http.Request) {

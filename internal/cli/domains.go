@@ -664,22 +664,16 @@ func printChallenge(a *app, r client.ChallengeRoute) error {
 }
 
 type challengeServerRow struct {
-	Enabled   bool   `json:"enabled"`
-	Zone      string `json:"zone"`
-	NS        string `json:"ns"`
-	IP        string `json:"ip"`
-	Listen    string `json:"listen"`
-	Listening bool   `json:"listening"`
-	Error     string `json:"error"`
-	Records   int    `json:"records"`
-	Needed    []struct {
-		Type    string `json:"type"`
-		Name    string `json:"name"`
-		Content string `json:"content"`
-		Zone    string `json:"zone"`
-		Managed bool   `json:"managed"`
-	} `json:"needed"`
-	Domains []string `json:"domains"`
+	Enabled   bool     `json:"enabled"`
+	Zone      string   `json:"zone"`
+	NS        string   `json:"ns"`
+	IP        string   `json:"ip"`
+	Listen    string   `json:"listen"`
+	Listening bool     `json:"listening"`
+	Error     string   `json:"error"`
+	Records   int      `json:"records"`
+	Sslip     bool     `json:"sslip"`
+	Domains   []string `json:"domains"`
 }
 
 func printChallengeServer(a *app, v challengeServerRow) error {
@@ -687,30 +681,25 @@ func printChallengeServer(a *app, v challengeServerRow) error {
 		return a.printer().json(v)
 	}
 	if !v.Enabled {
-		fmt.Fprintln(a.out, "SynCloud's challenge server is off. Set a zone under one of your domains:\n  synctl domains challenge-server set acme.example.com")
+		fmt.Fprintln(a.out, "SynCloud's challenge server is off. Turn it on (nothing to create at any DNS host):\n  synctl domains challenge-server on")
 		return nil
 	}
 	state := "listening on " + v.Listen
 	if !v.Listening {
 		state = "NOT listening on " + v.Listen + ": " + orDash(v.Error)
 	}
-	fmt.Fprintf(a.out, "Zone:         %s\nName server:  %s (%s)\nServer:       %s\nDomains:      %s\n", v.Zone, v.NS, v.IP, state, joinOrDash(v.Domains))
-	fmt.Fprintln(a.out, "Create these records at the DNS of the domain the zone is under:")
-	for _, n := range v.Needed {
-		how := "at your DNS host"
-		if n.Managed {
-			how = "SynCloud can create it (synctl domains challenge-server records)"
-		}
-		fmt.Fprintf(a.out, "  %-3s %s -> %s  (%s)\n", n.Type, n.Name, n.Content, how)
+	fmt.Fprintf(a.out, "Zone:         %s\nAddress:      %s (via %s)\nServer:       %s\nDomains:      %s\n", v.Zone, v.IP, v.NS, state, joinOrDash(v.Domains))
+	if v.Sslip {
+		fmt.Fprintln(a.out, "sslip.io hands this zone to the address: each domain needs one CNAME, once (synctl domains challenge DOMAIN shows it).")
 	}
 	return nil
 }
 
 // challengeServerCmd is SynCloud's own ACME challenge DNS server.
 func (a *app) challengeServerCmd() *cobra.Command {
-	cs := &cobra.Command{Use: "challenge-server", Short: "SynCloud's own ACME challenge DNS server: any domain renews wildcard certificates with one CNAME and no provider"}
+	cs := &cobra.Command{Use: "challenge-server", Short: "SynCloud's own ACME challenge DNS server: one click on, then any domain renews wildcard certificates with one CNAME and no provider"}
 	cs.AddCommand(&cobra.Command{
-		Use: "show", Short: "Show the server, its zone and the records to create", Args: cobra.NoArgs, Annotations: op("getChallengeServer"),
+		Use: "show", Short: "Show the server, its zone and the domains it answers for", Args: cobra.NoArgs, Annotations: op("getChallengeServer"),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var v challengeServerRow
 			if err := a.do(cmd, "GET", "/api/v1/domains/challenge-server", nil, &v); err != nil {
@@ -719,58 +708,35 @@ func (a *app) challengeServerCmd() *cobra.Command {
 			return printChallengeServer(a, v)
 		},
 	})
-	var ns, ip string
-	var off bool
-	set := &cobra.Command{
-		Use: "set [ZONE]", Short: "Turn the server on for a zone below a domain you own (--off switches it off)", Args: cobra.RangeArgs(0, 1),
-		Long: "The zone is a name like acme.example.com. The server answers TXT records for that zone only; it is not a general name server. Create the A and NS records it lists (or run 'records'), then 'check'.",
-		Example: `  synctl domains challenge-server set acme.example.com
-  synctl domains challenge-server set acme.example.com --ns acme-ns.example.com --ip 203.0.113.9
-  synctl domains challenge-server set --off`,
+	var ip string
+	on := &cobra.Command{
+		Use: "on", Short: "Turn the server on: zone _acme-challenge.<public ip>.sslip.io, nothing to create at any DNS host", Args: cobra.NoArgs,
+		Long: "sslip.io already delegates _acme-challenge.<ip>.sslip.io to the IP in the name, so the server answers it once UDP and TCP port 53 reach the controller. Each domain then needs one CNAME, once. The server answers TXT for that zone only; it is not a general name server.",
+		Example: `  synctl domains challenge-server on
+  synctl domains challenge-server on --ip 203.0.113.9   # behind NAT: kept when the detected address changes`,
 		Annotations: op("updateChallengeServer"),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			zone := ""
-			if len(args) == 1 {
-				zone = args[0]
-			}
-			if zone == "" && !off {
-				return fmt.Errorf("give the zone (acme.example.com) or --off")
-			}
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			var v challengeServerRow
-			if err := a.do(cmd, "PUT", "/api/v1/domains/challenge-server", map[string]any{"zone": zone, "ns": ns, "ip": ip}, &v); err != nil {
+			if err := a.do(cmd, "PUT", "/api/v1/domains/challenge-server", map[string]any{"enabled": true, "ip": ip}, &v); err != nil {
 				return err
 			}
 			return printChallengeServer(a, v)
 		},
 	}
-	set.Flags().StringVar(&ns, "ns", "", "the name server host (default: <first label>-ns.<rest of the zone>)")
-	set.Flags().StringVar(&ip, "ip", "", "this controller's public address (default: detected)")
-	set.Flags().BoolVar(&off, "off", false, "switch the server off")
-	var replace bool
-	records := &cobra.Command{
-		Use: "records", Short: "Create the A and NS records in the domains that have a provider", Args: cobra.NoArgs, Annotations: op("createChallengeServerRecords"),
+	on.Flags().StringVar(&ip, "ip", "", "this controller's public IPv4 address (default: detected, and followed when it changes)")
+	off := &cobra.Command{
+		Use: "off", Short: "Turn the server off (domains that CNAME to it go back to adding the TXT record by hand)", Args: cobra.NoArgs,
+		Annotations: op("updateChallengeServer"),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			path := "/api/v1/domains/challenge-server/records"
-			if replace {
-				path += "?replace=conflicts"
-			}
-			var out struct {
-				Created int                `json:"created"`
-				Server  challengeServerRow `json:"server"`
-			}
-			if err := a.do(cmd, "POST", path, nil, &out); err != nil {
+			var v challengeServerRow
+			if err := a.do(cmd, "PUT", "/api/v1/domains/challenge-server", map[string]any{"enabled": false}, &v); err != nil {
 				return err
 			}
-			if a.output == "json" {
-				return a.printer().json(out)
-			}
-			fmt.Fprintf(a.out, "Created %d record(s).\n", out.Created)
-			return printChallengeServer(a, out.Server)
+			return printChallengeServer(a, v)
 		},
 	}
-	records.Flags().BoolVar(&replace, "replace", false, "also remove records SynCloud did not create that are in the way")
-	cs.AddCommand(set, records, &cobra.Command{
-		Use: "check", Short: "Test the server from the outside: NS record, address, and a probe through public resolvers", Args: cobra.NoArgs, Annotations: op("checkChallengeServer"),
+	cs.AddCommand(on, off, &cobra.Command{
+		Use: "check", Short: "Test the server from the outside: a probe value through public resolvers (the delegation reaches this address, port 53 is open)", Args: cobra.NoArgs, Annotations: op("checkChallengeServer"),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var out struct {
 				OK     bool `json:"ok"`
