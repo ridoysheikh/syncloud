@@ -81,7 +81,7 @@ Start at the **[documentation map](docs/README.md)**: it routes you to the page 
 
 ## Status
 
-SynCloud is young: **v0.x**. It runs real clusters in our tests, from three small VMs up to a 50-node load test, but expect rough edges and breaking changes between minor versions until 1.0. Back up the controller ([how](docs/operations/backup-restore.md)), and read the [changelog](CHANGELOG.md) before upgrading.
+SynCloud is young. It runs real clusters in our tests, from three small VMs up to a 50-node load test, but expect rough edges. From 1.0, breaking changes come only in a new major version. Back up the controller ([how](docs/operations/backup-restore.md)), and read the [changelog](CHANGELOG.md) before upgrading.
 
 ## Contributing
 

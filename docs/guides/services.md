@@ -14,7 +14,7 @@ Services only exist inside a project environment. Create them with **New service
 
 ## The new-service wizard
 
-**New service** in a project walks through six steps:
+**New service** in a project walks through seven steps:
 
 | Step | What you set |
 | --- | --- |
@@ -22,7 +22,8 @@ Services only exist inside a project environment. Create them with **New service
 | **Basics** | Project, environment, name and the number of tasks to start with. |
 | **Network** | How each port is reached. Pick **Public HTTP**, **Public TCP/UDP** (presets for a mail server, MQTT and Minecraft), **Internal only** or **Worker**, then edit the port rows: a service can mix an HTTP page with raw ports. Public ports show a live free/taken check. The health check is chosen here too (HTTP, TCP connect, a command, or none). |
 | **Resources** | CPU and memory (shared or reserved, with optional limits), optional [autoscaling](scaling.md) and where tasks may run ([placement](scaling.md#placement)). |
-| **Variables** | Environment variables, the command, and a release command. |
+| **Variables** | Environment variables. |
+| **Deploy** | **Deploy new pushes automatically** (for an image, with how often the registry is checked; for Git, every successful build), the command, and the [release commands](release-commands.md) run before and after each deployment, each with a timeout and retries. |
 | **Review** | Every address the service will have, the ports it will open and on which load balancer, and the resources in words. |
 
 If a step after creation is refused (a public port taken in the meantime, for example), the service is removed again rather than left half-made. Labels, custom domains and allowed clients are set afterwards on the service's **Networking** tab.

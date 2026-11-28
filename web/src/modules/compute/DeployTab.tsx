@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { runTone, type JobRun } from "@/lib/jobs";
-import { since } from "@/lib/nodes";
+import type { JobRun } from "@/lib/jobs";
 import type { Spec } from "@/lib/workloads";
 import { Panel } from "@/ui/Panel";
 import {
@@ -12,12 +11,16 @@ import {
   Field,
   IconButton,
   Input,
-  StatusBadge,
   Toggle,
 } from "@/ui/controls";
 import { cn, gap } from "@/ui/cn";
 import { CommandPanel } from "./CommandOverride";
 import { ImageUpdatesPanel } from "./ImageUpdates";
+import {
+  ReleaseCommandLists,
+  releaseCommandsError,
+  type CommandRow,
+} from "./ReleaseCommandList";
 
 /* Service › Deploy (Phase 15b): image updates, command, release commands, build settings, rollout. */
 
@@ -40,15 +43,9 @@ interface HookJob {
 
 type Kind = "pre-deploy" | "post-deploy";
 
-interface Row {
-  /** The job's name; unset for a new row. */
-  name?: string;
-  command: string;
-  timeout: string;
-  retries: string;
+interface Row extends CommandRow {
   /** The job's command is not a shell line; kept unless edited. */
   raw?: HookJob["spec"];
-  lastRun?: JobRun | null;
 }
 
 const errText = (e: unknown, fallback: string) =>
@@ -156,16 +153,7 @@ function ReleaseCommands({
       void qc.invalidateQueries({ queryKey: ["jobs"] });
     },
   });
-  const empty = (["pre-deploy", "post-deploy"] as Kind[]).find((k) =>
-    rows[k].some((r) => !r.command.trim()),
-  );
-  const badNumber = (["pre-deploy", "post-deploy"] as Kind[]).some((k) =>
-    rows[k].some(
-      (r) =>
-        (r.timeout && !(Number(r.timeout) >= 1)) ||
-        (r.retries && !(Number(r.retries) >= 0 && Number(r.retries) <= 10)),
-    ),
-  );
+  const problem = releaseCommandsError(rows["pre-deploy"], rows["post-deploy"]);
   return (
     <Panel
       title="Release commands"
@@ -178,7 +166,7 @@ function ReleaseCommands({
           )}
           <Button
             variant="primary"
-            disabled={!edit || !!empty || badNumber || save.isPending}
+            disabled={!edit || !!problem || save.isPending}
             onClick={() => save.mutate()}
           >
             {save.isPending ? "Saving…" : "Save"}
@@ -187,151 +175,18 @@ function ReleaseCommands({
       }
     >
       <div className={cn("flex flex-col", gap)}>
-        <CommandList
-          title="Before each deployment"
-          hint="Run one at a time, in order, in the new revision's image with its variables, before it takes traffic: database migrations and similar. If one fails, the deployment stops and the running revision stays. Rollbacks skip them unless you ask."
-          placeholder="npm run migrate"
-          rows={rows["pre-deploy"]}
-          onChange={(r) => change("pre-deploy", r)}
+        <ReleaseCommandLists
+          pre={rows["pre-deploy"]}
+          post={rows["post-deploy"]}
+          onPre={(r) => change("pre-deploy", r as Row[])}
+          onPost={(r) => change("post-deploy", r as Row[])}
         />
-        <CommandList
-          title="After each successful deployment"
-          hint="Run in order once every task of the new revision serves traffic: cache purges, smoke tests, notifications. A failure stops the rest but does not undo the deployment."
-          placeholder="./scripts/purge-cache.sh"
-          rows={rows["post-deploy"]}
-          onChange={(r) => change("post-deploy", r)}
-        />
-        {empty && (
-          <Alert tone="warn">Fill in or remove the empty command.</Alert>
-        )}
-        {badNumber && (
-          <Alert tone="warn">
-            Timeouts are seconds (at least 1); retries are 0–10.
-          </Alert>
-        )}
+        {problem && <Alert tone="warn">{problem}</Alert>}
         {save.error && (
           <Alert>{errText(save.error, "Could not save the commands")}</Alert>
         )}
       </div>
     </Panel>
-  );
-}
-
-function CommandList({
-  title,
-  hint,
-  placeholder,
-  rows,
-  onChange,
-}: {
-  title: string;
-  hint: string;
-  placeholder: string;
-  rows: Row[];
-  onChange: (rows: Row[]) => void;
-}) {
-  const update = (i: number, r: Partial<Row>) =>
-    onChange(rows.map((x, j) => (j === i ? { ...x, ...r } : x)));
-  const move = (i: number, d: number) => {
-    const next = rows.slice();
-    const [r] = next.splice(i, 1);
-    if (r) next.splice(i + d, 0, r);
-    onChange(next);
-  };
-  return (
-    <section className="flex flex-col gap-1.5">
-      <h3 className="text-xs font-medium">{title}</h3>
-      <p className="text-faint text-xs">{hint}</p>
-      {rows.length === 0 && <p className="text-muted text-xs">No commands.</p>}
-      <ol className="flex flex-col gap-1.5">
-        {rows.map((r, i) => (
-          <li
-            key={r.name ?? `new-${i}`}
-            className="border-line flex flex-col gap-1.5 rounded-md border p-1.5 sm:flex-row sm:items-start"
-          >
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <label className="flex flex-col gap-0.5">
-                <span className="text-faint text-xs">Command {i + 1}</span>
-                <Input
-                  value={r.command}
-                  onChange={(e) =>
-                    update(i, { command: e.target.value, raw: undefined })
-                  }
-                  placeholder={placeholder}
-                  className="font-mono"
-                  spellCheck={false}
-                />
-              </label>
-              <div className="text-faint flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                {r.name && <span className="font-mono">job {r.name}</span>}
-                {r.raw && <span>exec form; editing makes it a shell line</span>}
-                {r.lastRun && (
-                  <span className="flex items-center gap-1">
-                    last run
-                    <StatusBadge tone={runTone[r.lastRun.status]}>
-                      {r.lastRun.status.replace("_", " ")}
-                    </StatusBadge>
-                    {since(r.lastRun.createdAt)}
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="flex items-end gap-1">
-              <label className="flex flex-col gap-0.5">
-                <span className="text-faint text-xs">Timeout (s)</span>
-                <Input
-                  value={r.timeout}
-                  onChange={(e) => update(i, { timeout: e.target.value })}
-                  placeholder="3600"
-                  inputMode="numeric"
-                  className="h-8 w-20"
-                />
-              </label>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-faint text-xs">Retries</span>
-                <Input
-                  value={r.retries}
-                  onChange={(e) => update(i, { retries: e.target.value })}
-                  placeholder="0"
-                  inputMode="numeric"
-                  className="h-8 w-16"
-                />
-              </label>
-              <IconButton
-                label="Move up"
-                disabled={i === 0}
-                onClick={() => move(i, -1)}
-              >
-                <ArrowUp className="size-3.5" />
-              </IconButton>
-              <IconButton
-                label="Move down"
-                disabled={i === rows.length - 1}
-                onClick={() => move(i, 1)}
-              >
-                <ArrowDown className="size-3.5" />
-              </IconButton>
-              <IconButton
-                label="Remove"
-                onClick={() => onChange(rows.filter((_, j) => j !== i))}
-              >
-                <Trash2 className="size-3.5" />
-              </IconButton>
-            </div>
-          </li>
-        ))}
-      </ol>
-      <div>
-        <Button
-          variant="ghost"
-          onClick={() =>
-            onChange([...rows, { command: "", timeout: "", retries: "" }])
-          }
-        >
-          <Plus className="size-3.5" /> Add command
-        </Button>
-      </div>
-    </section>
   );
 }
 

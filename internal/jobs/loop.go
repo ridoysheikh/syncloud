@@ -279,6 +279,12 @@ func (m *Manager) advanceHooks(ctx context.Context, depID string) {
 			m.wl.PreDeployDone(ctx, depID, ok, msg)
 		}
 	}
+	// A service built from Git has no image before its first build: its
+	// commands have nothing to run in, and run with that build's deployment.
+	if spec, err := m.wl.SpecFor(ctx, sv.ID, dep.ToRev); err == nil && spec.Image == workload.AwaitingBuild {
+		done(true, "")
+		return
+	}
 	runs, _ := m.st.DeploymentRuns(ctx, depID)
 	latest := map[string]store.JobRun{} // job ID -> its newest run (runs are oldest first)
 	for _, r := range runs {

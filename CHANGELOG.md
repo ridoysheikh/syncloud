@@ -1,6 +1,23 @@
 # Changelog
 
-All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
+All notable changes are listed here. Versions follow [semantic versioning](https://semver.org): from 1.0, breaking changes come only in a new major version. Releases before 1.0 could break things in a minor version, and each entry says how to upgrade.
+
+## [1.0.0]
+
+### Upgrading
+
+- Upgrade the controller as usual, from 0.6.0 or earlier. There are no new settings, and the API is unchanged.
+
+### Added
+
+- **Deploy settings in the new-service wizard.** A new **Deploy** step has what the service's Deploy tab has:
+  - **Deploy new pushes automatically.** For an image, SynCloud follows its tag, and you choose how often registries other than the built-in one are checked. An image pinned to a digest has nothing to follow. For a Git service it deploys every successful build; this switch was on the Source step before.
+  - **Release commands before and after each deployment.** Any number of each, in order, with a timeout and retries. The wizard had only one command before the deployment.
+  - **The command** the containers run, which was on the Variables step.
+
+### Fixed
+
+- **A new Git service ran its release commands before it had an image.** The empty deployment it starts with succeeds at once, which started the commands after the deployment in an image that didn't exist yet. The job failed and raised an alert. Release commands now run starting with the first build's deployment.
 
 ## [0.6.0]
 

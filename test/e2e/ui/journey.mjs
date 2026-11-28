@@ -49,7 +49,7 @@ async function toNetwork(page, name) {
   await page.getByText("Public TCP/UDP").first().waitFor();
 }
 
-/** Variables step: busybox runs this line. */
+/** Deploy step: busybox runs this line. */
 async function shellCommand(page, line) {
   await page.getByRole("radio", { name: "Shell command" }).click();
   await page.getByLabel("Shell command").fill(line);
@@ -101,6 +101,7 @@ await step(you, "a web service is created with the wizard: shared resources ask 
   if ((await you.getByText("MiB reserved per task").count()) !== 0) throw new Error("shared memory asks for an amount");
   await shot(you, "wizard-resources-shared");
   await next(you).click(); // Variables
+  await next(you).click(); // Deploy
   await shellCommand(you, "mkdir -p /www && echo hello-from-the-wizard > /www/index.html && exec httpd -f -p 8080 -h /www");
   await next(you).click(); // Review
   await you.getByText(/site-production-shop\./).first().waitFor();
@@ -128,6 +129,7 @@ await step(you, "a public TCP service takes the port its clients expect", async 
   await shot(you, "wizard-network-tcp");
   await next(you).click(); // Resources
   await next(you).click(); // Variables
+  await next(you).click(); // Deploy
   await shellCommand(you, "mkdir -p /www && echo hello-from-the-port > /www/index.html && exec httpd -f -p 8081 -h /www");
   await next(you).click(); // Review
   await you.getByText(`:${TCP_PORT}`).first().waitFor();

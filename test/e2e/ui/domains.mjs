@@ -433,6 +433,7 @@ await step(admin, "the new-service wizard takes a domain from the picker and add
   await shot(admin, "wizard-domain");
   await next(admin).click(); // Resources
   await next(admin).click(); // Variables
+  await next(admin).click(); // Deploy
   await next(admin).click(); // Review
   await admin.getByText("domain: https://store.example.test").waitFor();
   await admin.getByRole("button", { name: /Create and deploy/ }).click();

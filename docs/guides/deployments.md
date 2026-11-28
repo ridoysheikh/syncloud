@@ -62,7 +62,7 @@ A service that runs a ready-made image (not built from Git) refers to it by a ta
 
 The service page shows the digest next to the image. To pin an image yourself, give it with its digest (`nginx@sha256:…`); it is then never updated.
 
-New pushes are deployed from the service's **Deploy › Image updates**:
+New pushes are deployed from the service's **Deploy › Image updates**. You can turn this on while creating the service, in the wizard's **Deploy** step.
 
 - **Deploy new pushes automatically** watches the registry. Images in the built-in registry are deployed within seconds of a push. Images in other registries are checked every 5 minutes, or at an interval you choose (1 minute to 1 hour). **Check now** checks at once.
 - **Deploy webhook** gives a secret URL for CI to call after it pushes. The newest push of the tag is deployed at once, with any registry, whether automatic deploys are on or not:

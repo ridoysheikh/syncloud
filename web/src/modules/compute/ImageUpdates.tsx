@@ -33,7 +33,7 @@ interface ImageUpdate {
   message: string;
 }
 
-const intervals = [
+export const intervals = [
   { value: "60", label: "every minute" },
   { value: "300", label: "every 5 minutes" },
   { value: "900", label: "every 15 minutes" },

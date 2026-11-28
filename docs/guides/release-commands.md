@@ -4,7 +4,7 @@
 
 A **pre-deploy** command runs in the new revision's image before any task is replaced, for example a database migration. A **post-deploy** command runs after the rollout, for example a smoke test or a cache warm-up.
 
-Set them on the service's **Deploy** tab. Each command has a timeout and a retry count, and they run one at a time, in order.
+Set them in the new-service wizard's **Deploy** step, or later on the service's **Deploy** tab. Each command has a timeout and a retry count, and they run one at a time, in order.
 
 | | Pre-deploy | Post-deploy |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ Set them on the service's **Deploy** tab. Each command has a timeout and a retry
 
 The command runs with `sh -c`, so `npm run migrate && npm run seed` works whatever the image's entrypoint.
 
-**A new service waits for its migrations.** Give a release command in the new-service wizard, or as `releaseCommands` when creating a service. The service's first tasks start only after it passes:
+**A new service waits for its migrations.** Give a pre-deploy command in the new-service wizard, or as `releaseCommands` when creating a service. The service's first tasks start only after it passes. A Git service has nothing to run them in until its first build, so both kinds run with that build's deployment:
 
 ```json
 {

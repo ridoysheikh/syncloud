@@ -56,11 +56,17 @@ import {
 } from "@/modules/integrations/RepoPicker";
 import { Select } from "@/ui/select";
 import { CommandFields, commandError, commandForm, commandSpec, type CommandForm } from "@/modules/compute/CommandOverride";
+import { intervals } from "@/modules/compute/ImageUpdates";
+import {
+  ReleaseCommandLists,
+  releaseCommandsError,
+  type CommandRow,
+} from "@/modules/compute/ReleaseCommandList";
 import { resourceForm, resourceSpec, resourceSummary, type ResourceForm } from "./Resources";
 import { ImagePicker } from "@/modules/registry/ImagePicker";
 
 const nameRE = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
-const steps = ["Source", "Basics", "Network", "Resources", "Variables", "Review"] as const;
+const steps = ["Source", "Basics", "Network", "Resources", "Variables", "Deploy", "Review"] as const;
 type Step = (typeof steps)[number];
 
 
@@ -88,13 +94,30 @@ interface Form {
   /** Optional autoscaling and where tasks run (Phase 27). */
   scaling: ScalingForm;
   placement: PlacementForm;
-  /** A pre-deploy command such as database migrations (optional). */
-  release: string;
+  /** Image services: deploy new pushes of the tag. */
+  imageAutoDeploy: boolean;
+  pollSeconds: string;
+  /** Commands run before and after each deployment (migrations and such). */
+  preDeploy: CommandRow[];
+  postDeploy: CommandRow[];
   /** What the containers run (the image's own by default). */
   run: CommandForm;
 }
 
-/** Full-page wizard: source → basics → network → resources → variables → review (§4). */
+/** An image pinned to a digest has no newer push to follow. */
+const pinned = (image: string) => image.includes("@sha256:");
+const builtInRegistry = (image: string) => image.startsWith("@registry/");
+const watches = (f: Form) =>
+  f.source === "image" && f.imageAutoDeploy && !pinned(f.image);
+
+const hookCommands = (rows: CommandRow[]) =>
+  rows.map((r) => ({
+    command: r.command.trim(),
+    timeout: Number(r.timeout) || undefined,
+    retries: Number(r.retries) || undefined,
+  }));
+
+/** Full-page wizard: source → basics → network → resources → variables → deploy → review (§4). */
 export function NewServiceWizard() {
   const params = useParams({ strict: false }) as {
     project?: string;
@@ -127,7 +150,10 @@ export function NewServiceWizard() {
     resources: resourceForm(),
     scaling: scalingForm(),
     placement: placementForm(),
-    release: "",
+    imageAutoDeploy: false,
+    pollSeconds: "300",
+    preDeploy: [],
+    postDeploy: [],
     run: commandForm(),
   });
   const set = <K extends keyof Form>(k: K, v: Form[K]) =>
@@ -175,7 +201,9 @@ export function NewServiceWizard() {
             : "",
     Network: networkProblem,
     Resources: resourcesError(f.resources, f.scaling, f.placement, metrics),
-    Variables: varsError(vars) || commandError(f.run) || "",
+    Variables: varsError(vars),
+    Deploy:
+      commandError(f.run) || releaseCommandsError(f.preDeploy, f.postDeploy),
     Review: "",
   };
   const idx = steps.indexOf(step);
@@ -183,7 +211,10 @@ export function NewServiceWizard() {
 
   const spec = (): Partial<Spec> & {
     desiredCount: number;
-    releaseCommands?: { preDeploy: { command: string }[] };
+    releaseCommands?: {
+      preDeploy: ReturnType<typeof hookCommands>;
+      postDeploy: ReturnType<typeof hookCommands>;
+    };
   } => ({
     image: f.source === "image" ? f.image.trim() : AWAITING_BUILD,
     ...networkSpec(f.network),
@@ -195,17 +226,21 @@ export function NewServiceWizard() {
       ...(f.placement.nodes ? { nodes: f.placement.nodes } : {}),
     },
     desiredCount: Number(f.tasks),
-    releaseCommands: f.release.trim()
-      ? { preDeploy: [{ command: f.release.trim() }] }
-      : undefined,
+    releaseCommands:
+      f.preDeploy.length + f.postDeploy.length > 0
+        ? {
+            preDeploy: hookCommands(f.preDeploy),
+            postDeploy: hookCommands(f.postDeploy),
+          }
+        : undefined,
   });
 
   const create = useMutation({
     mutationFn: async () => {
       const path = servicePath({ project, environment: env, name: f.name });
       await api("PUT", path, spec());
-      // Public ports and autoscaling; a refused one (a port taken meanwhile)
-      // leaves no half-made service behind.
+      // Public ports, autoscaling and image updates; a refused one (a port
+      // taken meanwhile) leaves no half-made service behind.
       const routing = networkRouting(f.network);
       const policy = scalingPolicy(f.scaling);
       try {
@@ -217,6 +252,12 @@ export function NewServiceWizard() {
         const http = f.network.ports.find((p) => p.kind === "http");
         if (f.network.exposure === "public" && f.network.domain && http) {
           await api("POST", `${path}/domains`, { host: f.network.domain, port: http.name });
+        }
+        if (watches(f)) {
+          await api("PUT", `${path}/auto-deploy`, {
+            autoDeploy: true,
+            pollSeconds: Number(f.pollSeconds),
+          });
         }
       } catch (e) {
         await api("DELETE", path).catch(() => {});
@@ -341,21 +382,9 @@ export function NewServiceWizard() {
                   overrides them.
                 </p>
                 <VarsEditor rows={vars} onChange={setVars} inherited={shared} />
-                <CommandFields value={f.run} onChange={(v) => set("run", v)} />
-                <Field
-                  label="Release command (optional)"
-                  hint="Runs in the new image with these variables before every deployment takes traffic, for example database migrations. If it fails, the deployment stops and the running version stays. The first tasks start only after it passes. Change it later on the service's Deploy tab."
-                >
-                  <Input
-                    value={f.release}
-                    onChange={(e) => set("release", e.target.value)}
-                    placeholder="npm run migrate"
-                    className="font-mono"
-                    spellCheck={false}
-                  />
-                </Field>
               </div>
             )}
+            {step === "Deploy" && <DeployStep f={f} set={set} />}
             {step === "Review" && (
               <Review
                 f={f}
@@ -595,11 +624,6 @@ function SourceStep({
               />
             </Field>
           )}
-          <Toggle
-            checked={f.autoDeploy}
-            onChange={(v) => set("autoDeploy", v)}
-            label="Deploy every successful build automatically"
-          />
         </div>
       )}
     </div>
@@ -690,6 +714,85 @@ function BasicsStep({
   );
 }
 
+/** What the service's Deploy tab holds, set while creating it. */
+function DeployStep({ f, set }: { f: Form; set: SetFn }) {
+  const digest = f.source === "image" && pinned(f.image);
+  return (
+    <div className="flex flex-col gap-3">
+      {f.source === "git" ? (
+        <Toggle
+          checked={f.autoDeploy}
+          onChange={(v) => set("autoDeploy", v)}
+          label="Deploy new pushes automatically"
+          hint="Every successful build of a new commit is deployed. Off: deploy builds by hand."
+        />
+      ) : (
+        <>
+          <Toggle
+            checked={f.imageAutoDeploy && !digest}
+            disabled={digest}
+            onChange={(v) => set("imageAutoDeploy", v)}
+            label="Deploy new pushes automatically"
+            hint={
+              digest
+                ? "The image names a fixed digest: there is nothing newer to follow."
+                : builtInRegistry(f.image)
+                  ? "The image is in the built-in registry: a push is deployed within seconds."
+                  : "SynCloud checks the registry for a newer push of the tag and deploys it."
+            }
+          />
+          {watches(f) && !builtInRegistry(f.image) && (
+            <ChoiceField label="Check the registry">
+              <div>
+                <Select
+                  size="sm"
+                  value={f.pollSeconds}
+                  onChange={(v) => set("pollSeconds", v)}
+                  aria-label="Check interval"
+                  options={intervals}
+                />
+              </div>
+            </ChoiceField>
+          )}
+        </>
+      )}
+      <CommandFields value={f.run} onChange={(v) => set("run", v)} />
+      <ReleaseCommandLists
+        pre={f.preDeploy}
+        post={f.postDeploy}
+        onPre={(v) => set("preDeploy", v)}
+        onPost={(v) => set("postDeploy", v)}
+      />
+      <p className="text-faint text-xs">
+        {f.source === "git"
+          ? "The commands run with each build's deployment, starting with the first one."
+          : "A new service's first tasks start only after the commands before the deployment pass."}{" "}
+        Change all of this later on the service's Deploy tab.
+      </p>
+    </div>
+  );
+}
+
+/** Release commands in the review, in the order they run. */
+function Commands({ rows }: { rows: CommandRow[] }) {
+  if (rows.length === 0) return <span className="text-faint">none</span>;
+  return (
+    <ol className="flex flex-col gap-0.5 font-mono">
+      {rows.map((r, i) => (
+        <li key={i} className="break-all">
+          {r.command.trim()}
+          {(r.timeout || r.retries) && (
+            <span className="text-faint">
+              {r.timeout && ` · timeout ${r.timeout}s`}
+              {r.retries && ` · retries ${r.retries}`}
+            </span>
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function Row({ k, children }: { k: string; children: ReactNode }) {
   return (
     <>
@@ -725,9 +828,18 @@ function Review({
         </span>
       </Row>
       {f.source === "image" ? (
-        <Row k="Image">
-          <span className="font-mono">{f.image}</span>
-        </Row>
+        <>
+          <Row k="Image">
+            <span className="font-mono">{f.image}</span>
+          </Row>
+          <Row k="Deploys">
+            {watches(f)
+              ? builtInRegistry(f.image)
+                ? "new pushes of the tag, automatically"
+                : `new pushes of the tag, automatically (checked ${intervals.find((i) => i.value === f.pollSeconds)?.label})`
+              : "by hand"}
+          </Row>
+        </>
       ) : (
         <>
           <Row k="Repository">
@@ -776,12 +888,11 @@ function Review({
           </span>
         )}
       </Row>
-      <Row k="Release command">
-        {f.release.trim() ? (
-          <span className="font-mono break-all">{f.release.trim()}</span>
-        ) : (
-          <span className="text-faint">none</span>
-        )}
+      <Row k="Before deployment">
+        <Commands rows={f.preDeploy} />
+      </Row>
+      <Row k="After deployment">
+        <Commands rows={f.postDeploy} />
       </Row>
       <Row k="Variables">
         {names.length === 0 ? (
