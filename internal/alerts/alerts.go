@@ -658,9 +658,9 @@ func failureKey(f store.Failure) string {
 }
 
 // events turns failures in the rule's scope into alerts. A failure of a
-// service (or job) fires an alert that stays active until a later
-// deployment, build or run of it succeeds (resolveRecovered); repeated
-// failures meanwhile update it without notifying again.
+// service (or job) fires an alert that stays active until it is put right
+// (resolveRecovered); repeated failures meanwhile update it without
+// notifying again.
 func (m *Manager) events(ctx context.Context, r Rule, failures []store.Failure, services map[string]store.Service, now time.Time) {
 	m.mu.Lock()
 	cur := m.states[r.ID]
@@ -720,7 +720,9 @@ func (m *Manager) events(ctx context.Context, r Rule, failures []store.Failure, 
 }
 
 // resolveRecovered resolves the failure alerts whose service (or job) has
-// since succeeded, or is gone, and sends due reminders for the rest.
+// since succeeded, or is gone, and sends due reminders for the rest. A
+// failed deployment's alert also resolves when the service recovers by
+// itself: nothing new is deployed then, so no later success would come.
 func (m *Manager) resolveRecovered(ctx context.Context, r Rule, services map[string]store.Service, now time.Time) {
 	m.mu.Lock()
 	cur := m.states[r.ID]
@@ -754,6 +756,10 @@ func (m *Manager) resolveRecovered(ctx context.Context, r Rule, services map[str
 				reason = "the job was deleted"
 			case found && o.Succeeded:
 				reason = fmt.Sprintf("%s %s succeeded", r.Type, o.ID)
+			case r.Type == "deployment" && m.Sources.ServiceRecovered != nil:
+				if ok, err := m.Sources.ServiceRecovered(ctx, id); err == nil && ok {
+					reason = "the service is healthy again"
+				}
 			}
 		}
 		if reason == "" {

@@ -2,6 +2,24 @@
 
 All notable changes are listed here. Versions follow [semantic versioning](https://semver.org); until 1.0, minor versions may contain breaking changes, and each entry says how to upgrade.
 
+## [0.6.0]
+
+### Upgrading
+
+- Upgrade the controller as usual. There are no new settings.
+- An etcd or database member that is stopped or failed is started again by itself after the upgrade, once its node is connected.
+- Failed-deployment alerts that are still open for services that are healthy now resolve within a couple of minutes, and their channels get the "resolved" notification.
+
+### Fixed
+
+- **The platform etcd and database members did not recover after they stopped.** The controller sent a member to its node again only while it had not started. One reported as `exited` or `failed` stayed that way until someone stepped in: new PostgreSQL databases waited on "no member answers yet: e0 on … exited", and running ones lost their etcd. Such a member is now sent again every 30 seconds while its node is connected. The node starts the existing container, with its data, or reports that it is already running.
+- **Failed-deployment alerts stayed active on healthy services.** They resolved only when a later deployment succeeded. A service that recovered by itself, for example once a database it depends on was back, deploys nothing new, so its alert never cleared. It now also resolves when the version that deployment rolled out is fully serving and has been for a minute. If a pre-deploy job failed, the new version never shipped, so the alert stays until a deployment succeeds. Build and job alerts still resolve on the next successful build or run.
+- The monitoring guide and the rule editor said deployment, build and job alerts notify once each. They stay active until resolved, and the text now says so.
+
+### Added
+
+- `test/e2e/recovery.sh` breaks services, system components, Valkey, PostgreSQL, etcd and nodes on a test cluster, then checks that they come back and that no alert stays active. It takes a long time and isn't part of `make e2e`.
+
 ## [0.5.5]
 
 ### Fixed

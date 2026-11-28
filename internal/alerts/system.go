@@ -24,6 +24,9 @@ type Sources struct {
 	Backup func() BackupState
 	// ControllerDisk is the controller data disk's usage.
 	ControllerDisk func() (used, total uint64, err error)
+	// ServiceRecovered reports whether the revision a service's failed
+	// deployment rolled out is now fully serving.
+	ServiceRecovered func(ctx context.Context, serviceID string) (bool, error)
 }
 
 type DatabaseState struct {

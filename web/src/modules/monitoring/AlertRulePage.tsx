@@ -578,7 +578,7 @@ export function AlertRulePage() {
         <p className="text-muted text-xs">
           Fires for <span className="font-mono">{d.scope}</span> when {d.cond};
           checked every 30 seconds
-          {eventTypes.includes(r.type) ? ", once per event." : ", and notifies again when it resolves."}
+          {r.type === "database_failover" ? ", once per event." : ", and notifies again when it resolves."}
         </p>
         {save.error && (
           <Alert>

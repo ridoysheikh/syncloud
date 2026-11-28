@@ -830,6 +830,7 @@ func serve(args []string) error {
 			}
 			return out, nil
 		},
+		ServiceRecovered: workloads.Recovered,
 		ControllerDisk: func() (uint64, uint64, error) {
 			var fsStat syscall.Statfs_t
 			if err := syscall.Statfs(cfg.DataDir, &fsStat); err != nil {

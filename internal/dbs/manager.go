@@ -33,7 +33,7 @@ const (
 	// lostAfter is how long a member's node may be not ready before a
 	// replica or sentinel is replaced elsewhere.
 	lostAfter = 5 * time.Minute
-	// pendingResend re-sends a member's spec while it has not started.
+	// pendingResend re-sends a member's spec while it is not up.
 	pendingResend = 30 * time.Second
 	probeEvery    = 5 * time.Second
 )
@@ -746,7 +746,7 @@ func (m *Manager) reconcile(ctx context.Context, id string) {
 		ts := m.taskSpec(d, spec, st, sec, mb)
 		h := specHash(ts)
 		switch {
-		case mb.SpecHash == "", mb.State == store.TaskPending && now.Sub(mb.UpdatedAt) > pendingResend:
+		case mb.SpecHash == "", m.needsResend(mb.NodeID, mb.State, mb.UpdatedAt, now):
 			m.send(ctx, d, spec, st, sec, &mb)
 		case mb.SpecHash != h && !m.connected(mb.NodeID):
 			// Part of the spec (the node's resolver) is only known while the
@@ -807,6 +807,24 @@ func (m *Manager) projectNodes(ctx context.Context, envID string) []string {
 		return nil
 	}
 	return p.Nodes
+}
+
+// needsResend reports whether a member's spec must go to its node again: it
+// has not started, or it stopped or failed to start. Docker's restart policy
+// does not cover those two, and the state may be stale if the agent missed an
+// event; the agent starts the container, or reports that it is running.
+func (m *Manager) needsResend(nodeID, state string, updatedAt, now time.Time) bool {
+	if now.Sub(updatedAt) <= pendingResend {
+		return false
+	}
+	switch state {
+	case store.TaskPending:
+		return true
+	case store.TaskExited, store.TaskFailed:
+		// Only to a connected node: the spec's resolver is only known then.
+		return m.connected(nodeID)
+	}
+	return false
 }
 
 func (m *Manager) connected(nodeID string) bool {

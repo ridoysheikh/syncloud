@@ -246,6 +246,41 @@ func plural(n int, word string) string {
 	return word + "s"
 }
 
+// recoveredAfter is how long tasks must have lived before they show that a
+// service recovered: a crashing task runs for a moment before it dies, and
+// is replaced by a new one.
+const recoveredAfter = time.Minute
+
+// Recovered reports whether a service has got over a failed deployment by
+// itself: the revision its latest deployment rolled out is the current one,
+// and all its tasks serve and have done so for a while.
+func (m *Manager) Recovered(ctx context.Context, serviceID string) (bool, error) {
+	sv, err := m.st.ServiceByID(ctx, serviceID)
+	if err != nil {
+		return false, err
+	}
+	last, err := m.st.ListDeployments(ctx, serviceID, 1, "")
+	if err != nil {
+		return false, err
+	}
+	// A revision whose pre-deploy jobs failed never became current: the old
+	// one serving says nothing about it.
+	if sv.DesiredCount == 0 || len(last) == 0 || last[0].FinishedAt == nil || last[0].ToRev != sv.Revision {
+		return false, nil
+	}
+	tasks, err := m.st.ServiceTasks(ctx, serviceID, 0)
+	if err != nil {
+		return false, err
+	}
+	up := 0
+	for _, t := range tasks {
+		if t.Revision == sv.Revision && m.now().Sub(t.CreatedAt) >= recoveredAfter && m.serving(ctx, t) {
+			up++
+		}
+	}
+	return up >= sv.DesiredCount, nil
+}
+
 // CancelDeployment stops a deployment that is running or waiting on its
 // pre-deploy jobs. A running one rolls back to the revision before it.
 func (m *Manager) CancelDeployment(ctx context.Context, serviceID, depID, actor string) (ServiceView, error) {

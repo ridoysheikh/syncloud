@@ -100,7 +100,19 @@ echo '{"name":"web 5xx","type":"metric","metric":"error_rate","op":">","threshol
 synctl alerts active
 ```
 
-Rules are checked every 30 seconds. They notify when they fire, again every **Remind every** hours while they stay active (0 = never), and when they resolve. Failovers and failed deployments, builds and jobs notify once each. History is under **Alerts → History** (`synctl alerts events`), with each channel's delivery result.
+Rules are checked every 30 seconds. They notify when they fire, again every **Remind every** hours while they stay active (0 = never), and when they resolve. Failovers notify once each.
+
+A failed deployment, build or job run opens an alert that stays active until it's put right. More failures meanwhile don't notify again.
+
+| Alert | Resolves when |
+|---|---|
+| Deployment | a later deployment succeeds, or the version it rolled out is fully serving and has been for a minute (for example, once something the app depends on is back) |
+| Build | a later build of the service succeeds |
+| Job | a later run of the job succeeds |
+
+It also resolves when the service or job is deleted. A deployment stopped by a failed pre-deploy job stays active until a deployment succeeds, because the new version never shipped.
+
+History is under **Alerts → History** (`synctl alerts events`), with each channel's delivery result.
 
 ## Workspace branding
 

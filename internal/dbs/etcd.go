@@ -236,7 +236,7 @@ func (m *Manager) reconcileEtcd(ctx context.Context) {
 	}
 
 	for _, mb := range members {
-		if mb.SpecHash == "" || (mb.State == store.TaskPending && now.Sub(mb.UpdatedAt) > pendingResend) {
+		if mb.SpecHash == "" || m.needsResend(mb.NodeID, mb.State, mb.UpdatedAt, now) {
 			m.etcdSend(ctx, &mb)
 		}
 	}
